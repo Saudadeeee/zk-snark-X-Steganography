@@ -1,0 +1,30 @@
+# Build artifacts
+circuits/compiled/build/
+temp/
+*.wtns
+*.zkey
+*.r1cs
+*.sym
+
+# Temporary files
+*.tmp
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Generated files
+artifacts/proofs/*.json
+artifacts/images/generated_*.png
