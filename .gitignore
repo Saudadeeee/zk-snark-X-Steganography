@@ -1,12 +1,6 @@
 # Build artifacts
-circuits/compiled/build/
 temp/
 *.wtns
-*.zkey
-*.r1cs
-*.sym
-
-# Temporary files
 *.tmp
 *.log
 
@@ -25,6 +19,7 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Generated files
-artifacts/proofs/*.json
-artifacts/images/generated_*.png
+# Generated test files
+test_*.png
+test_*.json
+verification_result.json
