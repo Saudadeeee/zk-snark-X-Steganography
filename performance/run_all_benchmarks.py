@@ -350,6 +350,10 @@ def main():
         {
             'script': 'benchmark_zk_overhead.py',
             'description': 'ZK-SNARK Overhead Analysis'
+        },
+        {
+            'script': 'benchmark_security_analysis.py',
+            'description': 'Security Analysis & Steganalysis Resistance'
         }
     ]
     

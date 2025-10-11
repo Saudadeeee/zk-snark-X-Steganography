@@ -4,18 +4,18 @@
 Detailed analysis of computational overhead in ZK-SNARK chaos steganography.
 
 ## Summary Statistics
-- **Average Total Processing Time**: 128.81 ms
-- **Average Memory Overhead**: 0.62 MB
+- **Average Total Processing Time**: 119.05 ms
+- **Average Memory Overhead**: 0.61 MB
 
 ## Component Analysis
 | Component | Avg Time (ms) | % of Total |
 |-----------|---------------|------------|
-| Chaos Generation | 11.47 | 8.9% |
-| Proof Processing | 2.25 | 1.7% |
-| Image Saving | 32.83 | 25.5% |
-| Bit Embedding | 73.61 | 57.1% |
-| Image Loading | 7.53 | 5.8% |
+| Bit Embedding | 66.20 | 55.6% |
 | Position Selection | 1.12 | 0.9% |
+| Image Saving | 31.02 | 26.1% |
+| Image Loading | 7.42 | 6.2% |
+| Proof Processing | 2.24 | 1.9% |
+| Chaos Generation | 11.04 | 9.3% |
 
 ## Key Findings
 - Chaos generation is typically the most computationally expensive component

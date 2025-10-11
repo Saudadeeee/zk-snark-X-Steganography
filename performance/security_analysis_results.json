@@ -1,0 +1,155 @@
+{
+  "benchmark_info": {
+    "date": "2025-10-11 16:29:39",
+    "test_type": "Security Analysis & Steganalysis Resistance",
+    "description": "Comprehensive security evaluation of ZK-SNARK chaos steganography"
+  },
+  "steganalysis_results": [
+    {
+      "scenario": "Clean",
+      "image_size": 256,
+      "original_chi2_p": 0.0,
+      "stego_chi2_p": 0.0,
+      "histogram_distance": 20.4570955790122,
+      "histogram_correlation": 0.9998752572128133,
+      "psnr": 63.64663799071134,
+      "ssim": 0.9999640243440466,
+      "lsb_change_rate": 2.808125813802083,
+      "detection_risk": "HIGH"
+    },
+    {
+      "scenario": "Noisy",
+      "image_size": 256,
+      "original_chi2_p": 0.0,
+      "stego_chi2_p": 0.0,
+      "histogram_distance": 22.14604519583192,
+      "histogram_correlation": 0.9998606344640382,
+      "psnr": 63.54248936949798,
+      "ssim": 0.9999706774202795,
+      "lsb_change_rate": 2.87628173828125,
+      "detection_risk": "HIGH"
+    },
+    {
+      "scenario": "Textured",
+      "image_size": 256,
+      "original_chi2_p": 0.0,
+      "stego_chi2_p": 0.0,
+      "histogram_distance": 24.01551730224959,
+      "histogram_correlation": 0.9998508741031557,
+      "psnr": 63.55556474675688,
+      "ssim": 0.9999654873159277,
+      "lsb_change_rate": 2.867635091145833,
+      "detection_risk": "HIGH"
+    },
+    {
+      "scenario": "Large",
+      "image_size": 512,
+      "original_chi2_p": 0.0,
+      "stego_chi2_p": 0.0,
+      "histogram_distance": 5.248661987868088,
+      "histogram_correlation": 0.9999916104833398,
+      "psnr": 69.6319833554121,
+      "ssim": 0.9999909129473908,
+      "lsb_change_rate": 0.7077534993489583,
+      "detection_risk": "HIGH"
+    }
+  ],
+  "compression_results": [
+    {
+      "scenario": "Clean",
+      "jpeg_quality": 95,
+      "psnr_after_compression": 25.684961618111434,
+      "compression_robustness": "POOR"
+    },
+    {
+      "scenario": "Clean",
+      "jpeg_quality": 85,
+      "psnr_after_compression": 24.590817666435647,
+      "compression_robustness": "POOR"
+    },
+    {
+      "scenario": "Clean",
+      "jpeg_quality": 75,
+      "psnr_after_compression": 24.279351359491137,
+      "compression_robustness": "POOR"
+    },
+    {
+      "scenario": "Clean",
+      "jpeg_quality": 65,
+      "psnr_after_compression": 24.17081620836738,
+      "compression_robustness": "POOR"
+    },
+    {
+      "scenario": "Clean",
+      "jpeg_quality": 50,
+      "psnr_after_compression": 24.08972015483057,
+      "compression_robustness": "POOR"
+    },
+    {
+      "scenario": "Noisy",
+      "jpeg_quality": 95,
+      "psnr_after_compression": 24.346720623331144,
+      "compression_robustness": "POOR"
+    },
+    {
+      "scenario": "Noisy",
+      "jpeg_quality": 85,
+      "psnr_after_compression": 23.38298184912415,
+      "compression_robustness": "POOR"
+    },
+    {
+      "scenario": "Noisy",
+      "jpeg_quality": 75,
+      "psnr_after_compression": 22.9469734360598,
+      "compression_robustness": "POOR"
+    },
+    {
+      "scenario": "Noisy",
+      "jpeg_quality": 65,
+      "psnr_after_compression": 22.82123345543562,
+      "compression_robustness": "POOR"
+    },
+    {
+      "scenario": "Noisy",
+      "jpeg_quality": 50,
+      "psnr_after_compression": 22.722524810107636,
+      "compression_robustness": "POOR"
+    },
+    {
+      "scenario": "Textured",
+      "jpeg_quality": 95,
+      "psnr_after_compression": 25.307331625691457,
+      "compression_robustness": "POOR"
+    },
+    {
+      "scenario": "Textured",
+      "jpeg_quality": 85,
+      "psnr_after_compression": 24.251244563884775,
+      "compression_robustness": "POOR"
+    },
+    {
+      "scenario": "Textured",
+      "jpeg_quality": 75,
+      "psnr_after_compression": 23.910669782297248,
+      "compression_robustness": "POOR"
+    },
+    {
+      "scenario": "Textured",
+      "jpeg_quality": 65,
+      "psnr_after_compression": 23.801704055776042,
+      "compression_robustness": "POOR"
+    },
+    {
+      "scenario": "Textured",
+      "jpeg_quality": 50,
+      "psnr_after_compression": 23.723187903441016,
+      "compression_robustness": "POOR"
+    }
+  ],
+  "security_summary": {
+    "avg_psnr": 65.09416886559458,
+    "avg_ssim": 0.9999727755069112,
+    "detection_risk_count": 4,
+    "overall_security_rating": "MEDIUM"
+  }
+}
