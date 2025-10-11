@@ -15,11 +15,59 @@ import time
 from .chaos_embedding import ChaosProofArtifact, generate_chaos_key_from_secret
 
 class HybridProofArtifact:
-    """Hybrid PNG Chunk + Chaos LSB steganography"""
+    """Hybrid approach: PNG chunk metadata + Chaos-based LSB embedding"""
     
     def __init__(self):
-        self.chunk_type = b'zkPF'  # PNG chunk for metadata
         self.chaos_artifact = ChaosProofArtifact()
+        self.chunk_type = b'zkPF'  # zk-Proof chunk type
+        
+    def extract_image_feature_point(self, image_array: np.ndarray) -> Tuple[int, int]:
+        """
+        Extract distinctive features from image to determine starting point
+        Uses image texture/edge analysis to find stable feature points
+        """
+        height, width = image_array.shape[:2]
+        
+        # Convert to grayscale if needed
+        if len(image_array.shape) == 3:
+            gray = np.mean(image_array, axis=2).astype(np.uint8)
+        else:
+            gray = image_array
+            
+        # Calculate gradient magnitude (edge strength)
+        # Using simple Sobel-like operators
+        grad_x = np.abs(np.diff(gray, axis=1))  # Horizontal edges
+        grad_y = np.abs(np.diff(gray, axis=0))  # Vertical edges
+        
+        # Pad to maintain original size
+        grad_x = np.pad(grad_x, ((0, 0), (0, 1)), mode='edge')
+        grad_y = np.pad(grad_y, ((0, 1), (0, 0)), mode='edge')
+        
+        # Combined gradient magnitude
+        gradient_mag = grad_x + grad_y
+        
+        # Find regions with high texture (avoid smooth areas)
+        # Use a sliding window to find the most textured region
+        window_size = min(16, width//4, height//4)
+        max_texture = 0
+        best_x, best_y = width//2, height//2  # Default fallback
+        
+        for y in range(window_size//2, height - window_size//2, window_size//4):
+            for x in range(window_size//2, width - window_size//2, window_size//4):
+                # Calculate texture strength in this window
+                window = gradient_mag[y-window_size//2:y+window_size//2, 
+                                    x-window_size//2:x+window_size//2]
+                texture_score = np.sum(window)
+                
+                if texture_score > max_texture:
+                    max_texture = texture_score
+                    best_x, best_y = x, y
+        
+        # Ensure coordinates are within bounds
+        best_x = max(1, min(best_x, width-2))
+        best_y = max(1, min(best_y, height-2))
+        
+        return best_x, best_y
         
     def embed_hybrid_proof(
         self,
@@ -33,8 +81,9 @@ class HybridProofArtifact:
     ) -> bool:
         """
         Embed ZK proof using hybrid approach:
-        1. PNG chunk stores: initial position + chaos parameters + public inputs
-        2. Chaos LSB stores: actual ZK proof data
+        1. Extract image features to determine starting point (if not provided)
+        2. PNG chunk stores: initial position + chaos parameters + public inputs  
+        3. Chaos LSB stores: actual ZK proof data using chaos-based positioning
         """
         try:
             # Load cover image
@@ -44,16 +93,19 @@ class HybridProofArtifact:
             # Generate chaos parameters
             chaos_key = generate_chaos_key_from_secret(secret_key)
             
-            # Use center of image as default initial position
-            if x0 is None:
-                x0 = cover_array.shape[1] // 2
-            if y0 is None:
-                y0 = cover_array.shape[0] // 2
+            # Extract image features for starting point if not provided
+            if x0 is None or y0 is None:
+                feature_x, feature_y = self.extract_image_feature_point(cover_array)
+                x0 = feature_x if x0 is None else x0
+                y0 = feature_y if y0 is None else y0
+                print(f"🎯 Extracted feature-based starting point: ({x0}, {y0})")
+            else:
+                print(f"📍 Using provided starting point: ({x0}, {y0})")
                 
             # Serialize proof for embedding
             proof_bytes = json.dumps(proof_json, separators=(',', ':')).encode('utf-8')
             
-            # Embed proof using chaos positioning
+            # Embed proof using chaos positioning from feature point
             stego_array, chaos_metadata = self.chaos_artifact.embed_proof_chaos(
                 cover_array, proof_bytes, x0, y0, chaos_key
             )

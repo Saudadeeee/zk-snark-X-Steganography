@@ -14,9 +14,50 @@ class ChaosGenerator:
         self.width = image_width
         self.height = image_height
         
-    def arnold_cat_map(self, x: int, y: int, iterations: int) -> Tuple[int, int]:
-        """Arnold Cat Map transformation"""
+    def get_arnold_matrix(self) -> np.ndarray:
+        """
+        Return the Arnold Cat Map transformation matrix
+        
+        Standard Arnold Cat Map matrix: [2 1]
+                                       [1 1]
+        """
+        return np.array([[2, 1], 
+                        [1, 1]], dtype=int)
+    
+    def arnold_cat_map_matrix(self, x: int, y: int, iterations: int) -> Tuple[int, int]:
+        """
+        Arnold Cat Map using explicit matrix multiplication
+        
+        Transformation: [x_new]   [2 1] [x]
+                       [y_new] = [1 1] [y] mod (width, height)
+        """
+        arnold_matrix = self.get_arnold_matrix()
+        
         for _ in range(iterations):
+            # Matrix multiplication
+            position_vector = np.array([x, y])
+            new_position = arnold_matrix @ position_vector
+            
+            # Apply modulo for torus topology
+            x = new_position[0] % self.width
+            y = new_position[1] % self.height
+            
+        return x, y
+        
+    def arnold_cat_map(self, x: int, y: int, iterations: int) -> Tuple[int, int]:
+        """
+        Arnold Cat Map transformation using standard matrix form:
+        
+        Γ([x y]) = [2 1; 1 1] * [x; y] mod N
+        
+        Matrix form: [x_new]   [2 1] [x]
+                     [y_new] = [1 1] [y] mod (width, height)
+        
+        Equivalently: x_new = (2*x + y) mod width
+                      y_new = (x + y) mod height
+        """
+        for _ in range(iterations):
+            # Arnold Cat Map matrix transformation: [2 1; 1 1]
             x_new = (2 * x + y) % self.width
             y_new = (x + y) % self.height
             x, y = x_new, y_new
@@ -38,7 +79,15 @@ class ChaosGenerator:
         chaos_key: int,
         num_positions: int
     ) -> List[Tuple[int, int]]:
-        """Generate chaos-based embedding positions (ensuring uniqueness)"""
+        """
+        Generate chaos-based embedding positions (ensuring uniqueness)
+        
+        Flow:
+        1. Start from feature point (x0, y0) extracted from image
+        2. Use Arnold Cat Map for position transformation
+        3. Use Logistic Map for sequence generation
+        4. Ensure position uniqueness
+        """
         
         # Extract chaos parameters from key
         r = 3.7 + (chaos_key % 1000) / 10000  # Logistic parameter: 3.7-3.8
@@ -48,7 +97,7 @@ class ChaosGenerator:
         positions = []
         used_positions = set()
         
-        # Start with initial position
+        # Start with feature-extracted initial position
         if (x0, y0) not in used_positions:
             positions.append((x0, y0))
             used_positions.add((x0, y0))
