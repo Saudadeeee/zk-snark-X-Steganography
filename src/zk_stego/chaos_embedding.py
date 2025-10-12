@@ -163,6 +163,61 @@ class ChaosEmbedding:
         self.height, self.width = image_array.shape[:2]
         self.chaos_gen = ChaosGenerator(self.width, self.height)
     
+    def embed_message(self, message: str, secret_key: str = "default_key") -> 'PIL.Image.Image':
+        """
+        High-level method to embed a text message
+        """
+        # Import PIL here to avoid circular imports
+        from PIL import Image
+        
+        # Convert message to bits
+        message_bytes = message.encode('utf-8')
+        bits = []
+        for byte in message_bytes:
+            for i in range(7, -1, -1):  # MSB to LSB
+                bits.append((byte >> i) & 1)
+        
+        # Generate chaos key from secret
+        chaos_key = generate_chaos_key_from_secret(secret_key)
+        
+        # Use center of image as default starting point
+        x0 = self.width // 2
+        y0 = self.height // 2
+        
+        # Embed bits
+        stego_array = self.embed_bits(bits, x0, y0, chaos_key)
+        
+        # Convert back to PIL Image
+        return Image.fromarray(stego_array.astype('uint8'))
+    
+    def extract_message(self, message_length: int, secret_key: str = "default_key") -> str:
+        """
+        High-level method to extract a text message
+        """
+        # Generate chaos key from secret
+        chaos_key = generate_chaos_key_from_secret(secret_key)
+        
+        # Use same starting point
+        x0 = self.width // 2
+        y0 = self.height // 2
+        
+        # Calculate number of bits needed
+        num_bits = message_length * 8
+        
+        # Extract bits
+        bits = self.extract_bits(num_bits, x0, y0, chaos_key)
+        
+        # Convert bits back to message
+        message_bytes = bytearray()
+        for i in range(0, len(bits), 8):
+            byte = 0
+            for j in range(8):
+                if i + j < len(bits):
+                    byte |= bits[i + j] << (7 - j)  # MSB to LSB reconstruction
+            message_bytes.append(byte)
+        
+        return message_bytes.decode('utf-8', errors='ignore')
+    
     def embed_bits(
         self, 
         bits: List[int], 
