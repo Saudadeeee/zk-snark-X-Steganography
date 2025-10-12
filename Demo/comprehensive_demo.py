@@ -203,22 +203,47 @@ class ZKStegoDemo:
         self.logger.info(f"Debug info saved to: {debug_file}")
         return chaos_embedding
     
-    @step_timer("Generate Secret Message")
     def generate_secret_message(self):
         """Generate a secret message for embedding"""
-        messages = [
-            "Hello ZK-SNARK World!",
-            "This is a secret message hidden using zero-knowledge proofs",
-            "Chaos theory meets cryptography",
-            "Privacy-preserving steganography demo"
-        ]
+        step_name = "Generate Secret Message"
+        self.logger.info(f"\n{'='*20} STEP: {step_name} {'='*20}")
+        start_time = time.time()
         
-        message = messages[0]  # Use first message for demo
-        self.logger.info(f"Generated secret message: '{message}'")
-        self.logger.debug(f"Message length: {len(message)} characters")
-        self.logger.debug(f"Message bytes: {message.encode('utf-8')}")
-        
-        return message
+        try:
+            messages = [
+                "Hello ZK-SNARK World!",
+                "This is a secret message hidden using zero-knowledge proofs",
+                "Chaos theory meets cryptography",
+                "Privacy-preserving steganography demo"
+            ]
+            
+            message = messages[0]  # Use first message for demo
+            self.logger.info(f"Generated secret message: '{message}'")
+            self.logger.debug(f"Message length: {len(message)} characters")
+            self.logger.debug(f"Message bytes: {message.encode('utf-8')}")
+            
+            end_time = time.time()
+            duration = end_time - start_time
+            self.metrics["steps"][step_name] = {
+                "duration": duration,
+                "status": "success",
+                "timestamp": datetime.now().isoformat()
+            }
+            self.logger.info(f"✅ {step_name} completed in {duration:.4f} seconds")
+            
+            return message
+            
+        except Exception as e:
+            end_time = time.time()
+            duration = end_time - start_time
+            self.metrics["steps"][step_name] = {
+                "duration": duration,
+                "status": "failed",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+            self.logger.error(f"❌ {step_name} failed after {duration:.4f} seconds: {e}")
+            raise
     
     @step_timer("Embed Message")
     def embed_message(self, chaos_embedding, message):

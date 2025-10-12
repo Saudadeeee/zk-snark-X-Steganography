@@ -20,6 +20,79 @@ class HybridProofArtifact:
     def __init__(self):
         self.chaos_artifact = ChaosProofArtifact()
         self.chunk_type = b'zkPF'  # zk-Proof chunk type
+        self._zk_generator = None
+        
+    @property
+    def zk_generator(self):
+        """Lazy loading of ZK generator to avoid circular imports"""
+        if self._zk_generator is None:
+            from .zk_proof_generator import ZKProofGenerator
+            self._zk_generator = ZKProofGenerator()
+        return self._zk_generator
+        
+    def generate_proof(self, image_array: np.ndarray, message: str) -> Optional[Dict[str, Any]]:
+        """
+        Generate ZK proof for steganographic embedding
+        
+        Args:
+            image_array: Input image as numpy array
+            message: Message to prove embedding for
+            
+        Returns:
+            Complete ZK proof package or None if failed
+        """
+        print("🔐 Generating ZK proof for steganographic data...")
+        
+        try:
+            # Generate complete ZK proof
+            proof_package = self.zk_generator.generate_complete_proof(image_array, message)
+            
+            if proof_package:
+                print("✅ ZK proof generation completed successfully")
+                print(f"📊 Proof size: {len(json.dumps(proof_package['proof']))} bytes")
+                print(f"🔢 Public inputs: {len(proof_package['public_inputs'])} elements")
+                print(f"⏱️  Generation time: {proof_package['generation_timestamp']}")
+                
+            return proof_package
+            
+        except Exception as e:
+            print(f"❌ Error generating ZK proof: {e}")
+            return None
+    
+    def verify_proof(self, proof_package: Dict[str, Any]) -> bool:
+        """
+        Verify ZK proof package
+        
+        Args:
+            proof_package: Complete proof package from generate_proof
+            
+        Returns:
+            True if proof is valid, False otherwise
+        """
+        print("🔍 Verifying ZK proof...")
+        
+        try:
+            # Extract proof components
+            proof = proof_package.get("proof")
+            public_inputs = proof_package.get("public_inputs")
+            
+            if not proof or not public_inputs:
+                print("❌ Invalid proof package structure")
+                return False
+            
+            # Verify using ZK generator
+            is_valid = self.zk_generator.verify_proof(proof, public_inputs)
+            
+            if is_valid:
+                print("✅ ZK proof verification PASSED")
+            else:
+                print("❌ ZK proof verification FAILED")
+                
+            return is_valid
+            
+        except Exception as e:
+            print(f"❌ Error verifying ZK proof: {e}")
+            return False
         
     def extract_image_feature_point(self, image_array: np.ndarray) -> Tuple[int, int]:
         """

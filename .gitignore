@@ -1,8 +1,11 @@
 # Build artifacts
 temp/
+output/
 *.wtns
 *.tmp
 *.log
+*.backup
+*~
 
 # Python cache
 __pycache__/
@@ -23,3 +26,5 @@ Thumbs.db
 test_*.png
 test_*.json
 verification_result.json
+*_test_*.py
+*demo*.py
