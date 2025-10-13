@@ -237,7 +237,9 @@ class ComprehensiveDemo:
                 
                 # Setup paths
                 input_path = os.path.join(self.test_images_dir, image_filename)
-                output_filename = f"stego_{message_info['type'].lower().replace(' ', '_')}_{image_filename}"
+                # Use PNG format to preserve LSB data (WebP is lossy)
+                base_filename = os.path.splitext(image_filename)[0]
+                output_filename = f"stego_{message_info['type'].lower().replace(' ', '_')}_{base_filename}.png"
                 output_path = os.path.join(self.output_dir, output_filename)
                 
                 test_result = {
@@ -275,8 +277,8 @@ class ComprehensiveDemo:
                     # Perform embedding
                     stego_image = chaos_embedder.embed_message(message_info['content'], "test_secret_key")
                     
-                    # Save stego image
-                    stego_image.save(output_path)
+                    # Save stego image as PNG to preserve LSB data
+                    stego_image.save(output_path, 'PNG')
                     
                     embedding_time = time.time() - start_time
                     test_result['embedding_time'] = embedding_time

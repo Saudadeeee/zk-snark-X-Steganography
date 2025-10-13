@@ -1,21 +1,21 @@
 {
   "comprehensive_demo_report": {
     "metadata": {
-      "timestamp": "20251013_142631",
+      "timestamp": "20251013_144421",
       "demo_version": "1.0.0",
       "framework": "ZK-SNARK Steganography",
-      "log_file": "comprehensive_demo_20251013_142631.log"
+      "log_file": "comprehensive_demo_20251013_144421.log"
     },
     "summary": {
       "total_tests": 4,
       "successful_tests": 4,
       "failed_tests": 0,
       "success_rate": 100.0,
-      "avg_embedding_time": 0.035753726959228516,
-      "avg_extraction_time": 0.007681727409362793,
-      "avg_size_overhead": -92.91489600426361,
-      "min_embedding_time": 0.031709909439086914,
-      "max_embedding_time": 0.03813886642456055
+      "avg_embedding_time": 0.04580003023147583,
+      "avg_extraction_time": 0.009505093097686768,
+      "avg_size_overhead": 12.303824630790592,
+      "min_embedding_time": 0.044689178466796875,
+      "max_embedding_time": 0.0479433536529541
     },
     "chaos_analysis": {
       "seeds_tested": [
@@ -161,17 +161,16 @@
         "message_type": "File Properties",
         "message_length": 108,
         "input_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/examples/testvectors/Lenna_test_image.webp",
-        "output_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/Demo/output/stego_file_properties_Lenna_test_image.webp",
-        "timestamp": "2025-10-13T14:26:31.350738",
+        "output_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/Demo/output/stego_file_properties_Lenna_test_image.png",
+        "timestamp": "2025-10-13T14:44:21.563650",
         "original_size": 427806,
-        "embedding_time": 0.0356752872467041,
+        "embedding_time": 0.044689178466796875,
         "embedding_success": true,
-        "stego_size": 30344,
-        "size_overhead": -92.9070653520521,
-        "extraction_time": 0.007260322570800781,
+        "stego_size": 480244,
+        "size_overhead": 12.257425094552204,
+        "extraction_time": 0.00869297981262207,
         "extraction_success": true,
-        "message_integrity": false,
-        "message_differences": 54
+        "message_integrity": true
       },
       {
         "test_id": 2,
@@ -179,17 +178,16 @@
         "message_type": "Processing History",
         "message_length": 198,
         "input_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/examples/testvectors/Lenna_test_image.webp",
-        "output_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/Demo/output/stego_processing_history_Lenna_test_image.webp",
-        "timestamp": "2025-10-13T14:26:31.394026",
+        "output_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/Demo/output/stego_processing_history_Lenna_test_image.png",
+        "timestamp": "2025-10-13T14:44:21.617315",
         "original_size": 427806,
-        "embedding_time": 0.0374908447265625,
+        "embedding_time": 0.04566764831542969,
         "embedding_success": true,
-        "stego_size": 30280,
-        "size_overhead": -92.92202540403828,
-        "extraction_time": 0.007855892181396484,
+        "stego_size": 480547,
+        "size_overhead": 12.328251590674277,
+        "extraction_time": 0.009755849838256836,
         "extraction_success": true,
-        "message_integrity": false,
-        "message_differences": 98
+        "message_integrity": true
       },
       {
         "test_id": 3,
@@ -197,17 +195,16 @@
         "message_type": "JSON Structured",
         "message_length": 303,
         "input_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/examples/testvectors/Lenna_test_image.webp",
-        "output_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/Demo/output/stego_json_structured_Lenna_test_image.webp",
-        "timestamp": "2025-10-13T14:26:31.439712",
+        "output_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/Demo/output/stego_json_structured_Lenna_test_image.png",
+        "timestamp": "2025-10-13T14:44:21.673029",
         "original_size": 427806,
-        "embedding_time": 0.03813886642456055,
+        "embedding_time": 0.0479433536529541,
         "embedding_success": true,
-        "stego_size": 30274,
-        "size_overhead": -92.92342790891198,
-        "extraction_time": 0.009849071502685547,
+        "stego_size": 480735,
+        "size_overhead": 12.372196743383682,
+        "extraction_time": 0.011420965194702148,
         "extraction_success": true,
-        "message_integrity": false,
-        "message_differences": 149
+        "message_integrity": true
       },
       {
         "test_id": 4,
@@ -215,23 +212,22 @@
         "message_type": "Comprehensive Metadata",
         "message_length": 108,
         "input_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/examples/testvectors/Lenna_test_image.webp",
-        "output_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/Demo/output/stego_comprehensive_metadata_Lenna_test_image.webp",
-        "timestamp": "2025-10-13T14:26:31.488109",
+        "output_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/Demo/output/stego_comprehensive_metadata_Lenna_test_image.png",
+        "timestamp": "2025-10-13T14:44:21.732686",
         "original_size": 427806,
-        "embedding_time": 0.031709909439086914,
+        "embedding_time": 0.044899940490722656,
         "embedding_success": true,
-        "stego_size": 30344,
-        "size_overhead": -92.9070653520521,
-        "extraction_time": 0.005761623382568359,
+        "stego_size": 480244,
+        "size_overhead": 12.257425094552204,
+        "extraction_time": 0.008150577545166016,
         "extraction_success": true,
-        "message_integrity": false,
-        "message_differences": 54
+        "message_integrity": true
       }
     ],
     "performance_metrics": {
-      "throughput_bytes_per_second": 11965354.003174137,
+      "throughput_bytes_per_second": 9340736.192483833,
       "reliability_score": 1.0,
-      "efficiency_score": 3.304995536626976
+      "efficiency_score": 0.6695043691144973
     }
   }
 }

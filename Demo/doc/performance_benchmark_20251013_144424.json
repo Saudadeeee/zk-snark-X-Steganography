@@ -1,0 +1,124 @@
+{
+  "benchmark_info": {
+    "timestamp": "2025-10-13T14:44:24.039045",
+    "python_version": "3.12.3 (main, Aug 14 2025, 17:47:21) [GCC 13.3.0]",
+    "platform": "linux"
+  },
+  "test_cases": [
+    {
+      "image_name": "Lenna_test_image.webp",
+      "image_size_bytes": 427806,
+      "message_length": 50,
+      "message_bits": 400,
+      "times": {
+        "initialization": 3.4809112548828125e-05,
+        "embedding": 0.001676797866821289,
+        "saving": 0.03659224510192871,
+        "total": 0.03830385208129883
+      },
+      "file_sizes": {
+        "original": 427806,
+        "stego": 480019,
+        "overhead_bytes": 52213,
+        "overhead_percent": 12.204831161788288
+      },
+      "throughput": {
+        "bytes_per_second": 249944061.43251148,
+        "bits_per_second": 238549.92179724158
+      },
+      "status": "success",
+      "timestamp": "2025-10-13T14:44:24.096531"
+    },
+    {
+      "image_name": "Lenna_test_image.webp",
+      "image_size_bytes": 427806,
+      "message_length": 108,
+      "message_bits": 864,
+      "times": {
+        "initialization": 3.0994415283203125e-05,
+        "embedding": 0.0028870105743408203,
+        "saving": 0.03596806526184082,
+        "total": 0.038886070251464844
+      },
+      "file_sizes": {
+        "original": 427806,
+        "stego": 480224,
+        "overhead_bytes": 52418,
+        "overhead_percent": 12.252750078306523
+      },
+      "throughput": {
+        "bytes_per_second": 146609070.75937578,
+        "bits_per_second": 299271.5051614502
+      },
+      "status": "success",
+      "timestamp": "2025-10-13T14:44:24.241695"
+    },
+    {
+      "image_name": "Lenna_test_image.webp",
+      "image_size_bytes": 427806,
+      "message_length": 180,
+      "message_bits": 1440,
+      "times": {
+        "initialization": 2.7179718017578125e-05,
+        "embedding": 0.004017829895019531,
+        "saving": 0.03600311279296875,
+        "total": 0.04004812240600586
+      },
+      "file_sizes": {
+        "original": 427806,
+        "stego": 480472,
+        "overhead_bytes": 52666,
+        "overhead_percent": 12.310720279752973
+      },
+      "throughput": {
+        "bytes_per_second": 105761429.7432512,
+        "bits_per_second": 358402.4305720389
+      },
+      "status": "success",
+      "timestamp": "2025-10-13T14:44:24.390964"
+    },
+    {
+      "image_name": "Lenna_test_image.webp",
+      "image_size_bytes": 427806,
+      "message_length": 457,
+      "message_bits": 3656,
+      "times": {
+        "initialization": 4.2438507080078125e-05,
+        "embedding": 0.010854959487915039,
+        "saving": 0.03765511512756348,
+        "total": 0.048552513122558594
+      },
+      "file_sizes": {
+        "original": 427806,
+        "stego": 480676,
+        "overhead_bytes": 52870,
+        "overhead_percent": 12.358405445458923
+      },
+      "throughput": {
+        "bytes_per_second": 39257628.30691142,
+        "bits_per_second": 336804.5734367107
+      },
+      "status": "success",
+      "timestamp": "2025-10-13T14:44:24.549917"
+    }
+  ],
+  "summary": {
+    "total_tests": 4,
+    "successful_tests": 4,
+    "failed_tests": 0,
+    "average_times": {
+      "initialization": 3.3855438232421875e-05,
+      "embedding": 0.00485914945602417,
+      "total": 0.04144763946533203
+    },
+    "time_range": {
+      "min_total": 0.03830385208129883,
+      "max_total": 0.048552513122558594
+    },
+    "average_overhead_percent": 12.281676741326677,
+    "average_throughput": {
+      "bytes_per_second": 135393047.56051248,
+      "bits_per_second": 308257.1077418603
+    }
+  }
+}

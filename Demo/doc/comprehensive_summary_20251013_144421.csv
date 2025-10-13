@@ -1,0 +1,5 @@
+test_id,image,message_type,message_length,embedding_time,extraction_time,size_overhead,embedding_success,extraction_success,message_integrity
+1,Lenna_test_image.webp,File Properties,108,0.044689178466796875,0.00869297981262207,12.257425094552204,True,True,True
+2,Lenna_test_image.webp,Processing History,198,0.04566764831542969,0.009755849838256836,12.328251590674277,True,True,True
+3,Lenna_test_image.webp,JSON Structured,303,0.0479433536529541,0.011420965194702148,12.372196743383682,True,True,True
+4,Lenna_test_image.webp,Comprehensive Metadata,108,0.044899940490722656,0.008150577545166016,12.257425094552204,True,True,True

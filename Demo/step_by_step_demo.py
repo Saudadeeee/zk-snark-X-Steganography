@@ -137,7 +137,9 @@ def main():
     # Select first available test image
     test_image = test_images[0]
     input_path = os.path.join(test_images_dir, test_image)
-    output_path = os.path.join(output_dir, f"stego_{test_image}")
+    # Use PNG format to preserve LSB data (WebP is lossy and corrupts steganography)
+    output_filename = f"stego_{os.path.splitext(test_image)[0]}.png"
+    output_path = os.path.join(output_dir, output_filename)
     
     print_info(f"Processing image: {test_image}")
     print_info(f"Input: {input_path}")
@@ -162,8 +164,8 @@ def main():
         test_seed = "demo_secret_key"
         stego_image = chaos_embedder.embed_message(test_message, test_seed)
         
-        # Save stego image
-        stego_image.save(output_path)
+        # Save stego image as PNG to preserve LSB data
+        stego_image.save(output_path, 'PNG')
         
         embedding_time = time.time() - start_time
         print_success(f"Message embedded successfully in {embedding_time:.4f} seconds")
