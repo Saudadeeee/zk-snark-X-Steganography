@@ -74,6 +74,13 @@ echo "🔬 Running Performance Benchmark (this may take a while)..."
 echo "⏳ Please wait..."
 echo ""
 run_demo "Performance Benchmark" "performance_benchmark.py"
+sleep 2
+
+# 4. Histogram analysis (new!)
+echo "📊 Running Histogram Analysis..."
+echo "⏳ Analyzing steganographic changes..."
+echo ""
+run_demo "Histogram Analysis" "histogram.py --auto"
 
 # Generate summary report
 echo "DATA Generating summary report..."
@@ -91,6 +98,7 @@ cat > "$SUMMARY_FILE" << EOF
 1. SUCCESS Step-by-Step Demo (\`step_by_step_demo.py\`)
 2. SUCCESS Comprehensive Demo (\`comprehensive_demo.py\`)  
 3. SUCCESS Performance Benchmark (\`performance_benchmark.py\`)
+4. SUCCESS Histogram Analysis (\`histogram.py --auto\`)
 
 ### Generated Files
 
@@ -98,6 +106,8 @@ cat > "$SUMMARY_FILE" << EOF
 - Performance reports (JSON format)
 - Benchmark results (JSON + CSV)
 - Performance charts (PNG)
+- Histogram analysis charts (PNG)
+- Histogram statistics (JSON)
 - This summary report
 
 #### Outputs (\`output/\`)
@@ -137,6 +147,12 @@ Demo/
 \`\`\`bash
 # View latest performance report
 cat doc/performance_report_*.json | jq '.summary'
+
+# View histogram analysis results
+python3 view_histogram.py
+
+# Compare all histogram analyses
+python3 view_histogram.py --compare
 
 # Check demo logs
 tail -50 logs/demo_suite_*.log
