@@ -41,22 +41,21 @@ class HybridProofArtifact:
         Returns:
             Complete ZK proof package or None if failed
         """
-        print("🔐 Generating ZK proof for steganographic data...")
+        print("Generating ZK proof for steganographic data...")
         
         try:
-            # Generate complete ZK proof
             proof_package = self.zk_generator.generate_complete_proof(image_array, message)
             
             if proof_package:
-                print("✅ ZK proof generation completed successfully")
-                print(f"📊 Proof size: {len(json.dumps(proof_package['proof']))} bytes")
-                print(f"🔢 Public inputs: {len(proof_package['public_inputs'])} elements")
-                print(f"⏱️  Generation time: {proof_package['generation_timestamp']}")
+                print("ZK proof generation completed successfully")
+                print(f"Proof size: {len(json.dumps(proof_package['proof']))} bytes")
+                print(f"Public inputs: {len(proof_package['public_inputs'])} elements")
+                print(f"Generation timestamp: {proof_package['generation_timestamp']}")
                 
             return proof_package
             
         except Exception as e:
-            print(f"❌ Error generating ZK proof: {e}")
+            print(f"ERROR: Error generating ZK proof: {e}")
             return None
     
     def verify_proof(self, proof_package: Dict[str, Any]) -> bool:
@@ -69,65 +68,52 @@ class HybridProofArtifact:
         Returns:
             True if proof is valid, False otherwise
         """
-        print("🔍 Verifying ZK proof...")
+        print("Verifying ZK proof...")
         
         try:
-            # Extract proof components
             proof = proof_package.get("proof")
             public_inputs = proof_package.get("public_inputs")
             
             if not proof or not public_inputs:
-                print("❌ Invalid proof package structure")
+                print("ERROR: Invalid proof package structure")
                 return False
             
-            # Verify using ZK generator
             is_valid = self.zk_generator.verify_proof(proof, public_inputs)
             
             if is_valid:
-                print("✅ ZK proof verification PASSED")
+                print("ZK proof verification PASSED")
             else:
-                print("❌ ZK proof verification FAILED")
+                print("ERROR: ZK proof verification FAILED")
                 
             return is_valid
             
         except Exception as e:
-            print(f"❌ Error verifying ZK proof: {e}")
+            print(f"ERROR: Error verifying ZK proof: {e}")
             return False
         
     def extract_image_feature_point(self, image_array: np.ndarray) -> Tuple[int, int]:
-        """
-        Extract distinctive features from image to determine starting point
-        Uses image texture/edge analysis to find stable feature points
-        """
+        """Extract distinctive features from image to determine starting point"""
         height, width = image_array.shape[:2]
         
-        # Convert to grayscale if needed
         if len(image_array.shape) == 3:
             gray = np.mean(image_array, axis=2).astype(np.uint8)
         else:
             gray = image_array
             
-        # Calculate gradient magnitude (edge strength)
-        # Using simple Sobel-like operators
-        grad_x = np.abs(np.diff(gray, axis=1))  # Horizontal edges
-        grad_y = np.abs(np.diff(gray, axis=0))  # Vertical edges
+        grad_x = np.abs(np.diff(gray, axis=1))
+        grad_y = np.abs(np.diff(gray, axis=0))
         
-        # Pad to maintain original size
         grad_x = np.pad(grad_x, ((0, 0), (0, 1)), mode='edge')
         grad_y = np.pad(grad_y, ((0, 1), (0, 0)), mode='edge')
         
-        # Combined gradient magnitude
         gradient_mag = grad_x + grad_y
         
-        # Find regions with high texture (avoid smooth areas)
-        # Use a sliding window to find the most textured region
         window_size = min(16, width//4, height//4)
         max_texture = 0
-        best_x, best_y = width//2, height//2  # Default fallback
+        best_x, best_y = width//2, height//2
         
         for y in range(window_size//2, height - window_size//2, window_size//4):
             for x in range(window_size//2, width - window_size//2, window_size//4):
-                # Calculate texture strength in this window
                 window = gradient_mag[y-window_size//2:y+window_size//2, 
                                     x-window_size//2:x+window_size//2]
                 texture_score = np.sum(window)
@@ -136,7 +122,6 @@ class HybridProofArtifact:
                     max_texture = texture_score
                     best_x, best_y = x, y
         
-        # Ensure coordinates are within bounds
         best_x = max(1, min(best_x, width-2))
         best_y = max(1, min(best_y, height-2))
         
@@ -152,41 +137,29 @@ class HybridProofArtifact:
         x0: Optional[int] = None,
         y0: Optional[int] = None
     ) -> bool:
-        """
-        Embed ZK proof using hybrid approach:
-        1. Extract image features to determine starting point (if not provided)
-        2. PNG chunk stores: initial position + chaos parameters + public inputs  
-        3. Chaos LSB stores: actual ZK proof data using chaos-based positioning
-        """
+        """Embed ZK proof using hybrid approach"""
         try:
-            # Load cover image
             cover_img = Image.open(cover_image_path)
             cover_array = np.array(cover_img)
             
-            # Generate chaos parameters
             chaos_key = generate_chaos_key_from_secret(secret_key)
             
-            # Extract image features for starting point if not provided
             if x0 is None or y0 is None:
                 feature_x, feature_y = self.extract_image_feature_point(cover_array)
                 x0 = feature_x if x0 is None else x0
                 y0 = feature_y if y0 is None else y0
-                print(f"🎯 Extracted feature-based starting point: ({x0}, {y0})")
+                print(f"Extracted feature-based starting point: ({x0}, {y0})")
             else:
-                print(f"📍 Using provided starting point: ({x0}, {y0})")
+                print(f"Using provided starting point: ({x0}, {y0})")
                 
-            # Serialize proof for embedding
             proof_bytes = json.dumps(proof_json, separators=(',', ':')).encode('utf-8')
             
-            # Embed proof using chaos positioning from feature point
             stego_array, chaos_metadata = self.chaos_artifact.embed_proof_chaos(
                 cover_array, proof_bytes, x0, y0, chaos_key
             )
             
-            # Add exact byte length to metadata
             chaos_metadata["proof_byte_length"] = len(proof_bytes)
             
-            # Create PNG chunk metadata
             image_hash = self._calculate_image_hash(cover_image_path)
             
             chunk_metadata = {
@@ -201,11 +174,9 @@ class HybridProofArtifact:
                 "timestamp": int(time.time())
             }
             
-            # Save stego image with PNG chunk
             stego_img = Image.fromarray(stego_array.astype(np.uint8))
             stego_img.save(stego_image_path)
             
-            # Embed metadata in PNG chunk
             return self._embed_metadata_chunk(stego_image_path, chunk_metadata)
             
         except Exception as e:
@@ -213,32 +184,23 @@ class HybridProofArtifact:
             return False
     
     def extract_hybrid_proof(self, stego_image_path: str) -> Optional[Dict[str, Any]]:
-        """
-        Extract ZK proof using hybrid approach:
-        1. Extract metadata from PNG chunk
-        2. Extract proof data using chaos positioning
-        """
+        """Extract ZK proof using hybrid approach"""
         try:
-            # Extract metadata from PNG chunk
             metadata = self._extract_metadata_chunk(stego_image_path)
             if not metadata:
                 return None
                 
-            # Load stego image
             stego_img = Image.open(stego_image_path)
             stego_array = np.array(stego_img)
             
-            # Extract proof using chaos positioning
             proof_bytes = self.chaos_artifact.extract_proof_chaos(
                 stego_array, metadata["chaos"]
             )
             
-            # Truncate to exact original length if available
             if "proof_byte_length" in metadata["chaos"]:
                 original_length = metadata["chaos"]["proof_byte_length"]
                 proof_bytes = proof_bytes[:original_length]
             
-            # Deserialize proof
             proof_json = json.loads(proof_bytes.decode('utf-8'))
             
             return {
@@ -262,7 +224,6 @@ class HybridProofArtifact:
         """Create optimized public inputs for ZK verification"""
         chaos_positions = public_json.get('positions', [])
         
-        # Create Merkle root of positions (simplified)
         positions_str = ','.join([f"{x},{y}" for x, y in chaos_positions])
         commitment_root = hashlib.sha256(positions_str.encode()).hexdigest()[:16]
         
@@ -276,32 +237,26 @@ class HybridProofArtifact:
     def _embed_metadata_chunk(self, png_path: str, metadata: Dict[str, Any]) -> bool:
         """Embed metadata in PNG chunk"""
         try:
-            # Read PNG file
             with open(png_path, 'rb') as f:
                 png_data = f.read()
             
-            # Serialize metadata
             metadata_json = json.dumps(metadata, separators=(',', ':'))
             metadata_bytes = metadata_json.encode('utf-8')
             
-            # Find IEND chunk
             iend_pos = png_data.rfind(b'IEND')
             if iend_pos == -1:
                 return False
                 
             iend_chunk_start = iend_pos - 4
             
-            # Create chunk
             chunk_length = struct.pack('>I', len(metadata_bytes))
             chunk_type = self.chunk_type
             chunk_crc = struct.pack('>I', zlib.crc32(chunk_type + metadata_bytes) & 0xffffffff)
             
             full_chunk = chunk_length + chunk_type + metadata_bytes + chunk_crc
             
-            # Insert chunk
             new_png = png_data[:iend_chunk_start] + full_chunk + png_data[iend_chunk_start:]
             
-            # Write back
             with open(png_path, 'wb') as f:
                 f.write(new_png)
                 
@@ -317,8 +272,7 @@ class HybridProofArtifact:
             with open(png_path, 'rb') as f:
                 png_data = f.read()
             
-            # Parse chunks
-            pos = 8  # Skip PNG signature
+            pos = 8
             
             while pos < len(png_data):
                 if pos + 8 > len(png_data):
@@ -334,7 +288,6 @@ class HybridProofArtifact:
                     if data_end + 4 <= len(png_data):
                         chunk_data = png_data[data_start:data_end]
                         
-                        # Verify CRC
                         expected_crc = struct.unpack('>I', png_data[data_end:data_end+4])[0]
                         actual_crc = zlib.crc32(chunk_type + chunk_data) & 0xffffffff
                         

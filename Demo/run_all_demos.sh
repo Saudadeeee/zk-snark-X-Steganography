@@ -2,7 +2,7 @@
 # ZK-SNARK Steganography Demo Runner
 # Chạy tất cả demo và tạo báo cáo tổng hợp
 
-echo "🚀 ZK-SNARK STEGANOGRAPHY DEMO SUITE"
+echo "STARTING ZK-SNARK STEGANOGRAPHY DEMO SUITE"
 echo "===================================="
 echo "Started at: $(date)"
 echo ""
@@ -11,8 +11,8 @@ echo ""
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="$DEMO_DIR/logs/demo_suite_$(date +%Y%m%d_%H%M%S).log"
 
-# Create log file
-mkdir -p "$DEMO_DIR/logs"
+# Create directories
+mkdir -p "$DEMO_DIR/logs" "$DEMO_DIR/output" "$DEMO_DIR/debug" "$DEMO_DIR/doc"
 echo "Demo Suite Log - $(date)" > "$LOG_FILE"
 
 # Function to run demo and log
@@ -30,11 +30,11 @@ run_demo() {
     # Run demo
     if python3 "$DEMO_DIR/$demo_script" 2>&1 | tee -a "$LOG_FILE"; then
         echo ""
-        echo "✅ $demo_name completed successfully!"
+        echo "SUCCESS $demo_name completed successfully!"
         echo ""
     else
         echo ""
-        echo "❌ $demo_name failed!"
+        echo "ERROR $demo_name failed!"
         echo ""
     fi
     
@@ -43,7 +43,7 @@ run_demo() {
 }
 
 # Check Python and dependencies
-echo "🔍 Checking environment..."
+echo "CHECKING Checking environment..."
 echo "Python version: $(python3 --version)"
 echo "Demo directory: $DEMO_DIR"
 echo ""
@@ -53,7 +53,7 @@ if [ -d "$DEMO_DIR/../examples/testvectors" ]; then
     image_count=$(find "$DEMO_DIR/../examples/testvectors" -name "*.png" -o -name "*.webp" | wc -l)
     echo "Found $image_count test images"
 else
-    echo "⚠️  Test images directory not found!"
+    echo "WARNING  Test images directory not found!"
 fi
 echo ""
 
@@ -76,7 +76,7 @@ echo ""
 run_demo "Performance Benchmark" "performance_benchmark.py"
 
 # Generate summary report
-echo "📊 Generating summary report..."
+echo "DATA Generating summary report..."
 SUMMARY_FILE="$DEMO_DIR/doc/demo_suite_summary_$(date +%Y%m%d_%H%M%S).md"
 
 cat > "$SUMMARY_FILE" << EOF
@@ -88,9 +88,9 @@ cat > "$SUMMARY_FILE" << EOF
 ## Execution Summary
 
 ### Demos Run
-1. ✅ Step-by-Step Demo (\`step_by_step_demo.py\`)
-2. ✅ Comprehensive Demo (\`comprehensive_demo.py\`)  
-3. ✅ Performance Benchmark (\`performance_benchmark.py\`)
+1. SUCCESS Step-by-Step Demo (\`step_by_step_demo.py\`)
+2. SUCCESS Comprehensive Demo (\`comprehensive_demo.py\`)  
+3. SUCCESS Performance Benchmark (\`performance_benchmark.py\`)
 
 ### Generated Files
 
@@ -119,10 +119,10 @@ cat > "$SUMMARY_FILE" << EOF
 
 \`\`\`
 Demo/
-├── doc/           # 📁 All results and reports here
+├── doc/           # FOLDER All results and reports here
 ├── output/        # 🖼️ Generated stego images and proofs
-├── debug/         # 🔍 Debug information files
-└── logs/          # 📝 Execution logs
+├── debug/         # CHECKING Debug information files
+└── logs/          # NOTE Execution logs
 \`\`\`
 
 ## Next Steps
@@ -153,19 +153,19 @@ echo "📄 Summary report saved to: $SUMMARY_FILE"
 echo ""
 
 # Final summary
-echo "🎉 DEMO SUITE COMPLETED!"
+echo "COMPLETED DEMO SUITE COMPLETED!"
 echo "======================="
 echo "Completed at: $(date)"
 echo ""
-echo "📁 Results location: $DEMO_DIR"
-echo "📊 Summary report: $(basename "$SUMMARY_FILE")"
-echo "📝 Full log: $(basename "$LOG_FILE")"
+echo "FOLDER Results location: $DEMO_DIR"
+echo "DATA Summary report: $(basename "$SUMMARY_FILE")"
+echo "NOTE Full log: $(basename "$LOG_FILE")"
 echo ""
 echo "Generated files:"
 find "$DEMO_DIR/doc" "$DEMO_DIR/output" "$DEMO_DIR/debug" -type f -name "*" 2>/dev/null | sort | sed 's/^/  - /'
 echo ""
-echo "🔍 To review results:"
+echo "CHECKING To review results:"
 echo "  cd $DEMO_DIR"
 echo "  ls -la doc/ output/ debug/ logs/"
 echo ""
-echo "Happy analyzing! 📈"
+echo "Happy analyzing! CHART"

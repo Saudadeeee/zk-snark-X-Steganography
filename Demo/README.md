@@ -2,7 +2,7 @@
 
 Thư mục này chứa các demo chi tiết và đầy đủ cho hệ thống ZK-SNARK Steganography, bao gồm logging hiệu năng, debug thông tin, và lưu trữ kết quả.
 
-## 📁 Cấu trúc thư mục
+## FOLDER Cấu trúc thư mục
 
 ```
 Demo/
@@ -16,7 +16,7 @@ Demo/
 └── debug/                    # Debug information
 ```
 
-## 🚀 Cách sử dụng
+## STARTING Cách sử dụng
 
 ### 1. Demo từng bước (Khuyến nghị cho người mới)
 
@@ -26,12 +26,12 @@ python step_by_step_demo.py
 ```
 
 **Tính năng:**
-- ✅ Demo từng bước rõ ràng
-- 🔍 Debug output chi tiết
-- ⏱️ Đo thời gian từng bước
-- 📝 Lưu debug info vào file JSON
+- SUCCESS Demo từng bước rõ ràng
+- CHECKING Debug output chi tiết
+- TIME Đo thời gian từng bước
+- NOTE Lưu debug info vào file JSON
 - 🖼️ Tạo ảnh stego
-- 🔐 Generate và verify ZK proof (nếu có)
+- SECURING Generate và verify ZK proof (nếu có)
 
 ### 2. Demo đầy đủ với logging
 
@@ -41,12 +41,12 @@ python comprehensive_demo.py
 ```
 
 **Tính năng:**
-- 📊 Comprehensive performance metrics
-- 📝 Professional logging system
-- 🔍 Detailed debug information
-- 📈 Performance report generation
-- ⚡ Error handling và recovery
-- 📁 Organized output structure
+- DATA Comprehensive performance metrics
+- NOTE Professional logging system
+- CHECKING Detailed debug information
+- CHART Performance report generation
+- FAST Error handling và recovery
+- FOLDER Organized output structure
 
 ### 3. Performance Benchmark
 
@@ -58,12 +58,12 @@ python performance_benchmark.py
 **Tính năng:**
 - 🔬 Test multiple image sizes
 - 📏 Test different message lengths  
-- 📊 Generate performance charts
-- 📈 Throughput analysis
+- DATA Generate performance charts
+- CHART Throughput analysis
 - 💾 CSV export for analysis
-- 📉 Size overhead analysis
+- CHART Size overhead analysis
 
-## 📊 Kết quả Demo
+## DATA Kết quả Demo
 
 ### Thư mục `doc/`
 - `performance_report_YYYYMMDD_HHMMSS.json` - Báo cáo hiệu năng chi tiết
@@ -83,7 +83,7 @@ python performance_benchmark.py
 - `message_embedding.json` - Debug info cho message embedding
 - `zk_proof_verification.json` - Debug info cho ZK proof
 
-## 🔍 Thông tin Debug
+## CHECKING Thông tin Debug
 
 Mỗi demo sẽ tạo ra các file debug chứa:
 
@@ -122,7 +122,7 @@ Mỗi demo sẽ tạo ra các file debug chứa:
 }
 ```
 
-## 📈 Performance Metrics
+## CHART Performance Metrics
 
 ### Timing Metrics
 - **Initialization Time**: Thời gian khởi tạo chaos embedding
@@ -165,7 +165,7 @@ test_messages = [
 output_dir = Path("custom/output/path")
 ```
 
-## 🔧 Requirements
+## TOOLS Requirements
 
 Để chạy được demo, cần có:
 - Python 3.7+
@@ -173,7 +173,7 @@ output_dir = Path("custom/output/path")
 - matplotlib (cho biểu đồ, optional)
 - src/zk_stego modules (chaos_embedding, hybrid_proof_artifact)
 
-## 📝 Troubleshooting
+## NOTE Troubleshooting
 
 ### Lỗi import module
 ```bash
@@ -201,4 +201,4 @@ Nếu gặp vấn đề với demo, check:
 
 ---
 
-**Happy Testing! 🎉**
+**Happy Testing! COMPLETED**

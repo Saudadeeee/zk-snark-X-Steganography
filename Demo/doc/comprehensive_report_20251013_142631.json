@@ -1,0 +1,237 @@
+{
+  "comprehensive_demo_report": {
+    "metadata": {
+      "timestamp": "20251013_142631",
+      "demo_version": "1.0.0",
+      "framework": "ZK-SNARK Steganography",
+      "log_file": "comprehensive_demo_20251013_142631.log"
+    },
+    "summary": {
+      "total_tests": 4,
+      "successful_tests": 4,
+      "failed_tests": 0,
+      "success_rate": 100.0,
+      "avg_embedding_time": 0.035753726959228516,
+      "avg_extraction_time": 0.007681727409362793,
+      "avg_size_overhead": -92.91489600426361,
+      "min_embedding_time": 0.031709909439086914,
+      "max_embedding_time": 0.03813886642456055
+    },
+    "chaos_analysis": {
+      "seeds_tested": [
+        {
+          "dimensions": "256x256",
+          "chaos_key": 12345,
+          "positions_generated": 100,
+          "x_range": [
+            0,
+            255
+          ],
+          "y_range": [
+            0,
+            255
+          ],
+          "unique_positions": 100
+        },
+        {
+          "dimensions": "256x256",
+          "chaos_key": 54321,
+          "positions_generated": 100,
+          "x_range": [
+            0,
+            132
+          ],
+          "y_range": [
+            0,
+            132
+          ],
+          "unique_positions": 100
+        },
+        {
+          "dimensions": "256x256",
+          "chaos_key": 98765,
+          "positions_generated": 100,
+          "x_range": [
+            0,
+            255
+          ],
+          "y_range": [
+            0,
+            255
+          ],
+          "unique_positions": 100
+        },
+        {
+          "dimensions": "512x512",
+          "chaos_key": 12345,
+          "positions_generated": 100,
+          "x_range": [
+            0,
+            511
+          ],
+          "y_range": [
+            0,
+            511
+          ],
+          "unique_positions": 100
+        },
+        {
+          "dimensions": "512x512",
+          "chaos_key": 54321,
+          "positions_generated": 100,
+          "x_range": [
+            0,
+            260
+          ],
+          "y_range": [
+            0,
+            260
+          ],
+          "unique_positions": 100
+        },
+        {
+          "dimensions": "512x512",
+          "chaos_key": 98765,
+          "positions_generated": 100,
+          "x_range": [
+            0,
+            511
+          ],
+          "y_range": [
+            0,
+            511
+          ],
+          "unique_positions": 100
+        },
+        {
+          "dimensions": "1024x1024",
+          "chaos_key": 12345,
+          "positions_generated": 100,
+          "x_range": [
+            0,
+            1023
+          ],
+          "y_range": [
+            0,
+            1023
+          ],
+          "unique_positions": 100
+        },
+        {
+          "dimensions": "1024x1024",
+          "chaos_key": 54321,
+          "positions_generated": 100,
+          "x_range": [
+            0,
+            516
+          ],
+          "y_range": [
+            0,
+            516
+          ],
+          "unique_positions": 100
+        },
+        {
+          "dimensions": "1024x1024",
+          "chaos_key": 98765,
+          "positions_generated": 100,
+          "x_range": [
+            0,
+            1023
+          ],
+          "y_range": [
+            0,
+            1023
+          ],
+          "unique_positions": 100
+        }
+      ],
+      "statistics": {
+        "logistic_min": 0.09506250000000008,
+        "logistic_max": 0.975,
+        "logistic_mean": 0.5917679104221611,
+        "chaos_quality": "Good"
+      },
+      "position_tests": {}
+    },
+    "detailed_results": [
+      {
+        "test_id": 1,
+        "image": "Lenna_test_image.webp",
+        "message_type": "File Properties",
+        "message_length": 108,
+        "input_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/examples/testvectors/Lenna_test_image.webp",
+        "output_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/Demo/output/stego_file_properties_Lenna_test_image.webp",
+        "timestamp": "2025-10-13T14:26:31.350738",
+        "original_size": 427806,
+        "embedding_time": 0.0356752872467041,
+        "embedding_success": true,
+        "stego_size": 30344,
+        "size_overhead": -92.9070653520521,
+        "extraction_time": 0.007260322570800781,
+        "extraction_success": true,
+        "message_integrity": false,
+        "message_differences": 54
+      },
+      {
+        "test_id": 2,
+        "image": "Lenna_test_image.webp",
+        "message_type": "Processing History",
+        "message_length": 198,
+        "input_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/examples/testvectors/Lenna_test_image.webp",
+        "output_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/Demo/output/stego_processing_history_Lenna_test_image.webp",
+        "timestamp": "2025-10-13T14:26:31.394026",
+        "original_size": 427806,
+        "embedding_time": 0.0374908447265625,
+        "embedding_success": true,
+        "stego_size": 30280,
+        "size_overhead": -92.92202540403828,
+        "extraction_time": 0.007855892181396484,
+        "extraction_success": true,
+        "message_integrity": false,
+        "message_differences": 98
+      },
+      {
+        "test_id": 3,
+        "image": "Lenna_test_image.webp",
+        "message_type": "JSON Structured",
+        "message_length": 303,
+        "input_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/examples/testvectors/Lenna_test_image.webp",
+        "output_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/Demo/output/stego_json_structured_Lenna_test_image.webp",
+        "timestamp": "2025-10-13T14:26:31.439712",
+        "original_size": 427806,
+        "embedding_time": 0.03813886642456055,
+        "embedding_success": true,
+        "stego_size": 30274,
+        "size_overhead": -92.92342790891198,
+        "extraction_time": 0.009849071502685547,
+        "extraction_success": true,
+        "message_integrity": false,
+        "message_differences": 149
+      },
+      {
+        "test_id": 4,
+        "image": "Lenna_test_image.webp",
+        "message_type": "Comprehensive Metadata",
+        "message_length": 108,
+        "input_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/examples/testvectors/Lenna_test_image.webp",
+        "output_path": "/home/khenh/Code/Project/zk-snark/zk-snarkXsteganography/Demo/output/stego_comprehensive_metadata_Lenna_test_image.webp",
+        "timestamp": "2025-10-13T14:26:31.488109",
+        "original_size": 427806,
+        "embedding_time": 0.031709909439086914,
+        "embedding_success": true,
+        "stego_size": 30344,
+        "size_overhead": -92.9070653520521,
+        "extraction_time": 0.005761623382568359,
+        "extraction_success": true,
+        "message_integrity": false,
+        "message_differences": 54
+      }
+    ],
+    "performance_metrics": {
+      "throughput_bytes_per_second": 11965354.003174137,
+      "reliability_score": 1.0,
+      "efficiency_score": 3.304995536626976
+    }
+  }
+}

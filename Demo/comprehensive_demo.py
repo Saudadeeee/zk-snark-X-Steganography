@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Comprehensive Demo Script for ZK-SNARK Steganography
-Demonstrates step-by-step process with detailed logging and performance metrics
+ZK-SNARK Steganography - Comprehensive Demo
+Demo tổng hợp với logging chi tiết và phân tích đầy đủ
 """
 
 import os
@@ -10,445 +10,522 @@ import time
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
+from typing import Dict, List, Any, Optional
 
-# Add src directory to path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
+# Add parent directory to path to import our modules
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from zk_stego.chaos_embedding import ChaosEmbedding
-from zk_stego.hybrid_proof_artifact import HybridProofArtifact
+from src.zk_stego.chaos_embedding import ChaosEmbedding
+from src.zk_stego.metadata_message_generator import MetadataMessageGenerator
 
-class ZKStegoDemo:
+class ComprehensiveDemo:
+    """Comprehensive ZK-SNARK Steganography demonstration with detailed logging"""
+    
     def __init__(self):
-        self.demo_dir = Path(__file__).parent
-        self.doc_dir = self.demo_dir / "doc"
-        self.logs_dir = self.demo_dir / "logs"
-        self.output_dir = self.demo_dir / "output"
-        self.debug_dir = self.demo_dir / "debug"
+        self.demo_dir = os.path.dirname(os.path.abspath(__file__))
+        self.project_root = os.path.dirname(self.demo_dir)
+        self.test_images_dir = os.path.join(self.project_root, "examples", "testvectors")
+        self.output_dir = os.path.join(self.demo_dir, "output")
+        self.debug_dir = os.path.join(self.demo_dir, "debug")
+        self.doc_dir = os.path.join(self.demo_dir, "doc")
+        
+        # Create directories
+        for dir_path in [self.output_dir, self.debug_dir, self.doc_dir]:
+            os.makedirs(dir_path, exist_ok=True)
         
         # Setup logging
+        self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.log_file = os.path.join(self.debug_dir, f"comprehensive_demo_{self.timestamp}.log")
         self.setup_logging()
         
-        # Performance metrics
-        self.metrics = {
-            "start_time": time.time(),
-            "steps": {},
-            "memory_usage": [],
-            "file_sizes": {}
+        # Initialize components
+        self.msg_generator = MetadataMessageGenerator()
+        # Note: chaos_embedder will be initialized per image
+        
+        # Results storage
+        self.results = {
+            'timestamp': self.timestamp,
+            'tests': [],
+            'summary': {},
+            'errors': []
+        }
+    
+    def setup_logging(self):
+        """Setup detailed logging configuration"""
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(self.log_file),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        self.logger = logging.getLogger(__name__)
+    
+    def log_section(self, title: str, description: str = ""):
+        """Log section header"""
+        separator = "=" * 60
+        self.logger.info(separator)
+        self.logger.info(f"SECTION: {title}")
+        self.logger.info(separator)
+        if description:
+            self.logger.info(f"📝 {description}")
+    
+    def analyze_test_images(self) -> List[str]:
+        """Analyze available test images"""
+        self.log_section("TEST IMAGES ANALYSIS", "Scanning and analyzing available test images")
+        
+        if not os.path.exists(self.test_images_dir):
+            self.logger.error(f"Test images directory not found: {self.test_images_dir}")
+            return []
+        
+        # Find all image files
+        image_extensions = ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff')
+        images = []
+        
+        for file in os.listdir(self.test_images_dir):
+            if file.lower().endswith(image_extensions):
+                file_path = os.path.join(self.test_images_dir, file)
+                file_size = os.path.getsize(file_path)
+                
+                images.append(file)
+                self.logger.info(f"Found image: {file} ({file_size:,} bytes)")
+        
+        self.logger.info(f"Total images found: {len(images)}")
+        return images
+    
+    def generate_test_messages(self) -> List[Dict[str, Any]]:
+        """Generate various test messages"""
+        self.log_section("MESSAGE GENERATION", "Creating different types of metadata messages")
+        
+        messages = []
+        
+        # 1. Simple file properties
+        simple_msg = self.msg_generator.generate_file_properties_message(
+            os.path.join(self.test_images_dir, "Lenna_test_image.webp")
+        )
+        messages.append({
+            'type': 'File Properties',
+            'content': simple_msg,
+            'length': len(simple_msg),
+            'description': 'Basic file properties metadata'
+        })
+        
+        # 2. Processing history
+        extended_msg = self.msg_generator.generate_processing_history_message(
+            "Comprehensive demo steganography test with chaos embedding algorithm"
+        )
+        messages.append({
+            'type': 'Processing History',
+            'content': extended_msg,
+            'length': len(extended_msg),
+            'description': 'Detailed processing information'
+        })
+        
+        # 3. JSON structured data
+        json_data = {
+            "demo_info": {
+                "version": "1.0.0",
+                "timestamp": datetime.now().isoformat(),
+                "test_type": "comprehensive"
+            },
+            "parameters": {
+                "chaos_seed": 0.5,
+                "embedding_strength": 0.1,
+                "verification_enabled": True
+            },
+            "metadata": {
+                "author": "ZK-Stego Framework",
+                "purpose": "Comprehensive testing",
+                "expected_results": "Full verification"
+            }
+        }
+        json_msg = json.dumps(json_data, separators=(',', ':'))
+        messages.append({
+            'type': 'JSON Structured',
+            'content': json_msg,
+            'length': len(json_msg),
+            'description': 'Structured JSON data'
+        })
+        
+        # 4. Comprehensive metadata
+        long_msg = self.msg_generator.auto_generate_metadata_message(
+            os.path.join(self.test_images_dir, "Lenna_test_image.webp"),
+            message_type="comprehensive"
+        )
+        messages.append({
+            'type': 'Comprehensive Metadata',
+            'content': long_msg,
+            'length': len(long_msg),
+            'description': 'Comprehensive combined information'
+        })
+        
+        # Log message details
+        for msg in messages:
+            self.logger.info(f"Generated {msg['type']}: {msg['length']} chars - {msg['description']}")
+        
+        return messages
+    
+    def test_chaos_system(self) -> Dict[str, Any]:
+        """Test and analyze chaos system behavior"""
+        self.log_section("CHAOS SYSTEM ANALYSIS", "Testing chaos map behavior and properties")
+        
+        from src.zk_stego.chaos_embedding import ChaosGenerator
+        
+        test_results = {
+            'seeds_tested': [],
+            'statistics': {},
+            'position_tests': {}
         }
         
-        self.logger.info("=" * 80)
-        self.logger.info("ZK-SNARK STEGANOGRAPHY COMPREHENSIVE DEMO")
-        self.logger.info("=" * 80)
-        self.logger.info(f"Demo started at: {datetime.now()}")
+        # Test with different image dimensions
+        test_dimensions = [(256, 256), (512, 512), (1024, 1024)]
+        test_keys = [12345, 54321, 98765]
         
-    def setup_logging(self):
-        """Setup comprehensive logging system"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_file = self.logs_dir / f"demo_log_{timestamp}.log"
+        for width, height in test_dimensions:
+            self.logger.info(f"Testing chaos system with dimensions: {width}x{height}")
+            chaos_gen = ChaosGenerator(width, height)
+            
+            for chaos_key in test_keys:
+                # Test position generation
+                positions = chaos_gen.generate_positions(width//2, height//2, chaos_key, 100)
+                
+                # Calculate position statistics
+                x_coords = [p[0] for p in positions]
+                y_coords = [p[1] for p in positions]
+                
+                stats = {
+                    'dimensions': f"{width}x{height}",
+                    'chaos_key': chaos_key,
+                    'positions_generated': len(positions),
+                    'x_range': [min(x_coords), max(x_coords)],
+                    'y_range': [min(y_coords), max(y_coords)],
+                    'unique_positions': len(set(positions))
+                }
+                
+                test_results['seeds_tested'].append(stats)
+                self.logger.info(f"  Key {chaos_key}: Generated {len(positions)} unique positions")
+                
+        # Test logistic map directly
+        chaos_gen = ChaosGenerator(512, 512)
+        logistic_seq = chaos_gen.logistic_map(0.5, 3.9, 1000)
         
-        # Create formatter
-        formatter = logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
-        )
+        test_results['statistics'] = {
+            'logistic_min': min(logistic_seq),
+            'logistic_max': max(logistic_seq),
+            'logistic_mean': sum(logistic_seq) / len(logistic_seq),
+            'chaos_quality': 'Good' if max(logistic_seq) > 0.8 and min(logistic_seq) < 0.2 else 'Needs improvement'
+        }
         
-        # Setup file handler
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setFormatter(formatter)
-        file_handler.setLevel(logging.DEBUG)
+        self.logger.info(f"Logistic Map - Range: [{test_results['statistics']['logistic_min']:.4f}, {test_results['statistics']['logistic_max']:.4f}]")
+        self.logger.info(f"Chaos system quality: {test_results['statistics']['chaos_quality']}")
         
-        # Setup console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        console_handler.setLevel(logging.INFO)
+        return test_results
+    
+    def perform_embedding_tests(self, images: List[str], messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Perform comprehensive embedding tests"""
+        self.log_section("EMBEDDING TESTS", "Testing steganography with different image-message combinations")
         
-        # Setup logger
-        self.logger = logging.getLogger('ZKStegoDemo')
-        self.logger.setLevel(logging.DEBUG)
-        self.logger.addHandler(file_handler)
-        self.logger.addHandler(console_handler)
+        test_results = []
+        test_count = 0
+        total_tests = len(images) * len(messages)
         
-        self.logger.info(f"Logging initialized. Log file: {log_file}")
-        
-    def step_timer(self, step_name):
-        """Decorator for timing steps"""
-        def decorator(func):
-            def wrapper(*args, **kwargs):
-                self.logger.info(f"\n{'='*20} STEP: {step_name} {'='*20}")
-                start_time = time.time()
+        for image_filename in images:
+            for message_info in messages:
+                test_count += 1
+                self.logger.info(f"[{test_count}/{total_tests}] Testing {image_filename} with {message_info['type']}")
+                
+                # Setup paths
+                input_path = os.path.join(self.test_images_dir, image_filename)
+                output_filename = f"stego_{message_info['type'].lower().replace(' ', '_')}_{image_filename}"
+                output_path = os.path.join(self.output_dir, output_filename)
+                
+                test_result = {
+                    'test_id': test_count,
+                    'image': image_filename,
+                    'message_type': message_info['type'],
+                    'message_length': message_info['length'],
+                    'input_path': input_path,
+                    'output_path': output_path,
+                    'timestamp': datetime.now().isoformat()
+                }
                 
                 try:
-                    result = func(*args, **kwargs)
-                    end_time = time.time()
-                    duration = end_time - start_time
+                    from PIL import Image
+                    import numpy as np
+                    from src.zk_stego.chaos_embedding import ChaosEmbedding
                     
-                    self.metrics["steps"][step_name] = {
-                        "duration": duration,
-                        "status": "success",
-                        "timestamp": datetime.now().isoformat()
-                    }
+                    # Get original file info
+                    original_size = os.path.getsize(input_path)
+                    test_result['original_size'] = original_size
                     
-                    self.logger.info(f"✅ {step_name} completed in {duration:.4f} seconds")
-                    return result
+                    # Perform embedding
+                    self.logger.info(f"  Embedding message ({message_info['length']} chars)...")
+                    start_time = time.time()
                     
+                    # Load and prepare image
+                    image = Image.open(input_path)
+                    if image.mode != 'RGB':
+                        image = image.convert('RGB')
+                    image_array = np.array(image)
+                    
+                    # Initialize chaos embedder for this specific image
+                    chaos_embedder = ChaosEmbedding(image_array)
+                    
+                    # Perform embedding
+                    stego_image = chaos_embedder.embed_message(message_info['content'], "test_secret_key")
+                    
+                    # Save stego image
+                    stego_image.save(output_path)
+                    
+                    embedding_time = time.time() - start_time
+                    test_result['embedding_time'] = embedding_time
+                    test_result['embedding_success'] = True
+                    
+                    if os.path.exists(output_path):
+                        # Analyze stego image
+                        stego_size = os.path.getsize(output_path)
+                        size_overhead = ((stego_size - original_size) / original_size) * 100
+                        
+                        test_result['stego_size'] = stego_size
+                        test_result['size_overhead'] = size_overhead
+                        
+                        self.logger.info(f"  ✅ Embedding successful: {embedding_time:.4f}s, overhead: {size_overhead:.2f}%")
+                        
+                        # Test extraction
+                        self.logger.info(f"  Testing message extraction...")
+                        extract_start = time.time()
+                        
+                        # Load stego image for extraction
+                        stego_loaded = Image.open(output_path)
+                        if stego_loaded.mode != 'RGB':
+                            stego_loaded = stego_loaded.convert('RGB')
+                        stego_array = np.array(stego_loaded)
+                        
+                        # Initialize extractor
+                        chaos_extractor = ChaosEmbedding(stego_array)
+                        
+                        # Extract message
+                        extracted_message = chaos_extractor.extract_message(
+                            message_info['length'],
+                            "test_secret_key"
+                        )
+                        
+                        extraction_time = time.time() - extract_start
+                        test_result['extraction_time'] = extraction_time
+                        
+                        if extracted_message:
+                            # Verify message integrity
+                            integrity_check = extracted_message == message_info['content']
+                            test_result['extraction_success'] = True
+                            test_result['message_integrity'] = integrity_check
+                            
+                            if integrity_check:
+                                self.logger.info(f"  ✅ Extraction successful: {extraction_time:.4f}s, integrity: VERIFIED")
+                            else:
+                                if len(extracted_message) == len(message_info['content']):
+                                    differences = sum(1 for a, b in zip(message_info['content'], extracted_message) if a != b)
+                                    test_result['message_differences'] = differences
+                                    self.logger.warning(f"  ⚠️ Message integrity failed: {differences} differences")
+                                else:
+                                    test_result['message_differences'] = abs(len(extracted_message) - len(message_info['content']))
+                                    self.logger.warning(f"  ⚠️ Length mismatch: expected {len(message_info['content'])}, got {len(extracted_message)}")
+                        else:
+                            test_result['extraction_success'] = False
+                            test_result['message_integrity'] = False
+                            self.logger.error(f"  ❌ Message extraction failed")
+                    else:
+                        test_result['embedding_success'] = False
+                        self.logger.error(f"  ❌ Stego image not created")
+                
                 except Exception as e:
-                    end_time = time.time()
-                    duration = end_time - start_time
-                    
-                    self.metrics["steps"][step_name] = {
-                        "duration": duration,
-                        "status": "failed",
-                        "error": str(e),
-                        "timestamp": datetime.now().isoformat()
-                    }
-                    
-                    self.logger.error(f"❌ {step_name} failed after {duration:.4f} seconds: {e}")
-                    raise
-                    
-            return wrapper
-        return decorator
-    
-    def setup_environment(self):
-        """Setup and verify environment"""
-        self.logger.info("Checking environment setup...")
-        
-        # Check required directories
-        required_dirs = [
-            "../examples/testvectors",
-            "../circuits/compiled",
-            "../artifacts/keys"
-        ]
-        
-        for dir_path in required_dirs:
-            full_path = self.demo_dir / dir_path
-            if full_path.exists():
-                self.logger.debug(f"✅ Directory exists: {full_path}")
-            else:
-                self.logger.error(f"❌ Missing directory: {full_path}")
+                    test_result['error'] = str(e)
+                    self.logger.error(f"  ❌ Test failed with error: {str(e)}")
+                    self.results['errors'].append({
+                        'test_id': test_count,
+                        'error': str(e),
+                        'timestamp': datetime.now().isoformat()
+                    })
                 
-        # Check for test images
-        test_images_dir = self.demo_dir.parent / "examples" / "testvectors"
-        images = list(test_images_dir.glob("*.png")) + list(test_images_dir.glob("*.webp"))
+                test_results.append(test_result)
         
-        self.logger.info(f"Found {len(images)} test images:")
-        for img in images:
-            size = img.stat().st_size
-            self.logger.info(f"  - {img.name}: {size} bytes")
-            self.metrics["file_sizes"][img.name] = size
-            
-        return images
-        """Setup and verify environment"""
-        self.logger.info("Checking environment setup...")
-        
-        # Check required directories
-        required_dirs = [
-            "../examples/testvectors",
-            "../circuits/compiled",
-            "../artifacts/keys"
-        ]
-        
-        for dir_path in required_dirs:
-            full_path = self.demo_dir / dir_path
-            if full_path.exists():
-                self.logger.debug(f"✅ Directory exists: {full_path}")
-            else:
-                self.logger.error(f"❌ Missing directory: {full_path}")
-                
-        # Check for test images
-        test_images_dir = self.demo_dir.parent / "examples" / "testvectors"
-        images = list(test_images_dir.glob("*.png")) + list(test_images_dir.glob("*.webp"))
-        
-        self.logger.info(f"Found {len(images)} test images:")
-        for img in images:
-            size = img.stat().st_size
-            self.logger.info(f"  - {img.name}: {size} bytes")
-            self.metrics["file_sizes"][img.name] = size
-            
-        return images
+        return test_results
     
-    def initialize_chaos_embedding(self, image_path):
-        """Initialize chaos embedding system"""
-        self.logger.info(f"Initializing chaos embedding for: {image_path}")
+    def generate_comprehensive_report(self, test_results: List[Dict[str, Any]], chaos_results: Dict[str, Any]):
+        """Generate comprehensive analysis report"""
+        self.log_section("REPORT GENERATION", "Creating detailed analysis report")
         
-        # Debug: Print image details
-        self.logger.debug(f"Image path: {image_path}")
-        self.logger.debug(f"Image exists: {image_path.exists()}")
-        self.logger.debug(f"Image size: {image_path.stat().st_size} bytes")
+        # Calculate summary statistics
+        successful_tests = [t for t in test_results if t.get('embedding_success', False) and t.get('extraction_success', False)]
+        failed_tests = [t for t in test_results if not (t.get('embedding_success', False) and t.get('extraction_success', False))]
         
-        # Load image as numpy array
-        from PIL import Image
-        import numpy as np
-        
-        pil_image = Image.open(image_path)
-        image_array = np.array(pil_image)
-        
-        # Initialize chaos embedding
-        chaos_embedding = ChaosEmbedding(image_array)
-        
-        # Debug: Print chaos parameters
-        self.logger.debug("Chaos parameters:")
-        self.logger.debug(f"  - Image dimensions: {chaos_embedding.width}x{chaos_embedding.height}")
-        
-        # Save debug info
-        debug_info = {
-            "image_path": str(image_path),
-            "image_size_bytes": image_path.stat().st_size,
-            "initialization_time": datetime.now().isoformat()
+        summary = {
+            'total_tests': len(test_results),
+            'successful_tests': len(successful_tests),
+            'failed_tests': len(failed_tests),
+            'success_rate': len(successful_tests) / len(test_results) * 100 if test_results else 0
         }
         
-        debug_file = self.debug_dir / f"chaos_init_{image_path.stem}.json"
-        with open(debug_file, 'w') as f:
-            json.dump(debug_info, f, indent=2)
+        if successful_tests:
+            embedding_times = [t['embedding_time'] for t in successful_tests if 'embedding_time' in t]
+            extraction_times = [t['extraction_time'] for t in successful_tests if 'extraction_time' in t]
+            size_overheads = [t['size_overhead'] for t in successful_tests if 'size_overhead' in t]
             
-        self.logger.info(f"Debug info saved to: {debug_file}")
-        return chaos_embedding
-    
-    def generate_secret_message(self):
-        """Generate a secret message for embedding"""
-        step_name = "Generate Secret Message"
-        self.logger.info(f"\n{'='*20} STEP: {step_name} {'='*20}")
-        start_time = time.time()
+            summary.update({
+                'avg_embedding_time': sum(embedding_times) / len(embedding_times) if embedding_times else 0,
+                'avg_extraction_time': sum(extraction_times) / len(extraction_times) if extraction_times else 0,
+                'avg_size_overhead': sum(size_overheads) / len(size_overheads) if size_overheads else 0,
+                'min_embedding_time': min(embedding_times) if embedding_times else 0,
+                'max_embedding_time': max(embedding_times) if embedding_times else 0
+            })
         
-        try:
-            messages = [
-                "Hello ZK-SNARK World!",
-                "This is a secret message hidden using zero-knowledge proofs",
-                "Chaos theory meets cryptography",
-                "Privacy-preserving steganography demo"
-            ]
-            
-            message = messages[0]  # Use first message for demo
-            self.logger.info(f"Generated secret message: '{message}'")
-            self.logger.debug(f"Message length: {len(message)} characters")
-            self.logger.debug(f"Message bytes: {message.encode('utf-8')}")
-            
-            end_time = time.time()
-            duration = end_time - start_time
-            self.metrics["steps"][step_name] = {
-                "duration": duration,
-                "status": "success",
-                "timestamp": datetime.now().isoformat()
-            }
-            self.logger.info(f"✅ {step_name} completed in {duration:.4f} seconds")
-            
-            return message
-            
-        except Exception as e:
-            end_time = time.time()
-            duration = end_time - start_time
-            self.metrics["steps"][step_name] = {
-                "duration": duration,
-                "status": "failed",
-                "error": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
-            self.logger.error(f"❌ {step_name} failed after {duration:.4f} seconds: {e}")
-            raise
-    
-    @step_timer("Embed Message")
-    def embed_message(self, chaos_embedding, message):
-        """Embed message using chaos-based steganography"""
-        self.logger.info("Starting message embedding process...")
-        
-        # Convert message to binary
-        binary_message = ''.join(format(ord(char), '08b') for char in message)
-        self.logger.debug(f"Binary message: {binary_message}")
-        self.logger.debug(f"Binary length: {len(binary_message)} bits")
-        
-        # Perform embedding
-        stego_image = chaos_embedding.embed_message(message)
-        
-        # Save stego image
-        output_file = self.output_dir / f"stego_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        stego_image.save(output_file)
-        
-        self.logger.info(f"Stego image saved to: {output_file}")
-        self.metrics["file_sizes"][output_file.name] = output_file.stat().st_size
-        
-        # Debug: Compare original vs stego
-        original_size = chaos_embedding.image_path
-        stego_size = output_file.stat().st_size
-        
-        self.logger.debug(f"Size comparison:")
-        self.logger.debug(f"  - Stego image size: {stego_size} bytes")
-        self.logger.debug(f"  - Size difference: {stego_size - self.metrics['file_sizes'].get('original', 0)} bytes")
-        
-        return stego_image, output_file
-    
-    @step_timer("Initialize ZK Proof System")
-    def initialize_zk_proof(self):
-        """Initialize ZK proof artifact system"""
-        self.logger.info("Initializing ZK proof system...")
-        
-        # Check for required circuit files
-        circuit_dir = self.demo_dir.parent / "circuits" / "compiled"
-        required_files = ["stego_check_v2.r1cs", "stego_check_v2.wasm"]
-        
-        for file_name in required_files:
-            file_path = circuit_dir / "build" / "stego_check_v2_js" / file_name
-            if not file_path.exists():
-                file_path = circuit_dir / "build" / file_name
-                
-            if file_path.exists():
-                self.logger.debug(f"✅ Found circuit file: {file_path}")
-                self.metrics["file_sizes"][file_name] = file_path.stat().st_size
-            else:
-                self.logger.warning(f"⚠️  Circuit file not found: {file_name}")
-        
-        # Initialize hybrid proof artifact
-        try:
-            hybrid_proof = HybridProofArtifact()
-            self.logger.info("✅ ZK proof system initialized successfully")
-            return hybrid_proof
-        except Exception as e:
-            self.logger.error(f"❌ Failed to initialize ZK proof system: {e}")
-            raise
-    
-    @step_timer("Generate ZK Proof")
-    def generate_zk_proof(self, hybrid_proof, stego_image_path, message):
-        """Generate zero-knowledge proof"""
-        self.logger.info("Generating zero-knowledge proof...")
-        
-        try:
-            # Generate proof
-            proof_data = hybrid_proof.generate_proof(str(stego_image_path), message)
-            
-            # Save proof
-            proof_file = self.output_dir / f"proof_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            with open(proof_file, 'w') as f:
-                json.dump(proof_data, f, indent=2)
-                
-            self.logger.info(f"✅ ZK proof generated and saved to: {proof_file}")
-            self.metrics["file_sizes"][proof_file.name] = proof_file.stat().st_size
-            
-            # Debug: Proof details
-            self.logger.debug(f"Proof data keys: {list(proof_data.keys())}")
-            
-            return proof_data, proof_file
-            
-        except Exception as e:
-            self.logger.error(f"❌ Failed to generate ZK proof: {e}")
-            # Continue demo even if proof generation fails
-            return None, None
-    
-    @step_timer("Verify ZK Proof")
-    def verify_zk_proof(self, hybrid_proof, proof_data):
-        """Verify the generated zero-knowledge proof"""
-        if proof_data is None:
-            self.logger.warning("⚠️  Skipping proof verification (no proof data)")
-            return False
-            
-        self.logger.info("Verifying zero-knowledge proof...")
-        
-        try:
-            verification_result = hybrid_proof.verify_proof(proof_data)
-            
-            if verification_result:
-                self.logger.info("✅ ZK proof verification successful!")
-            else:
-                self.logger.error("❌ ZK proof verification failed!")
-                
-            return verification_result
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error during proof verification: {e}")
-            return False
-    
-    @step_timer("Generate Performance Report")
-    def generate_performance_report(self):
-        """Generate comprehensive performance report"""
-        self.logger.info("Generating performance report...")
-        
-        # Calculate total runtime
-        total_runtime = time.time() - self.metrics["start_time"]
-        self.metrics["total_runtime"] = total_runtime
-        
-        # Create performance report
+        # Create comprehensive report
         report = {
-            "demo_metadata": {
-                "timestamp": datetime.now().isoformat(),
-                "total_runtime_seconds": total_runtime,
-                "python_version": sys.version,
-                "platform": sys.platform
-            },
-            "step_performance": self.metrics["steps"],
-            "file_sizes": self.metrics["file_sizes"],
-            "summary": {
-                "total_steps": len(self.metrics["steps"]),
-                "successful_steps": len([s for s in self.metrics["steps"].values() if s["status"] == "success"]),
-                "failed_steps": len([s for s in self.metrics["steps"].values() if s["status"] == "failed"]),
-                "avg_step_duration": sum(s["duration"] for s in self.metrics["steps"].values()) / len(self.metrics["steps"]) if self.metrics["steps"] else 0
+            'comprehensive_demo_report': {
+                'metadata': {
+                    'timestamp': self.timestamp,
+                    'demo_version': '1.0.0',
+                    'framework': 'ZK-SNARK Steganography',
+                    'log_file': os.path.basename(self.log_file)
+                },
+                'summary': summary,
+                'chaos_analysis': chaos_results,
+                'detailed_results': test_results,
+                'performance_metrics': {
+                    'throughput_bytes_per_second': self.calculate_throughput(successful_tests),
+                    'reliability_score': len(successful_tests) / len(test_results) if test_results else 0,
+                    'efficiency_score': self.calculate_efficiency_score(successful_tests)
+                }
             }
         }
         
-        # Save performance report
-        report_file = self.doc_dir / f"performance_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        # Save JSON report
+        report_file = os.path.join(self.doc_dir, f"comprehensive_report_{self.timestamp}.json")
         with open(report_file, 'w') as f:
             json.dump(report, f, indent=2)
-            
-        self.logger.info(f"📊 Performance report saved to: {report_file}")
         
-        # Generate summary
-        self.logger.info("\n" + "="*60)
-        self.logger.info("DEMO PERFORMANCE SUMMARY")
-        self.logger.info("="*60)
-        self.logger.info(f"Total Runtime: {total_runtime:.4f} seconds")
-        self.logger.info(f"Steps Completed: {report['summary']['successful_steps']}/{report['summary']['total_steps']}")
-        self.logger.info(f"Average Step Duration: {report['summary']['avg_step_duration']:.4f} seconds")
+        self.logger.info(f"📄 Comprehensive report saved: {os.path.basename(report_file)}")
         
-        return report_file
+        # Save CSV summary
+        csv_file = os.path.join(self.doc_dir, f"comprehensive_summary_{self.timestamp}.csv")
+        self.save_csv_summary(test_results, csv_file)
+        
+        return report
     
-    def run_demo(self):
-        """Run the complete demo"""
+    def calculate_throughput(self, successful_tests: List[Dict[str, Any]]) -> float:
+        """Calculate average throughput in bytes per second"""
+        if not successful_tests:
+            return 0.0
+        
+        total_bytes = sum(t.get('original_size', 0) for t in successful_tests)
+        total_time = sum(t.get('embedding_time', 0) for t in successful_tests)
+        
+        return total_bytes / total_time if total_time > 0 else 0.0
+    
+    def calculate_efficiency_score(self, successful_tests: List[Dict[str, Any]]) -> float:
+        """Calculate efficiency score based on time and size overhead"""
+        if not successful_tests:
+            return 0.0
+        
+        # Normalize factors (lower is better)
+        avg_time = sum(t.get('embedding_time', 0) for t in successful_tests) / len(successful_tests)
+        avg_overhead = sum(t.get('size_overhead', 0) for t in successful_tests) / len(successful_tests)
+        
+        # Simple efficiency score (0-1, higher is better)
+        time_score = max(0, 1 - (avg_time / 1.0))  # Assume 1 second is maximum acceptable
+        overhead_score = max(0, 1 - (avg_overhead / 20.0))  # Assume 20% is maximum acceptable
+        
+        return (time_score + overhead_score) / 2
+    
+    def save_csv_summary(self, test_results: List[Dict[str, Any]], csv_file: str):
+        """Save test results summary as CSV"""
+        import csv
+        
+        fieldnames = [
+            'test_id', 'image', 'message_type', 'message_length',
+            'embedding_time', 'extraction_time', 'size_overhead',
+            'embedding_success', 'extraction_success', 'message_integrity'
+        ]
+        
+        with open(csv_file, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            for result in test_results:
+                row = {field: result.get(field, '') for field in fieldnames}
+                writer.writerow(row)
+        
+        self.logger.info(f"📊 CSV summary saved: {os.path.basename(csv_file)}")
+    
+    def run_comprehensive_demo(self):
+        """Run the complete comprehensive demo"""
+        self.logger.info("🚀 STARTING COMPREHENSIVE ZK-SNARK STEGANOGRAPHY DEMO")
+        self.logger.info(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
         try:
-            # Setup environment
-            images = self.setup_environment()
-            
+            # 1. Analyze test images
+            images = self.analyze_test_images()
             if not images:
-                self.logger.error("No test images found. Demo cannot continue.")
-                return
-                
-            # Use first available image
-            test_image = images[0]
-            self.logger.info(f"Using test image: {test_image}")
+                self.logger.error("No test images found. Cannot proceed.")
+                return False
             
-            # Initialize chaos embedding
-            chaos_embedding = self.initialize_chaos_embedding(test_image)
+            # 2. Generate test messages
+            messages = self.generate_test_messages()
             
-            # Generate secret message
-            message = self.generate_secret_message()
+            # 3. Test chaos system
+            chaos_results = self.test_chaos_system()
             
-            # Embed message
-            stego_image, stego_file = self.embed_message(chaos_embedding, message)
+            # 4. Perform embedding tests
+            test_results = self.perform_embedding_tests(images, messages)
             
-            # Initialize ZK proof system
-            hybrid_proof = self.initialize_zk_proof()
+            # 5. Generate comprehensive report
+            report = self.generate_comprehensive_report(test_results, chaos_results)
             
-            # Generate ZK proof
-            proof_data, proof_file = self.generate_zk_proof(hybrid_proof, stego_file, message)
+            # 6. Final summary
+            self.log_section("DEMO COMPLETED", "Comprehensive demo finished successfully")
             
-            # Verify ZK proof
-            verification_result = self.verify_zk_proof(hybrid_proof, proof_data)
+            summary = report['comprehensive_demo_report']['summary']
+            self.logger.info("📊 FINAL SUMMARY:")
+            self.logger.info(f"  Total tests: {summary['total_tests']}")
+            self.logger.info(f"  Successful tests: {summary['successful_tests']}")
+            self.logger.info(f"  Success rate: {summary['success_rate']:.1f}%")
             
-            # Generate performance report
-            report_file = self.generate_performance_report()
+            if 'avg_embedding_time' in summary:
+                self.logger.info(f"  Average embedding time: {summary['avg_embedding_time']:.4f}s")
+                self.logger.info(f"  Average size overhead: {summary['avg_size_overhead']:.2f}%")
             
-            # Final summary
-            self.logger.info("\n" + "="*80)
-            self.logger.info("DEMO COMPLETED SUCCESSFULLY!")
-            self.logger.info("="*80)
-            self.logger.info("Generated files:")
-            self.logger.info(f"  - Stego image: {stego_file if stego_file else 'N/A'}")
-            self.logger.info(f"  - ZK proof: {proof_file if proof_file else 'N/A'}")
-            self.logger.info(f"  - Performance report: {report_file}")
-            self.logger.info(f"  - Debug logs: {self.logs_dir}")
+            self.logger.info("📁 Generated files:")
+            for file in os.listdir(self.doc_dir):
+                if file.startswith(f"comprehensive"):
+                    self.logger.info(f"  - doc/{file}")
+            
+            for file in os.listdir(self.output_dir):
+                if file.startswith("stego_"):
+                    self.logger.info(f"  - output/{file}")
+            
+            return True
             
         except Exception as e:
-            self.logger.error(f"Demo failed with error: {e}")
+            self.logger.error(f"❌ Comprehensive demo failed: {str(e)}")
             import traceback
-            self.logger.error(f"Traceback: {traceback.format_exc()}")
-            raise
+            traceback.print_exc()
+            return False
+
+def main():
+    """Main function"""
+    demo = ComprehensiveDemo()
+    success = demo.run_comprehensive_demo()
+    return success
 
 if __name__ == "__main__":
-    demo = ZKStegoDemo()
-    demo.run_demo()
+    try:
+        success = main()
+        sys.exit(0 if success else 1)
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Demo interrupted by user")
+        sys.exit(130)
+    except Exception as e:
+        print(f"\n\n❌ FATAL ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

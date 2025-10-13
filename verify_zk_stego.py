@@ -29,9 +29,8 @@ def verify_zk_stego(stego_image_path: str, secret_key: str = None, verbose: bool
     """
     try:
         if verbose:
-            print(f"🔍 Analyzing steganographic image: {stego_image_path}")
+            print(f"Analyzing steganographic image: {stego_image_path}")
         
-        # Extract hidden ZK proof artifact
         artifact = extract_chaos_proof(stego_image_path)
         
         if not artifact:
@@ -63,7 +62,7 @@ def verify_zk_stego(stego_image_path: str, secret_key: str = None, verbose: bool
         }
         
         if verbose:
-            print("✅ ZK-SNARK Proof Successfully Extracted!")
+            print("ZK-SNARK Proof Successfully Extracted!")
             print(f"   Algorithm: {result['chaos_algorithm']}")
             print(f"   Proof elements: {', '.join(result['proof_elements'])}")
             print(f"   Data size: {result['proof_size_bits']} bits")
@@ -78,7 +77,7 @@ def verify_zk_stego(stego_image_path: str, secret_key: str = None, verbose: bool
         if missing_elements:
             result['warning'] = f"Missing proof elements: {missing_elements}"
             if verbose:
-                print(f"⚠️  Warning: {result['warning']}")
+                print(f"WARNING  Warning: {result['warning']}")
         
         # Add raw proof data if requested
         result['raw_proof'] = proof
@@ -120,11 +119,10 @@ Examples:
     args = parser.parse_args()
     
     # Check if image exists
-    if not os.path.exists(args.image):
-        print(f"❌ Error: Image file not found: {args.image}")
-        sys.exit(1)
     
-    # Perform verification
+    if not os.path.exists(args.image):
+        print(f"ERROR: Image file not found: {args.image}")
+        sys.exit(1)    # Perform verification
     result = verify_zk_stego(args.image, args.key, args.verbose and not args.json)
     
     if args.json:
@@ -133,14 +131,14 @@ Examples:
     else:
         # Human-readable output
         if result['success']:
-            print(f"✅ ZK-SNARK Proof Verified in {args.image}")
+            print(f"ZK-SNARK Proof Verified in {args.image}")
             print(f"   Type: {result['proof_type']}")
             print(f"   Algorithm: {result['chaos_algorithm']}")
             print(f"   Size: {result['proof_size_bits']} bits")
             if result.get('warning'):
-                print(f"   ⚠️  {result['warning']}")
+                print(f"   WARNING: {result['warning']}")
         else:
-            print(f"❌ Verification Failed: {result['error']}")
+            print(f"ERROR: Verification Failed: {result['error']}")
             if result.get('details'):
                 print(f"   Details: {result['details']}")
             sys.exit(1)

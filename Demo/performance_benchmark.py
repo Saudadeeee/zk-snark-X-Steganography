@@ -35,7 +35,7 @@ class PerformanceBenchmark:
         
     def benchmark_embedding(self, image_path, message):
         """Benchmark message embedding process"""
-        print(f"\n🔬 Benchmarking: {image_path.name} with message length {len(message)}")
+        print(f"\nTESTING Benchmarking: {image_path.name} with message length {len(message)}")
         
         try:
             from zk_stego.chaos_embedding import ChaosEmbedding
@@ -53,13 +53,14 @@ class PerformanceBenchmark:
             
             # Embed message
             embed_start = time.time()
-            stego_image = chaos_embedding.embed_message(message)
+            # Use metadata-specific secret key for consistency
+            stego_image = chaos_embedding.embed_message(message, secret_key="benchmark_metadata_key")
             embed_time = time.time() - embed_start
             
             # Save stego image
             save_start = time.time()
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            stego_file = self.output_dir / f"benchmark_stego_{image_path.stem}_{len(message)}_{timestamp}.png"
+            stego_file = self.output_dir / f"metadata_benchmark_{image_path.stem}_{len(message)}_{timestamp}.png"
             stego_image.save(stego_file)
             save_time = time.time() - save_start
             
@@ -94,13 +95,13 @@ class PerformanceBenchmark:
                 "timestamp": datetime.now().isoformat()
             }
             
-            print(f"  ✅ Success - Total time: {result['times']['total']:.4f}s")
+            print(f"  SUCCESS - Total time: {result['times']['total']:.4f}s")
             print(f"     Embedding: {embed_time:.4f}s, Size overhead: {size_overhead_percent:.2f}%")
             
             return result
             
         except Exception as e:
-            print(f"  ❌ Failed: {e}")
+            print(f"  FAILED: {e}")
             
             result = {
                 "image_name": image_path.name,
@@ -115,29 +116,73 @@ class PerformanceBenchmark:
     
     def run_benchmark_suite(self):
         """Run comprehensive benchmark suite"""
-        print("🚀 STARTING PERFORMANCE BENCHMARK SUITE")
+        print("STARTING PERFORMANCE BENCHMARK SUITE")
         print(f"Timestamp: {datetime.now()}")
         
-        # Find test images
         test_images_dir = self.demo_dir.parent / "examples" / "testvectors"
         images = list(test_images_dir.glob("*.png")) + list(test_images_dir.glob("*.webp"))
         
         if not images:
-            print("❌ No test images found!")
+            print("ERROR: No test images found!")
             return
         
         print(f"Found {len(images)} test images: {[img.name for img in images]}")
         
-        # Test messages of different lengths
-        test_messages = [
-            "Hi",  # 2 chars
-            "Hello World!",  # 12 chars
-            "This is a secret message for ZK steganography testing.",  # 56 chars
-            "Lorem ipsum dolor sit amet, consectetur adipiscing elit. " * 2,  # ~114 chars
-            "A" * 200,  # 200 chars
-        ]
+        # Import metadata generator
+        try:
+            from zk_stego.metadata_message_generator import MetadataMessageGenerator
+            metadata_gen = MetadataMessageGenerator()
+            use_metadata = True
+        except ImportError:
+            print("WARNING: MetadataMessageGenerator not available, using fallback messages")
+            use_metadata = False
         
-        print(f"Testing {len(test_messages)} different message lengths")
+        # Test messages of different lengths - now using metadata
+        if use_metadata:
+            test_messages = []
+            # Generate different types of metadata messages
+            for image in images[:1]:  # Use first image for metadata generation
+                try:
+                    # Short metadata message
+                    msg1 = metadata_gen.generate_authenticity_hash_message(str(image))[:50]  # Truncated
+                    test_messages.append(msg1)
+                    
+                    # Medium metadata message  
+                    msg2 = metadata_gen.generate_file_properties_message(str(image))
+                    test_messages.append(msg2)
+                    
+                    # Long metadata message
+                    msg3 = metadata_gen.generate_processing_history_message("Comprehensive image processing with multiple tools")
+                    test_messages.append(msg3)
+                    
+                    # Very long metadata message
+                    copyright_msg = metadata_gen.generate_copyright_message("Professional Photographer Studio", "Commercial License")
+                    combined_msg = f"{msg2} | {msg3} | {copyright_msg}"
+                    test_messages.append(combined_msg)
+                    
+                    break
+                except Exception as e:
+                    print(f"Failed to generate metadata for {image.name}: {e}")
+                    
+            # Fallback if metadata generation failed
+            if not test_messages:
+                test_messages = [
+                    "File integrity verification",  # Short
+                    "Authenticity Hash - SHA256: abcd1234..., Verified: 2025-10-13",  # Medium
+                    "Processing History - Image processed with ZK-Steganography tools",  # Long
+                    "Copyright (c) 2025 Owner. Protected with ZK-SNARK verification."  # Very long
+                ]
+        else:
+            # Fallback messages if metadata generator not available
+            test_messages = [
+                "Hi",  # 2 chars
+                "Hello World!",  # 12 chars
+                "This is a test message for steganography.",  # 42 chars
+                "Lorem ipsum dolor sit amet, consectetur adipiscing elit. " * 2,  # ~114 chars
+            ]
+        
+        print(f"Testing {len(test_messages)} different message types/lengths")
+        print("Message types:", ["Short metadata", "File properties", "Processing history", "Combined metadata"] if use_metadata else ["Short", "Medium", "Long", "Very long"])
         
         # Run benchmarks
         total_tests = len(images) * len(test_messages)
@@ -146,7 +191,8 @@ class PerformanceBenchmark:
         for image in images:
             for i, message in enumerate(test_messages):
                 current_test += 1
-                print(f"\n[{current_test}/{total_tests}] Testing {image.name} with message #{i+1} ({len(message)} chars)")
+                msg_type = ["Short metadata", "File properties", "Processing history", "Combined metadata"][i] if use_metadata else f"Message #{i+1}"
+                print(f"\n[{current_test}/{total_tests}] Testing {image.name} with {msg_type} ({len(message)} chars)")
                 
                 result = self.benchmark_embedding(image, message)
                 self.results["test_cases"].append(result)
@@ -163,7 +209,7 @@ class PerformanceBenchmark:
         # Generate visualizations
         self.generate_visualizations()
         
-        print(f"\n🎉 BENCHMARK COMPLETED!")
+        print(f"\nCOMPLETED BENCHMARK COMPLETED!")
         print(f"Total tests: {total_tests}")
         print(f"Successful: {len([r for r in self.results['test_cases'] if r['status'] == 'success'])}")
         print(f"Failed: {len([r for r in self.results['test_cases'] if r['status'] == 'failed'])}")
@@ -210,7 +256,7 @@ class PerformanceBenchmark:
             }
         }
         
-        print(f"\n📊 BENCHMARK SUMMARY:")
+        print(f"\nDATA BENCHMARK SUMMARY:")
         print(f"  Average embedding time: {avg_embed_time:.4f}s")
         print(f"  Average size overhead: {avg_overhead_percent:.2f}%")
         print(f"  Average throughput: {avg_throughput_bps:.0f} bytes/s")
@@ -223,7 +269,7 @@ class PerformanceBenchmark:
         with open(results_file, 'w') as f:
             json.dump(self.results, f, indent=2)
         
-        print(f"📁 Results saved to: {results_file}")
+        print(f"FOLDER Results saved to: {results_file}")
         
         # Also save a CSV summary for easy analysis
         csv_file = self.doc_dir / f"performance_summary_{timestamp}.csv"
@@ -243,14 +289,14 @@ class PerformanceBenchmark:
                     f.write(f"{result['image_name']},{result['message_length']},"
                            f",,,,{result['status']}\n")
         
-        print(f"📊 CSV summary saved to: {csv_file}")
+        print(f"DATA CSV summary saved to: {csv_file}")
     
     def generate_visualizations(self):
         """Generate performance visualization charts"""
         successful_tests = [r for r in self.results["test_cases"] if r["status"] == "success"]
         
         if not successful_tests:
-            print("⚠️  No successful tests for visualization")
+            print("WARNING  No successful tests for visualization")
             return
         
         try:
@@ -332,12 +378,12 @@ class PerformanceBenchmark:
             plt.savefig(chart_file, dpi=300, bbox_inches='tight')
             plt.close()
             
-            print(f"📈 Performance charts saved to: {chart_file}")
+            print(f"CHART Performance charts saved to: {chart_file}")
             
         except ImportError:
-            print("⚠️  matplotlib not available - skipping visualization")
+            print("WARNING  matplotlib not available - skipping visualization")
         except Exception as e:
-            print(f"⚠️  Error generating visualization: {e}")
+            print(f"WARNING  Error generating visualization: {e}")
 
 if __name__ == "__main__":
     benchmark = PerformanceBenchmark()
