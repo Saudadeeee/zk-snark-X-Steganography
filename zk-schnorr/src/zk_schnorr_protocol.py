@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""
-ZK-Schnorr Protocol Implementation
-===================================
 
-Schnorr signature-based Zero-Knowledge proof system for steganography.
-This provides an alternative to ZK-SNARK with different performance characteristics.
-
-Schnorr Protocol Properties:
-- Simpler than ZK-SNARK
-- Faster proof generation
-- Smaller proof size
-- Interactive protocol (made non-interactive via Fiat-Shamir)
-- Based on Discrete Logarithm Problem
-
-Author: ZK-Stego Research Team
-Date: October 2025
-"""
 
 import hashlib
 import secrets
@@ -57,20 +41,7 @@ class SchnorrProof:
 
 
 class ZKSchnorrProtocol:
-    """
-    Zero-Knowledge Schnorr Protocol Implementation
-    
-    Based on Schnorr identification protocol with Fiat-Shamir transform
-    for non-interactive proofs.
-    
-    Protocol Steps:
-    1. Prover chooses random r, computes R = r*G
-    2. Prover computes challenge c = H(R || message)
-    3. Prover computes response s = r + c*x
-    4. Verifier checks: s*G = R + c*Y (where Y = x*G)
-    
-    Security based on Discrete Logarithm Problem (DLP)
-    """
+
     
     def __init__(self, security_bits: int = 256):
         """
@@ -81,8 +52,6 @@ class ZKSchnorrProtocol:
         """
         self.security_bits = security_bits
         
-        # Use a large prime modulus (for demonstration, using a 256-bit prime)
-        # In production, use standardized curve parameters (e.g., secp256k1)
         self.prime = self._get_safe_prime(security_bits)
         self.generator = 2  # Generator for the group
         
@@ -155,26 +124,17 @@ class ZKSchnorrProtocol:
             raise ValueError("Must generate keypair first")
         
         start_time = time.perf_counter()
-        
-        # Step 1: Prover chooses random nonce r
         nonce = secrets.randbelow(self.prime - 1) + 1
         
-        # Step 2: Compute commitment R = r * G (mod prime)
         commitment = pow(self.generator, nonce, self.prime)
         
-        # Step 3: Compute challenge using Fiat-Shamir transform
-        # c = H(R || message || public_key)
         message_hash = hashlib.sha256(message.encode()).hexdigest()
         challenge = self._hash_message(commitment, message, self.public_key)
         
-        # Step 4: Compute response s = r + c * private_key (mod prime-1)
         response = (nonce + challenge * self.private_key) % (self.prime - 1)
         
         generation_time = time.perf_counter() - start_time
-        
-        # Calculate proof size
-        # commitment (32 bytes) + challenge (32 bytes) + response (32 bytes)
-        proof_size = 32 + 32 + 32  # = 96 bytes (much smaller than ZK-SNARK!)
+        proof_size = 32 + 32 + 32  #
         
         proof = SchnorrProof(
             commitment=commitment,
