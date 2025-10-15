@@ -17,10 +17,17 @@ from .chaos_embedding import ChaosProofArtifact, generate_chaos_key_from_secret
 class HybridProofArtifact:
     """Hybrid approach: PNG chunk metadata + Chaos-based LSB embedding"""
     
-    def __init__(self):
+    def __init__(self, image=None):
+        """
+        Initialize HybridProofArtifact
+        
+        Args:
+            image: Optional PIL Image or numpy array to process
+        """
         self.chaos_artifact = ChaosProofArtifact()
         self.chunk_type = b'zkPF'  # zk-Proof chunk type
         self._zk_generator = None
+        self.image = image  # Store image for later processing
         
     @property
     def zk_generator(self):
