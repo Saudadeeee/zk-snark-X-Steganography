@@ -1,31 +1,3 @@
-"""
-ZK-SNARK Proof Generator and Verifier
-Complete impleme        if self.circuit_zkey.exists() and self.verification_key.exists():
-            print("Trusted setup already completed")
-            return True
-            
-        print("S        success, stdout, stderr = self._run_command(verify_cmd)
-        
-        proof_file.unlink()
-        public_file.unlink()
-        
-        if success:
-            print("Proof verification PASSED")
-            return True
-        else:
-            print(f"ERROR: Proof verification FAILED: {stderr}")
-            return Falsested setup...")
-        
-        r1cs_file = self.build_dir / "stego_check_v2.r1cs"
-        if not r1cs_file.exists():
-            print(f"ERROR: R1CS file not found: {r1cs_file}")
-            return False
-            
-        if not self.ptau_file.exists():
-            print(f"ERROR: Powers of Tau not found: {self.ptau_file}")
-            print("Download with: wget https://hermez.s3-eu-west-1.amazonaws.com/powersOfTau28_hez_final_12.ptau")
-            return Falseproof integration
-"""
 
 import os
 import json
