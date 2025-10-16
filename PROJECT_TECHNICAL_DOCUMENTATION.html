@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>ZK-SNARK Steganography Benchmark Tables</title>
+            <style>
+/* From extension vscode.github */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.vscode-dark img[src$=\#gh-light-mode-only],
+.vscode-light img[src$=\#gh-dark-mode-only],
+.vscode-high-contrast:not(.vscode-high-contrast-light) img[src$=\#gh-light-mode-only],
+.vscode-high-contrast-light img[src$=\#gh-dark-mode-only] {
+	display: none;
+}
+
+</style>
+            
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/markdown.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/highlight.css">
+<style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, 'Ubuntu', 'Droid Sans', sans-serif;
+                font-size: 14px;
+                line-height: 1.6;
+            }
+        </style>
+        <style>
+.task-list-item {
+    list-style-type: none;
+}
+
+.task-list-item-checkbox {
+    margin-left: -20px;
+    vertical-align: middle;
+    pointer-events: none;
+}
+</style>
+<style>
+:root {
+  --color-note: #0969da;
+  --color-tip: #1a7f37;
+  --color-warning: #9a6700;
+  --color-severe: #bc4c00;
+  --color-caution: #d1242f;
+  --color-important: #8250df;
+}
+
+</style>
+<style>
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-note: #2f81f7;
+    --color-tip: #3fb950;
+    --color-warning: #d29922;
+    --color-severe: #db6d28;
+    --color-caution: #f85149;
+    --color-important: #a371f7;
+  }
+}
+
+</style>
+<style>
+.markdown-alert {
+  padding: 0.5rem 1rem;
+  margin-bottom: 16px;
+  color: inherit;
+  border-left: .25em solid #888;
+}
+
+.markdown-alert>:first-child {
+  margin-top: 0
+}
+
+.markdown-alert>:last-child {
+  margin-bottom: 0
+}
+
+.markdown-alert .markdown-alert-title {
+  display: flex;
+  font-weight: 500;
+  align-items: center;
+  line-height: 1
+}
+
+.markdown-alert .markdown-alert-title .octicon {
+  margin-right: 0.5rem;
+  display: inline-block;
+  overflow: visible !important;
+  vertical-align: text-bottom;
+  fill: currentColor;
+}
+
+.markdown-alert.markdown-alert-note {
+  border-left-color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-note .markdown-alert-title {
+  color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-important {
+  border-left-color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-important .markdown-alert-title {
+  color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-warning {
+  border-left-color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-warning .markdown-alert-title {
+  color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-tip {
+  border-left-color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-tip .markdown-alert-title {
+  color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-caution {
+  border-left-color: var(--color-caution);
+}
+
+.markdown-alert.markdown-alert-caution .markdown-alert-title {
+  color: var(--color-caution);
+}
+
+</style>
+        
+        </head>
+        <body class="vscode-body vscode-light">
+            <h1 id="zk-snark-steganography-benchmark-tables">ZK-SNARK Steganography Benchmark Tables</h1>
+<p>All measurements use a 60-character metadata integrity token (480 bits). Test cases cover:</p>
+<ul>
+<li>Lenna 512×512 (reference image)</li>
+<li>Random Noise 1024×1024 (synthetic high-entropy texture)</li>
+<li>Gradient Field 768×768 (structured smooth content)</li>
+</ul>
+<h2 id="quality--proof-metrics">Quality &amp; Proof Metrics</h2>
+<table>
+<thead>
+<tr>
+<th>Image/Test Case</th>
+<th>System Variant</th>
+<th>PSNR (dB)</th>
+<th>SSIM</th>
+<th>MSE</th>
+<th>Capacity (bpp)</th>
+<th>Proof Generation Time (s)</th>
+<th>Proof Verification Time (s)</th>
+<th>Proof Size (KB)</th>
+<th>Overhead vs Baseline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lenna 512×512</td>
+<td>Proposed Method (zk-SNARK)</td>
+<td>83.38</td>
+<td>0.99999998</td>
+<td>2.99e-04</td>
+<td>0.00183</td>
+<td>0.53</td>
+<td>0.51</td>
+<td>0.72</td>
+<td>+0.53 s</td>
+</tr>
+<tr>
+<td>Lenna 512×512</td>
+<td>Proposed Method (zk-SNARK)</td>
+<td>83.38</td>
+<td>0.99999998</td>
+<td>2.99e-04</td>
+<td>0.00183</td>
+<td>0.53</td>
+<td>0.51</td>
+<td>0.72</td>
+<td>+0.53 s</td>
+</tr>
+<tr>
+<td>Lenna 512×512</td>
+<td>Proposed (Optimized)</td>
+<td>83.38</td>
+<td>0.99999998</td>
+<td>2.99e-04</td>
+<td>0.00183</td>
+<td>0.55</td>
+<td>0.52</td>
+<td>0.72</td>
+<td>+0.55 s</td>
+</tr>
+<tr>
+<td>Random Noise 1024×1024</td>
+<td>Proposed Method (zk-SNARK)</td>
+<td>89.43</td>
+<td>0.999999996</td>
+<td>7.41e-05</td>
+<td>0.00046</td>
+<td>0.54</td>
+<td>0.52</td>
+<td>0.73</td>
+<td>+0.54 s</td>
+</tr>
+<tr>
+<td>Random Noise 1024×1024</td>
+<td>Proposed (Optimized)</td>
+<td>89.43</td>
+<td>0.999999996</td>
+<td>7.41e-05</td>
+<td>0.00046</td>
+<td>0.55</td>
+<td>0.48</td>
+<td>0.72</td>
+<td>+0.55 s</td>
+</tr>
+<tr>
+<td>Gradient Field 768×768</td>
+<td>Proposed Method (zk-SNARK)</td>
+<td>86.75</td>
+<td>0.999999994</td>
+<td>1.37e-04</td>
+<td>0.00081</td>
+<td>0.54</td>
+<td>0.51</td>
+<td>0.72</td>
+<td>+0.54 s</td>
+</tr>
+<tr>
+<td>Gradient Field 768×768</td>
+<td>Proposed (Optimized)</td>
+<td>86.75</td>
+<td>0.999999994</td>
+<td>1.37e-04</td>
+<td>0.00081</td>
+<td>0.54</td>
+<td>0.49</td>
+<td>0.72</td>
+<td>+0.54 s</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Baseline rows keep proof-related cells empty because those stages are not executed in the reference variant.</p>
+</blockquote>
+<h2 id="ram-consumption">RAM Consumption</h2>
+<table>
+<thead>
+<tr>
+<th>Image/Test Case</th>
+<th>System Variant</th>
+<th>RAM (Stego)</th>
+<th>RAM (Proving)</th>
+<th>RAM (Verifying)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lenna 512×512</td>
+<td>Proposed Method (zk-SNARK)</td>
+<td>58.45 MB</td>
+<td>55.43 MB</td>
+<td>55.43 MB</td>
+</tr>
+<tr>
+<td>Lenna 512×512</td>
+<td>Proposed Method (zk-SNARK)</td>
+<td>58.45 MB</td>
+<td>55.43 MB</td>
+<td>55.43 MB</td>
+</tr>
+<tr>
+<td>Lenna 512×512</td>
+<td>Proposed (Optimized)</td>
+<td>58.45 MB</td>
+<td>55.43 MB</td>
+<td>55.43 MB</td>
+</tr>
+<tr>
+<td>Random Noise 1024×1024</td>
+<td>Proposed Method (zk-SNARK)</td>
+<td>92.74 MB</td>
+<td>78.65 MB</td>
+<td>78.65 MB</td>
+</tr>
+<tr>
+<td>Random Noise 1024×1024</td>
+<td>Proposed (Optimized)</td>
+<td>92.74 MB</td>
+<td>78.65 MB</td>
+<td>78.65 MB</td>
+</tr>
+<tr>
+<td>Gradient Field 768×768</td>
+<td>Proposed Method (zk-SNARK)</td>
+<td>99.58 MB</td>
+<td>105.12 MB</td>
+<td>105.12 MB</td>
+</tr>
+<tr>
+<td>Gradient Field 768×768</td>
+<td>Proposed (Optimized)</td>
+<td>99.58 MB</td>
+<td>105.12 MB</td>
+<td>105.12 MB</td>
+</tr>
+</tbody>
+</table>
+<p>RAM values capture process RSS immediately after each stage (embed, prove, verify) using <code>psutil</code>.</p>
+<h2 id="runtime-breakdown">Runtime Breakdown</h2>
+<table>
+<thead>
+<tr>
+<th>Image/Test Case</th>
+<th>System Variant</th>
+<th>Time (Stego)</th>
+<th>Time (Proving)</th>
+<th>Time (Verifying)</th>
+<th>Total Time (s)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lenna 512×512</td>
+<td>Proposed Method (zk-SNARK)</td>
+<td>0.0017 s</td>
+<td>0.533 s</td>
+<td>0.510 s</td>
+<td>0.534 s</td>
+</tr>
+<tr>
+<td>Lenna 512×512</td>
+<td>Proposed Method (zk-SNARK)</td>
+<td>0.0017 s</td>
+<td>0.533 s</td>
+<td>0.510 s</td>
+<td>0.534 s</td>
+</tr>
+<tr>
+<td>Lenna 512×512</td>
+<td>Proposed (Optimized)</td>
+<td>0.0017 s</td>
+<td>0.547 s</td>
+<td>0.515 s</td>
+<td>0.549 s</td>
+</tr>
+<tr>
+<td>Random Noise 1024×1024</td>
+<td>Proposed Method (zk-SNARK)</td>
+<td>0.0026 s</td>
+<td>0.539 s</td>
+<td>0.521 s</td>
+<td>0.541 s</td>
+</tr>
+<tr>
+<td>Random Noise 1024×1024</td>
+<td>Proposed (Optimized)</td>
+<td>0.0026 s</td>
+<td>0.554 s</td>
+<td>0.485 s</td>
+<td>0.556 s</td>
+</tr>
+<tr>
+<td>Gradient Field 768×768</td>
+<td>Proposed Method (zk-SNARK)</td>
+<td>0.0020 s</td>
+<td>0.541 s</td>
+<td>0.505 s</td>
+<td>0.543 s</td>
+</tr>
+<tr>
+<td>Gradient Field 768×768</td>
+<td>Proposed (Optimized)</td>
+<td>0.0020 s</td>
+<td>0.535 s</td>
+<td>0.485 s</td>
+<td>0.537 s</td>
+</tr>
+</tbody>
+</table>
+<p>Total time aggregates steganography embedding and proof generation. Optimized measurements reuse witness inputs to reflect a warmed proving pipeline.</p>
+
+            
+            
+        </body>
+        </html>
