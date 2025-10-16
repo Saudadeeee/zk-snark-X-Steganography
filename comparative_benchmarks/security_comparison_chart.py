@@ -8,198 +8,211 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
 
+BASE_DIR = Path(__file__).resolve().parent
+OUTPUT_DIR = BASE_DIR / "comparison_results" / "figures"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
 def create_security_comparison():
     """Create comprehensive security comparison charts"""
     
-    # Create figure with 2x3 subplots
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
-    fig.suptitle('Security & Performance Trade-offs: ZK-SNARK vs ZK-Schnorr', 
+    fig.suptitle('Security & Performance Trade-offs: ZK-SNARK vs ZK-Schnorr',
                  fontsize=16, fontweight='bold', y=0.98)
     
     colors = {
         'Schnorr': '#2E86AB',
         'SNARK': '#A23B72',
-        'Better': '#06A77D',
-        'Worse': '#E63946'
+        'Guide': '#7F7F7F'
     }
     
-    # ============================================================================
-    # Chart 1: Security Level (bits)
-    # ============================================================================
-    ax1 = axes[0, 0]
+    def plot_line(ax, labels, schnorr_vals, snark_vals, ylabel, title,
+                  schnorr_notes, snark_notes, unit, ylim=None, guides=None):
+        """Helper to draw dual-line comparisons with detailed annotations."""
+        x = np.arange(len(labels))
+        ax.plot(x, schnorr_vals, 'o-', color=colors['Schnorr'], linewidth=2.8,
+                markersize=8, label='ZK-Schnorr')
+        ax.plot(x, snark_vals, 's--', color=colors['SNARK'], linewidth=2.8,
+                markersize=8, label='ZK-SNARK')
+        
+        for xpos, value, note in zip(x, schnorr_vals, schnorr_notes):
+            text = f'{value}{unit}\n{note}' if unit else f'{value}\n{note}'
+            ax.annotate(text, xy=(xpos, value), xytext=(-32, 12),
+                        textcoords='offset points', ha='right', va='bottom',
+                        fontsize=9, fontweight='bold', color=colors['Schnorr'],
+                        bbox=dict(boxstyle='round,pad=0.3', edgecolor=colors['Schnorr'],
+                                  facecolor='#E6F0FA', alpha=0.65))
+        
+        for xpos, value, note in zip(x, snark_vals, snark_notes):
+            text = f'{value}{unit}\n{note}' if unit else f'{value}\n{note}'
+            ax.annotate(text, xy=(xpos, value), xytext=(32, -18),
+                        textcoords='offset points', ha='left', va='top',
+                        fontsize=9, fontweight='bold', color=colors['SNARK'],
+                        bbox=dict(boxstyle='round,pad=0.3', edgecolor=colors['SNARK'],
+                                  facecolor='#F9E6F0', alpha=0.65))
+        
+        if guides:
+            for guide_val, guide_label in guides:
+                ax.axhline(y=guide_val, color=colors['Guide'], linestyle='--',
+                           linewidth=1.2, alpha=0.5)
+                ax.text(x[-1] + 0.1, guide_val, guide_label,
+                        fontsize=9, color=colors['Guide'], va='center')
+        
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, fontsize=10)
+        ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
+        ax.set_title(title, fontsize=12, fontweight='bold')
+        ax.grid(True, alpha=0.3)
+        if ylim:
+            ax.set_ylim(*ylim)
+        ax.legend(fontsize=9, loc='best')
     
-    protocols = ['ZK-Schnorr', 'ZK-SNARK\n(Groth16)']
-    security_bits = [256, 128]  # DLP-256 vs pairing-based 128-bit
+    # Chart 1: Computational Security (bits)
+    plot_line(
+        axes[0, 0],
+        labels=['Classical bit security', 'Symmetric equivalent', 'Grover-adjusted (PQ)'],
+        schnorr_vals=[256, 128, 128],
+        snark_vals=[128, 80, 64],
+        ylabel='Security Strength',
+        title='1. Computational Security Benchmarks',
+        schnorr_notes=[
+            'Discrete log hardness',
+            '≈ AES-128 resilience',
+            'Post-quantum plan required'
+        ],
+        snark_notes=[
+            'Pairing curve baseline',
+            '≈ AES-80 equivalent',
+            'Grover halves exponent'
+        ],
+        unit=' bits',
+        ylim=(0, 280),
+        guides=[(128, 'Recommended floor: 128 bits')]
+    )
     
-    bars = ax1.bar(protocols, security_bits, color=[colors['Schnorr'], colors['SNARK']], 
-                   alpha=0.8, edgecolor='black', linewidth=2)
+    # Chart 2: Setup Requirements (complexity score)
+    plot_line(
+        axes[0, 1],
+        labels=['Trusted parties involved', 'Setup phases', 'Universality score'],
+        schnorr_vals=[0, 0, 10],
+        snark_vals=[10, 8, 3],
+        ylabel='Complexity & Reuse Score',
+        title='2. Trusted Setup Requirements',
+        schnorr_notes=[
+            'No coordinator required',
+            'No ceremony, deterministic',
+            'Universal across circuits'
+        ],
+        snark_notes=[
+            'Requires MPC of n parties',
+            'Powers of Tau + circuit-specific',
+            'Reuse limited to circuit'
+        ],
+        unit=' /10',
+        ylim=(-1, 12)
+    )
     
-    # Add value labels
-    for bar, value in zip(bars, security_bits):
-        ax1.text(bar.get_x() + bar.get_width()/2, value + 5,
-                f'{value} bits', ha='center', va='bottom', fontsize=11, fontweight='bold')
+    # Chart 3: Zero-Knowledge Strength
+    plot_line(
+        axes[0, 2],
+        labels=['Witness leakage', 'Transcript unlinkability', 'Simulation soundness'],
+        schnorr_vals=[6, 7, 7],
+        snark_vals=[10, 9, 10],
+        ylabel='Privacy Level',
+        title='3. Zero-Knowledge Strength (0-10)',
+        schnorr_notes=[
+            'Statement exposure present',
+            'Reusable signature structure',
+            'Sigma protocol simulator'
+        ],
+        snark_notes=[
+            'Witness perfectly hidden',
+            'Uses CRS for unlinkability',
+            'Strong simulation ZK'
+        ],
+        unit=' /10',
+        ylim=(0, 12)
+    )
     
-    ax1.axhline(y=128, color='orange', linestyle='--', alpha=0.5, linewidth=2, label='Min Recommended (128-bit)')
-    ax1.set_ylabel('Security Level (bits)', fontsize=11, fontweight='bold')
-    ax1.set_title('1. Computational Security', fontsize=12, fontweight='bold')
-    ax1.legend(fontsize=9)
-    ax1.grid(True, alpha=0.3, axis='y')
-    ax1.set_ylim(0, 300)
+    # Chart 4: Attack Resistance per Threat
+    plot_line(
+        axes[1, 0],
+        labels=['Brute force', 'Quantum future', 'Side channel', 'Replay attack'],
+        schnorr_vals=[10, 3, 8, 10],
+        snark_vals=[9, 2, 7, 10],
+        ylabel='Resistance Score (0-10)',
+        title='4. Resistance Across Threat Models',
+        schnorr_notes=[
+            '2^256 operations',
+            'Needs PQ hardening',
+            'Constant-time signatures',
+            'Fresh nonces each proof'
+        ],
+        snark_notes=[
+            '≈2^128 operations',
+            'Relies on pairings',
+            'Circuit leakage risk',
+            'Includes unique commitments'
+        ],
+        unit=' /10',
+        ylim=(0, 12),
+        guides=[(5, 'Baseline acceptable security')]
+    )
     
-    # ============================================================================
-    # Chart 2: Setup Complexity
-    # ============================================================================
-    ax2 = axes[0, 1]
-    
-    setup_types = ['ZK-Schnorr', 'ZK-SNARK']
-    setup_complexity = [0, 10]  # Schnorr: no setup, SNARK: trusted setup required
-    
-    bars = ax2.bar(setup_types, setup_complexity, 
-                   color=[colors['Better'], colors['Worse']], 
-                   alpha=0.8, edgecolor='black', linewidth=2)
-    
-    # Add labels
-    labels = ['No Setup\nNeeded ✓', 'Trusted Setup\nRequired ✗']
-    for bar, label, value in zip(bars, labels, setup_complexity):
-        if value == 0:
-            ax2.text(bar.get_x() + bar.get_width()/2, 1,
-                    label, ha='center', va='bottom', fontsize=10, fontweight='bold')
-        else:
-            ax2.text(bar.get_x() + bar.get_width()/2, value + 0.3,
-                    label, ha='center', va='bottom', fontsize=10, fontweight='bold')
-    
-    ax2.set_ylabel('Setup Complexity (0-10 scale)', fontsize=11, fontweight='bold')
-    ax2.set_title('2. Setup Requirements', fontsize=12, fontweight='bold')
-    ax2.set_ylim(0, 12)
-    ax2.grid(True, alpha=0.3, axis='y')
-    
-    # ============================================================================
-    # Chart 3: Zero-Knowledge Property
-    # ============================================================================
-    ax3 = axes[0, 2]
-    
-    zk_types = ['ZK-Schnorr\n(Signature-based)', 'ZK-SNARK\n(Full ZK)']
-    zk_level = [7, 10]  # Schnorr: proof of knowledge, SNARK: full zero-knowledge
-    
-    bars = ax3.bar(zk_types, zk_level, 
-                   color=[colors['Schnorr'], colors['SNARK']], 
-                   alpha=0.8, edgecolor='black', linewidth=2)
-    
-    # Add value labels
-    labels_zk = ['Proof of Knowledge\n(Limited ZK)', 'Full Zero-Knowledge\n(Complete Privacy)']
-    for bar, label, value in zip(bars, labels_zk, zk_level):
-        ax3.text(bar.get_x() + bar.get_width()/2, value + 0.3,
-                f'{value}/10\n{label}', ha='center', va='bottom', fontsize=9, fontweight='bold')
-    
-    ax3.set_ylabel('Zero-Knowledge Level (0-10)', fontsize=11, fontweight='bold')
-    ax3.set_title('3. Privacy Guarantee', fontsize=12, fontweight='bold')
-    ax3.set_ylim(0, 12)
-    ax3.grid(True, alpha=0.3, axis='y')
-    
-    # ============================================================================
-    # Chart 4: Attack Resistance (multiple threats)
-    # ============================================================================
-    ax4 = axes[1, 0]
-    
-    threats = ['Brute\nForce', 'Quantum\n(Future)', 'Side\nChannel', 'Replay\nAttack']
-    schnorr_resistance = [10, 3, 8, 10]  # High classical, low quantum, good side-channel
-    snark_resistance = [9, 2, 7, 10]     # High classical, low quantum, moderate side-channel
-    
-    x = np.arange(len(threats))
-    width = 0.35
-    
-    bars1 = ax4.bar(x - width/2, schnorr_resistance, width, label='ZK-Schnorr',
-                    color=colors['Schnorr'], alpha=0.8, edgecolor='black', linewidth=1.5)
-    bars2 = ax4.bar(x + width/2, snark_resistance, width, label='ZK-SNARK',
-                    color=colors['SNARK'], alpha=0.8, edgecolor='black', linewidth=1.5)
-    
-    # Add value labels
-    for bars in [bars1, bars2]:
-        for bar in bars:
-            height = bar.get_height()
-            ax4.text(bar.get_x() + bar.get_width()/2., height + 0.2,
-                    f'{int(height)}/10', ha='center', va='bottom', fontsize=8, fontweight='bold')
-    
-    ax4.set_ylabel('Resistance Level (0-10)', fontsize=11, fontweight='bold')
-    ax4.set_title('4. Attack Resistance', fontsize=12, fontweight='bold')
-    ax4.set_xticks(x)
-    ax4.set_xticklabels(threats, fontsize=10)
-    ax4.legend(fontsize=10, loc='upper right')
-    ax4.set_ylim(0, 12)
-    ax4.grid(True, alpha=0.3, axis='y')
-    ax4.axhline(y=5, color='red', linestyle=':', alpha=0.3, linewidth=1)
-    
-    # ============================================================================
     # Chart 5: Cryptographic Assumptions
-    # ============================================================================
-    ax5 = axes[1, 1]
+    plot_line(
+        axes[1, 1],
+        labels=['Core assumptions', 'Exotic primitives', 'Knowledge-of-exponent'],
+        schnorr_vals=[1, 0, 0],
+        snark_vals=[3, 2, 1],
+        ylabel='Assumption Count / Presence',
+        title='5. Cryptographic Foundations',
+        schnorr_notes=[
+            'Discrete Log over prime fields',
+            'No pairings or bilinear maps',
+            'No knowledge-of-exponent'
+        ],
+        snark_notes=[
+            'DLP + Pairings + Algebraic Group Model',
+            'Pairings & elliptic curve twists',
+            'Knowledge-of-exponent needed'
+        ],
+        unit=' units',
+        ylim=(-1, 5)
+    )
     
-    assumption_complexity = {
-        'ZK-Schnorr': 1,    # Only DLP
-        'ZK-SNARK': 3       # DLP + pairing + knowledge-of-exponent
-    }
-    
-    protocols_assume = list(assumption_complexity.keys())
-    complexity_values = list(assumption_complexity.values())
-    
-    bars = ax5.bar(protocols_assume, complexity_values,
-                   color=[colors['Better'], colors['Worse']], 
-                   alpha=0.8, edgecolor='black', linewidth=2)
-    
-    # Add detailed labels
-    labels_assume = ['1 Assumption:\nDLP-256\n(Simple ✓)', 
-                     '3 Assumptions:\nDLP + Pairing +\nKoE (Complex ✗)']
-    for bar, label, value in zip(bars, labels_assume, complexity_values):
-        ax5.text(bar.get_x() + bar.get_width()/2, value + 0.1,
-                label, ha='center', va='bottom', fontsize=9, fontweight='bold')
-    
-    ax5.set_ylabel('Number of Assumptions', fontsize=11, fontweight='bold')
-    ax5.set_title('5. Cryptographic Foundation', fontsize=12, fontweight='bold')
-    ax5.set_ylim(0, 4)
-    ax5.grid(True, alpha=0.3, axis='y')
-    
-    # ============================================================================
-    # Chart 6: Overall Security Score (Radar-style as bar)
-    # ============================================================================
-    ax6 = axes[1, 2]
-    
-    categories = ['Security\nLevel', 'Privacy', 'Simplicity', 'Proven\nSecurity', 'Future-\nProof']
-    
-    # Scores out of 10
-    schnorr_scores = [10, 7, 10, 9, 6]   # High security, moderate privacy, simple, proven, quantum-vulnerable
-    snark_scores = [9, 10, 5, 7, 5]       # High security, full privacy, complex, less proven, quantum-vulnerable
-    
-    x = np.arange(len(categories))
-    width = 0.35
-    
-    bars1 = ax6.bar(x - width/2, schnorr_scores, width, label='ZK-Schnorr',
-                    color=colors['Schnorr'], alpha=0.8, edgecolor='black', linewidth=1.5)
-    bars2 = ax6.bar(x + width/2, snark_scores, width, label='ZK-SNARK',
-                    color=colors['SNARK'], alpha=0.8, edgecolor='black', linewidth=1.5)
-    
-    # Add value labels
-    for bars in [bars1, bars2]:
-        for bar in bars:
-            height = bar.get_height()
-            ax6.text(bar.get_x() + bar.get_width()/2., height + 0.2,
-                    f'{int(height)}', ha='center', va='bottom', fontsize=9, fontweight='bold')
-    
-    ax6.set_ylabel('Score (0-10)', fontsize=11, fontweight='bold')
-    ax6.set_title('6. Overall Security Profile', fontsize=12, fontweight='bold')
-    ax6.set_xticks(x)
-    ax6.set_xticklabels(categories, fontsize=9)
-    ax6.legend(fontsize=10, loc='upper left')
-    ax6.set_ylim(0, 12)
-    ax6.grid(True, alpha=0.3, axis='y')
-    ax6.axhline(y=5, color='orange', linestyle='--', alpha=0.3, linewidth=1, label='Threshold')
+    # Chart 6: Overall Security Profile
+    plot_line(
+        axes[1, 2],
+        labels=['Security Level', 'Privacy', 'Simplicity', 'Proven Security', 'Future-Proofing'],
+        schnorr_vals=[10, 7, 10, 9, 6],
+        snark_vals=[9, 10, 5, 7, 5],
+        ylabel='Composite Score (0-10)',
+        title='6. Multi-factor Security Profile',
+        schnorr_notes=[
+            'Large classical margin',
+            'Partial knowledge hiding',
+            'Few moving parts',
+            'Long production use',
+            'PQ migration needed'
+        ],
+        snark_notes=[
+            'Pairing curve security',
+            'Full witness privacy',
+            'Circuit complexity',
+            'Younger deployments',
+            'PQ migration needed'
+        ],
+        unit=' /10',
+        ylim=(0, 12),
+        guides=[(5, 'Minimum acceptable score')]
+    )
     
     # ============================================================================
     # Adjust layout and save
     # ============================================================================
     plt.tight_layout(rect=[0, 0.02, 1, 0.96])
     
-    output_file = Path('comparative_benchmarks/comparison_results/figures/security_tradeoffs_comparison.png')
-    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file = OUTPUT_DIR / "security_tradeoffs_comparison.png"
     plt.savefig(output_file, dpi=300, bbox_inches='tight', facecolor='white')
     print(f'✓ Security comparison chart saved: {output_file}')
     
@@ -261,12 +274,42 @@ def create_line_chart_comparison():
     ax1.fill_between(x_pos, schnorr_line, alpha=0.2, color=colors['Schnorr'])
     ax1.fill_between(x_pos, snark_line, alpha=0.2, color=colors['SNARK'])
     
-    # Add value labels
-    for i, (s, n) in enumerate(zip(schnorr_line, snark_line)):
-        ax1.text(i, s + 0.3, f'{s}', ha='center', fontsize=10, 
-                fontweight='bold', color=colors['Schnorr'])
-        ax1.text(i, n - 0.7, f'{n}', ha='center', fontsize=10, 
-                fontweight='bold', color=colors['SNARK'])
+    schnorr_line_details = [
+        '256-bit headroom',
+        'Knowledge proofs',
+        'Minimal arithmetic',
+        'Deterministic setup',
+        'Battle-tested',
+        'Not quantum-safe'
+    ]
+    snark_line_details = [
+        'Pairing hardness',
+        'Full witness hiding',
+        'Circuit overhead',
+        'Trusted ceremony',
+        'Younger audits',
+        'Needs PQ upgrade'
+    ]
+    for idx, (score, detail) in enumerate(zip(schnorr_line, schnorr_line_details)):
+        ax1.annotate(f'{score}/10\n{detail}',
+                     xy=(idx, score),
+                     xytext=(-25, 10),
+                     textcoords='offset points',
+                     ha='right',
+                     va='bottom',
+                     fontsize=9,
+                     fontweight='bold',
+                     color=colors['Schnorr'])
+    for idx, (score, detail) in enumerate(zip(snark_line, snark_line_details)):
+        ax1.annotate(f'{score}/10\n{detail}',
+                     xy=(idx, score),
+                     xytext=(25, -18),
+                     textcoords='offset points',
+                     ha='left',
+                     va='top',
+                     fontsize=9,
+                     fontweight='bold',
+                     color=colors['SNARK'])
     
     ax1.set_xticks(x_pos)
     ax1.set_xticklabels(properties, fontsize=10)
@@ -293,14 +336,23 @@ def create_line_chart_comparison():
     bars = ax2.bar(categories, [abs(w) for w in winners], 
                    color=colors_bar, alpha=0.8, edgecolor='black', linewidth=2)
     
-    # Add winner labels
-    labels = ['Schnorr\n256-bit', 'SNARK\nFull ZK', 'Schnorr\nNo Setup', 
-              'Schnorr\n1 Assumption', 'Schnorr\n96B', 'Schnorr\n1200× Faster']
-    
-    for bar, label in zip(bars, labels):
-        height = bar.get_height()
-        ax2.text(bar.get_x() + bar.get_width()/2., height + 0.02,
-                label, ha='center', va='bottom', fontsize=9, fontweight='bold')
+    winner_details = [
+        'Schnorr\n256-bit security (+128-bit margin)',
+        'SNARK\nFull witness privacy',
+        'Schnorr\nNo trusted parties',
+        'Schnorr\nSingle DLP assumption',
+        'Schnorr\n≈96 byte proofs',
+        'Schnorr\n~1200× faster proving'
+    ]
+    for bar, detail in zip(bars, winner_details):
+        ax2.annotate(detail,
+                     xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
+                     xytext=(0, 8),
+                     textcoords='offset points',
+                     ha='center',
+                     va='bottom',
+                     fontsize=9,
+                     fontweight='bold')
     
     ax2.set_ylabel('Winner (1 = has advantage)', fontsize=12, fontweight='bold')
     ax2.set_title('Category Winners', fontsize=13, fontweight='bold')
@@ -317,7 +369,7 @@ def create_line_chart_comparison():
     
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     
-    output_file = Path('comparative_benchmarks/comparison_results/figures/security_line_comparison.png')
+    output_file = OUTPUT_DIR / "security_line_comparison.png"
     plt.savefig(output_file, dpi=300, bbox_inches='tight', facecolor='white')
     print(f'\n✓ Line chart comparison saved: {output_file}')
     

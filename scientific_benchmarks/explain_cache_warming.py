@@ -10,14 +10,46 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 from pathlib import Path
+from glob import glob
 import json
 
-# Load debug results
-results_file = Path("detailed_benchmark_results/debug_results.json")
-with open(results_file) as f:
-    data = json.load(f)
+# Base directory relative to this script
+RESULTS_DIR = Path(__file__).resolve().parent / "detailed_benchmark_results"
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-results = data['results']
+# Load debug results (with fallbacks)
+results_file = RESULTS_DIR / "debug_results.json"
+if results_file.exists():
+    with open(results_file) as f:
+        data = json.load(f)
+    results = data['results']
+else:
+    fallback_files = sorted(RESULTS_DIR.glob("results_image_size_*.json"))
+    if not fallback_files:
+        raise FileNotFoundError(
+            "Không tìm thấy dữ liệu debug hoặc fallback. "
+            "Hãy chạy final_detailed_benchmark.py trước."
+        )
+    latest = fallback_files[-1]
+    with open(latest) as f:
+        data = json.load(f)
+    derived_results = []
+    for entry in data['results'][:8]:
+        width = entry.get('width')
+        height = entry.get('height')
+        total_time = entry.get('total_time_ms', 0.0)
+        pixels = entry.get('pixels', max(width * height if width and height else 0, 1))
+        time_per_pixel_us = (total_time / pixels) * 1000 if pixels else 0.0
+        derived_results.append({
+            'size': f'{width}×{height}',
+            'pixels': pixels,
+            'total_time_ms': total_time,
+            'time_per_pixel_us': time_per_pixel_us
+        })
+    results = derived_results
+
+# Defensive copy to ensure downstream code works with standard list
+results = list(results)
 
 # Create figure
 fig = plt.figure(figsize=(16, 12))
@@ -236,11 +268,11 @@ plt.suptitle('🔥 COLD START vs CACHE WARMING - Detailed Explanation\n' +
 
 plt.tight_layout(rect=[0, 0, 1, 0.99])
 
-output_file = Path("detailed_benchmark_results/cache_warming_explanation.png")
+output_file = RESULTS_DIR / "cache_warming_explanation.png"
 plt.savefig(output_file, dpi=300, bbox_inches='tight', facecolor='white')
 print(f"✅ Saved: {output_file}")
 
-output_pdf = Path("detailed_benchmark_results/cache_warming_explanation.pdf")
+output_pdf = RESULTS_DIR / "cache_warming_explanation.pdf"
 plt.savefig(output_pdf, format='pdf', bbox_inches='tight', facecolor='white')
 print(f"✅ Saved: {output_pdf}")
 
@@ -307,11 +339,11 @@ plt.suptitle('📊 Cold Start Impact on Benchmark Accuracy\n' +
 
 plt.tight_layout()
 
-output_file2 = Path("detailed_benchmark_results/cache_warming_comparison.png")
+output_file2 = RESULTS_DIR / "cache_warming_comparison.png"
 plt.savefig(output_file2, dpi=300, bbox_inches='tight', facecolor='white')
 print(f"✅ Saved: {output_file2}")
 
-output_pdf2 = Path("detailed_benchmark_results/cache_warming_comparison.pdf")
+output_pdf2 = RESULTS_DIR / "cache_warming_comparison.pdf"
 plt.savefig(output_pdf2, format='pdf', bbox_inches='tight', facecolor='white')
 print(f"✅ Saved: {output_pdf2}")
 

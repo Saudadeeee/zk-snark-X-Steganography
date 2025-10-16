@@ -470,6 +470,76 @@ MSE (Mean Squared Error): <0.1 (minimal distortion)
 Visual Detection: Impossible với mắt thường
 ```
 
+## BẢNG TỔNG HỢP ZK-SNARK X STEGANOGRAPHY
+
+Để tổng hợp kết quả benchmark cho các biến thể steganography kết hợp zk-SNARK, sử dụng cấu trúc bảng gồm ba nhóm cột như sau:
+- **Nhóm Dữ Liệu Đầu Vào/Kiểu Ảnh**: `Image/Test Case`, `Hệ Thống/Biến Thể`.
+- **Chỉ Số Chất Lượng Steganography**: `PSNR (dB)`, `SSIM`, `MSE`, `Capacity (bits/pixel)`.
+- **Chỉ Số Hiệu Suất zk-SNARK**: `Proof Generation Time (s)`, `Proof Verification Time (s)`, `Proof Size (KB)`, `Overhead`.
+
+<table>
+  <thead>
+    <tr>
+      <th colspan="2">Nhóm Dữ Liệu Đầu Vào / Kiểu Ảnh</th>
+      <th colspan="4">Chỉ Số Chất Lượng Steganography</th>
+      <th colspan="4">Chỉ Số Hiệu Suất zk-SNARK</th>
+    </tr>
+    <tr>
+      <th>Image/Test Case</th>
+      <th>Hệ Thống/Biến Thể</th>
+      <th>PSNR (dB)</th>
+      <th>SSIM</th>
+      <th>MSE</th>
+      <th>Capacity (bits/pixel)</th>
+      <th>Proof Generation Time (s)</th>
+      <th>Proof Verification Time (s)</th>
+      <th>Proof Size (KB)</th>
+      <th>Overhead</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>(a)</td>
+      <td>Proposed Method (zk-SNARK)</td>
+      <td>82.01</td>
+      <td>0.99999998</td>
+      <td>4.09e-04</td>
+      <td>0.00238</td>
+      <td>1.17</td>
+      <td>0.51</td>
+      <td>0.72</td>
+      <td>+1.67 s</td>
+    </tr>
+    <tr>
+      <td>(b)</td>
+      <td>Baseline Steganography</td>
+      <td>82.81</td>
+      <td>0.99999998</td>
+      <td>3.41e-04</td>
+      <td>0.00238</td>
+      <td>-</td>
+      <td>-</td>
+      <td>-</td>
+      <td>Reference</td>
+    </tr>
+    <tr>
+      <td>(c)</td>
+      <td>Proposed (Optimized)</td>
+      <td>82.01</td>
+      <td>0.99999998</td>
+      <td>4.09e-04</td>
+      <td>0.00238</td>
+      <td>0.58</td>
+      <td>0.52</td>
+      <td>0.72</td>
+      <td>+1.09 s</td>
+    </tr>
+  </tbody>
+</table>
+
+> Ghi chú: thay thế các trường `...` bằng số liệu đo được; giữ nguyên dấu `-` khi không áp dụng (ví dụ variant baseline không tạo proof).
+> Thông số trên được đo với ảnh Lenna 512×512 và metadata authenticity hash (~78 ký tự). Thời gian tạo proof bao gồm bước generate witness + snarkjs prove; Overhead so sánh với thời gian nhúng cơ bản (~2.5 ms).
+
 ## CÀI ĐẶT VÀ SỬ DỤNG
 
 ### System Requirements
