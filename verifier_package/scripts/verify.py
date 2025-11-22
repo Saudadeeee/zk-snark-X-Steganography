@@ -93,13 +93,34 @@ def verify_zk_stego(stego_image_path: str, secret_key: str = None, verbose: bool
                 zk_gen = ZKProofGenerator(project_root=str(project_root))
                 
                 # Convert public inputs từ dict sang list
+                # Circuit có nPublic: 3
+                # Public inputs format: [commitmentRoot, proofLength, timestamp] (all as strings)
                 public_info = artifact.get('public', {})
-                public_list = [
-                    public_info.get('image_hash', ''),
-                    public_info.get('commitment_root', ''),
-                    str(public_info.get('proof_length', 0)),
-                    str(public_info.get('timestamp', 0))
-                ]
+                
+                # If actual public_inputs are stored, use them directly
+                if 'public_inputs' in public_info and public_info['public_inputs']:
+                    public_list = [str(x) for x in public_info['public_inputs']]
+                else:
+                    # Fallback: convert from metadata
+                    commitment_root_hex = public_info.get('commitment_root', '')
+                    try:
+                        # Convert hex string to number
+                        if commitment_root_hex:
+                            commitment_root_num = int(commitment_root_hex, 16)
+                        else:
+                            commitment_root_num = 0
+                    except (ValueError, TypeError):
+                        commitment_root_num = 0
+                    
+                    proof_length = public_info.get('proof_length', 0)
+                    timestamp = public_info.get('timestamp', 0)
+                    
+                    # Format as list of strings (snarkjs expects this format)
+                    public_list = [
+                        str(commitment_root_num),
+                        str(proof_length),
+                        str(timestamp)
+                    ]
                 
                 if verbose:
                     print("Verifying ZK-SNARK proof...")

@@ -5,7 +5,13 @@ Có thể chạy độc lập để tạo ảnh trước khi benchmark
 
 import os
 import sys
+import io
 from pathlib import Path
+
+# Fix encoding for Windows
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
@@ -84,10 +90,22 @@ def create_stego_image(original_path: str, output_dir: str = "benchmark_results"
         
         # Embed proof using hybrid method
         proof_json = proof_package.get('proof', {})
-        public_json = {
+        
+        # Use actual public_inputs from proof_package if available
+        actual_public_inputs = proof_package.get('public_inputs')
+        if actual_public_inputs:
+            # Convert public inputs list to dict format for embedding
+            # Format: [commitmentRoot, proofLength, timestamp]
+            public_json = {
             'positions': proof_package.get('chaos_params', {}).get('positions', []),
-            'proof_length': proof_package.get('chaos_params', {}).get('proof_length', 0)
+            'proof_length': proof_package.get('chaos_params', {}).get('proof_length', 0),
+            'public_inputs': actual_public_inputs  # Store actual public inputs
         }
+        else:
+            public_json = {
+                'positions': proof_package.get('chaos_params', {}).get('positions', []),
+                'proof_length': proof_package.get('chaos_params', {}).get('proof_length', 0)
+            }
         
         success = hybrid_artifact.embed_hybrid_proof(
             str(original_output),
@@ -100,7 +118,7 @@ def create_stego_image(original_path: str, output_dir: str = "benchmark_results"
         )
         
         if success:
-            print("✓ ZK proof embedded into PNG chunk successfully")
+            print("[OK] ZK proof embedded into PNG chunk successfully")
         else:
             print("WARNING: Failed to embed proof into PNG chunk, but stego image created")
     

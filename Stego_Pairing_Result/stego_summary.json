@@ -1,0 +1,12 @@
+{
+  "session_id": 1,
+  "transfer_time": 0.051149000000000555,
+  "payload_bytes": 1351704,
+  "total_packets": 201,
+  "server_packets": 96,
+  "throughput_mbps": 211.41433850123917,
+  "file_size_kb": 1320.0234375,
+  "file_size_mb": 1.2890853881835938,
+  "latency_ms": 51.149000000000555,
+  "avg_packet_size": 14614.0
+}

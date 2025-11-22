@@ -553,7 +553,6 @@ class BenchmarkComparator:
         print(f"Đã lưu: {output_dir / 'performance_trends.png'}")
         plt.close()
         
-        # 4. Biểu đồ cột so sánh (thay thế box plot)
         fig, axes = plt.subplots(2, 3, figsize=(18, 10))
         fig.suptitle('So sánh Origin vs Stego - Biểu đồ Cột', fontsize=14, fontweight='bold')
         
@@ -571,14 +570,13 @@ class BenchmarkComparator:
             stego_data = self.stego_df[metric]
             
             x = np.arange(2)
-            width = 0.35  # Độ rộng của cột
+            width = 0.35  
             
             origin_mean = origin_data.mean()
             origin_std = origin_data.std()
             stego_mean = stego_data.mean()
             stego_std = stego_data.std()
             
-            # Vẽ biểu đồ cột với 2 cột cạnh nhau
             bars1 = ax.bar(x - width/2, [origin_mean], width, 
                           label='Origin', color=color_origin, alpha=0.8,
                           yerr=[origin_std], capsize=5, edgecolor='black', linewidth=1.5)
