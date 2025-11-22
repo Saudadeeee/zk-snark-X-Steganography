@@ -179,11 +179,18 @@ class ChaosEmbedding:
         if len(positions) < len(bits):
             raise ValueError(f"Not enough positions: need {len(bits)}, got {len(positions)}")
         
+        is_grayscale = len(self.image.shape) == 2
+        
         for i, bit in enumerate(bits):
             x, y = positions[i]
             if 0 <= x < self.width and 0 <= y < self.height:
-                pixel_value = self.image[y, x, channel]
-                self.image[y, x, channel] = (pixel_value & 0xFE) | (bit & 1)
+                if is_grayscale:
+                    pixel_value = self.image[y, x]
+                    self.image[y, x] = (pixel_value & 0xFE) | (bit & 1)
+                else:
+                    ch = channel % self.image.shape[2]
+                    pixel_value = self.image[y, x, ch]
+                    self.image[y, x, ch] = (pixel_value & 0xFE) | (bit & 1)
             
         return self.image
     
@@ -198,13 +205,18 @@ class ChaosEmbedding:
         """Extract bits using chaos-based positioning"""
         
         positions = self.chaos_gen.generate_positions(x0, y0, chaos_key, num_bits)
+        is_grayscale = len(self.image.shape) == 2
         
         bits = []
         for i in range(num_bits):
             if i < len(positions):
                 x, y = positions[i]
                 if 0 <= x < self.width and 0 <= y < self.height:
-                    lsb = self.image[y, x, channel] & 1
+                    if is_grayscale:
+                        lsb = self.image[y, x] & 1
+                    else:
+                        ch = channel % self.image.shape[2]
+                        lsb = self.image[y, x, ch] & 1
                     bits.append(lsb)
                 else:
                     bits.append(0)
@@ -224,7 +236,7 @@ class ChaosProofArtifact:
     """Hybrid: PNG Chunk + Chaos-based LSB embedding"""
     
     def __init__(self):
-        self.chunk_type = b'zkPF'  # zk-Proof chunk metadata
+        self.chunk_type = b'zkPF'
         
     def create_chaos_metadata(
         self, 
@@ -294,7 +306,6 @@ class ChaosProofArtifact:
         
         return bytes(proof_bytes)
 
-# Utility functions
 def generate_chaos_key_from_secret(secret: str) -> int:
     """Generate deterministic chaos key from secret string"""
     hash_obj = hashlib.sha256(secret.encode())

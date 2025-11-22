@@ -83,11 +83,9 @@ class MetadataMessageGenerator:
     def generate_authenticity_hash_message(self, image_path: str) -> str:
         """Generate authenticity hash message"""
         try:
-            # Hash of original file
             with open(image_path, 'rb') as f:
                 file_hash = hashlib.sha256(f.read()).hexdigest()
             
-            # Timestamp for when hash was created
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
             message = f"Authenticity Hash - SHA256: {file_hash[:16]}..., "
@@ -151,20 +149,16 @@ class MetadataMessageGenerator:
             return self.generate_authenticity_hash_message(image_path)
             
         elif message_type == "comprehensive":
-            # Combine multiple metadata sources
             messages = []
             
-            # File properties
             file_msg = self.generate_file_properties_message(image_path)
             messages.append(file_msg)
             
-            # EXIF info
             exif_data = self.extract_exif_metadata(image_path)
             if exif_data:
                 camera_msg = self.generate_camera_info_message(exif_data)
                 messages.append(camera_msg)
             
-            # Join with separator
             return " | ".join(messages)
         
         else:
@@ -187,7 +181,6 @@ class MetadataMessageGenerator:
 def demonstrate_metadata_messages():
     """Demonstrate different metadata message types"""
     
-    # Example with test image
     test_image = "examples/testvectors/Lenna_test_image.webp"
     
     generator = MetadataMessageGenerator()
@@ -195,7 +188,6 @@ def demonstrate_metadata_messages():
     print("METADATA MESSAGE GENERATION DEMO")
     print("=" * 50)
     
-    # Get all recommendations
     recommendations = generator.get_message_recommendations(test_image)
     
     for use_case, message in recommendations.items():
@@ -209,22 +201,25 @@ def demonstrate_metadata_messages():
     print("=" * 50)
     
     print("""
-# Usage in your ZK steganography system:
-from src.zk_stego.metadata_message_generator import MetadataMessageGenerator
-from src.zk_stego.hybrid_proof_artifact import HybridProofArtifact
+Usage in your ZK steganography system:
+import sys
+from pathlib import Path
 
-# Generate metadata message
+sys.path.append(str(Path(__file__).parent / 'src'))
+
+from zk_stego.metadata_message_generator import MetadataMessageGenerator
+from zk_stego.hybrid_proof_artifact import HybridProofArtifact
+
 generator = MetadataMessageGenerator()
 metadata_message = generator.auto_generate_metadata_message(
     "path/to/image.jpg", 
     message_type="authenticity"
 )
 
-# Use with ZK steganography 
 hybrid = HybridProofArtifact()
 stego_result = hybrid.embed_with_proof(
     image_array, 
-    metadata_message,  # Use metadata instead of custom text
+    metadata_message,
     chaos_key="metadata_protection_key"
 )
     """)

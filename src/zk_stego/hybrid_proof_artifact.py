@@ -12,7 +12,7 @@ from PIL import Image
 from typing import Dict, Any, Optional, Tuple, List
 import time
 
-from .chaos_embedding import ChaosProofArtifact, generate_chaos_key_from_secret
+from .chaos_embedding import ChaosProofArtifact, generate_chaos_key_from_secret, ChaosEmbedding
 
 class HybridProofArtifact:
     """Hybrid approach: PNG chunk metadata + Chaos-based LSB embedding"""
@@ -25,9 +25,9 @@ class HybridProofArtifact:
             image: Optional PIL Image or numpy array to process
         """
         self.chaos_artifact = ChaosProofArtifact()
-        self.chunk_type = b'zkPF'  # zk-Proof chunk type
+        self.chunk_type = b'zkPF'
         self._zk_generator = None
-        self.image = image  # Store image for later processing
+        self.image = image
         
     @property
     def zk_generator(self):
@@ -84,7 +84,7 @@ class HybridProofArtifact:
             if not proof or not public_inputs:
                 print("ERROR: Invalid proof package structure")
                 return False
-            
+                
             is_valid = self.zk_generator.verify_proof(proof, public_inputs)
             
             if is_valid:
@@ -97,6 +97,54 @@ class HybridProofArtifact:
         except Exception as e:
             print(f"ERROR: Error verifying ZK proof: {e}")
             return False
+    
+    def embed_with_proof(
+        self,
+        image_array: np.ndarray,
+        message: str,
+        x0: Optional[int] = None,
+        y0: Optional[int] = None,
+        chaos_key: str = "default_key"
+    ) -> Optional[Tuple[Image.Image, Dict[str, Any]]]:
+        """
+        High-level method to embed message with ZK proof
+        
+        Args:
+            image_array: Input image as numpy array
+            message: Message to embed
+            x0: Optional starting X position
+            y0: Optional starting Y position
+            chaos_key: Secret key for chaos parameters
+            
+        Returns:
+            Tuple of (stego_image, proof_package) or None if failed
+        """
+        try:
+            if x0 is None or y0 is None:
+                x0, y0 = self.extract_image_feature_point(image_array)
+                print(f"Extracted feature-based starting point: ({x0}, {y0})")
+            
+            proof_package = self.generate_proof(image_array, message)
+            if not proof_package:
+                print("WARNING: Failed to generate ZK proof, continuing with embedding only...")
+            
+            chaos_embed = ChaosEmbedding(image_array)
+            chaos_key_int = generate_chaos_key_from_secret(chaos_key)
+            
+            message_bytes = message.encode('utf-8')
+            bits = []
+            for byte in message_bytes:
+                for i in range(7, -1, -1):
+                    bits.append((byte >> i) & 1)
+            
+            stego_array = chaos_embed.embed_bits(bits, x0, y0, chaos_key_int)
+            stego_image = Image.fromarray(stego_array.astype(np.uint8))
+            
+            return stego_image, proof_package
+            
+        except Exception as e:
+            print(f"ERROR: Error in embed_with_proof: {e}")
+            return None
         
     def extract_image_feature_point(self, image_array: np.ndarray) -> Tuple[int, int]:
         """Extract distinctive features from image to determine starting point"""
@@ -208,7 +256,11 @@ class HybridProofArtifact:
                 original_length = metadata["chaos"]["proof_byte_length"]
                 proof_bytes = proof_bytes[:original_length]
             
-            proof_json = json.loads(proof_bytes.decode('utf-8'))
+            try:
+                proof_json = json.loads(proof_bytes.decode('utf-8'))
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                print(f"Error decoding proof JSON: {e}")
+                return None
             
             return {
                 "proof": proof_json,
@@ -313,7 +365,6 @@ class HybridProofArtifact:
             print(f"Error extracting PNG chunk: {e}")
             return None
 
-# High-level API functions
 def embed_chaos_proof(
     cover_image_path: str,
     stego_image_path: str,
@@ -325,14 +376,12 @@ def embed_chaos_proof(
 ) -> bool:
     """High-level function to embed proof using hybrid chaos approach"""
     
-    # Load proof files
     with open(proof_json_path, 'r') as f:
         proof_json = json.load(f)
         
     with open(public_json_path, 'r') as f:
         public_json = json.load(f)
     
-    # Create hybrid artifact
     hybrid = HybridProofArtifact()
     
     return hybrid.embed_hybrid_proof(
@@ -351,7 +400,6 @@ def verify_chaos_stego(stego_image_path: str) -> bool:
     if not artifact:
         return False
         
-    # Verify artifact structure
     required_fields = ['proof', 'chaos']
     return all(field in artifact for field in required_fields)
 
