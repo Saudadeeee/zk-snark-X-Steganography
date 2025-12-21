@@ -186,9 +186,39 @@ class ZKProofGenerator:
         
         return witness_input
     
-    def extract_chaos_parameters(self, image_array: np.ndarray, message: str) -> Dict[str, Any]:
-        """Extract chaos parameters (supports up to 32 bytes)"""
+    def generate_chaos_key(self, seed: Optional[str] = None) -> str:
+        """
+        Generate a random chaos key for position generation.
         
+        Args:
+            seed: Optional seed for deterministic key generation.
+                  If None, generates a cryptographically random key.
+        
+        Returns:
+            64-character hex string (256-bit key)
+        """
+        import secrets
+        if seed is not None:
+            # Deterministic generation from seed
+            return hashlib.sha256(seed.encode()).hexdigest()
+        else:
+            # Cryptographically secure random key
+            return secrets.token_hex(32)
+    
+    def extract_chaos_parameters(self, image_array: np.ndarray, message: str, 
+                                  chaos_key: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Extract chaos parameters for ZK proof generation.
+        
+        Args:
+            image_array: Input image as numpy array
+            message: Message to embed (max 32 bytes, private input)
+            chaos_key: Secret chaos key (private input, transmitted via secure channel)
+                      If None, generates a new random key.
+        
+        Returns:
+            Dict containing all chaos parameters for witness generation
+        """
         height, width = image_array.shape[:2]
         
         if len(image_array.shape) == 3:
@@ -207,7 +237,11 @@ class ZKProofGenerator:
         max_pos = np.unravel_index(np.argmax(gradient_mag), gradient_mag.shape)
         x0, y0 = int(max_pos[1]), int(max_pos[0])
         
-        chaos_key = hashlib.sha256(message.encode()).hexdigest()
+        # chaos_key is a PRIVATE INPUT - passed separately, NOT derived from message
+        if chaos_key is None:
+            chaos_key = self.generate_chaos_key()
+            print(f"Generated new chaos_key (store securely!): {chaos_key[:16]}...")
+        
         image_hash = hashlib.sha256(image_array.tobytes()).hexdigest()
         
         message_bytes = message.encode('utf-8')[:32]
@@ -367,15 +401,27 @@ class ZKProofGenerator:
             print(f"ERROR: Proof verification FAILED: {stderr}")
             return False
     
-    def generate_complete_proof(self, image_array: np.ndarray, message: str) -> Optional[Dict[str, Any]]:
-        """Complete workflow: extract parameters, generate witness, create proof"""
+    def generate_complete_proof(self, image_array: np.ndarray, message: str,
+                                  chaos_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Complete workflow: extract parameters, generate witness, create proof.
+        
+        Args:
+            image_array: Input image as numpy array (public input)
+            message: Message to embed (private input)
+            chaos_key: Secret chaos key (private input, transmitted via secure channel)
+                      If None, generates a new random key.
+        
+        Returns:
+            Complete proof package or None if failed
+        """
         print("Starting complete ZK proof generation...")
         
         if not self.setup_trusted_setup():
             return None
         
         print("Extracting chaos parameters...")
-        chaos_params = self.extract_chaos_parameters(image_array, message)
+        chaos_params = self.extract_chaos_parameters(image_array, message, chaos_key)
         
         print("Creating witness input...")
         witness_input = self.create_witness_input(

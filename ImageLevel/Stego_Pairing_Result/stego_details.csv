@@ -1,2 +1,0 @@
-﻿session_id,start_time,end_time,transfer_time,payload_bytes,throughput_mbps,total_packets,server_packets,avg_packet_size,latency_ms,file_size_bytes
-1,13.11221,13.163359,0.051149000000000555,1351704,211.41433850123917,201,96,14614.0,51.149000000000555,1351704

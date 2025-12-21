@@ -1,7 +1,0 @@
-Metric,zkSNARK (Groth16),zkSchnorr,Analysis
-Stego Image Size,"507.78 KB (519,967 bytes)","506.72 KB (518,883 bytes)","zkSchnorr 1.06 KB smaller (0.2% difference)"
-Proof Size (embedded),~192 bytes (3 G1 + 1 G2 points),~300 bytes (signature + public key),"zkSNARK 108 bytes smaller (36% smaller proof)"
-Base Image,Same PNG,Same PNG,Identical source
-Embedding Method,Chaos-based LSB,Chaos-based LSB,Identical method
-Total Overhead,192 bytes proof + metadata,300 bytes proof + metadata,Both minimal overhead
-File Format,PNG (lossless),PNG (lossless),Same format

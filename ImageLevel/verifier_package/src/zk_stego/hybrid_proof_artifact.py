@@ -238,18 +238,32 @@ class HybridProofArtifact:
             print(f"Error in hybrid embedding: {e}")
             return False
     
-    def extract_hybrid_proof(self, stego_image_path: str) -> Optional[Dict[str, Any]]:
-        """Extract ZK proof using hybrid approach"""
+    def extract_hybrid_proof(self, stego_image_path: str, secret_key: str = None) -> Optional[Dict[str, Any]]:
+        """Extract ZK proof using hybrid approach
+        
+        Args:
+            stego_image_path: Path to the steganographic image
+            secret_key: Secret key for chaos extraction (REQUIRED for version 2.0+)
+                       Must be transmitted via secure channel
+                       
+        Returns:
+            Extracted proof artifact or None if extraction fails
+        """
         try:
             metadata = self._extract_metadata_chunk(stego_image_path)
             if not metadata:
                 return None
+            
+            # Convert secret_key to chaos_key integer if provided
+            chaos_key = None
+            if secret_key is not None:
+                chaos_key = generate_chaos_key_from_secret(secret_key)
                 
             stego_img = Image.open(stego_image_path)
             stego_array = np.array(stego_img)
             
             proof_bytes = self.chaos_artifact.extract_proof_chaos(
-                stego_array, metadata["chaos"]
+                stego_array, metadata["chaos"], chaos_key=chaos_key
             )
             
             if "proof_byte_length" in metadata["chaos"]:
@@ -404,14 +418,28 @@ def embed_chaos_proof(
         proof_json, public_json, secret_key, x0, y0
     )
 
-def extract_chaos_proof(stego_image_path: str) -> Optional[Dict[str, Any]]:
-    """High-level function to extract proof using hybrid chaos approach"""
+def extract_chaos_proof(stego_image_path: str, secret_key: str = None) -> Optional[Dict[str, Any]]:
+    """High-level function to extract proof using hybrid chaos approach
+    
+    Args:
+        stego_image_path: Path to the steganographic image
+        secret_key: Secret key for chaos extraction (REQUIRED for version 2.0+)
+                   Must be transmitted via secure channel, NOT stored in image
+                   
+    Returns:
+        Extracted proof artifact or None if extraction fails
+    """
     hybrid = HybridProofArtifact()
-    return hybrid.extract_hybrid_proof(stego_image_path)
+    return hybrid.extract_hybrid_proof(stego_image_path, secret_key=secret_key)
 
-def verify_chaos_stego(stego_image_path: str) -> bool:
-    """Single-command verification for chaos-based steganography"""
-    artifact = extract_chaos_proof(stego_image_path)
+def verify_chaos_stego(stego_image_path: str, secret_key: str = None) -> bool:
+    """Single-command verification for chaos-based steganography
+    
+    Args:
+        stego_image_path: Path to the steganographic image  
+        secret_key: Secret key for chaos extraction (REQUIRED for version 2.0+)
+    """
+    artifact = extract_chaos_proof(stego_image_path, secret_key=secret_key)
     if not artifact:
         return False
         

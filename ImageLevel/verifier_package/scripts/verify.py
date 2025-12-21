@@ -29,7 +29,8 @@ def verify_zk_stego(stego_image_path: str, secret_key: str = None, verbose: bool
     
     Args:
         stego_image_path: Path to steganographic image
-        secret_key: Secret key for chaos parameters (optional)
+        secret_key: Secret key for chaos extraction (REQUIRED for version 2.0+)
+                   Must be transmitted via secure channel
         verbose: Enable detailed output
         
     Returns:
@@ -39,7 +40,15 @@ def verify_zk_stego(stego_image_path: str, secret_key: str = None, verbose: bool
         if verbose:
             print(f"Analyzing steganographic image: {stego_image_path}")
         
-        artifact = extract_chaos_proof(stego_image_path)
+        # Extract proof using secret_key (required for secure version 2.0+)
+        try:
+            artifact = extract_chaos_proof(stego_image_path, secret_key=secret_key)
+        except ValueError as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'details': 'Secret key is required for extraction. Use --key option.'
+            }
         
         if not artifact:
             return {
@@ -170,22 +179,24 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic verification
-  python scripts/verify.py stego_image.png
-  
-  # With secret key
+  # Verification with secret key (REQUIRED for version 2.0+)
   python scripts/verify.py stego_image.png --key "my_secret_key"
   
-  # Verbose output
-  python scripts/verify.py stego_image.png -v
+  # Verbose output  
+  python scripts/verify.py stego_image.png --key "my_secret_key" -v
   
   # JSON output for automation
-  python scripts/verify.py stego_image.png --json
+  python scripts/verify.py stego_image.png --key "my_secret_key" --json
+
+SECURITY NOTE:
+  The secret key must be transmitted via a SECURE CHANNEL (not stored in image).
+  This ensures that only authorized parties can extract and verify the proof.
         """
     )
     
     parser.add_argument('image', help='Path to steganographic image')
-    parser.add_argument('--key', '-k', help='Secret key for extraction')
+    parser.add_argument('--key', '-k', required=True, 
+                       help='Secret key for extraction (REQUIRED - must be transmitted securely)')
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
     parser.add_argument('--json', '-j', action='store_true', help='JSON output format')
     

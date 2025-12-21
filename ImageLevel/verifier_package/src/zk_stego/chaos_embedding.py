@@ -245,13 +245,15 @@ class ChaosProofArtifact:
         chaos_key: int,
         proof_length: int
     ) -> dict:
-        """Create metadata for PNG chunk"""
+        """Create metadata for PNG chunk (chaos_key NOT stored - must be transmitted securely)"""
+        # Hash chaos_key for verification (user must provide correct key to extract)
+        chaos_key_hash = hashlib.sha256(str(chaos_key).encode()).hexdigest()[:16]
         return {
             "initial_position": {"x": x0, "y": y0},
-            "chaos_key": chaos_key,
+            "chaos_key_hash": chaos_key_hash,  # Only store hash, not the actual key
             "proof_length": proof_length,
             "algorithm": "arnold_cat_logistic",
-            "version": "1.0"
+            "version": "2.0"  # Version bump for security update
         }
     
     def embed_proof_chaos(
@@ -284,14 +286,38 @@ class ChaosProofArtifact:
     def extract_proof_chaos(
         self,
         stego_image: np.ndarray,
-        metadata: dict
+        metadata: dict,
+        chaos_key: int = None
     ) -> bytes:
-        """Extract proof using chaos-based positioning from metadata"""
+        """Extract proof using chaos-based positioning
         
+        Args:
+            stego_image: The steganographic image array
+            metadata: Metadata from PNG chunk
+            chaos_key: The chaos key (MUST be provided by user via secure channel)
+            
+        Returns:
+            Extracted proof bytes, or None if key verification fails
+        """
         x0 = metadata["initial_position"]["x"]
         y0 = metadata["initial_position"]["y"]
-        chaos_key = metadata["chaos_key"]
         proof_length = metadata["proof_length"]
+        
+        # Handle backward compatibility: old version stored chaos_key directly
+        if "chaos_key" in metadata:
+            # Old format (version 1.0) - use stored key (deprecated, insecure)
+            if chaos_key is None:
+                chaos_key = metadata["chaos_key"]
+                print("WARNING: Using legacy insecure format with stored chaos_key")
+        elif chaos_key is None:
+            raise ValueError("chaos_key is required for extraction (must be transmitted via secure channel)")
+        
+        # Verify chaos_key hash if available (version 2.0+)
+        if "chaos_key_hash" in metadata:
+            expected_hash = metadata["chaos_key_hash"]
+            actual_hash = hashlib.sha256(str(chaos_key).encode()).hexdigest()[:16]
+            if expected_hash != actual_hash:
+                raise ValueError("Invalid chaos_key: hash verification failed. Please check your secret key.")
         
         chaos_extract = ChaosEmbedding(stego_image)
         proof_bits = chaos_extract.extract_bits(proof_length, x0, y0, chaos_key)

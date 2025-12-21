@@ -1,4 +1,9 @@
-# ZK-SNARK Steganography Verifier Package
+# ZK-SNARK Steganography Verifier Package (v2.0 - Secure)
+
+## 🔐 Security Update (v2.0)
+
+**QUAN TRỌNG:** Từ version 2.0, `secret_key` (chaos_key) **KHÔNG còn được lưu trong ảnh**.  
+Bạn phải nhận secret_key qua một **kênh an toàn riêng** (secure channel).
 
 ## Setup
 
@@ -26,22 +31,22 @@ python scripts/verify.py --help
 
 ## Sử dụng
 
-### Verify ảnh stego
+### Verify ảnh stego (REQUIRED: --key)
 
 ```bash
-python scripts/verify.py path/to/stego_image.png
+python scripts/verify.py path/to/stego_image.png --key "your_secret_key"
 ```
 
 ### Verify với verbose output
 
 ```bash
-python scripts/verify.py path/to/stego_image.png -v
+python scripts/verify.py path/to/stego_image.png --key "your_secret_key" -v
 ```
 
 ### Verify và output JSON
 
 ```bash
-python scripts/verify.py path/to/stego_image.png --json
+python scripts/verify.py path/to/stego_image.png --key "your_secret_key" --json
 ```
 
 ## Cấu trúc Package
@@ -57,8 +62,9 @@ verifier_package/
 └── README.md              # File này
 ```
 
-## Lưu ý
+## 🔑 Bảo mật (v2.0)
 
-- **Verification key** là public key, không cần bảo mật
-- **Secret key** KHÔNG cần thiết để verify proof (chỉ cần để extract message)
-- Tất cả thông tin cần thiết đã có trong ảnh stego (metadata + proof)
+- **Secret key**: PHẢI được truyền qua kênh an toàn (HTTPS, encrypted message, ...)
+- **Không lưu trong ảnh**: Ảnh chỉ chứa hash của key để verify
+- **Verification key**: Là public key của ZK circuit, không cần bảo mật
+- **Backward compatible**: Vẫn hỗ trợ ảnh cũ (v1.0) nhưng sẽ hiển thị warning
