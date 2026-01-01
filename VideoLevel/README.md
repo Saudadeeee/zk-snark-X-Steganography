@@ -17,6 +17,7 @@ Hệ thống nhúng bằng chứng zk-SNARK vào Motion Vector của video H.264
 ### 1. Yêu cầu hệ thống
 - Python 3.7+
 - FFmpeg (với H.264 support)
+- **PyAV (khuyến nghị cho production)**
 
 ### 2. Cài đặt FFmpeg
 
@@ -41,6 +42,13 @@ brew install ffmpeg
 cd VideoLevel
 pip install -r requirements.txt
 ```
+
+**Bao gồm**:
+- `numpy`, `matplotlib` - Core dependencies
+- `av` - **PyAV cho real H.264 MV extraction**
+- `opencv-python` - Video processing
+- `Pillow` - Image processing
+- `scikit-image` - SSIM calculation
 
 ---
 
@@ -69,23 +77,35 @@ VideoLevel/
 
 ## Sử dụng
 
-### Quick Start
+### Quick Start - Production Mode (PyAV)
 
 ```bash
-# Chạy pipeline hoàn chỉnh với 1 lệnh
-python phase0_demo.py path/to/video.mp4
+# Bước 1: Chuẩn bị video H.264 với P-frames
+python prepare_test_videos.py
+
+# Bước 2: Test PyAV extraction
+python test_pyav_extraction.py data/encoded/foreman_cif_h264.mp4
+
+# Bước 3: Chạy pipeline với real MV extraction
+python phase0_demo.py data/encoded/foreman_cif_h264.mp4
 ```
 
-Ví dụ:
+**⚡ NEW**: Pipeline tự động detect và sử dụng PyAV nếu có!
+
+### Quick Start - Demo Mode (Fallback)
+
+Nếu PyAV chưa cài hoặc không hoạt động:
+
 ```bash
-python phase0_demo.py ../TestVideo/sample.mp4
+# Chạy với synthetic MV data
+python phase0_demo.py TestVideo/foreman_cif.y4m
+**Production (PyAV)**:
+```bash
+python tools/mv_extractor/h264_parser.py input.mp4 output_mv.json
 ```
 
-Pipeline sẽ tự động:
-1. ✅ Trích xuất Motion Vectors
-2. ✅ Tạo visualization (overlay video, plots, heatmaps)
-3. ✅ Tính toán thống kê (magnitude, parity, correlation, capacity)
-4. ✅ Tạo báo cáo Phase 0
+**Demo mode**:
+```
 
 ### Sử dụng từng module riêng lẻ
 
@@ -153,12 +173,45 @@ Sau khi chạy `phase0_demo.py`, bạn sẽ có:
 - **All P-MVs**: Tổng capacity tối đa (không khuyến nghị)
 - **Safe MVs**: Chỉ MV có magnitude >= 5 (khuyến nghị)
 - **Sparse 10%-50%**: Embedding thưa → an toàn hơn, khó phát hiện hơn
+có 2 chế độ**:
 
----
+**1. Production Mode (Khuyến nghị)** - PyAV
+- ✅ Extract **real** motion vectors từ H.264 bitstream
+- ✅ Production-ready cho Phase 1+
+- ✅ Tự động detect nếu PyAV available
 
-## Lưu ý quan trọng
+**2. Demo Mode (Fallback)** - Synthetic data
+- ⚠️ Tạo synthetic MV data để demonstration
+- ⚠️ Chỉ dùng để test pipeline structure
+- ⚠️ **KHÔNG dùng cho production**
 
-### Demo Mode
+### Kiểm tra mode nào đang dùng
+
+```bash
+# Test PyAV
+python test_pyav_extraction.py data/encoded/test.mp4
+
+# Nếu tất cả tests pass → Production Mode ✓
+# Nếu có test fail → Demo Mode (cần fix)
+```
+
+### Chuyển từ Demo sang Production
+
+```bash
+# 1. Cài PyAV
+pip install av
+
+# 2. Chuẩn bị video H.264
+python prepare_test_videos.py
+
+# 3. Test
+python test_pyav_extraction.py data/encoded/foreman_cif_h264.mp4
+
+# 4. Chạy pipeline
+python phase0_demo.py data/encoded/foreman_cif_h264.mp4
+```
+
+Xem hướng dẫn chi tiết: [docs/PYAV_QUICK_START.md](docs/PYAV_QUICK_START.md)
 ⚠️ **Phase 0 hiện chạy ở Demo Mode** với synthetic MV data để demonstration.
 
 Để sử dụng trong production:

@@ -1,6 +1,14 @@
 """
 Motion Vector Extractor for H.264/AVC videos
-Extracts motion vectors from P-frames using FFmpeg
+Extracts motion vectors from P-frames using multiple methods
+
+Production Mode:
+- PyAV: Fast, cross-platform (requires av package)
+- JM Decoder: Reference standard (requires JM build)
+- FFmpeg: Parser-based (fallback)
+
+Demo Mode:
+- Synthetic data for testing pipeline
 """
 
 import subprocess
@@ -213,40 +221,70 @@ class MVExtractor:
         """
         import tempfile
 
-        # Create temporary file for MV data
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
-            temp_mv_file = f.name
-
+        print("[INFO] Attempting real H.264 MV extraction...")
+        
+        # Try PyAV first (production method)
         try:
-            # Extract frame info with codecview
-            cmd = [
-                'ffmpeg',
-                '-flags2', '+export_mvs',
-                '-i', self.video_path,
-                '-vframes', str(max_frames),
-                '-vf', 'codecview=mv=pf+bf+bb:enable=gt(n\\,0)',
-                '-f', 'null',
-                '-'
-            ]
-
-            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
-
-            # Write debug output to temp file
-            with open(temp_mv_file, 'w', encoding='utf-8') as f:
-                f.write(result.stderr)
-
-            print(f"FFmpeg output saved to: {temp_mv_file}")
-            print("\nNote: Full MV extraction requires direct bitstream parsing.")
-            print("This demo shows the extraction pipeline structure.")
-
-            # Generate sample data for demonstration
-            self._generate_sample_mv_data(max_frames)
-
+            return self._extract_with_pyav(max_frames)
+        except ImportError:
+            print("[WARN] PyAV not installed. Install with: pip install av")
+        except Exception as e:
+            print(f"[WARN] PyAV extraction failed: {e}")
+        
+        # Fallback to demo mode
+        print("[INFO] Falling back to demo mode with synthetic data")
+        self._generate_sample_mv_data(max_frames)
+        return self.mv_data
+    
+    def _extract_with_pyav(self, max_frames: int = 100) -> List[MVData]:
+        """
+        Extract motion vectors using PyAV (Production mode)
+        
+        Args:
+            max_frames: Maximum frames to process
+            
+        Returns:
+            List of MVData objects
+        """
+        try:
+            from .h264_parser import H264MVExtractor
+            
+            print("[INFO] Using PyAV for real H.264 MV extraction")
+            
+            # Create H.264 extractor
+            extractor = H264MVExtractor(self.video_path)
+            
+            # Extract motion vectors
+            real_mvs = extractor.extract_motion_vectors(max_frames=max_frames)
+            
+            if not real_mvs:
+                print("[WARN] No motion vectors extracted with PyAV")
+                print("[INFO] Video might be all I-frames or codec doesn't export MVs")
+                raise ValueError("No MVs extracted")
+            
+            # Convert RealMVData to MVData format
+            self.mv_data = []
+            for mv in real_mvs:
+                mv_obj = MVData(
+                    frame_idx=mv.frame_idx,
+                    frame_type=mv.frame_type,
+                    timestamp=mv.timestamp,
+                    mb_x=mv.mb_x,
+                    mb_y=mv.mb_y,
+                    mvx=mv.mvx,
+                    mvy=mv.mvy,
+                    block_type=f"{mv.w}x{mv.h}"
+                )
+                self.mv_data.append(mv_obj)
+            
+            print(f"[OK] Extracted {len(self.mv_data)} real motion vectors using PyAV")
             return self.mv_data
-
-        finally:
-            if os.path.exists(temp_mv_file):
-                os.unlink(temp_mv_file)
+            
+        except ImportError:
+            raise  # Re-raise to trigger fallback
+        except Exception as e:
+            print(f"[ERROR] PyAV extraction error: {e}")
+            raise
 
     def _generate_sample_mv_data(self, num_frames: int):
         """

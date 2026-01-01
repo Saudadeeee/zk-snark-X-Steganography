@@ -4,9 +4,11 @@
 numpy>=1.21.0
 matplotlib>=3.4.0
 
-# Video processing (optional, FFmpeg is used via subprocess)
-# av>=9.0.0  # PyAV for advanced bitstream parsing (optional)
+# Video processing - H.264 bitstream parsing
+av>=10.0.0  # PyAV for real H.264 motion vector extraction
+Pillow>=9.0.0  # Image processing for frame extraction
 
 # For future phases
-# opencv-python>=4.5.0  # Advanced video processing
-# Pillow>=8.0.0  # Image processing
+opencv-python>=4.5.0  # Advanced video processing
+scikit-image>=0.19.0  # SSIM calculation
+tqdm>=4.62.0  # Progress bars
