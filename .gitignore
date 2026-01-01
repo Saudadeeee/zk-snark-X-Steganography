@@ -28,3 +28,10 @@ test_*.json
 verification_result.json
 *_test_*.py
 *demo*.py
+
+# Test videos and data
+/TestVideo
+/VideoLevel/data/
+/VideoLevel/results/
+/VideoLevel/output/
+.claude/
