@@ -1,5 +1,5 @@
-"""Motion Vector Extractor Package"""
+"""Motion Vector Extractor Package - Production PyAV"""
 
-from .parser import MVExtractor, MVData
+from .h264_parser import H264MVExtractor, RealMVData
 
-__all__ = ['MVExtractor', 'MVData']
+__all__ = ['H264MVExtractor', 'RealMVData']
