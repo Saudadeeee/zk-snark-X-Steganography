@@ -1,4 +1,4 @@
-# Phase 0: Motion Vector Analysis Requirements
+# Phase 0 & 1: Motion Vector Analysis & Embedding Requirements
 
 # Core dependencies
 numpy>=1.21.0
@@ -7,6 +7,9 @@ matplotlib>=3.4.0
 # Video processing - H.264 bitstream parsing
 av>=10.0.0  # PyAV for real H.264 motion vector extraction
 Pillow>=9.0.0  # Image processing for frame extraction
+
+# Phase 1: Embedding requirements
+reedsolo>=1.7.0  # Reed-Solomon error correction codes
 
 # For future phases
 opencv-python>=4.5.0  # Advanced video processing
