@@ -1,38 +1,191 @@
-# Build artifacts
-temp/
-output/
-*.wtns
-*.tmp
-*.log
-*.backup
-*~
-
-# Python cache
+# ============================================================
+# PYTHON
+# ============================================================
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+*.so
 
-# IDE files
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ============================================================
+# NODE.JS / JAVASCRIPT
+# ============================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+.npm/
+
+# ============================================================
+# ZK-SNARK CIRCUITS (LARGE FILES)
+# ============================================================
+# Powers of Tau ceremony files (large!)
+*.ptau
+pot*.ptau
+/ImageLevel/artifacts/keys/*.ptau
+
+# Compiled circuit artifacts
+*.r1cs
+*.wasm
+*.sym
+*.wtns
+*.zkey
+!verification_key.json
+
+# Circuit build directories
+/ImageLevel/circuits/compiled/build/chaos_zk_stego_js/
+/ImageLevel/circuits/compiled/build/*.r1cs
+/ImageLevel/circuits/compiled/build/*.zkey
+/ImageLevel/circuits/compiled/build/*.wasm
+
+# ============================================================
+# STEGANOGRAPHY ARTIFACTS
+# ============================================================
+# Generated stego images/videos
+/ImageLevel/stego_images/*.png
+/ImageLevel/stego_images/*.jpg
+!/ImageLevel/stego_images/client_download.py
+!/ImageLevel/stego_images/server_save.py
+
+# Benchmark results (can be large)
+/VideoLevel/benchmark_results/
+/VideoLevel/benchmark_stego.json
+
+# Test videos and temporary data
+/TestVideo/
+/VideoLevel/data/encoded/
+/VideoLevel/data/output/
+/VideoLevel/results/
+/VideoLevel/output/
+
+# Stego pairing results
+/ImageLevel/Stego_Pairing_Result/stego_details.csv
+/ImageLevel/Stego_Pairing_Result/schnorr/
+
+# Setup results (CSV files can stay for reference)
+# /ImageLevel/Setup_Result/setup_details.csv
+
+# WiFi benchmark data
+/ImageLevel/wifi_benchmark/ComXCom_Result/
+/ImageLevel/wifi_benchmark/Pi5XCom_Result/
+
+# ZK-Schnorr benchmark
+/ImageLevel/zk_schnorr_benchmark/*.csv
+
+# ============================================================
+# LATEX / DOCUMENTATION
+# ============================================================
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+*.idx
+*.ilg
+*.ind
+/ImageLevel/*.pdf
+!/ImageLevel/MainPaper.tex
+
+# ============================================================
+# IDE / EDITOR
+# ============================================================
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+.project
+.classpath
+.settings/
 
-# OS files
+# ============================================================
+# OS FILES
+# ============================================================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+Desktop.ini
 
-# Generated test files
+# ============================================================
+# TEMPORARY / BUILD FILES
+# ============================================================
+temp/
+tmp/
+output/
+*.tmp
+*.backup
+*.bak
+*.cache
+
+# ============================================================
+# TEST / DEVELOPMENT FILES
+# ============================================================
 test_*.png
+test_*.jpg
 test_*.json
+test_*.py
+*_test.py
+demo_*.py
+*demo*.json
 verification_result.json
-*_test_*.py
-*demo*.py
 
-# Test videos and data
-/TestVideo
-/VideoLevel/data/
-/VideoLevel/results/
-/VideoLevel/output/
+# Todo and notes
 .claude/
-/VideoLevel/todo.md
+todo.md
+TODO.md
+notes.md
+
+# ============================================================
+# PROJECT-SPECIFIC EXCLUSIONS
+# ============================================================
+# Keep important config files
+!package.json
+!requirements.txt
+!setup.bat
+!setup.sh
+!tsconfig.json
+
+# Keep verification keys (small, important)
+!*verification_key.json
+
+# Keep example test vectors
+!/ImageLevel/examples/testvectors/
+
+# Keep verifier packages structure
+!/ImageLevel/verifier_package/
+!/ImageLevel/verifier_zkschnorr_package/
