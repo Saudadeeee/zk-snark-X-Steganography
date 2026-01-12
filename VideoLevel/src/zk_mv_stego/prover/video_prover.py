@@ -173,9 +173,11 @@ class VideoProver:
                     output_video=output_video
                 )
                 
+                # Pass embedding_info to encoder for sidecar metadata
                 encoding_result = encoder.write_stego_video(
                     modified_mvs=modified_mv_data,
-                    method='bitstream'  # Copy video approach
+                    method='enhanced',  # Use enhanced encoding
+                    embedding_info=embedding_info  # Pass embedding info
                 )
                 
                 print(f"  Stego video created: {output_video}")
@@ -197,6 +199,8 @@ class VideoProver:
             except Exception as e:
                 print(f"  [ERROR] Video encoding failed: {e}")
                 print(f"  [INFO] Metadata saved without video file")
+                import traceback
+                traceback.print_exc()
         
         # Summary
         print(f"\n{'='*80}")
