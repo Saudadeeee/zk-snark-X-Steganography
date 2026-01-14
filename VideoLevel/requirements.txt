@@ -1,17 +1,25 @@
-# Phase 0 & 1: Motion Vector Analysis & Embedding Requirements
+# DCT Steganography Requirements
 
 # Core dependencies
-numpy>=1.21.0
-matplotlib>=3.4.0
+numpy>=1.24.0
 
-# Video processing - H.264 bitstream parsing
-av>=10.0.0  # PyAV for real H.264 motion vector extraction
-Pillow>=9.0.0  # Image processing for frame extraction
+# Video processing
+opencv-python>=4.8.0  # Video I/O, frame processing
 
-# Phase 1: Embedding requirements
-reedsolo>=1.7.0  # Reed-Solomon error correction codes
+# DCT Transform
+scipy>=1.11.0  # DCT/IDCT transforms
 
-# For future phases
-opencv-python>=4.5.0  # Advanced video processing
-scikit-image>=0.19.0  # SSIM calculation
-tqdm>=4.62.0  # Progress bars
+# Quality metrics
+scikit-image>=0.21.0  # SSIM calculation
+
+# Error correction
+reedsolo>=1.7.0  # Reed-Solomon ECC
+
+# Utilities
+tqdm>=4.65.0  # Progress bars
+
+# ZK-SNARKs (requires Node.js + snarkjs)
+# Install separately: npm install -g snarkjs
+
+# Testing
+pytest>=7.4.0

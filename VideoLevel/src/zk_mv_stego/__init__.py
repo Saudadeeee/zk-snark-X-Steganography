@@ -1,33 +1,33 @@
 """
-ZK-SNARK Motion Vector Steganography
-Production-ready video steganography using H.264 motion vectors + Zero-Knowledge proofs
+ZK-SNARK DCT Video Steganography
+Production-ready video steganography using DCT coefficients + Zero-Knowledge proofs
 
 Modules:
-- extractor: H.264 motion vector extraction (PyAV-based)
-- embedder: Payload embedding into motion vectors
-- prover: ZK-SNARK proof generation for steganography
-- verifier: Message extraction and proof verification
-- utils: Shared utilities (statistics, quality metrics)
+- embedder: DCT coefficient embedding
+- encoder: Video encoding/decoding
+- prover: ZK-SNARK proof generation
+- verifier: Proof extraction and verification
+- utils: Quality metrics and statistics
 """
 
-__version__ = "2.0.0"
+__version__ = "2.0-DCT"
 __author__ = "ZK-Stego Team"
 
-from .extractor import H264MVExtractor
-from .embedder import CarrierSelector, PayloadEncoder, MVEmbedder, MVExtractor
+from .embedder import DCTEmbedder, DCTExtractor, PayloadEncoder, PayloadDecoder
 from .prover import VideoProver, ZKProofWrapper
 from .verifier import VideoVerifier
-from .utils import MVStatistics, QualityMetrics
+from .encoder import VideoEncoder
+from .utils import calculate_psnr, calculate_ssim
 
 __all__ = [
-    # Extractor
-    "H264MVExtractor",
-    
     # Embedder
-    "CarrierSelector",
+    "DCTEmbedder",
+    "DCTExtractor",
     "PayloadEncoder",
-    "MVEmbedder",
-    "MVExtractor",
+    "PayloadDecoder",
+    
+    # Encoder
+    "VideoEncoder",
     
     # Prover
     "VideoProver",
@@ -37,6 +37,6 @@ __all__ = [
     "VideoVerifier",
     
     # Utils
-    "MVStatistics",
-    "QualityMetrics",
+    "calculate_psnr",
+    "calculate_ssim",
 ]
