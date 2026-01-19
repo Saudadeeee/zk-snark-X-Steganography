@@ -1,42 +1,28 @@
 """
-ZK-SNARK DCT Video Steganography
-Production-ready video steganography using DCT coefficients + Zero-Knowledge proofs
+ZK-SNARK CAVLC Video Steganography
+Core CAVLC-based video steganography system with Zero-Knowledge proofs
 
-Modules:
-- embedder: DCT coefficient embedding
-- encoder: Video encoding/decoding
+Core Modules:
+- bitstream: CAVLC encoder/decoder, H.264 parser, bitstream I/O
+- decoder: CAVLC coefficient extraction
 - prover: ZK-SNARK proof generation
-- verifier: Proof extraction and verification
-- utils: Quality metrics and statistics
+- verifier: Proof verification
+- utils: Quality metrics
+- core: Payload embedding
 """
 
-__version__ = "2.0-DCT"
+__version__ = "3.0-CAVLC-Core"
 __author__ = "ZK-Stego Team"
 
-from .embedder import DCTEmbedder, DCTExtractor, PayloadEncoder, PayloadDecoder
-from .prover import VideoProver, ZKProofWrapper
-from .verifier import VideoVerifier
-from .encoder import VideoEncoder
-from .utils import calculate_psnr, calculate_ssim
+# Core CAVLC system - minimal imports
+from .bitstream.cavlc_encoder import CAVLCEncoder
+from .bitstream.cavlc_decoder import CAVLCDecoder
+from .bitstream.h264_parser import H264BitstreamParser
+from .decoder.cavlc_extractor_simple import SimpleCAVLCExtractor
 
 __all__ = [
-    # Embedder
-    "DCTEmbedder",
-    "DCTExtractor",
-    "PayloadEncoder",
-    "PayloadDecoder",
-    
-    # Encoder
-    "VideoEncoder",
-    
-    # Prover
-    "VideoProver",
-    "ZKProofWrapper",
-    
-    # Verifier
-    "VideoVerifier",
-    
-    # Utils
-    "calculate_psnr",
-    "calculate_ssim",
+    "CAVLCEncoder",
+    "CAVLCDecoder",
+    "H264BitstreamParser",
+    "SimpleCAVLCExtractor",
 ]
