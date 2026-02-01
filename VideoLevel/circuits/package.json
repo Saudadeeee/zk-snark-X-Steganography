@@ -1,0 +1,23 @@
+{
+  "name": "zk-snark-video-steganography-circuits",
+  "version": "2.0.0",
+  "description": "Circom circuits for ZK-SNARK video steganography",
+  "main": "index.js",
+  "scripts": {
+    "compile": "circom payload_verify.circom --r1cs --wasm --sym -o build",
+    "setup": "node setup.js",
+    "test": "node test.js"
+  },
+  "keywords": [
+    "zk-snark",
+    "circom",
+    "steganography",
+    "groth16"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "circomlib": "^2.0.5",
+    "snarkjs": "^0.7.0"
+  }
+}

@@ -17,6 +17,7 @@ from typing import List, Optional
 from enum import IntEnum
 
 from .h264_parser import BitstreamReader
+from .bitstream_io import BitstreamReader
 
 
 class MBType(IntEnum):
@@ -330,22 +331,95 @@ class MacroblockParser:
         # Get left and top blocks
         # (Simplified - proper implementation needs full neighbor logic)
         
-        # Block position within MB (0-15)
-        blk_x = blk_idx % 4
-        blk_y = blk_idx // 4
+        # Get left and top blocks
+        # Correctly map block_idx (0-15) to (x,y) in 4x4 grid
+        # H.264 scan order:
+        # 0 1 | 4 5
+        # 2 3 | 6 7
+        # -----+-----
+        # 8 9 |12 13
+        # 10 11|14 15
         
-        # Left block
+        # blk_idx to (x,y) mapping table
+        # x: 0..3, y: 0..3
+        BLOCK_XY = [
+            (0,0), (1,0), (0,1), (1,1),
+            (2,0), (3,0), (2,1), (3,1),
+            (0,2), (1,2), (0,3), (1,3),
+            (2,2), (3,2), (2,3), (3,3)
+        ]
+        
+        if blk_idx < 16:
+            blk_x, blk_y = BLOCK_XY[blk_idx]
+        elif blk_idx < 20: # DC Chroma (U, V) - handled separately or mapped?
+             # Chroma DC is 2x2 blocks for 4:2:0? No, 1 block per component usually for 4:2:0 YUV
+             # But here block_idx 16..19 usually means:
+             # 16: Cb DC
+             # 17: Cr DC
+             # This depends on format.
+             # For nC calculation of Chroma, rules are different.
+             # We simplify: return 0 or -1?
+             # Standard says Chroma uses different nC logic (often nC=-1 for Chroma DC).
+             return -1 # Chroma DC uses nC = -1
+        else: # AC Chroma
+             # 20-39 for 4:2:0 (8 AC blocks per component: 4 Cb + 4 Cr)
+             # H.264 standard: Chroma AC uses nC = -2 (different VLC table)
+             return -2 # Chroma AC uses nC = -2
+        
+        # Left neighbor
         if blk_x > 0:
-            left_key = (mb_x, mb_y, blk_idx - 1)
+             # Find neighbors in same MB
+             # We need to find block_idx that has (blk_x-1, blk_y)
+             # Reverse lookup? 
+             # Or precompute:
+             # (1,0)->0 (idx 1->0), (3,0)->2 (idx 5->4)
+             # (0,1)->Left is neighbor MB
+             
+             # Map (blk_x-1, blk_y) back to index
+             left_x = blk_x - 1
+             left_y = blk_y
+             # Scan BLOCK_XY to find index
+             # Optimization:
+             left_idx = -1
+             for i, (bx, by) in enumerate(BLOCK_XY):
+                 if bx == left_x and by == left_y:
+                     left_idx = i
+                     break
+             left_key = (mb_x, mb_y, left_idx)
         else:
-            left_key = (mb_x - 1, mb_y, blk_idx + 3)
-        
-        # Top block
+             # Neighbor MB (Left)
+             # Rightmost column of left MB is x=3
+             # y matches
+             left_x = 3
+             left_y = blk_y
+             left_idx = -1
+             for i, (bx, by) in enumerate(BLOCK_XY):
+                 if bx == left_x and by == left_y:
+                     left_idx = i
+                     break
+             left_key = (mb_x - 1, mb_y, left_idx)
+             
+        # Top neighbor
         if blk_y > 0:
-            top_key = (mb_x, mb_y, blk_idx - 4)
+             top_x = blk_x
+             top_y = blk_y - 1
+             top_idx = -1
+             for i, (bx, by) in enumerate(BLOCK_XY):
+                 if bx == top_x and by == top_y:
+                     top_idx = i
+                     break
+             top_key = (mb_x, mb_y, top_idx)
         else:
-            top_key = (mb_x, mb_y - 1, blk_idx + 12)
-        
+             # Neighbor MB (Top)
+             top_x = blk_x
+             top_y = 3
+             top_idx = -1
+             for i, (bx, by) in enumerate(BLOCK_XY):
+                 if bx == top_x and by == top_y:
+                     top_idx = i
+                     break
+             top_key = (mb_x, mb_y - 1, top_idx)
+             
         # Get neighbor counts
         nA = neighbor_coeffs.get(left_key, 0)
         nB = neighbor_coeffs.get(top_key, 0)

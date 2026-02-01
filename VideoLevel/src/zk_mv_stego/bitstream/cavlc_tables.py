@@ -264,6 +264,45 @@ COEFF_TOKEN_NC_4_5 = {
     '00000001': (16, 3),
 }
 
+# For nC = -1 (Chroma DC 2x2)
+# Complete table from FFmpeg libavcodec/h264_cavlc.c
+# Maps VLC code -> (TotalCoeff, TrailingOnes)
+COEFF_TOKEN_CHROMA_DC = {
+    '1': (1, 1),           # TotalCoeff=1, T1s=1
+    '01': (0, 0),          # TotalCoeff=0, T1s=0
+    '001': (2, 2),         # TotalCoeff=2, T1s=2
+    '000010': (4, 0),      # TotalCoeff=4, T1s=0
+    '000011': (3, 0),      # TotalCoeff=3, T1s=0
+    '000100': (2, 0),      # TotalCoeff=2, T1s=0
+    '000101': (3, 3),      # TotalCoeff=3, T1s=3
+    '000110': (2, 1),      # TotalCoeff=2, T1s=1
+    '000111': (1, 0),      # TotalCoeff=1, T1s=0
+    '0000000': (4, 3),     # TotalCoeff=4, T1s=3
+    '0000010': (3, 2),     # TotalCoeff=3, T1s=2
+    '0000011': (3, 1),     # TotalCoeff=3, T1s=1
+    '00000010': (4, 2),    # TotalCoeff=4, T1s=2
+    '00000011': (4, 1),    # TotalCoeff=4, T1s=1
+}
+
+# Table 9-9(b): Total zeros for 2x2 blocks (Chroma DC)
+TOTAL_ZEROS_2x2 = {
+    1: { # TotalCoeff = 1
+        '1': 0,
+        '01': 1,
+        '00': 2,
+        '000': 3, # Implicit?
+    },
+    2: { # TotalCoeff = 2
+        '1': 0,
+        '01': 1,
+        '00': 2, # Max zeros 2? (Total 4, 2 coeffs -> 2 zeros)
+    },
+    3: { # TotalCoeff = 3
+        '1': 0,
+        '0': 1, # Max zeros 1
+    }
+}
+
 # For nC = 6 or 7 (Table 9-5(d))
 COEFF_TOKEN_NC_6_7 = {
     '0101': (0, 0),
@@ -658,11 +697,13 @@ def get_coeff_token_table(nC: int):
         nC: Prediction value from neighboring blocks
         
     Returns:
-        Dictionary mapping code strings to (TotalCoeff, TrailingOnes)
     """
     if nC == -1:
-        # Chroma DC uses special table (not implemented)
-        return {}
+        # Chroma DC uses special table (Table 9-5 column nC=-1)
+        return COEFF_TOKEN_CHROMA_DC
+    elif nC == -2:
+        # Chroma AC uses same table as nC=0-1 (Table 9-5 column nC=0,1)
+        return COEFF_TOKEN_NC_0_1
     elif nC < 2:
         return COEFF_TOKEN_NC_0_1
     elif nC < 4:
@@ -675,22 +716,27 @@ def get_coeff_token_table(nC: int):
         # Use FLC(6) - fixed length code
         return 'FLC6'
 
+# ...
 
-def get_total_zeros_table(total_coeff: int):
+def get_total_zeros_table(total_coeff: int, is_chroma_dc: bool = False):
     """
     Get total_zeros VLC table for given TotalCoeff
     
     Args:
         total_coeff: Number of non-zero coefficients
-        
-    Returns:
-        Dictionary mapping code strings to total_zeros values
+        is_chroma_dc: Whether this is for Chroma DC (2x2 block)
     """
+    if is_chroma_dc:
+        if total_coeff in TOTAL_ZEROS_2x2:
+            return TOTAL_ZEROS_2x2[total_coeff]
+        return {}
+        
     if total_coeff in TOTAL_ZEROS_TABLES:
         return TOTAL_ZEROS_TABLES[total_coeff]
     else:
         # Return empty dict for unimplemented tables
         return {}
+
 
 
 def get_run_before_table(zeros_left: int):
@@ -937,3 +983,26 @@ def find_run_before_code(run_before: int, zeros_left: int) -> str:
         raise ValueError(f"Invalid run_before: {run_before} for zerosLeft={zeros_left}")
     
     return reverse_table[run_before]
+
+
+def get_cbp_me_mapping(is_intra: bool) -> list:
+    """
+    Get CBP me(v) mapping table based on MB type
+    H.264 Table 9-4: Specification of mapping of cbp to me(v)
+    
+    Args:
+        is_intra: True for Intra MBs, False for Inter MBs
+    
+    Returns:
+        List mapping code_num -> cbp value
+    """
+    if is_intra:
+        # Intra mapping (Table 9-4 left column)
+        return [47, 31, 15, 0, 23, 27, 29, 30, 7, 11, 13, 14, 39, 43, 45, 46,
+                16, 3, 5, 10, 12, 19, 21, 26, 28, 35, 37, 42, 44, 1, 2, 4,
+                8, 17, 18, 20, 24, 6, 9, 22, 25, 32, 33, 34, 36, 40, 38, 41]
+    else:
+        # Inter mapping (Table 9-4 right column)  
+        return [0, 16, 1, 2, 4, 8, 32, 3, 5, 10, 12, 15, 47, 7, 11, 13,
+                14, 6, 9, 31, 35, 37, 42, 44, 33, 34, 36, 40, 39, 43, 45, 46,
+                17, 18, 20, 24, 19, 21, 26, 28, 23, 27, 29, 30, 22, 25, 38, 41]

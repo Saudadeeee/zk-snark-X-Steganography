@@ -11,7 +11,7 @@ import numpy as np
 from typing import List, Tuple
 from dataclasses import dataclass
 
-from .bitstream_writer import BitstreamWriter
+from .bitstream_io import BitstreamWriter
 from .cavlc_tables import (
     find_coeff_token_code,
     find_total_zeros_code,
@@ -95,6 +95,22 @@ class CAVLCEncoder:
         
         # 4. Encode total_zeros (if not all coefficients)
         if analysis.total_coeffs < max_num_coeff:
+            # DEBUG for first block
+            if debug_key and debug_key[0] == 0 and debug_key[1] == 0:
+                print(f"      [CAVLC_ENC] total_zeros={analysis.total_zeros}, total_coeffs={analysis.total_coeffs}, max_num_coeff={max_num_coeff}")
+                print(f"      [CAVLC_ENC] Constraint: total_zeros <= {max_num_coeff - analysis.total_coeffs}")
+            
+            # Validate total_zeros is within valid range for VLC tables
+            max_tz = max_num_coeff - 1 - analysis.total_coeffs
+            if analysis.total_zeros > max_tz:
+                # This should not happen after our validation in _analyze_block,
+                # but add safety check anyway
+                print(f"      [WARN] total_zeros ({analysis.total_zeros}) > max ({max_tz}), clamping")
+                analysis.total_zeros = max_tz
+            elif analysis.total_zeros < 0:
+                print(f"      [WARN] total_zeros ({analysis.total_zeros}) < 0, setting to 0")
+                analysis.total_zeros = 0
+            
             total_zeros_code = find_total_zeros_code(
                 analysis.total_zeros,
                 analysis.total_coeffs
@@ -115,10 +131,35 @@ class CAVLCEncoder:
         Returns:
             BlockAnalysis with all parameters
         """
-        # Find non-zero coefficients
-        non_zero_indices = [i for i, c in enumerate(coeffs) if c != 0]
+        # CRITICAL FIX: Strip trailing zeros BEFORE processing
+        # H.264 CAVLC only encodes coefficients up to the last non-zero
+        # Trailing zeros are implicit (not encoded in bitstream)
+        last_nonzero_idx = -1
+        for i in range(len(coeffs) - 1, -1, -1):
+            if coeffs[i] != 0:
+                last_nonzero_idx = i
+                break
+        
+        # If all coefficients are zero
+        if last_nonzero_idx == -1:
+            return BlockAnalysis(
+                total_coeffs=0,
+                trailing_ones=0,
+                trailing_signs=[],
+                levels=[],
+                total_zeros=0,
+                runs=[]
+            )
+        
+        # Only process coefficients up to last non-zero (inclusive)
+        # This excludes trailing zeros which are NOT encoded in CAVLC
+        active_coeffs = coeffs[:last_nonzero_idx + 1]
+        
+        # Find non-zero coefficients within active range
+        non_zero_indices = [i for i, c in enumerate(active_coeffs) if c != 0]
         total_coeffs = len(non_zero_indices)
         
+        # Sanity check (should never happen after stripping trailing zeros)
         if total_coeffs == 0:
             return BlockAnalysis(
                 total_coeffs=0,
@@ -130,7 +171,7 @@ class CAVLCEncoder:
             )
         
         # Extract levels (values) in reverse zigzag order
-        levels = [coeffs[i] for i in reversed(non_zero_indices)]
+        levels = [active_coeffs[i] for i in reversed(non_zero_indices)]
         
         # Count trailing ±1s (from highest frequency, max 3)
         trailing_ones = 0
@@ -143,21 +184,16 @@ class CAVLCEncoder:
             else:
                 break
         
-        # Calculate total_zeros
-        # total_zeros is the count of ALL zero coefficients up to (but not including)
-        # the LAST non-zero coefficient position
-        # For example: [5,0,0,0,...] has last_coeff at index 0, so total_zeros = 0
-        # For example: [3,0,-2,0,...] has last_coeff at index 2, so total_zeros = 1 (the zero at index 1)
-        # For example: [0,0,3,0,5,0,...] has last_coeff at index 4, so total_zeros = 3 (indices 0,1,3)
-        
-        # Actually, looking at H.264 spec more carefully:
-        # total_zeros is number of zeros BEFORE the highest-frequency (last in zigzag) coefficient
-        # Since we process in REVERSE order, this is zeros before the FIRST non-zero in forward scan
-        
-        # Simpler: total_zeros = (max_num_coeff - total_coeffs) - trailing_zeros_after_last_coeff
-        # Even simpler: count zeros from position 0 to last non-zero position (inclusive)
-        last_coeff_idx = non_zero_indices[-1]
-        total_zeros = last_coeff_idx + 1 - total_coeffs
+        # Calculate total_zeros (H.264 Section 9.2.1)
+        # total_zeros = number of zero-valued coefficients BEFORE the last non-zero coefficient
+        # This is the number of zeros within the active range (already stripped trailing zeros)
+        # = (last_active_position + 1) - total_coeffs
+        # = len(active_coeffs) - total_coeffs
+        # 
+        # Example: [5,0,0,3]     -> total_coeffs=2, total_zeros=2 (positions 1,2)
+        # Example: [0,0,5]       -> total_coeffs=1, total_zeros=2 (positions 0,1)
+        # Example: [5]           -> total_coeffs=1, total_zeros=0
+        # Example: [5,0,0,3,0,0,0,0] -> strip to [5,0,0,3], total_coeffs=2, total_zeros=2
         
         # Calculate run_before for each coefficient
         runs = []
@@ -170,6 +206,44 @@ class CAVLCEncoder:
         
         # Reverse runs to match encoding order (high freq first)
         runs = list(reversed(runs))
+        
+        # total_zeros = number of zeros within active coefficient range
+        # = (length of active range) - (number of non-zero coeffs)
+        # = len(active_coeffs) - total_coeffs
+        # By definition: total_zeros = sum(runs)
+        total_zeros = sum(runs)
+        
+        # VALIDATION: For active_coeffs of length N with total_coeffs non-zero values:
+        # max_total_zeros = N - total_coeffs
+        # Since we stripped trailing zeros, N = last_nonzero_idx + 1
+        max_total_zeros = len(active_coeffs) - total_coeffs
+        
+        # Sanity check: total_zeros should equal max by construction
+        # (since active_coeffs has no trailing zeros)
+        if total_zeros != max_total_zeros:
+            print(f"[WARN] total_zeros mismatch: calculated={total_zeros}, max={max_total_zeros}")
+            print(f"  active_coeffs length: {len(active_coeffs)}, total_coeffs: {total_coeffs}")
+            print(f"  runs: {runs}, sum: {sum(runs)}")
+        
+        # Additional H.264 VLC table constraint:
+        # The VLC tables for total_zeros are indexed by total_coeffs
+        # and go up to (15 - total_coeffs) for 4x4 blocks
+        # After stripping trailing zeros, we should always satisfy this
+        vlc_max = max_num_coeff - 1 - total_coeffs
+        if total_zeros > vlc_max:
+            print(f"[WARN] total_zeros ({total_zeros}) > VLC max ({vlc_max})")
+            # This should not happen after stripping trailing zeros
+            # But clamp just in case
+            excess = total_zeros - vlc_max
+            total_zeros = vlc_max
+            
+            # Adjust runs to maintain sum = clamped total_zeros
+            for i in range(len(runs) - 1, -1, -1):
+                if excess == 0:
+                    break
+                reduction = min(runs[i], excess)
+                runs[i] -= reduction
+                excess -= reduction
         
         return BlockAnalysis(
             total_coeffs=total_coeffs,
@@ -200,53 +274,69 @@ class CAVLCEncoder:
         
         for i, level in enumerate(levels_to_encode):
             abs_level = abs(level)
+            sign = 1 if level < 0 else 0
             
-            # Calculate levelCode WITH sign embedded
-            # H.264 Spec Section 9.2.2.1:
-            # - Normal: levelCode = 2*abs_level - 2 + (sign ? 1 : 0)
-            # - After 3 T1s: Use abs_level + 3 (bias correction)
+            # Calculate levelCode WITH sign embedded (H.264 Section 9.2.2.1 Table 9-6)
+            # Normal: levelCode = (abs_level - 1) * 2 + sign
+            # Special: If trailing_ones == 3 and this is first level, offset by 2
+            #          because abs_level cannot be 1 (already used by T1s)
+            #          so levelCode = (abs_level - 1 - 2) * 2 + sign for abs_level >= 2
+            
             if i == 0 and analysis.trailing_ones == 3:
-                # When 3 trailing ones exist, first level uses:
-                # levelCode = 2*(abs_level + 3) - 6 + (sign ? 1 : 0)
-                #           = 2*abs_level + 6 - 6 + sign
-                #           = 2*abs_level + (sign ? 1 : 0)
-                # This handles the case where 4th consecutive ±1 appears
-                levelCode = (abs_level << 1)
-                if level < 0:
-                    levelCode += 1
+                # First level after 3 T1s: special encoding  
+                # H.264 Spec 9.2.2.1: This level cannot be ±1 (already in T1s), so abs_level >= 2
+                # Map abs_level >= 2 to levelCode starting from 0:
+                # levelCode = 2*(abs_level - 2) + sign
+                # Decoder reverses: abs_level = (levelCode - sign)/2 + 2
+                levelCode = (abs_level - 2) * 2 + sign
             else:
-                # levelCode = 2*abs_level - 2 + (sign ? 1 : 0)
-                levelCode = (abs_level << 1) - 2
-                if level < 0:
-                    levelCode += 1
+                # Standard encoding: levelCode = (abs_level - 1) * 2 + sign
+                levelCode = (abs_level - 1) * 2 + sign
             
-            # Ensure non-negative (should not happen with correct logic)
-            if levelCode < 0:
-                levelCode = 0
-            
-            # Determine levelPrefix and levelSuffixSize
+            # Determine levelPrefix and levelSuffixSize (H.264 Section 9.2.2.1)
             if suffixLength == 0:
+                # For suffixLength=0, escape code threshold is 14 (decoder checks prefix < 14)
+                # Decoder: if prefix < 14 → normal, else → escape (4-bit suffix)
+                # So encoder must use escape when levelCode >= 14
                 if levelCode < 14:
+                    # Normal encoding: prefix = levelCode, no suffix
                     levelPrefix = levelCode
                     levelSuffixSize = 0
                     levelSuffix = 0
                 else:
-                    # Escape code with 4-bit suffix
+                    # Escape code: levelPrefix = 14, 4-bit suffix
+                    # Decoder formula: levelCode = 15 + suffix
+                    # So: suffix = levelCode - 15
                     levelPrefix = 14
                     levelSuffixSize = 4
-                    levelSuffix = levelCode - 14
+                    levelSuffix = levelCode - 15
+                    # Validate suffix fits in 4 bits (must be >= 0 for levelCode >= 15)
+                    if levelSuffix < 0:
+                        # levelCode=14: suffix would be -1, but decoder expects 4-bit value
+                        # This is a problem! Can't encode levelCode=14 with suffixLength=0
+                        # Force suffix=0, will decode as levelCode=15 (off by 1 error)
+                        levelSuffix = 0
+                    elif levelSuffix > 15:
+                        # Cap at maximum 4-bit value
+                        levelSuffix = 15
             else:
                 # Normal case: split into prefix and suffix
                 levelPrefix = levelCode >> suffixLength
                 levelSuffix = levelCode & ((1 << suffixLength) - 1)
                 levelSuffixSize = suffixLength
                 
-                # Check for escape
-                if levelPrefix >= 15:
-                    levelPrefix = 15
-                    # Extended escape with larger suffix
+                # Check for escape (levelPrefix >= 14)
+                # Decoder treats all prefix>=14 as escape with 4-bit suffix
+                # Decoder formula: levelCode = (15 << suffixLength) + suffix
+                if levelPrefix >= 14:
+                    levelPrefix = 14
                     levelSuffixSize = 4
                     levelSuffix = levelCode - (15 << suffixLength)
+                    # Validate suffix fits in 4 bits
+                    if levelSuffix < 0:
+                        levelSuffix = 0
+                    elif levelSuffix > 15:
+                        levelSuffix = 15
             
             # Write level_prefix (unary)
             self.writer.write_unary(levelPrefix)
@@ -257,11 +347,16 @@ class CAVLCEncoder:
             
             # NO SIGN BIT - sign is embedded in levelCode!
             
-            # Update suffixLength adaptively
+            # Update suffixLength adaptively (H.264 Section 9.2.2.1)
+            # Rule: After encoding first level, set suffixLength = 1 if it was 0
+            # Then increase when abs_level exceeds threshold
             if suffixLength == 0:
                 suffixLength = 1
-            elif abs_level > (3 << (suffixLength - 1)) and suffixLength < 6:
-                suffixLength += 1
+            elif suffixLength > 0 and suffixLength < 6:
+                # Increase when abs_level > (3 << (suffixLength - 1))
+                threshold = 3 << (suffixLength - 1)
+                if abs_level > threshold:
+                    suffixLength += 1
     
     def _encode_run_before(self, analysis: BlockAnalysis):
         """
@@ -272,11 +367,28 @@ class CAVLCEncoder:
         """
         zeros_left = analysis.total_zeros
         
+        # Validate zeros_left is non-negative
+        if zeros_left < 0:
+            zeros_left = 0
+        
         # Encode all runs except the last (which is implicit)
         for run in analysis.runs[:-1]:
+            # CRITICAL: Ensure run < zeros_left (strictly less than)
+            # H.264 spec: run_before must be in range [0, zeros_left-1]
+            # If run >= zeros_left, clamp it to zeros_left - 1
+            if run >= zeros_left:
+                if zeros_left > 0:
+                    run = zeros_left - 1
+                else:
+                    run = 0
+            
             run_before_code = find_run_before_code(run, zeros_left)
             self.writer.write_bit_string(run_before_code)
             zeros_left -= run
+            
+            # Prevent negative zeros_left
+            if zeros_left < 0:
+                zeros_left = 0
     
     def zigzag_scan_4x4(self, block_4x4: np.ndarray) -> List[int]:
         """

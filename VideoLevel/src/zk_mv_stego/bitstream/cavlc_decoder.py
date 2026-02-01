@@ -73,7 +73,6 @@ class CAVLCDecoder:
         Returns:
             CoefficientBlock with decoded levels
         """
-        # Step 1: Decode coeff_token to get TotalCoeffs and TrailingOnes
         total_coeffs, trailing_ones = self._decode_coeff_token(nC)
         
         if total_coeffs == 0:
@@ -93,11 +92,12 @@ class CAVLCDecoder:
         
         # Step 3: Decode remaining levels
         levels_remaining = total_coeffs - trailing_ones
-        level_values = self._decode_levels(levels_remaining, trailing_ones)
+        level_values = self._decode_levels(levels_remaining, trailing_ones, total_coeffs)
         
         # Step 4: Decode total_zeros
         if total_coeffs < max_num_coeff:
-            total_zeros = self._decode_total_zeros(total_coeffs, max_num_coeff)
+            is_chroma_dc = (nC == -1)
+            total_zeros = self._decode_total_zeros(total_coeffs, max_num_coeff, is_chroma_dc)
         else:
             total_zeros = 0
         
@@ -139,6 +139,9 @@ class CAVLCDecoder:
         """
         table = get_coeff_token_table(nC)
         
+        if nC == -1:
+            print(f"[DEBUG] limit nC=-1 table keys: {list(table.keys())}")
+            
         if table == 'FLC6':
             # nC >= 8: use fixed-length code (8 bits total)
             # Format per H.264 spec: 6 bits TotalCoeff + 2 bits TrailingOnes
@@ -164,7 +167,7 @@ class CAVLCDecoder:
             trailing_ones = min(self.reader.read_bits(2), total_coeffs)
             return (total_coeffs, trailing_ones)
     
-    def _decode_levels(self, count: int, trailing_ones: int) -> List[int]:
+    def _decode_levels(self, count: int, trailing_ones: int, total_coeffs: int) -> List[int]:
         """
         Decode remaining coefficient levels (non-trailing-one values)
         
@@ -174,9 +177,12 @@ class CAVLCDecoder:
         levels = []
         
         # Level decoding uses adaptive VLC
-        # suffixLength initialization per H.264 spec
-        # Note: This is for levels AFTER trailing ones, not the total_coeffs
-        suffixLength = 0
+        # suffixLength initialization per H.264 spec (MUST match encoder!)
+        # Rule: suffixLength = 1 if total_coeffs > 10 and trailing_ones < 3, else 0
+        if total_coeffs > 10 and trailing_ones < 3:
+            suffixLength = 1
+        else:
+            suffixLength = 0
         
         for i in range(count):
             # Decode level_prefix (unary code)
@@ -206,9 +212,11 @@ class CAVLCDecoder:
             sign_bit = levelCode & 1  # LSB is sign (0=positive, 1=negative)
             
             if i == 0 and trailing_ones == 3:
-                # levelCode = 2*abs_level + sign_bit
-                # abs_level = (levelCode - sign_bit) / 2
+                # First level after 3 T1s: special decoding
+                # levelCode = 2*(abs_level - 2) + sign_bit
+                # Solve: abs_level = (levelCode - sign_bit)/2 + 2
                 abs_level = (levelCode - sign_bit) >> 1
+                abs_level += 2
             else:
                 # levelCode = 2*abs_level - 2 + sign_bit
                 # abs_level = (levelCode - sign_bit + 2) / 2
@@ -228,11 +236,11 @@ class CAVLCDecoder:
         
         return levels
     
-    def _decode_total_zeros(self, total_coeffs: int, max_num_coeff: int) -> int:
+    def _decode_total_zeros(self, total_coeffs: int, max_num_coeff: int, is_chroma_dc: bool = False) -> int:
         """
         Decode total_zeros using VLC table based on TotalCoeffs
         """
-        table = get_total_zeros_table(total_coeffs)
+        table = get_total_zeros_table(total_coeffs, is_chroma_dc)
         
         if table:
             try:
@@ -252,6 +260,10 @@ class CAVLCDecoder:
         """
         runs = []
         zeros_left = total_zeros
+        
+        # Optimization: if no zeros, all runs are 0
+        if total_zeros == 0:
+            return [0] * total_coeffs
         
         for i in range(total_coeffs - 1):
             if zeros_left > 0:
@@ -330,7 +342,7 @@ class CAVLCDecoder:
 
 def test_cavlc_decoder():
     """Test CAVLC decoder with synthetic data"""
-    from src.zk_mv_stego.bitstream.h264_parser import BitstreamReader
+    from src.zk_mv_stego.bitstream.bitstream_io import BitstreamReader
     
     # Create test bitstream (would come from real H.264 slice)
     test_data = bytes([0xFF, 0xAA, 0x55, 0x00, 0x01, 0x02, 0x03])

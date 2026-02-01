@@ -16,119 +16,13 @@ import struct
 from typing import List, Tuple, BinaryIO
 from dataclasses import dataclass
 from enum import IntEnum
+from .bitstream_io import BitstreamReader
 
 
-class NALUnitType(IntEnum):
-    """NAL unit types (H.264 Table 7-1)"""
-    UNSPECIFIED = 0
-    SLICE_NON_IDR = 1
-    SLICE_PARTITION_A = 2
-    SLICE_PARTITION_B = 3
-    SLICE_PARTITION_C = 4
-    SLICE_IDR = 5
-    SEI = 6
-    SPS = 7  # Sequence Parameter Set
-    PPS = 8  # Picture Parameter Set
-    AUD = 9  # Access Unit Delimiter
-    END_OF_SEQUENCE = 10
-    END_OF_STREAM = 11
-    FILLER = 12
-    # Additional types (13-23 reserved)
-    SUBSET_SPS = 15
-    PREFIX_NAL = 20
-    # Extended types (used in MP4 container)
-    UNKNOWN = 99  # Fallback for unknown types
+from .nal_handler import NALUnit, NALUnitType
 
 
-@dataclass
-class NALUnit:
-    """Represents a NAL unit"""
-    forbidden_zero_bit: int
-    nal_ref_idc: int
-    nal_unit_type: NALUnitType
-    rbsp_byte: bytes  # Raw Byte Sequence Payload
-    start_pos: int  # Position in file
-    size: int
-
-
-class BitstreamReader:
-    """
-    Bitstream reader with Exp-Golomb decoding
-    Used for parsing H.264 syntax elements
-    """
-    
-    def __init__(self, data: bytes):
-        self.data = data
-        self.pos = 0  # Bit position
-    
-    @property
-    def position(self) -> int:
-        """Get current bit position"""
-        return self.pos
-    
-    def tell(self) -> int:
-        """Get current bit position (alias for position property)"""
-        return self.pos
-    
-    def seek(self, pos: int):
-        """Seek to a specific bit position"""
-        if pos < 0 or pos > len(self.data) * 8:
-            raise ValueError(f"Invalid position: {pos}")
-        self.pos = pos
-    
-    def is_byte_aligned(self) -> bool:
-        """Check if reader is byte-aligned"""
-        return self.pos % 8 == 0
-        
-    def read_bits(self, n: int) -> int:
-        """Read n bits from bitstream"""
-        result = 0
-        for _ in range(n):
-            byte_pos = self.pos // 8
-            bit_pos = 7 - (self.pos % 8)
-            
-            if byte_pos >= len(self.data):
-                raise EOFError("End of bitstream")
-            
-            bit = (self.data[byte_pos] >> bit_pos) & 1
-            result = (result << 1) | bit
-            self.pos += 1
-        
-        return result
-    
-    def read_ue(self) -> int:
-        """
-        Read unsigned Exp-Golomb coded integer
-        Used extensively in H.264 for variable-length encoding
-        """
-        leading_zeros = 0
-        while self.read_bits(1) == 0:
-            leading_zeros += 1
-            if leading_zeros > 32:
-                raise ValueError("Invalid Exp-Golomb code")
-        
-        if leading_zeros == 0:
-            return 0
-        
-        value = self.read_bits(leading_zeros)
-        return (1 << leading_zeros) - 1 + value
-    
-    def read_se(self) -> int:
-        """
-        Read signed Exp-Golomb coded integer
-        """
-        code_num = self.read_ue()
-        # Map: 0→0, 1→1, 2→-1, 3→2, 4→-2, ...
-        return (code_num + 1) // 2 if code_num % 2 == 1 else -(code_num // 2)
-    
-    def byte_aligned(self) -> bool:
-        """Check if at byte boundary"""
-        return self.pos % 8 == 0
-    
-    def align_to_byte(self):
-        """Skip bits to align to next byte boundary"""
-        if not self.byte_aligned():
-            self.pos = ((self.pos // 8) + 1) * 8
+# BitstreamReader moved to bitstream_io.py
 
 
 class H264BitstreamParser:
