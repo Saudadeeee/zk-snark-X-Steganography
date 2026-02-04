@@ -25,6 +25,11 @@ class BitstreamReader:
         """Get current bit position"""
         return self.pos
     
+    @property
+    def bit_position(self) -> int:
+        """Get current bit position (alias for position)"""
+        return self.pos
+    
     def tell(self) -> int:
         """Get current bit position (alias for position property)"""
         return self.pos

@@ -19,20 +19,33 @@ class PayloadEmbedder:
     - Skip zeros (would become ±1, changing block structure)
     """
     
-    def __init__(self, skip_dc: bool = True, skip_zeros: bool = True, 
-                 allow_small_values: bool = False):
+    def __init__(self, skip_dc: bool = False, skip_zeros: bool = True, 
+                 allow_small_values: bool = False, dc_only: bool = False,
+                 magnitude_threshold: int = 5, ac_index_filter: int = None,
+                 use_sign_embedding: bool = False):
         """
         Initialize embedder
         
         Args:
-            skip_dc: Skip DC coefficients (position 0 in zigzag)
+            skip_dc: Skip DC coefficients (DEPRECATED, use dc_only instead)
             skip_zeros: Skip zero coefficients
-            allow_small_values: Allow embedding in |coeff| == 1 (RISKY: may flip to 0)
-                               Set to True for higher capacity (up to 2x), but less stable
+            allow_small_values: Allow embedding in |coeff| == 1 (RISKY)
+            dc_only: ONLY embed in DC coefficients (index 0) - MOST STABLE (but has delta encoding issues)
+            magnitude_threshold: Minimum |coeff| value for embedding (default 5)
+            ac_index_filter: ONLY use AC coefficient at specific index (e.g., 1 for first AC after DC)
+            use_sign_embedding: Use sign (+/-) instead of LSB for embedding (MORE ROBUST for CAVLC)
         """
         self.skip_dc = skip_dc
         self.skip_zeros = skip_zeros
         self.allow_small_values = allow_small_values
+        self.dc_only = dc_only
+        self.magnitude_threshold = magnitude_threshold
+        self.ac_index_filter = ac_index_filter
+        self.use_sign_embedding = use_sign_embedding
+        
+        mode_str = 'DC-ONLY' if dc_only else ('AC-INDEX-{}'.format(ac_index_filter) if ac_index_filter is not None else 'ALL-AC')
+        embed_mode = 'SIGN' if use_sign_embedding else 'LSB'
+        print(f"[PayloadEmbedder] Mode: {mode_str}, Embedding: {embed_mode}, Magnitude threshold: {magnitude_threshold}")
     
     def embed_payload(self, coefficients: List[Tuple[int, int, List[int]]], 
                      payload: bytes) -> Tuple[List[Tuple[int, int, List[int]]], int]:
@@ -63,16 +76,26 @@ class PayloadEmbedder:
             new_coeffs = coeffs[:]
             
             for i, coeff in enumerate(coeffs):
-                # Check embedding criteria
+                # AC-INDEX-FILTER MODE: Only embed at specific AC index
+                if self.ac_index_filter is not None and i != self.ac_index_filter:
+                    continue
+                
+                # DC-ONLY MODE: Only embed in DC coefficient (index 0)
+                if self.dc_only and i != 0:
+                    continue
+                
+                # Legacy mode: skip DC if requested
                 if self.skip_dc and i == 0:
                     continue
                 
                 if self.skip_zeros and coeff == 0:
                     continue
                 
+                # MAGNITUDE THRESHOLD: Only use stable coefficients
+                if abs(coeff) < self.magnitude_threshold:
+                    continue
+                
                 # CAPACITY OPTIMIZATION: Conditionally skip ±1
-                # If allow_small_values=False (default): Skip ±1 for stability
-                # If allow_small_values=True: Use ±1 for higher capacity (risky)
                 if not self.allow_small_values and abs(coeff) == 1:
                     continue
                 
@@ -81,8 +104,11 @@ class PayloadEmbedder:
                 
                 payload_bit = payload_bits[bits_embedded]
                 
-                # Embed one bit into LSB
-                new_coeffs[i] = self._modify_lsb(coeff, payload_bit)
+                # Embed one bit (using sign or LSB)
+                if self.use_sign_embedding:
+                    new_coeffs[i] = self._modify_sign(coeff, payload_bit)
+                else:
+                    new_coeffs[i] = self._modify_lsb(coeff, payload_bit)
                 bits_embedded += 1
             
             modified.append((mb_idx, block_idx, new_coeffs))
@@ -108,11 +134,23 @@ class PayloadEmbedder:
                 break
             
             for i, coeff in enumerate(coeffs):
-                # Check extraction criteria (same as embedding)
+                # AC-INDEX-FILTER MODE: Only extract from specific AC index
+                if self.ac_index_filter is not None and i != self.ac_index_filter:
+                    continue
+                
+                # DC-ONLY MODE: Only extract from DC coefficient (index 0)
+                if self.dc_only and i != 0:
+                    continue
+                
+                # Legacy mode: skip DC if requested
                 if self.skip_dc and i == 0:
                     continue
                 
                 if self.skip_zeros and coeff == 0:
+                    continue
+                
+                # MAGNITUDE THRESHOLD: Only use stable coefficients
+                if abs(coeff) < self.magnitude_threshold:
                     continue
                 
                 # Match embedding criteria
@@ -122,9 +160,12 @@ class PayloadEmbedder:
                 if len(extracted_bits) >= payload_length_bits:
                     break
                 
-                # Extract LSB of absolute value
-                lsb = abs(coeff) & 1
-                extracted_bits.append(lsb)
+                # Extract bit (from sign or LSB)
+                if self.use_sign_embedding:
+                    bit = 1 if coeff > 0 else 0
+                else:
+                    bit = abs(coeff) & 1
+                extracted_bits.append(bit)
         
         # Convert bits to bytes
         return self._bits_to_bytes(extracted_bits)
@@ -143,10 +184,23 @@ class PayloadEmbedder:
         
         for mb_idx, block_idx, coeffs in coefficients:
             for i, coeff in enumerate(coeffs):
+                # AC-INDEX-FILTER MODE: Only count specific AC index
+                if self.ac_index_filter is not None and i != self.ac_index_filter:
+                    continue
+                
+                # DC-ONLY MODE: Only count DC coefficient (index 0)
+                if self.dc_only and i != 0:
+                    continue
+                
+                # Legacy mode: skip DC if requested
                 if self.skip_dc and i == 0:
                     continue
                 
                 if self.skip_zeros and coeff == 0:
+                    continue
+                
+                # MAGNITUDE THRESHOLD: Only count stable coefficients
+                if abs(coeff) < self.magnitude_threshold:
                     continue
                 
                 # Match embedding criteria
@@ -182,6 +236,32 @@ class PayloadEmbedder:
         
         # Preserve sign
         return new_abs if coeff > 0 else -new_abs
+    
+    def _modify_sign(self, coeff: int, bit: int) -> int:
+        """
+        Modify sign of coefficient to embed one bit
+        Sign embedding is MORE ROBUST than LSB for CAVLC re-encoding
+        
+        Strategy:
+        - bit=1 -> positive coefficient
+        - bit=0 -> negative coefficient
+        - Preserve magnitude
+        
+        Args:
+            coeff: Original coefficient value (must be non-zero)
+            bit: Bit to embed (0 or 1)
+        
+        Returns:
+            Modified coefficient with embedded bit in sign
+        """
+        if coeff == 0:
+            # Cannot embed in zero coefficient
+            return coeff
+        
+        abs_val = abs(coeff)
+        
+        # bit=1 -> positive, bit=0 -> negative
+        return abs_val if bit == 1 else -abs_val
     
     def _bytes_to_bits(self, data: bytes) -> List[int]:
         """Convert bytes to list of bits"""

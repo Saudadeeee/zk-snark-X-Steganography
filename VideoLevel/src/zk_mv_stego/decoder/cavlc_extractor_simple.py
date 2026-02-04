@@ -13,6 +13,14 @@ from ..bitstream.cavlc_decoder import CAVLCDecoder
 class SimpleCAVLCExtractor:
     """Extract coefficients using exact same logic as reconstructor"""
     
+    def __init__(self, skip_constraint_fixing=False, track_positions=False):
+        self.skip_constraint_fixing = skip_constraint_fixing
+        self.track_positions = track_positions
+        if skip_constraint_fixing:
+            print("[CAVLC Extractor] Constraint fixing DISABLED - raw coefficients preserved")
+        if track_positions:
+            print("[CAVLC Extractor] Bit position tracking ENABLED for DirectBitstreamPatcher")
+    
     def extract_from_video(self, video_path: str, max_frames: Optional[int] = None) -> List[Dict]:
         parser = H264BitstreamParser(video_path)
         nal_units = parser.parse()  # No argument needed
@@ -147,9 +155,13 @@ class SimpleCAVLCExtractor:
         print(f"  Slice header parsed, reader at bit {header_bits_end}, QP={slice_qp}")
         
         mb_parser = MacroblockParser(reader, slice_header.slice_type)
-        cavlc_decoder = CAVLCDecoder(reader)
+        cavlc_decoder = CAVLCDecoder(reader, skip_constraint_fixing=self.skip_constraint_fixing)
         
         mbs = []
+        
+        # For DirectBitstreamPatcher: store original bitstream data
+        if self.track_positions:
+            original_bitstream = nal.rbsp_byte
         
         # Calculate theoretical max MBs to prevent infinite loops
         max_mbs_in_frame = (sps.pic_width_in_mbs_minus1 + 1) * (sps.pic_height_in_map_units_minus1 + 1)
@@ -183,6 +195,10 @@ class SimpleCAVLCExtractor:
                 # We need to trust cbp from mb_data.
                 
                 # Iterate all 24 potential blocks
+                # Track coefficient positions if requested
+                if self.track_positions and not hasattr(mb_data, 'coeff_positions'):
+                    mb_data.coeff_positions = {}
+                
                 for b in range(24):
                     should_decode = False
                     if b < 16:
@@ -200,12 +216,17 @@ class SimpleCAVLCExtractor:
                          if not hasattr(self, 'neighbor_coeffs'): self.neighbor_coeffs = {}
                          nC = mb_parser.calculate_nC(mb_x, mb_y, b, self.neighbor_coeffs)
                          
-                         block = cavlc_decoder.decode_block_cavlc(nC, 16)
+                         # Decode with position tracking if enabled
+                         block = cavlc_decoder.decode_block_cavlc(nC, 16, track_positions=self.track_positions)
                          
                          # Copy into correct position in flattened list
                          # flatten coeffs: blocks 0..23
                          start_idx = b * 16
                          coeffs[start_idx:start_idx+16] = block.levels
+                         
+                         # Store bit positions if tracking
+                         if self.track_positions and hasattr(block, 'coeff_bit_positions'):
+                             mb_data.coeff_positions[(mb_idx, b)] = block.coeff_bit_positions
                          
                          self.neighbor_coeffs[(mb_x, mb_y, b)] = block.total_coeffs
                     else:
@@ -215,22 +236,34 @@ class SimpleCAVLCExtractor:
                          if not hasattr(self, 'neighbor_coeffs'): self.neighbor_coeffs = {}
                          self.neighbor_coeffs[(mb_x, mb_y, b)] = 0
                 
-                mbs.append({'mb_idx': mb_idx, 'coefficients': coeffs})
+                mb_entry = {'mb_idx': mb_idx, 'coefficients': coeffs}
+                
+                # Add bit positions if tracking
+                if self.track_positions and hasattr(mb_data, 'coeff_positions'):
+                    mb_entry['coeff_positions'] = mb_data.coeff_positions
+                
+                mbs.append(mb_entry)
                 
                 current_mb_addr += 1
                 slice_mb_idx_counter += 1
                 
             except Exception as e:
-                # print(f"Extract error MB {slice_mb_idx_counter}: {e}")
+                print(f"[EXTRACT_ERROR] MB {slice_mb_idx_counter}: {type(e).__name__}: {str(e)[:200]}")
                 break
 
         
-        return {
+        result = {
             'frame_idx': idx,
             'macroblocks': mbs,
             'total_coefficients': len(mbs) * 384,
             'non_zero_count': sum(sum(1 for c in mb['coefficients'] if c != 0) for mb in mbs)
         }
+        
+        # Add bitstream data if tracking positions
+        if self.track_positions:
+            result['bitstream_data'] = original_bitstream
+        
+        return result
     
     def extract_coefficients_from_nal(self, nal, global_mb_idx: int = 0, sps=None, pps=None) -> Optional[Dict]:
         """
@@ -263,43 +296,82 @@ class SimpleCAVLCExtractor:
             slice_qp = 26 + pps.pic_init_qp_minus26 + slice_header.slice_qp_delta
             
             mb_parser = MacroblockParser(reader, slice_header.slice_type)
-            cavlc_decoder = CAVLCDecoder(reader)
+            cavlc_decoder = CAVLCDecoder(reader, skip_constraint_fixing=self.skip_constraint_fixing)
             
             blocks = {}  # {(mb_idx, block_idx): [16 coeffs]}
             mb_metadata = {}  # {mb_idx: {'mb_type': ..., 'cbp': ...}}
             
-            # Extract ALL macroblocks in the slice (not just 10)
-            # CIF format is 352x288 = 22x18 macroblocks = 396 total MBs per frame
-            for mb_idx in range(396):  # Extract all MBs
+            # Reset neighbor context (CRITICAL for proper nC calculation)
+            self.neighbor_coeffs = {}
+            
+            # Use same robust extraction as _extract_slice
+            max_mbs_in_frame = (sps.pic_width_in_mbs_minus1 + 1) * (sps.pic_height_in_map_units_minus1 + 1)
+            total_bits = len(reader.data) * 8
+            slice_mb_idx = 0
+            current_mb_addr = slice_header.first_mb_in_slice
+            
+            # Loop while there are enough bits for at least one more MB
+            while (total_bits - reader.position) > 8 and slice_mb_idx < max_mbs_in_frame:
+                mb_idx = current_mb_addr
                 try:
-                    mb_type = mb_parser.parse_macroblock_type_only()
+                    # Use FULL macroblock parsing (same as _extract_slice)
+                    mb_data = mb_parser.parse_macroblock()
                     
-                    cbp = 0
-                    # Only process I-slices (types 2 and 7)
-                    # P-slices have different MB types and CBP encoding
-                    if slice_header.slice_type in [2, 7]:
-                        try:
-                            cbp = mb_parser._read_coded_block_pattern()
-                            if cbp > 0:
-                                mb_parser.reader.read_se()
-                        except:
-                            pass
+                    # Store MB metadata - use correct attribute names from MacroblockData
+                    mb_metadata[mb_idx] = {
+                        'mb_type': mb_data.mb_type if hasattr(mb_data, 'mb_type') else 0,
+                        'cbp': mb_data.coded_block_pattern if hasattr(mb_data, 'coded_block_pattern') else 0
+                    }
                     
-                    # Store MB metadata
-                    mb_metadata[mb_idx] = {'mb_type': mb_type, 'cbp': cbp}
+                    # Determine blocks to decode (use MacroblockParser's logic)
+                    luma_blocks = mb_parser.get_luma_blocks_to_decode(mb_data)
                     
-                    if cbp != 0:
-                        for block_idx in range(24):  # 24 blocks per MB
-                            try:
-                                block = cavlc_decoder.decode_block_cavlc(2, 16)
+                    # Decode all 24 blocks
+                    for block_idx in range(24):
+                        should_decode = False
+                        
+                        if block_idx < 16:  # Luma
+                            should_decode = (block_idx in luma_blocks)
+                        elif block_idx < 20:  # Chroma DC
+                            should_decode = mb_data.chroma_dc_present if hasattr(mb_data, 'chroma_dc_present') else False
+                        elif block_idx < 24:  # Chroma AC
+                            should_decode = mb_data.chroma_ac_present if hasattr(mb_data, 'chroma_ac_present') else False
+                        
+                        if should_decode:
+                            # Calculate nC with neighbor context (CRITICAL)
+                            mb_x = mb_idx % (sps.pic_width_in_mbs_minus1 + 1)
+                            mb_y = mb_idx // (sps.pic_width_in_mbs_minus1 + 1)
+                            nC = mb_parser.calculate_nC(mb_x, mb_y, block_idx, self.neighbor_coeffs)
+                            
+                            # Decode block with proper nC
+                            debug_key = (mb_idx, block_idx) if (mb_idx == 0 and block_idx == 2) else None
+                            block = cavlc_decoder.decode_block_cavlc(nC, 16, debug_key=debug_key)
+                            
+                            # DEBUG: Log first few blocks
+                            if mb_idx == 0 and block_idx == 2:
+                                print(f"[EXTRACT_DEBUG] MB0 Block2: total_coeffs={block.total_coeffs}, levels={block.levels}")
+                            
+                            # CRITICAL: Only store if block has non-zero coefficients
+                            # This prevents BitstreamReconstructor from getting spurious zero blocks
+                            if block.total_coeffs > 0:
                                 blocks[(mb_idx, block_idx)] = block.levels
-                            except:
-                                blocks[(mb_idx, block_idx)] = [0] * 16
-                    else:
-                        # All zero blocks
-                        for block_idx in range(24):
-                            blocks[(mb_idx, block_idx)] = [0] * 16
-                except:
+                            
+                            # Update neighbor context (CRITICAL for next MB)
+                            self.neighbor_coeffs[(mb_x, mb_y, block_idx)] = block.total_coeffs
+                        else:
+                            # Block not coded (CBP=0 for this block) - update neighbor context only
+                            # Don't add to blocks dict - BitstreamReconstructor will use zeros
+                            mb_x = mb_idx % (sps.pic_width_in_mbs_minus1 + 1)
+                            mb_y = mb_idx // (sps.pic_width_in_mbs_minus1 + 1)
+                            self.neighbor_coeffs[(mb_x, mb_y, block_idx)] = 0
+                    
+                    current_mb_addr += 1
+                    slice_mb_idx += 1
+                    
+                except Exception as e:
+                    # Only log if it's not expected end-of-stream
+                    if (total_bits - reader.position) > 8:
+                        print(f"[extract_coefficients_from_nal] MB {mb_idx} error: {type(e).__name__}")
                     break
             
             return {'blocks': blocks, 'mb_metadata': mb_metadata}

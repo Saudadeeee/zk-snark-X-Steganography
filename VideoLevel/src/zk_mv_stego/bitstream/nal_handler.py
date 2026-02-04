@@ -218,7 +218,7 @@ class SliceHeaderParser:
         frame_num = self.reader.read_bits(self.sps.log2_max_frame_num_minus4 + 4)
         
         idr_pic_id = None
-        if self.nal_unit.is_idr():
+        if self.nal_unit == NALUnitType.SLICE_IDR:
             idr_pic_id = self.reader.read_ue()
             
         return SliceHeader(

@@ -100,22 +100,33 @@ class CAVLCEncoder:
                 print(f"      [CAVLC_ENC] total_zeros={analysis.total_zeros}, total_coeffs={analysis.total_coeffs}, max_num_coeff={max_num_coeff}")
                 print(f"      [CAVLC_ENC] Constraint: total_zeros <= {max_num_coeff - analysis.total_coeffs}")
             
-            # Validate total_zeros is within valid range for VLC tables
-            max_tz = max_num_coeff - 1 - analysis.total_coeffs
-            if analysis.total_zeros > max_tz:
-                # This should not happen after our validation in _analyze_block,
-                # but add safety check anyway
-                print(f"      [WARN] total_zeros ({analysis.total_zeros}) > max ({max_tz}), clamping")
-                analysis.total_zeros = max_tz
-            elif analysis.total_zeros < 0:
-                print(f"      [WARN] total_zeros ({analysis.total_zeros}) < 0, setting to 0")
+            # CRITICAL FIX: Validate total_zeros strictly respects H.264 VLC table constraints
+            # H.264 standard: total_zeros MUST be <= (max_num_coeff - total_coeffs)
+            # For 4x4 blocks: max_num_coeff=16, so total_zeros <= 16 - total_coeffs
+            # The VLC tables are indexed by total_coeffs and max value is (15 - total_coeffs)
+            max_tz_constraint = max_num_coeff - analysis.total_coeffs
+            
+            if analysis.total_zeros > max_tz_constraint:
+                print(f"[CAVLC_CRITICAL] total_zeros ({analysis.total_zeros}) > max_constraint ({max_tz_constraint})")
+                print(f"  total_coeffs={analysis.total_coeffs}, max_num_coeff={max_num_coeff}")
+                print(f"  This indicates a coefficient counting bug!")
+                # Emergency clamp to prevent VLC lookup failure
+                analysis.total_zeros = max_tz_constraint
+            
+            if analysis.total_zeros < 0:
+                print(f"[CAVLC_ERROR] total_zeros ({analysis.total_zeros}) < 0, setting to 0")
                 analysis.total_zeros = 0
             
-            total_zeros_code = find_total_zeros_code(
-                analysis.total_zeros,
-                analysis.total_coeffs
-            )
-            self.writer.write_bit_string(total_zeros_code)
+            try:
+                total_zeros_code = find_total_zeros_code(
+                    analysis.total_zeros,
+                    analysis.total_coeffs
+                )
+                self.writer.write_bit_string(total_zeros_code)
+            except (KeyError, ValueError) as e:
+                print(f"[CAVLC_ERROR] Failed to encode total_zeros={analysis.total_zeros}, total_coeffs={analysis.total_coeffs}")
+                print(f"  Error: {e}")
+                raise
         
         # 5. Encode run_before values
         self._encode_run_before(analysis)
@@ -225,17 +236,21 @@ class CAVLCEncoder:
             print(f"  active_coeffs length: {len(active_coeffs)}, total_coeffs: {total_coeffs}")
             print(f"  runs: {runs}, sum: {sum(runs)}")
         
-        # Additional H.264 VLC table constraint:
+        # CRITICAL FIX: Strict H.264 VLC table constraint validation
         # The VLC tables for total_zeros are indexed by total_coeffs
-        # and go up to (15 - total_coeffs) for 4x4 blocks
-        # After stripping trailing zeros, we should always satisfy this
-        vlc_max = max_num_coeff - 1 - total_coeffs
-        if total_zeros > vlc_max:
-            print(f"[WARN] total_zeros ({total_zeros}) > VLC max ({vlc_max})")
-            # This should not happen after stripping trailing zeros
-            # But clamp just in case
-            excess = total_zeros - vlc_max
-            total_zeros = vlc_max
+        # and have maximum value of (max_num_coeff - total_coeffs)
+        # For 4x4 blocks: max_total_zeros = 16 - total_coeffs
+        vlc_constraint = max_num_coeff - total_coeffs
+        
+        if total_zeros > vlc_constraint:
+            print(f"[CAVLC_ERROR] total_zeros ({total_zeros}) exceeds H.264 constraint ({vlc_constraint})")
+            print(f"  max_num_coeff={max_num_coeff}, total_coeffs={total_coeffs}")
+            print(f"  active_coeffs_len={len(active_coeffs)}, last_nonzero_idx={last_nonzero_idx}")
+            print(f"  This should NEVER happen after stripping trailing zeros!")
+            
+            # Emergency fix: clamp and adjust runs
+            excess = total_zeros - vlc_constraint
+            total_zeros = vlc_constraint
             
             # Adjust runs to maintain sum = clamped total_zeros
             for i in range(len(runs) - 1, -1, -1):
@@ -244,6 +259,8 @@ class CAVLCEncoder:
                 reduction = min(runs[i], excess)
                 runs[i] -= reduction
                 excess -= reduction
+            
+            print(f"[CAVLC_FIX] Clamped total_zeros to {total_zeros}, adjusted runs: {runs}")
         
         return BlockAnalysis(
             total_coeffs=total_coeffs,

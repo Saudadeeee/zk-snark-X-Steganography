@@ -153,7 +153,8 @@ class MacroblockParser:
     
     def _read_mb_type(self) -> int:
         """Read mb_type using Exp-Golomb (simplified)"""
-        return self.reader.read_ue()
+        mb_type = self.reader.read_ue()
+        return mb_type
     
     def _interpret_mb_type(self, mb_type: int) -> Optional[MBType]:
         """Convert mb_type value to MBType enum"""

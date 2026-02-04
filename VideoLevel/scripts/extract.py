@@ -32,21 +32,25 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.zk_mv_stego.decoder.cavlc_extractor_simple import SimpleCAVLCExtractor
 
 
-def extract_payload(stego_video: Path, max_frames: int = 100) -> dict:
+def extract_payload(stego_video: Path, max_frames: int = 100, 
+                   allow_small_values: bool = False,
+                   use_sign_bit: bool = False) -> dict:  # Changed default to LSB
     """
     Extract embedded payload from stego video
     
     Args:
         stego_video: Path to stego H.264 video
         max_frames: Maximum number of I-frames to process
+        allow_small_values: Extract from |coeff|==1 (must match embedding setting)
+        use_sign_bit: Use SIGN BIT extraction (True) or LSB extraction (False - default)
     
     Returns:
         Dictionary with extracted message and proof
     """
     print(f"\n[*] Extracting from: {stego_video}")
-    print(f"    Max frames: {max_frames}")
+    print(f"    Max frames: {max_frames}, allow_small_values: {allow_small_values}")
+    print(f"    Extraction method: {'SIGN BIT' if use_sign_bit else 'LSB'}")
     
-    # Step 1: Parse H.264 and extract DCT coefficients
     print("\n[1/3] Extracting DCT coefficients from I-frames...")
     extractor = SimpleCAVLCExtractor()
     frames = extractor.extract_from_video(str(stego_video), max_frames=max_frames)
@@ -56,43 +60,49 @@ def extract_payload(stego_video: Path, max_frames: int = 100) -> dict:
     
     print(f"  [OK] Extracted {len(frames)} I-frames")
     
-    # Step 2: Collect usable coefficients
     print("\n[2/3] Collecting usable coefficients...")
     coefficients = []
     
     for frame in frames:
-        # Access coefficients from macroblocks
         if 'macroblocks' in frame:
             for mb_data in frame['macroblocks']:
                 coeffs_flat = mb_data['coefficients']
                 
-                # Split into 24 blocks (16 Y + 4 Cb + 4 Cr)
-                for block_idx in range(24):
+                for block_idx in range(24):  # 16 Y + 4 Cb + 4 Cr
                     start = block_idx * 16
                     end = start + 16
                     block_coeffs = coeffs_flat[start:end]
                     
-                    # Skip DC coefficient (index 0) and unstable values
                     for coeff_idx, coeff in enumerate(block_coeffs):
-                        if coeff_idx == 0:  # Skip DC
+                        # AC-INDEX-1 MODE: ONLY extract from index 1 (first AC after DC)
+                        if coeff_idx != 1:
                             continue
-                        if coeff == 0 or abs(coeff) == 1:  # Skip unstable
+                        if coeff == 0:  # Skip zeros
+                            continue
+                        # Magnitude threshold: only use coefficients >= 3
+                        if abs(coeff) < 3:
+                            continue
+                        # MUST match embedding: allow_small_values controls ±1 usage
+                        if not allow_small_values and abs(coeff) == 1:
                             continue
                         coefficients.append(coeff)
     
     print(f"  [OK] Found {len(coefficients)} usable coefficients")
     print(f"       Capacity: {len(coefficients) // 8} bytes")
     
-    # Step 3: Extract LSB bits (matching embedding method)
-    print("\n[3/3] Extracting LSB bits...")
+    print(f"\n[3/3] Extracting bits using {'SIGN BIT' if use_sign_bit else 'LSB'} method...")
     bits = []
-    for coeff in coefficients:
-        # Extract LSB from absolute value (matching PayloadEmbedder)
-        # This matches the embedding: new_coeff = (abs(coeff) & ~1) | bit
-        lsb = abs(coeff) & 1
-        bits.append(lsb)
     
-    # Convert bits to bytes
+    if use_sign_bit:
+        # Bit 0 = Positive, Bit 1 = Negative (matches DirectBitstreamPatcher)
+        for coeff in coefficients:
+            bit = 1 if coeff < 0 else 0
+            bits.append(bit)
+    else:
+        for coeff in coefficients:
+            lsb = abs(coeff) & 1  # Extract LSB from absolute value
+            bits.append(lsb)
+    
     payload_bytes = bytearray()
     for i in range(0, len(bits), 8):
         if i + 8 <= len(bits):
@@ -102,26 +112,26 @@ def extract_payload(stego_video: Path, max_frames: int = 100) -> dict:
     
     print(f"  [OK] Extracted {len(payload_bytes)} bytes ({len(bits)} bits)")
     
-    # Step 4: Parse payload structure
-    if len(payload_bytes) < 4:
-        raise ValueError(f"Payload too small: {len(payload_bytes)} bytes (need at least 4 for header)")
+    if len(payload_bytes) < 8:
+        raise ValueError(f"Payload too small: {len(payload_bytes)} bytes (need at least 8 for header)")
     
-    # Parse header (4 bytes: message length) - BIG-ENDIAN to match embedding
-    message_length = struct.unpack('>I', payload_bytes[0:4])[0]
+    magic = payload_bytes[0:4]  # 4 bytes magic + 4 bytes message length (BIG-ENDIAN)
+    if magic != b'ZKST':
+        raise ValueError(f"Invalid magic header: {magic} (expected b'ZKST')")
+    
+    message_length = struct.unpack('>I', payload_bytes[4:8])[0]
     
     print(f"\n[*] Payload structure:")
-    print(f"    Header: 4 bytes")
+    print(f"    Magic: {magic.decode('ascii')}")
     print(f"    Message length: {message_length} bytes")
     
-    # Extract message
-    if len(payload_bytes) < 4 + message_length:
-        raise ValueError(f"Payload too small for message: {len(payload_bytes)} bytes (need {4 + message_length})")
+    if len(payload_bytes) < 8 + message_length:
+        raise ValueError(f"Payload too small for message: {len(payload_bytes)} bytes (need {8 + message_length})")
     
-    message_bytes = payload_bytes[4:4+message_length]
+    message_bytes = payload_bytes[8:8+message_length]
     message = message_bytes.decode('utf-8', errors='replace')
     
-    # Extract proof (remaining bytes)
-    proof_bytes = payload_bytes[4+message_length:]
+    proof_bytes = payload_bytes[8+message_length:]
     
     print(f"    Message: {len(message_bytes)} bytes = '{message}'")
     print(f"    Proof: {len(proof_bytes)} bytes")
@@ -155,15 +165,25 @@ def main():
     
     # Parse arguments
     stego_video = Path(sys.argv[1])
-    output_json = Path(sys.argv[2]) if len(sys.argv) >= 3 else Path("data/output/extracted_payload.json")
+    output_json = Path(sys.argv[2]) if len(sys.argv) >= 3 and not sys.argv[2].startswith('--') else Path("data/output/extracted_payload.json")
+    
+    # Parse flags
+    allow_small_values = '--allow-small-values' in sys.argv
+    use_sign_bit = '--sign-bit' in sys.argv or '--use-sign-bit' in sys.argv
+    
+    # Default to SIGN BIT if not explicitly set to LSB
+    if '--lsb' not in sys.argv:
+        use_sign_bit = True
     
     if not stego_video.exists():
         print(f"[ERROR] Video not found: {stego_video}")
         sys.exit(1)
     
     try:
-        # Extract payload
-        result = extract_payload(stego_video, max_frames=100)
+        # Extract payload (with matching embedding settings)
+        result = extract_payload(stego_video, max_frames=100, 
+                                allow_small_values=allow_small_values,
+                                use_sign_bit=use_sign_bit)
         
         # Save to JSON
         output_json.parent.mkdir(parents=True, exist_ok=True)
