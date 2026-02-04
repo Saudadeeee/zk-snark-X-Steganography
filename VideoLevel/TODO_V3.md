@@ -8,23 +8,31 @@
 ## 🎯 GIAI ĐOẠN 1: YUV + DWT (Tuần 1-3)
 
 ### Week 1: YUV Converter
-- [ ] **Day 1-2**: Setup & Research
-  - [ ] Đọc ITU-T H.264 Section 6.2 (Color space)
-  - [ ] Nghiên cứu YUV 4:2:0 subsampling
-  - [ ] Setup test environment với sample videos
+- [x] **Day 1-2**: Setup & Research ✅ (2025-01-15)
+  - [x] Đọc ITU-T H.264 Section 6.2 (Color space) ✅
+  - [x] Nghiên cứu YUV 4:2:0 subsampling ✅
+  - [x] Setup test environment với sample videos ✅
   
-- [ ] **Day 3-4**: Implementation
-  - [ ] Tạo file `src/zk_mv_stego/preprocessing/__init__.py`
-  - [ ] Implement `yuv_converter.py`:
-    - [ ] `extract_yuv_from_frame()` method
-    - [ ] `get_luma_channel()` method
-    - [ ] `reconstruct_from_yuv()` method
-  - [ ] Unit tests cho YUV conversion
+- [x] **Day 3-4**: Implementation ✅ (2025-01-15)
+  - [x] Tạo file `src/zk_mv_stego/preprocessing/__init__.py` ✅
+  - [x] Implement `yuv_converter.py`: ✅
+    - [x] `extract_yuv_from_frame()` method ✅
+    - [x] `get_luma_channel()` method ✅
+    - [x] `reconstruct_from_yuv()` method ✅
+  - [x] Unit tests cho YUV conversion ✅
+  - [x] All tests passing (11/11) ✅
+  - [x] Performance optimization (vectorized upsampling) ✅
   
 - [ ] **Day 5**: Validation
   - [ ] Test với 5 sample videos
   - [ ] Verify Y/Cb/Cr channels riêng biệt
   - [ ] Benchmark conversion time
+
+**Week 1 Results**: 
+- Performance: Luma 1.06ms/frame (945 fps), Full YUV 1.88ms (533 fps)
+- Accuracy: MAE 1.37, 99.6% pixels error <10
+- Code: 230 lines (yuv_converter.py), 270 lines (tests), 150 lines (demo)
+- Git commit: 7623e22
 
 ### Week 2: DWT Analyzer
 - [ ] **Day 1-2**: Haar DWT Research
