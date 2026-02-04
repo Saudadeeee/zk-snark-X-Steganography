@@ -61,10 +61,52 @@ class HybridCoefficientSelector:
         Returns:
             List of (mb_idx, block_idx, coeff_position) tuples
         """
-        # TODO: Analyze each macroblock with DWT
-        # TODO: Score each coefficient based on criteria
-        # TODO: Sort by score and select top candidates
-        raise NotImplementedError("Week 3 - Day 3-5")
+        selected = []
+        
+        # Analyze macroblock with DWT to get frequency regions
+        dwt_result = self.dwt_analyzer.analyze_macroblock(macroblock_data)
+        
+        # Process each 4x4 block
+        for mb_idx, block_idx, coeff_list in coefficients:
+            # Skip if no coefficients
+            if not coeff_list:
+                continue
+            
+            # Evaluate each coefficient in the block
+            for position, value in enumerate(coeff_list):
+                # Skip if below minimum magnitude
+                if abs(value) < min_magnitude:
+                    continue
+                
+                # Map position to DWT region
+                dwt_region = self.dwt_analyzer.get_dwt_region_for_position(
+                    position, mb_size=16
+                )
+                
+                # Check if coefficient should be used
+                if self.should_use_coefficient(value, position, dwt_region):
+                    # Compute stability score
+                    score = self.compute_stability_score(
+                        value, position, dwt_region
+                    )
+                    
+                    selected.append({
+                        'mb_idx': mb_idx,
+                        'block_idx': block_idx,
+                        'position': position,
+                        'score': score,
+                        'value': value
+                    })
+        
+        # Sort by stability score (descending)
+        selected.sort(key=lambda x: x['score'], reverse=True)
+        
+        # Limit to max_coefficients if specified
+        if max_coefficients is not None:
+            selected = selected[:max_coefficients]
+        
+        # Return as tuples (mb_idx, block_idx, position)
+        return [(s['mb_idx'], s['block_idx'], s['position']) for s in selected]
     
     def compute_stability_score(self, 
                                 coeff_value: int,
@@ -93,8 +135,20 @@ class HybridCoefficientSelector:
         Returns:
             Stability score (0.0-1.0, higher = more stable)
         """
-        # TODO: Implement scoring formula
-        raise NotImplementedError("Week 3 - Day 3-5")
+        # Magnitude score: logarithmic scaling (stronger coefficients better)
+        magnitude_score = np.log(abs(coeff_value) + 1) / np.log(256)
+        
+        # Region weight: prioritize mid-frequency bands
+        region_weight = self.region_weights.get(dwt_region, 0.0)
+        
+        # Context score: texture more important than motion
+        context_score = 0.6 * texture_score + 0.4 * motion_score
+        
+        # Final score: product of all factors
+        score = magnitude_score * region_weight * context_score
+        
+        # Clamp to [0.0, 1.0]
+        return float(np.clip(score, 0.0, 1.0))
     
     def should_use_coefficient(self,
                               coeff_value: int,
@@ -160,8 +214,29 @@ class HybridCoefficientSelector:
         Returns:
             Binary map (1 = usable, 0 = skip)
         """
-        # TODO: Build coefficient map
-        raise NotImplementedError("Week 3 - Day 3-5")
+        # Analyze macroblock with DWT
+        dwt_result = self.dwt_analyzer.analyze_macroblock(macroblock_data)
+        
+        # Initialize map with zeros (assume all unusable)
+        total_coeffs = sum(len(coeffs) for _, _, coeffs in coefficients)
+        coeff_map = np.zeros(total_coeffs, dtype=np.uint8)
+        
+        # Mark usable coefficients
+        offset = 0
+        for _, _, coeff_list in coefficients:
+            for position, value in enumerate(coeff_list):
+                # Map position to DWT region
+                dwt_region = self.dwt_analyzer.get_dwt_region_for_position(
+                    position, mb_size=16
+                )
+                
+                # Check if usable
+                if self.should_use_coefficient(value, position, dwt_region):
+                    coeff_map[offset + position] = 1
+            
+            offset += len(coeff_list)
+        
+        return coeff_map
     
     def estimate_capacity(self, coefficient_map: np.ndarray) -> int:
         """
