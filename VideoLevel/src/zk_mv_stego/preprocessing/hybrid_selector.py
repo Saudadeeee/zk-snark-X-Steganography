@@ -12,8 +12,9 @@ Strategy: Only use coefficients that are:
 """
 
 import numpy as np
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 from .dwt_analyzer import HaarDWTAnalyzer
+from .context_analyzer import ContextAnalyzer
 
 
 class HybridCoefficientSelector:
@@ -27,14 +28,17 @@ class HybridCoefficientSelector:
     4. Context: High texture or motion (from context analyzer)
     """
     
-    def __init__(self, dwt_analyzer: HaarDWTAnalyzer = None):
+    def __init__(self, dwt_analyzer: HaarDWTAnalyzer = None, 
+                 context_analyzer: ContextAnalyzer = None):
         """
         Initialize hybrid selector
         
         Args:
             dwt_analyzer: DWT analyzer instance (creates new if None)
+            context_analyzer: Context analyzer instance (creates new if None)
         """
         self.dwt_analyzer = dwt_analyzer or HaarDWTAnalyzer(levels=2)
+        self.context_analyzer = context_analyzer or ContextAnalyzer()
         
         # Selection weights for different regions
         self.region_weights = {
@@ -48,7 +52,9 @@ class HybridCoefficientSelector:
                           coefficients: List[Tuple[int, int, List[int]]],
                           macroblock_data: np.ndarray,
                           min_magnitude: int = 2,
-                          max_coefficients: int = None) -> List[Tuple[int, int, int]]:
+                          max_coefficients: int = None,
+                          context_score: Optional[float] = None,
+                          previous_macroblock: Optional[np.ndarray] = None) -> List[Tuple[int, int, int]]:
         """
         Select best coefficients for embedding using hybrid analysis
         
@@ -57,6 +63,8 @@ class HybridCoefficientSelector:
             macroblock_data: Raw macroblock pixel data for DWT analysis
             min_magnitude: Minimum |coefficient| value (default: 2)
             max_coefficients: Maximum number to select (None = unlimited)
+            context_score: Pre-computed context score (None = compute from macroblock)
+            previous_macroblock: Previous frame macroblock for motion analysis (optional)
         
         Returns:
             List of (mb_idx, block_idx, coeff_position) tuples
@@ -143,8 +151,14 @@ class HybridCoefficientSelector:
             self.region_weights.get(r, 0.0) for r in regions
         ], dtype=np.float32)
         
-        # Context score (texture=1.0, motion=0.0 by default)
-        context_score = 0.6 * 1.0 + 0.4 * 0.0  # = 0.6
+        # Context score (use provided or compute from macroblock)
+        if context_score is None:
+            # Compute context score using context analyzer
+            suitability = self.context_analyzer.get_embedding_suitability(
+                macroblock_data,
+                previous_mb=previous_macroblock
+            )
+            context_score = suitability['context_score']
         
         # Final scores
         scores = magnitude_scores * region_weights * context_score
