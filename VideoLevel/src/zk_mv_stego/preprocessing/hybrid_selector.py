@@ -61,52 +61,128 @@ class HybridCoefficientSelector:
         Returns:
             List of (mb_idx, block_idx, coeff_position) tuples
         """
-        selected = []
+        if not coefficients:
+            return []
         
-        # Analyze macroblock with DWT to get frequency regions
+        # Analyze macroblock with DWT once (cache result)
         dwt_result = self.dwt_analyzer.analyze_macroblock(macroblock_data)
         
-        # Process each 4x4 block
+        # Pre-allocate arrays for vectorized processing
+        max_coeffs_total = sum(len(c[2]) for c in coefficients)
+        mb_indices = np.empty(max_coeffs_total, dtype=np.int32)
+        block_indices = np.empty(max_coeffs_total, dtype=np.int32)
+        positions = np.empty(max_coeffs_total, dtype=np.int32)
+        values = np.empty(max_coeffs_total, dtype=np.int32)
+        
+        # Flatten all coefficients into arrays
+        idx = 0
         for mb_idx, block_idx, coeff_list in coefficients:
-            # Skip if no coefficients
-            if not coeff_list:
+            n = len(coeff_list)
+            if n == 0:
                 continue
-            
-            # Evaluate each coefficient in the block
-            for position, value in enumerate(coeff_list):
-                # Skip if below minimum magnitude
-                if abs(value) < min_magnitude:
-                    continue
-                
-                # Map position to DWT region
-                dwt_region = self.dwt_analyzer.get_dwt_region_for_position(
-                    position, mb_size=16
-                )
-                
-                # Check if coefficient should be used
-                if self.should_use_coefficient(value, position, dwt_region):
-                    # Compute stability score
-                    score = self.compute_stability_score(
-                        value, position, dwt_region
-                    )
-                    
-                    selected.append({
-                        'mb_idx': mb_idx,
-                        'block_idx': block_idx,
-                        'position': position,
-                        'score': score,
-                        'value': value
-                    })
+            mb_indices[idx:idx+n] = mb_idx
+            block_indices[idx:idx+n] = block_idx
+            positions[idx:idx+n] = np.arange(n)
+            values[idx:idx+n] = coeff_list
+            idx += n
         
-        # Sort by stability score (descending)
-        selected.sort(key=lambda x: x['score'], reverse=True)
+        # Trim to actual size
+        mb_indices = mb_indices[:idx]
+        block_indices = block_indices[:idx]
+        positions = positions[:idx]
+        values = values[:idx]
         
-        # Limit to max_coefficients if specified
-        if max_coefficients is not None:
-            selected = selected[:max_coefficients]
+        # Vectorized filtering: magnitude >= min_magnitude
+        magnitude_mask = np.abs(values) >= min_magnitude
         
-        # Return as tuples (mb_idx, block_idx, position)
-        return [(s['mb_idx'], s['block_idx'], s['position']) for s in selected]
+        # Vectorized filtering: skip DC (position 0)
+        dc_mask = positions != 0
+        
+        # Combine filters
+        valid_mask = magnitude_mask & dc_mask
+        
+        # Apply filters
+        mb_indices = mb_indices[valid_mask]
+        block_indices = block_indices[valid_mask]
+        positions = positions[valid_mask]
+        values = values[valid_mask]
+        
+        if len(positions) == 0:
+            return []
+        
+        # Vectorized region mapping (pre-compute for all positions)
+        regions = np.array([
+            self.dwt_analyzer.get_dwt_region_for_position(pos, mb_size=16)
+            for pos in positions
+        ])
+        
+        # Vectorized filtering: apply selection rules
+        # Rule 2: Skip HH region
+        hh_mask = regions != 'HH'
+        
+        # Apply HH filter
+        mb_indices = mb_indices[hh_mask]
+        block_indices = block_indices[hh_mask]
+        positions = positions[hh_mask]
+        values = values[hh_mask]
+        regions = regions[hh_mask]
+        
+        if len(positions) == 0:
+            return []
+        
+        # Vectorized score computation
+        # Rule 3: |value| >= 2 already filtered above
+        # Rule 4: texture >= 0.3 (using default texture=1.0, always passes)
+        # Rule 5 & 6: Check coefficient strength by region
+        
+        # Vectorized magnitude scoring: log(|coeff| + 1) / log(256)
+        magnitude_scores = np.log(np.abs(values) + 1) / np.log(256)
+        
+        # Vectorized region weights
+        region_weights = np.array([
+            self.region_weights.get(r, 0.0) for r in regions
+        ], dtype=np.float32)
+        
+        # Context score (texture=1.0, motion=0.0 by default)
+        context_score = 0.6 * 1.0 + 0.4 * 0.0  # = 0.6
+        
+        # Final scores
+        scores = magnitude_scores * region_weights * context_score
+        
+        # Apply selection rules (vectorized)
+        # Rule 5: Accept LH/HL with |value| >= 3
+        lh_hl_mask = (regions == 'LH') | (regions == 'HL')
+        rule5_mask = lh_hl_mask & (np.abs(values) >= 3)
+        
+        # Rule 6: Accept LL with |value| >= 5
+        ll_mask = regions == 'LL'
+        rule6_mask = ll_mask & (np.abs(values) >= 5)
+        
+        # Combine rules: must pass either rule 5 or rule 6
+        valid_mask = rule5_mask | rule6_mask
+        
+        # Apply final filter
+        mb_indices = mb_indices[valid_mask]
+        block_indices = block_indices[valid_mask]
+        positions = positions[valid_mask]
+        scores = scores[valid_mask]
+
+        
+        if len(scores) == 0:
+            return []
+        
+        # Sort by score (descending)
+        sort_idx = np.argsort(-scores)  # Negative for descending
+        
+        # Limit to max_coefficients
+        if max_coefficients is not None and len(sort_idx) > max_coefficients:
+            sort_idx = sort_idx[:max_coefficients]
+        
+        # Return as tuples
+        return [
+            (int(mb_indices[i]), int(block_indices[i]), int(positions[i]))
+            for i in sort_idx
+        ]
     
     def compute_stability_score(self, 
                                 coeff_value: int,
