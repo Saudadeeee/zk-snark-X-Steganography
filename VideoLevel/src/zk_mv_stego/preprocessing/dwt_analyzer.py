@@ -214,11 +214,11 @@ class HaarDWTAnalyzer:
     
     def _haar_transform_2d(self, data: np.ndarray) -> Dict[str, np.ndarray]:
         """
-        2D Haar wavelet transform (separable)
+        2D Haar wavelet transform (separable) - OPTIMIZED
         
         Steps:
-        1. Apply 1D transform to each row
-        2. Apply 1D transform to each column
+        1. Apply 1D transform to all rows simultaneously (vectorized)
+        2. Apply 1D transform to all columns simultaneously (vectorized)
         3. Result: 4 sub-bands (LL, LH, HL, HH)
         
         Args:
@@ -231,19 +231,31 @@ class HaarDWTAnalyzer:
         if h % 2 != 0 or w % 2 != 0:
             raise ValueError(f"Dimensions must be even, got {h}x{w}")
         
-        # Step 1: Apply 1D transform to each row
-        row_transformed = np.zeros_like(data, dtype=np.float32)
-        for i in range(h):
-            approx, detail = self._haar_transform_1d(data[i, :])
-            row_transformed[i, :w//2] = approx
-            row_transformed[i, w//2:] = detail
+        sqrt2 = np.sqrt(2)
         
-        # Step 2: Apply 1D transform to each column
-        result = np.zeros_like(data, dtype=np.float32)
-        for j in range(w):
-            approx, detail = self._haar_transform_1d(row_transformed[:, j])
-            result[:h//2, j] = approx
-            result[h//2:, j] = detail
+        # Step 1: Vectorized row-wise transform
+        # Split into even and odd columns
+        even_cols = data[:, 0::2]
+        odd_cols = data[:, 1::2]
+        
+        # Compute approximation and detail for all rows at once
+        row_approx = (even_cols + odd_cols) / sqrt2
+        row_detail = (even_cols - odd_cols) / sqrt2
+        
+        # Concatenate horizontally: [approx | detail]
+        row_transformed = np.hstack([row_approx, row_detail])
+        
+        # Step 2: Vectorized column-wise transform
+        # Split into even and odd rows
+        even_rows = row_transformed[0::2, :]
+        odd_rows = row_transformed[1::2, :]
+        
+        # Compute approximation and detail for all columns at once
+        col_approx = (even_rows + odd_rows) / sqrt2
+        col_detail = (even_rows - odd_rows) / sqrt2
+        
+        # Concatenate vertically: [[approx], [detail]]
+        result = np.vstack([col_approx, col_detail])
         
         # Step 3: Extract 4 quadrants (sub-bands)
         mid_h = h // 2
@@ -258,19 +270,23 @@ class HaarDWTAnalyzer:
     
     def _inverse_haar_1d(self, approx: np.ndarray, detail: np.ndarray) -> np.ndarray:
         """
-        Inverse 1D Haar transform
+        Inverse 1D Haar transform - OPTIMIZED
         
         Formula:
             data[2i] = (approx[i] + detail[i]) / sqrt(2)
             data[2i+1] = (approx[i] - detail[i]) / sqrt(2)
         """
-        n = len(approx)
-        data = np.zeros(n * 2, dtype=np.float32)
         sqrt2 = np.sqrt(2)
         
-        for i in range(n):
-            data[2*i] = (approx[i] + detail[i]) / sqrt2
-            data[2*i + 1] = (approx[i] - detail[i]) / sqrt2
+        # Vectorized computation
+        even_data = (approx + detail) / sqrt2
+        odd_data = (approx - detail) / sqrt2
+        
+        # Interleave using column_stack and ravel
+        n = len(approx)
+        data = np.empty(n * 2, dtype=np.float32)
+        data[0::2] = even_data
+        data[1::2] = odd_data
         
         return data
 
@@ -361,7 +377,7 @@ class HaarDWTAnalyzer:
     def _inverse_haar_2d(self, LL: np.ndarray, LH: np.ndarray,
                         HL: np.ndarray, HH: np.ndarray) -> np.ndarray:
         """
-        Inverse 2D Haar transform
+        Inverse 2D Haar transform - OPTIMIZED
         
         Args:
             LL, LH, HL, HH: Four sub-bands (same size, e.g., 4x4)
@@ -370,22 +386,35 @@ class HaarDWTAnalyzer:
             Reconstructed 2D array (2x size of input bands, e.g., 8x8)
         """
         h, w = LL.shape
+        sqrt2 = np.sqrt(2)
         
-        # Step 1: Inverse column-wise transform
-        # Combine LL+HL for left half columns
-        left_cols = np.zeros((h * 2, w), dtype=np.float32)
-        for j in range(w):
-            left_cols[:, j] = self._inverse_haar_1d(LL[:, j], HL[:, j])
+        # Step 1: Inverse column-wise transform (vectorized)
+        # Reconstruct left half columns (LL + HL)
+        even_rows_left = (LL + HL) / sqrt2
+        odd_rows_left = (LL - HL) / sqrt2
         
-        # Combine LH+HH for right half columns  
-        right_cols = np.zeros((h * 2, w), dtype=np.float32)
-        for j in range(w):
-            right_cols[:, j] = self._inverse_haar_1d(LH[:, j], HH[:, j])
+        # Reconstruct right half columns (LH + HH)
+        even_rows_right = (LH + HH) / sqrt2
+        odd_rows_right = (LH - HH) / sqrt2
         
-        # Step 2: Inverse row-wise transform
-        result = np.zeros((h * 2, w * 2), dtype=np.float32)
-        for i in range(h * 2):
-            result[i, :] = self._inverse_haar_1d(left_cols[i, :], right_cols[i, :])
+        # Interleave rows: stack even and odd rows
+        left_cols = np.empty((h * 2, w), dtype=np.float32)
+        left_cols[0::2, :] = even_rows_left
+        left_cols[1::2, :] = odd_rows_left
+        
+        right_cols = np.empty((h * 2, w), dtype=np.float32)
+        right_cols[0::2, :] = even_rows_right
+        right_cols[1::2, :] = odd_rows_right
+        
+        # Step 2: Inverse row-wise transform (vectorized)
+        # Reconstruct even columns
+        even_cols = (left_cols + right_cols) / sqrt2
+        odd_cols = (left_cols - right_cols) / sqrt2
+        
+        # Interleave columns
+        result = np.empty((h * 2, w * 2), dtype=np.float32)
+        result[:, 0::2] = even_cols
+        result[:, 1::2] = odd_cols
         
         return result
 
