@@ -35,19 +35,32 @@
 - Git commit: 7623e22
 
 ### Week 2: DWT Analyzer
-- [ ] **Day 1-2**: Haar DWT Research
-  - [ ] Đọc paper "DWT-DCT-SVD Based Steganography"
-  - [ ] Understand LL, LH, HL, HH sub-bands
-  - [ ] Mathematical verification của Haar transform
+- [x] **Day 1-2**: Haar DWT Research ✅ (2025-02-04)
+  - [x] Đọc paper "DWT-DCT-SVD Based Steganography" ✅
+  - [x] Understand LL, LH, HL, HH sub-bands ✅
+  - [x] Mathematical verification của Haar transform ✅
   
-- [ ] **Day 3-5**: Implementation
-  - [ ] Implement `dwt_analyzer.py`:
-    - [ ] `analyze_macroblock()` method
-    - [ ] `compute_energy_map()` method
-    - [ ] `classify_frequency_region()` method
-  - [ ] Unit tests cho DWT analysis
+- [x] **Day 3-5**: Implementation ✅ (2025-02-04)
+  - [x] Implement `dwt_analyzer.py`: ✅
+    - [x] `analyze_macroblock()` method ✅
+    - [x] `compute_energy_map()` method ✅
+    - [x] `classify_frequency_region()` method ✅
+    - [x] 2-level Haar DWT decomposition ✅
+    - [x] Inverse DWT reconstruction ✅
+  - [x] Unit tests cho DWT analysis (16/16 passing) ✅
+  - [x] Demo script with visualization ✅
   
 - [ ] **Day 6-7**: Integration
+  - [ ] Integrate với existing H.264 parser
+  - [ ] Create frequency maps cho test videos
+  - [ ] Visualize DWT sub-bands (debugging)
+
+**Week 2 Results**: 
+- Performance: 0.462ms per 16x16 MB (2,164 MB/sec)
+- Reconstruction: MAE <1e-6 (perfect)
+- Tests: 16/16 passing
+- Code: 390 lines (dwt_analyzer.py), 277 lines (tests), 223 lines (demo)
+- Git commits: 98638f2, 07df7b2
   - [ ] Integrate với existing H.264 parser
   - [ ] Create frequency maps cho test videos
   - [ ] Visualize DWT sub-bands (debugging)
