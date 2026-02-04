@@ -168,38 +168,45 @@
   - [ ] Verify output = 384 bytes (rate 1/2)
   - [ ] Unit tests cho encoder
 
-### Week 8: LDPC Decoder
-- [ ] **Day 1-3**: Belief Propagation Implementation
-  - [ ] Implement BP decoder
-  - [ ] LLR (Log-Likelihood Ratio) calculations
-  - [ ] Convergence detection
+### Week 8: Temporal Interleaver ✅ COMPLETE
+- [x] **Day 1-2**: Interleaving Strategy Design
+  - [x] Design recurrent strategy (hash-based frame dependency)
+  - [x] Define frame dependency logic (cumulative hashing)
+  - [x] Security analysis (prevents partial extraction)
   
-- [ ] **Day 4-5**: Error Injection Testing
-  - [ ] Test với 0%, 5%, 10%, 15% bit errors
-  - [ ] Measure recovery rate
-  - [ ] Tune max_iterations parameter
+- [x] **Day 3-5**: Implementation
+  - [x] Implement `temporal_interleaver.py` (340 LOC):
+    - [x] `interleave()` method - Split and permute
+    - [x] `deinterleave()` method - Reconstruct with missing tolerance
+    - [x] `compute_frame_dependency()` method - Hash-based MB positioning
+    - [x] `get_frame_chain()` - Full dependency chain
+    - [x] `create_frame_manifest()` - Distribution metadata
   
-- [ ] **Day 6-7**: Optimization
-  - [ ] Performance optimization
-  - [ ] Memory usage optimization
-  - [ ] Benchmark vs. target (100% @ 10% errors)
+- [x] **Day 6-7**: Testing & Deliverables
+  - [x] Test with frame drops (30% loss handled)
+  - [x] End-to-end with LDPC (integration verified)
+  - [x] 32 comprehensive tests (100% passing)
+  - [x] Demo with 6 scenarios
+  - [x] Performance: <1ms per operation
+  - [x] Overall: 207/210 tests passing (98.6%)
 
-### Week 9: Temporal Interleaving
-- [ ] **Day 1-2**: Interleaving Strategy Design
-  - [ ] Design recurrent strategy
-  - [ ] Define frame dependency logic
-  - [ ] Security analysis
+### Week 9: Adaptive Quantization
+- [ ] **Day 1-2**: Quantization Strategy Design
+  - [ ] Study H.264 quantization parameters
+  - [ ] Design adaptive rate control
+  - [ ] Define quality-capacity tradeoff
   
 - [ ] **Day 3-5**: Implementation
-  - [ ] Implement `temporal_interleaver.py`:
-    - [ ] `interleave()` method
-    - [ ] `deinterleave()` method
-    - [ ] `compute_frame_dependency()` method
+  - [ ] Implement `adaptive_quantizer.py`:
+    - [ ] `compute_qp()` method - Context-aware QP selection
+    - [ ] `adjust_embedding_rate()` - Variable bits per coefficient
+    - [ ] `estimate_capacity()` - Frame-level capacity prediction
   
 - [ ] **Day 6-7**: Testing & Deliverables
-  - [ ] Test với frame drops
-  - [ ] End-to-end with LDPC
-  - [ ] All Phase 3 deliverables completed (~650 lines)
+  - [ ] Test with various video types
+  - [ ] Measure PSNR impact
+  - [ ] End-to-end with temporal interleaver
+  - [ ] All Phase 3 deliverables completed
   - [ ] Accuracy benchmark (target: 100%)
 
 ---
