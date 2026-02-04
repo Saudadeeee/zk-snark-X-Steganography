@@ -197,9 +197,9 @@ class DataInterleaver:
         
         Algorithm:
         1. Store original length (4 bytes)
-        2. Distribute input across delay lines (FIFO buffers)
-        3. Each line has different delay (0, 1, 2, ..., depth-1)
-        4. Spreads consecutive symbols across time
+        2. Each input byte goes to ONE delay line in round-robin fashion
+        3. Line 0 has delay 0*B, Line 1 has delay 1*B, ..., Line (depth-1) has delay (depth-1)*B
+        4. Output is taken from delay lines in same round-robin order
         
         Args:
             data: Input data
@@ -210,36 +210,26 @@ class DataInterleaver:
         data_array = np.frombuffer(data, dtype=np.uint8)
         original_length = len(data_array)
         interleaved = []
-        input_idx = 0
         
-        # Process input data
-        while input_idx < len(data_array):
-            # Round-robin through delay lines
-            for line_idx in range(self.depth):
-                if input_idx >= len(data_array):
-                    break
-                
-                # Add byte to current delay line
-                self.interleave_delay_lines[line_idx].append(data_array[input_idx])
-                input_idx += 1
-                
-                # Calculate delay for this line
-                delay_amount = line_idx * self.block_size
-                
-                # Output if delay line has enough data
-                if len(self.interleave_delay_lines[line_idx]) > delay_amount:
-                    output_byte = self.interleave_delay_lines[line_idx].pop(0)
-                    interleaved.append(output_byte)
+        # Process each input byte
+        for idx, byte_val in enumerate(data_array):
+            # Determine which delay line (round-robin)
+            line_idx = idx % self.depth
+            
+            # Add to delay line
+            self.interleave_delay_lines[line_idx].append(byte_val)
+            
+            # Check if we can output from this line
+            delay_amount = line_idx * self.block_size
+            if len(self.interleave_delay_lines[line_idx]) > delay_amount:
+                output_byte = self.interleave_delay_lines[line_idx].pop(0)
+                interleaved.append(output_byte)
         
-        # Flush remaining data from all delay lines
-        flushing = True
-        while flushing:
-            flushing = False
-            for line_idx in range(self.depth):
-                if len(self.interleave_delay_lines[line_idx]) > 0:
-                    output_byte = self.interleave_delay_lines[line_idx].pop(0)
-                    interleaved.append(output_byte)
-                    flushing = True
+        # Flush remaining data from all delay lines (in order)
+        for line_idx in range(self.depth):
+            while len(self.interleave_delay_lines[line_idx]) > 0:
+                output_byte = self.interleave_delay_lines[line_idx].pop(0)
+                interleaved.append(output_byte)
         
         # Convert to bytes
         result = np.array(interleaved, dtype=np.uint8)
@@ -255,9 +245,9 @@ class DataInterleaver:
         
         Algorithm:
         1. Extract original length (4 bytes)
-        2. Apply REVERSE delay pattern: (depth-1)×B, (depth-2)×B, ..., B, 0
-        3. Process ALL interleaved data (including padding from flush)
-        4. Trim output to original length
+        2. Each input byte goes to ONE delay line in round-robin fashion
+        3. Use REVERSE delays: Line 0 has delay (depth-1)*B, Line 1 has (depth-2)*B, ...
+        4. This undoes the interleaving effect
         
         Args:
             data: Interleaved data with length header
@@ -269,29 +259,26 @@ class DataInterleaver:
         original_length = int.from_bytes(data[:4], byteorder='little')
         data_array = np.frombuffer(data[4:], dtype=np.uint8)
         deinterleaved = []
-        input_idx = 0
         
-        # Process ALL interleaved data (including flush padding)
-        while input_idx < len(data_array) or any(len(line) > 0 for line in self.deinterleave_delay_lines):
-            # Round-robin through delay lines
-            for line_idx in range(self.depth):
-                # Add input byte if available
-                if input_idx < len(data_array):
-                    self.deinterleave_delay_lines[line_idx].append(data_array[input_idx])
-                    input_idx += 1
-                
-                # Calculate REVERSE delay
-                delay_amount = (self.depth - 1 - line_idx) * self.block_size
-                
-                # Output if delay line has enough data
-                if len(self.deinterleave_delay_lines[line_idx]) > delay_amount:
-                    output_byte = self.deinterleave_delay_lines[line_idx].pop(0)
-                    deinterleaved.append(output_byte)
-                # If we've consumed all input, flush what's left
-                elif input_idx >= len(data_array) and len(self.deinterleave_delay_lines[line_idx]) > 0:
-                    output_byte = self.deinterleave_delay_lines[line_idx].pop(0)
-                    deinterleaved.append(output_byte)
-                    deinterleaved.append(output_byte)
+        # Process each input byte
+        for idx, byte_val in enumerate(data_array):
+            # Determine which delay line (round-robin)
+            line_idx = idx % self.depth
+            
+            # Add to delay line
+            self.deinterleave_delay_lines[line_idx].append(byte_val)
+            
+            # Check if we can output from this line (REVERSE delay)
+            delay_amount = (self.depth - 1 - line_idx) * self.block_size
+            if len(self.deinterleave_delay_lines[line_idx]) > delay_amount:
+                output_byte = self.deinterleave_delay_lines[line_idx].pop(0)
+                deinterleaved.append(output_byte)
+        
+        # Flush remaining data from all delay lines (in order)
+        for line_idx in range(self.depth):
+            while len(self.deinterleave_delay_lines[line_idx]) > 0:
+                output_byte = self.deinterleave_delay_lines[line_idx].pop(0)
+                deinterleaved.append(output_byte)
         
         # Convert to bytes and trim to original length
         result = np.array(deinterleaved[:original_length], dtype=np.uint8)
