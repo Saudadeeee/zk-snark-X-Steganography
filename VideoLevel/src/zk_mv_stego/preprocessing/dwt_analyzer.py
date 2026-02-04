@@ -8,7 +8,7 @@ Reference: "DWT-DCT-SVD Based Steganography" (Kumar et al., 2018)
 """
 
 import numpy as np
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 
 
 class HaarDWTAnalyzer:
@@ -41,27 +41,49 @@ class HaarDWTAnalyzer:
         Perform Haar DWT on a macroblock (16x16)
         
         Args:
-            mb_data: Macroblock data (16 x 16)
+            mb_data: Macroblock data (16 x 16 or 8 x 8)
         
         Returns:
             Dictionary with sub-bands:
+            For 2-level DWT:
             {
-                'LL': low-low coefficients (approximation),
-                'LH': low-high coefficients (horizontal edges),
-                'HL': high-low coefficients (vertical edges),
-                'HH': high-high coefficients (diagonal details)
+                'LL2': 2nd level approximation (4x4),
+                'LH2': 2nd level horizontal (4x4),
+                'HL2': 2nd level vertical (4x4),
+                'HH2': 2nd level diagonal (4x4),
+                'LH1': 1st level horizontal (8x8),
+                'HL1': 1st level vertical (8x8),
+                'HH1': 1st level diagonal (8x8)
             }
         """
-        # TODO: Implement 2-level Haar DWT
-        # Level 1: 16x16 → 8x8 (LL), 8x8 (LH), 8x8 (HL), 8x8 (HH)
-        # Level 2: Apply DWT on LL sub-band again
-        raise NotImplementedError("Week 2 - Day 3-5")
+        # Ensure float type for computation
+        mb_float = mb_data.astype(np.float32)
+        
+        # Level 1: Full decomposition
+        level1 = self._haar_transform_2d(mb_float)
+        
+        if self.levels == 1:
+            return level1
+        
+        # Level 2: Decompose LL sub-band further
+        level2 = self._haar_transform_2d(level1['LL'])
+        
+        # Return all sub-bands with level indicators
+        return {
+            'LL2': level2['LL'],
+            'LH2': level2['LH'],
+            'HL2': level2['HL'],
+            'HH2': level2['HH'],
+            'LH1': level1['LH'],
+            'HL1': level1['HL'],
+            'HH1': level1['HH']
+        }
     
     def compute_energy_map(self, dwt_coeffs: Dict[str, np.ndarray]) -> Dict[str, float]:
         """
         Compute energy distribution across frequency bands
         
-        Energy = sum of squared coefficients
+        Energy = sum of squared coefficients (variance)
         
         Args:
             dwt_coeffs: DWT coefficients from analyze_macroblock()
@@ -69,16 +91,24 @@ class HaarDWTAnalyzer:
         Returns:
             Dictionary of energy values:
             {
-                'LL': energy_ll,
-                'LH': energy_lh,
-                'HL': energy_hl,
-                'HH': energy_hh,
+                'LL2': energy_ll2,
+                'LH2': energy_lh2,
+                ...,
                 'total': total_energy
             }
         """
-        # TODO: Calculate energy for each sub-band
-        # Energy(band) = sum(coeff^2) for all coeffs in band
-        raise NotImplementedError("Week 2 - Day 3-5")
+        energy_map = {}
+        total_energy = 0.0
+        
+        for band_name, coeffs in dwt_coeffs.items():
+            # Energy = variance (captures information content)
+            energy = float(np.var(coeffs))
+            energy_map[band_name] = energy
+            total_energy += energy
+        
+        energy_map['total'] = total_energy
+        
+        return energy_map
     
     def classify_frequency_region(self, energy_map: Dict[str, float]) -> str:
         """
@@ -95,8 +125,30 @@ class HaarDWTAnalyzer:
         Returns:
             Classification: 'low' | 'mid' | 'high'
         """
-        # TODO: Classify based on energy ratios
-        raise NotImplementedError("Week 2 - Day 3-5")
+        total = energy_map.get('total', 0.0)
+        if total == 0:
+            return 'low'  # Flat region
+        
+        # Calculate energy ratios
+        ll_energy = energy_map.get('LL2', 0.0) + energy_map.get('LL1', 0.0)
+        lh_energy = energy_map.get('LH2', 0.0) + energy_map.get('LH1', 0.0)
+        hl_energy = energy_map.get('HL2', 0.0) + energy_map.get('HL1', 0.0)
+        hh_energy = energy_map.get('HH2', 0.0) + energy_map.get('HH1', 0.0)
+        
+        mid_energy = lh_energy + hl_energy
+        
+        # Ratio-based classification
+        ll_ratio = ll_energy / total
+        mid_ratio = mid_energy / total
+        hh_ratio = hh_energy / total
+        
+        # Classification thresholds
+        if hh_ratio > 0.4:
+            return 'high'  # High-frequency dominant (complex texture)
+        elif mid_ratio > 0.3:
+            return 'mid'   # Mid-frequency dominant (edges) - BEST
+        else:
+            return 'low'   # Low-frequency dominant (smooth)
     
     def get_dwt_region_for_position(self, position: int, mb_size: int = 16) -> str:
         """
@@ -115,8 +167,21 @@ class HaarDWTAnalyzer:
         Returns:
             Region: 'LL' | 'LH' | 'HL' | 'HH'
         """
-        # TODO: Map position to DWT region
-        raise NotImplementedError("Week 2 - Day 3-5")
+        # Convert position to (row, col)
+        row = position // mb_size
+        col = position % mb_size
+        
+        # Determine quadrant (Level 1 DWT)
+        mid = mb_size // 2
+        
+        if row < mid and col < mid:
+            return 'LL'
+        elif row < mid and col >= mid:
+            return 'LH'
+        elif row >= mid and col < mid:
+            return 'HL'
+        else:
+            return 'HH'
     
     def _haar_transform_1d(self, data: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -132,8 +197,20 @@ class HaarDWTAnalyzer:
         Returns:
             (approximation, detail) coefficients
         """
-        # TODO: Implement 1D Haar transform
-        pass
+        n = len(data)
+        if n % 2 != 0:
+            raise ValueError(f"Data length must be even, got {n}")
+        
+        # Haar wavelet coefficients
+        sqrt2 = np.sqrt(2)
+        
+        # Approximation (low-pass): average of pairs
+        approx = (data[0::2] + data[1::2]) / sqrt2
+        
+        # Detail (high-pass): difference of pairs
+        detail = (data[0::2] - data[1::2]) / sqrt2
+        
+        return approx, detail
     
     def _haar_transform_2d(self, data: np.ndarray) -> Dict[str, np.ndarray]:
         """
@@ -150,10 +227,34 @@ class HaarDWTAnalyzer:
         Returns:
             Dictionary with 4 sub-bands
         """
-        # TODO: Row-wise transform
-        # TODO: Column-wise transform
-        # TODO: Split into 4 quadrants
-        pass
+        h, w = data.shape
+        if h % 2 != 0 or w % 2 != 0:
+            raise ValueError(f"Dimensions must be even, got {h}x{w}")
+        
+        # Step 1: Apply 1D transform to each row
+        row_transformed = np.zeros_like(data, dtype=np.float32)
+        for i in range(h):
+            approx, detail = self._haar_transform_1d(data[i, :])
+            row_transformed[i, :w//2] = approx
+            row_transformed[i, w//2:] = detail
+        
+        # Step 2: Apply 1D transform to each column
+        result = np.zeros_like(data, dtype=np.float32)
+        for j in range(w):
+            approx, detail = self._haar_transform_1d(row_transformed[:, j])
+            result[:h//2, j] = approx
+            result[h//2:, j] = detail
+        
+        # Step 3: Extract 4 quadrants (sub-bands)
+        mid_h = h // 2
+        mid_w = w // 2
+        
+        return {
+            'LL': result[:mid_h, :mid_w],  # Approximation (low-low)
+            'LH': result[:mid_h, mid_w:],  # Horizontal detail (low-high)
+            'HL': result[mid_h:, :mid_w],  # Vertical detail (high-low)
+            'HH': result[mid_h:, mid_w:]   # Diagonal detail (high-high)
+        }
     
     def _inverse_haar_1d(self, approx: np.ndarray, detail: np.ndarray) -> np.ndarray:
         """
@@ -163,8 +264,130 @@ class HaarDWTAnalyzer:
             data[2i] = (approx[i] + detail[i]) / sqrt(2)
             data[2i+1] = (approx[i] - detail[i]) / sqrt(2)
         """
-        # TODO: Reconstruct from approximation + detail
-        pass
+        n = len(approx)
+        data = np.zeros(n * 2, dtype=np.float32)
+        sqrt2 = np.sqrt(2)
+        
+        for i in range(n):
+            data[2*i] = (approx[i] + detail[i]) / sqrt2
+            data[2*i + 1] = (approx[i] - detail[i]) / sqrt2
+        
+        return data
+
+    def get_stable_regions(self, dwt_coeffs: Dict[str, np.ndarray], 
+                          energy_map: Dict[str, float],
+                          threshold: float = 10.0) -> List[str]:
+        """
+        Identify stable DWT regions suitable for embedding
+        
+        Stability criteria:
+        1. Energy > threshold (sufficient detail to hide data)
+        2. Not HH band (too unstable during compression)
+        3. Prefer LH/HL (mid-frequency, robust)
+        
+        Args:
+            dwt_coeffs: DWT sub-bands
+            energy_map: Energy values
+            threshold: Minimum energy for embedding (default: 10.0)
+        
+        Returns:
+            List of stable band names, e.g., ['LH1', 'HL1', 'LH2']
+        """
+        stable = []
+        
+        for band_name in dwt_coeffs.keys():
+            energy = energy_map.get(band_name, 0.0)
+            
+            # Skip HH bands (unstable)
+            if 'HH' in band_name:
+                continue
+            
+            # Require minimum energy
+            if energy < threshold:
+                continue
+            
+            stable.append(band_name)
+        
+        # Sort by priority: LH/HL > LL
+        def priority(band):
+            if 'LH' in band or 'HL' in band:
+                return 2  # Best for embedding
+            elif 'LL' in band:
+                return 1  # Use cautiously
+            else:
+                return 0
+        
+        stable.sort(key=priority, reverse=True)
+        
+        return stable
+    
+    def reconstruct_from_dwt(self, dwt_coeffs: Dict[str, np.ndarray], 
+                            levels: int = 2) -> np.ndarray:
+        """
+        Inverse 2D DWT (reconstruction for visualization)
+        
+        Args:
+            dwt_coeffs: DWT sub-bands from analyze_macroblock()
+            levels: Number of decomposition levels used
+        
+        Returns:
+            Reconstructed macroblock
+        """
+        if levels == 2:
+            # Reconstruct level 2 LL from its sub-bands
+            level2_ll = self._inverse_haar_2d(
+                dwt_coeffs['LL2'],
+                dwt_coeffs['LH2'],
+                dwt_coeffs['HL2'],
+                dwt_coeffs['HH2']
+            )
+            
+            # Reconstruct full macroblock from level 1 sub-bands
+            return self._inverse_haar_2d(
+                level2_ll,
+                dwt_coeffs['LH1'],
+                dwt_coeffs['HL1'],
+                dwt_coeffs['HH1']
+            )
+        else:
+            # Single level reconstruction
+            return self._inverse_haar_2d(
+                dwt_coeffs['LL'],
+                dwt_coeffs['LH'],
+                dwt_coeffs['HL'],
+                dwt_coeffs['HH']
+            )
+    
+    def _inverse_haar_2d(self, LL: np.ndarray, LH: np.ndarray,
+                        HL: np.ndarray, HH: np.ndarray) -> np.ndarray:
+        """
+        Inverse 2D Haar transform
+        
+        Args:
+            LL, LH, HL, HH: Four sub-bands (same size, e.g., 4x4)
+        
+        Returns:
+            Reconstructed 2D array (2x size of input bands, e.g., 8x8)
+        """
+        h, w = LL.shape
+        
+        # Step 1: Inverse column-wise transform
+        # Combine LL+HL for left half columns
+        left_cols = np.zeros((h * 2, w), dtype=np.float32)
+        for j in range(w):
+            left_cols[:, j] = self._inverse_haar_1d(LL[:, j], HL[:, j])
+        
+        # Combine LH+HH for right half columns  
+        right_cols = np.zeros((h * 2, w), dtype=np.float32)
+        for j in range(w):
+            right_cols[:, j] = self._inverse_haar_1d(LH[:, j], HH[:, j])
+        
+        # Step 2: Inverse row-wise transform
+        result = np.zeros((h * 2, w * 2), dtype=np.float32)
+        for i in range(h * 2):
+            result[i, :] = self._inverse_haar_1d(left_cols[i, :], right_cols[i, :])
+        
+        return result
 
 
 # TODO: Week 2 - Day 6-7
