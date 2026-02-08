@@ -24,11 +24,11 @@ class PayloadEmbedder:
     1. Zero-Preservation: Never 0→nonzero or nonzero→0 (breaks TotalCoeffs)
     2. Trailing Ones: Never modify last 3 ±1 coeffs (special CAVLC encoding)
     3. Bit-Length Invariance: Only modify if encoding length unchanged
-    4. Magnitude Threshold: Only |value| >= 2 (stable after LSB flip)
+    4. Magnitude Threshold: Only |value| >= 3 (guarantees structure preservation after LSB flip)
     5. CAVLC Re-encoding: Always re-encode modified blocks
     
     CAPACITY OPTIMIZATION:
-    - Use coefficients with |value| >= 2 (stable after LSB flip)
+    - Use coefficients with |value| >= 3 (guarantees no structure change after LSB flip)
     - Optionally include |value| == 1 with caution (may flip to 0)
     - Skip DC (position 0) for stability
     - Skip zeros (would become ±1, changing block structure)
@@ -60,7 +60,7 @@ class PayloadEmbedder:
         
         # Initialize CAVLC Safety Filter if enabled
         if self.use_safety_filter:
-            min_magnitude = 1 if allow_small_values else 2
+            min_magnitude = 1 if allow_small_values else 3
             self.safety_filter = CAVLCSafetyFilter(
                 enable_zero_preservation=True,
                 enable_trailing_ones_protection=enable_trailing_ones_protection,

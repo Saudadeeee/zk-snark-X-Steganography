@@ -77,7 +77,7 @@ class CAVLCSafetyFilter:
                  enable_zero_preservation: bool = True,
                  enable_trailing_ones_protection: bool = True,
                  enable_bit_length_check: bool = True,
-                 min_safe_magnitude: int = 2):
+                 min_safe_magnitude: int = 3):
         """
         Initialize safety filter
         
@@ -85,7 +85,7 @@ class CAVLCSafetyFilter:
             enable_zero_preservation: Enforce Rule 1 (strongly recommended)
             enable_trailing_ones_protection: Enforce Rule 2 (recommended)
             enable_bit_length_check: Enforce Rule 3 (optional but safer)
-            min_safe_magnitude: Minimum |value| for safe embedding (default: 2)
+            min_safe_magnitude: Minimum |value| for safe embedding (default: 3)
         
         Raises:
             SafetyFilterError: If configuration is invalid
@@ -476,7 +476,7 @@ def demo_safety_filter():
         enable_zero_preservation=True,
         enable_trailing_ones_protection=True,
         enable_bit_length_check=True,
-        min_safe_magnitude=2
+        min_safe_magnitude=3
     )
     
     print("\nAnalyzing coefficient blocks...")
