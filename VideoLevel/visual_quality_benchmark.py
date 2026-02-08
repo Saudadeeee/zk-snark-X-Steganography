@@ -381,65 +381,90 @@ class VisualQualityBenchmark:
         
         # 1. Brightness Comparison (TOP LEFT)
         ax1 = plt.subplot(3, 3, 1)
-        ax1.plot(frames, metrics['original']['brightness'], marker='o', linewidth=2.5, 
-                markersize=7, color='#3498db', label='Original', alpha=0.8)
-        ax1.plot(frames, metrics['stego']['brightness'], marker='s', linewidth=2.5,
-                markersize=7, color='#e74c3c', label='Stego', alpha=0.8)
+        ax1.plot(frames, metrics['original']['brightness'], linestyle='-', linewidth=2.5, 
+                color='#2c3e50', label='Original', alpha=0.9, zorder=1)
+        ax1.plot(frames, metrics['stego']['brightness'], linestyle='--', linewidth=2.5,
+                color='#e74c3c', label='Stego', alpha=0.85, zorder=2)
         ax1.set_xlabel('Frame', fontsize=11, fontweight='bold')
         ax1.set_ylabel('Brightness (0-255)', fontsize=11, fontweight='bold')
         ax1.set_title('Brightness Comparison', fontsize=13, fontweight='bold')
-        ax1.legend(loc='best', fontsize=10)
-        ax1.grid(True, alpha=0.3)
+        ax1.legend(loc='best', fontsize=10, framealpha=0.9)
+        ax1.grid(True, alpha=0.3, linestyle=':')
         
         # 2. Contrast Comparison (TOP MIDDLE)
         ax2 = plt.subplot(3, 3, 2)
-        ax2.plot(frames, metrics['original']['contrast'], marker='o', linewidth=2.5,
-                markersize=7, color='#3498db', label='Original', alpha=0.8)
-        ax2.plot(frames, metrics['stego']['contrast'], marker='s', linewidth=2.5,
-                markersize=7, color='#e74c3c', label='Stego', alpha=0.8)
+        ax2.plot(frames, metrics['original']['contrast'], linestyle='-', linewidth=2.5,
+                color='#2c3e50', label='Original', alpha=0.9, zorder=1)
+        ax2.plot(frames, metrics['stego']['contrast'], linestyle='--', linewidth=2.5,
+                color='#e74c3c', label='Stego', alpha=0.85, zorder=2)
         ax2.set_xlabel('Frame', fontsize=11, fontweight='bold')
         ax2.set_ylabel('Contrast (std dev)', fontsize=11, fontweight='bold')
         ax2.set_title('Contrast Comparison', fontsize=13, fontweight='bold')
-        ax2.legend(loc='best', fontsize=10)
-        ax2.grid(True, alpha=0.3)
+        ax2.legend(loc='best', fontsize=10, framealpha=0.9)
+        ax2.grid(True, alpha=0.3, linestyle=':')
         
         # 3. Entropy Comparison (TOP RIGHT)
         ax3 = plt.subplot(3, 3, 3)
-        ax3.plot(frames, metrics['original']['entropy'], marker='o', linewidth=2.5,
-                markersize=7, color='#3498db', label='Original', alpha=0.8)
-        ax3.plot(frames, metrics['stego']['entropy'], marker='s', linewidth=2.5,
-                markersize=7, color='#e74c3c', label='Stego', alpha=0.8)
+        ax3.plot(frames, metrics['original']['entropy'], linestyle='-', linewidth=2.5,
+                color='#2c3e50', label='Original', alpha=0.9, zorder=1)
+        ax3.plot(frames, metrics['stego']['entropy'], linestyle='--', linewidth=2.5,
+                color='#e74c3c', label='Stego', alpha=0.85, zorder=2)
         ax3.set_xlabel('Frame', fontsize=11, fontweight='bold')
         ax3.set_ylabel('Entropy (bits)', fontsize=11, fontweight='bold')
         ax3.set_title('Entropy Comparison', fontsize=13, fontweight='bold')
-        ax3.legend(loc='best', fontsize=10)
-        ax3.grid(True, alpha=0.3)
+        ax3.legend(loc='best', fontsize=10, framealpha=0.9)
+        ax3.grid(True, alpha=0.3, linestyle=':')
         
         # 4. PSNR per frame (MIDDLE LEFT)
         ax4 = plt.subplot(3, 3, 4)
-        ax4.plot(frames, metrics['psnr'], marker='D', linewidth=2.5, 
-                markersize=8, color='#9b59b6', label='PSNR (Original vs Stego)')
-        ax4.axhline(y=avg_psnr, color='r', linestyle='--', linewidth=2, alpha=0.7,
-                   label=f'Average: {avg_psnr:.2f} dB')
-        ax4.fill_between(frames, metrics['psnr'], avg_psnr, alpha=0.2, color='#9b59b6')
+        # Filter out infinity values for better visualization
+        psnr_finite = [p if p != float('inf') else None for p in metrics['psnr']]
+        psnr_count_inf = sum(1 for p in metrics['psnr'] if p == float('inf'))
+        psnr_count_finite = len(metrics['psnr']) - psnr_count_inf
+        
+        if psnr_count_finite > 0:
+            ax4.plot(frames, psnr_finite, marker='D', linewidth=2, 
+                    markersize=5, color='#9b59b6', label=f'PSNR ({psnr_count_finite} frames)', markevery=max(1, len(frames)//20))
+            if not np.isinf(avg_psnr):
+                ax4.axhline(y=avg_psnr, color='r', linestyle='--', linewidth=2, alpha=0.7,
+                           label=f'Average: {avg_psnr:.2f} dB')
+        
+        ax4.text(0.98, 0.98, f'{psnr_count_inf} frames: PSNR = ∞ (perfect)', 
+                transform=ax4.transAxes, ha='right', va='top',
+                bbox=dict(boxstyle='round', facecolor='#2ecc71', alpha=0.8),
+                color='white', fontsize=8, fontweight='bold')
+        
         ax4.set_xlabel('Frame', fontsize=11, fontweight='bold')
         ax4.set_ylabel('PSNR (dB)', fontsize=11, fontweight='bold')
         ax4.set_title('Per-Frame PSNR', fontsize=13, fontweight='bold')
-        ax4.legend(loc='best', fontsize=10)
-        ax4.grid(True, alpha=0.3)
+        ax4.legend(loc='upper left', fontsize=9, framealpha=0.9)
+        ax4.grid(True, alpha=0.3, linestyle=':')
         
         # 5. SSIM per frame (MIDDLE MIDDLE)
         ax5 = plt.subplot(3, 3, 5)
-        ax5.plot(frames, metrics['ssim'], marker='D', linewidth=2.5,
-                markersize=8, color='#2ecc71', label='SSIM (Original vs Stego)')
-        ax5.axhline(y=avg_ssim, color='r', linestyle='--', linewidth=2, alpha=0.7,
+        # Count perfect SSIM frames
+        ssim_perfect = sum(1 for s in metrics['ssim'] if s >= 0.9999)
+        ssim_good = sum(1 for s in metrics['ssim'] if 0.99 <= s < 0.9999)
+        ssim_other = len(metrics['ssim']) - ssim_perfect - ssim_good
+        
+        ax5.plot(frames, metrics['ssim'], linewidth=2.5, color='#2ecc71', 
+                label='SSIM (Original vs Stego)', linestyle='-')
+        ax5.axhline(y=avg_ssim, color='#c0392b', linestyle='--', linewidth=2, alpha=0.7,
                    label=f'Average: {avg_ssim:.4f}')
-        ax5.fill_between(frames, metrics['ssim'], avg_ssim, alpha=0.2, color='#2ecc71')
+        ax5.fill_between(frames, metrics['ssim'], avg_ssim, alpha=0.15, color='#2ecc71')
+        
+        # Add quality breakdown annotation
+        quality_text = f'Perfect (≥0.9999): {ssim_perfect}\nGood (≥0.99): {ssim_good}\nOther: {ssim_other}'
+        ax5.text(0.02, 0.02, quality_text, transform=ax5.transAxes,
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray'),
+                fontsize=8, verticalalignment='bottom')
+        
         ax5.set_xlabel('Frame', fontsize=11, fontweight='bold')
         ax5.set_ylabel('SSIM', fontsize=11, fontweight='bold')
         ax5.set_title('Per-Frame SSIM', fontsize=13, fontweight='bold')
-        ax5.legend(loc='best', fontsize=10)
-        ax5.grid(True, alpha=0.3)
+        ax5.legend(loc='upper right', fontsize=9, framealpha=0.9)
+        ax5.grid(True, alpha=0.3, linestyle=':')
+        ax5.set_ylim([min(metrics['ssim']) * 0.995, 1.001])  # Zoom to relevant range
         
         # 6. Difference Metrics (MIDDLE RIGHT)
         ax6 = plt.subplot(3, 3, 6)
@@ -447,10 +472,10 @@ class VisualQualityBenchmark:
                                                        metrics['stego']['brightness'])]
         contrast_diff = [abs(o - s) for o, s in zip(metrics['original']['contrast'],
                                                      metrics['stego']['contrast'])]
-        ax6.plot(frames, brightness_diff, marker='o', linewidth=2,
-                markersize=6, color='#f39c12', label='Brightness Δ')
-        ax6.plot(frames, contrast_diff, marker='s', linewidth=2,
-                markersize=6, color='#e67e22', label='Contrast Δ')
+        ax6.plot(frames, brightness_diff, linestyle='-', linewidth=2,
+                color='#f39c12', label='Brightness Δ')
+        ax6.plot(frames, contrast_diff, linestyle='--', linewidth=2,
+                color='#e67e22', label='Contrast Δ')
         ax6.set_xlabel('Frame', fontsize=11, fontweight='bold')
         ax6.set_ylabel('Absolute Difference', fontsize=11, fontweight='bold')
         ax6.set_title('Feature Differences (|Original - Stego|)', fontsize=13, fontweight='bold')
