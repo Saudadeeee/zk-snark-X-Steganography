@@ -42,6 +42,89 @@ class BitstreamReconstructor:
     
     def __init__(self):
         self.start_code = b'\x00\x00\x00\x01'
+        # Cache for total_coeffs tracking (needed for nC calculation)
+        self.mb_total_coeffs = {}  # {(mb_idx, block_idx): total_coeffs}
+    
+    def _calculate_nC(self, mb_idx: int, block_idx: int, pic_width_in_mbs: int = 22) -> int:
+        """
+        Calculate nC (neighbor context) for CAVLC coeff_token encoding
+        
+        According to H.264 Section 8.4.1.2.2:
+        nC = (nA + nB + 1) >> 1
+        
+        Where:
+        - nA = total_coeffs of left block
+        - nB = total_coeffs of top block
+        - If unavailable, use default: 0 for edge blocks, or based on position
+        
+        Args:
+            mb_idx: Current macroblock index (scan order)
+            block_idx: Block index within MB (0-15 luma, 16-23 chroma)
+            pic_width_in_mbs: Picture width in macroblocks (for CIF 352x288: 22 MBs)
+        
+        Returns:
+            nC context value (0-4 for Table 9-5, -1 for ChromaDC)
+        """
+        # Chroma DC blocks use nC=-1 (not applicable in I_4x4 mode we're using)
+        if block_idx >= 16:
+            return -1  # Chroma blocks - use special handling
+        
+        # Luma 4x4 block - calculate neighbor context
+        mb_x = mb_idx % pic_width_in_mbs
+        mb_y = mb_idx // pic_width_in_mbs
+        
+        # Block position within MB (4x4 grid, 0-15)
+        block_x = block_idx % 4
+        block_y = block_idx // 4
+        
+        # Get left neighbor (nA)
+        nA = None
+        if block_x > 0:
+            # Left block is within same MB
+            left_block_idx = block_idx - 1
+            nA = self.mb_total_coeffs.get((mb_idx, left_block_idx), 0)
+        elif mb_x > 0:
+            # Left block is in left MB (rightmost column, block 3, 7, 11, 15)
+            left_mb_idx = mb_idx - 1
+            left_block_idx = block_idx + 3  # Map to right edge of left MB
+            nA = self.mb_total_coeffs.get((left_mb_idx, left_block_idx), 0)
+        
+        # Get top neighbor (nB)
+        nB = None
+        if block_y > 0:
+            # Top block is within same MB
+            top_block_idx = block_idx - 4
+            nB = self.mb_total_coeffs.get((mb_idx, top_block_idx), 0)
+        elif mb_y > 0:
+            # Top block is in top MB (bottom row, block 12, 13, 14, 15)
+            top_mb_idx = mb_idx - pic_width_in_mbs
+            top_block_idx = block_idx + 12  # Map to bottom edge of top MB
+            nB = self.mb_total_coeffs.get((top_mb_idx, top_block_idx), 0)
+        
+        # Calculate nC according to H.264 spec
+        if nA is not None and nB is not None:
+            nC = (nA + nB + 1) >> 1
+        elif nA is not None:
+            nC = nA
+        elif nB is not None:
+            nC = nB
+        else:
+            # No neighbors available (top-left corner) - use default
+            nC = 0
+        
+        return nC
+    
+    def _update_total_coeffs_cache(self, mb_idx: int, block_idx: int, coeffs: List[int]):
+        """
+        Update cache with total_coeffs for a block (for nC calculation)
+        
+        Args:
+            mb_idx: Macroblock index
+            block_idx: Block index within MB
+            coeffs: Coefficient array
+        """
+        total_coeffs = sum(1 for c in coeffs if c != 0)
+        self.mb_total_coeffs[(mb_idx, block_idx)] = total_coeffs
         
     def reconstruct_video(self, 
                          original_file: str,
@@ -427,7 +510,12 @@ class BitstreamReconstructor:
                             if len(coeffs) != 16:
                                 coeffs = (list(coeffs) + [0]*16)[:16]
                             
-                            encoder.encode_block_cavlc(coeffs, nC=2, max_num_coeff=16)
+                            # Calculate nC from neighbors (H.264 Section 8.4.1.2.2)
+                            # CRITICAL: Use mb_global_idx (frame-absolute), NOT slice_mb_idx!
+                            nC = self._calculate_nC(mb_global_idx, block_idx, pic_width_in_mbs=22)
+                            encoder.encode_block_cavlc(coeffs, nC=nC, max_num_coeff=16)
+                            # Update total_coeffs cache for future nC calculations
+                            self._update_total_coeffs_cache(mb_global_idx, block_idx, coeffs)
             
             # Get MB data
             mb_data_bytes = mb_writer.to_bytes()
@@ -457,6 +545,9 @@ class BitstreamReconstructor:
         Surgical approach: Copy original bytes, only re-encode modified coefficient blocks.
         """
         try:
+            # Clear total_coeffs cache for new slice (nC calculation needs fresh context)
+            self.mb_total_coeffs.clear()
+            
             # If no modifications, return original
             if not blocks:
                 return original_nal.rbsp_byte
@@ -736,9 +827,13 @@ class BitstreamReconstructor:
                                 print(f"          [DEBUG] MB 0, Block 0 coeffs: {coeffs}")
                                 print(f"          [DEBUG] Bitstream position before CAVLC: {bits_before} bits")
                             
-                            # Encode with proper nC context (simplified to 2)
+                            # Calculate nC from neighbors (H.264 Section 8.4.1.2.2)
+                            # CRITICAL: Use mb_global_idx (frame-absolute), NOT slice_mb_idx!
+                            nC = self._calculate_nC(mb_global_idx, block_idx, pic_width_in_mbs=22)
                             debug_key = (slice_mb_idx, block_idx) if slice_mb_idx == 0 else None
-                            encoder.encode_block_cavlc(coeffs, nC=2, max_num_coeff=max_num_coeff, debug_key=debug_key)
+                            encoder.encode_block_cavlc(coeffs, nC=nC, max_num_coeff=max_num_coeff, debug_key=debug_key)
+                            # Update total_coeffs cache for future nC calculations
+                            self._update_total_coeffs_cache(mb_global_idx, block_idx, coeffs)
                             
                             if slice_mb_idx == 0 and block_idx == 0:
                                 bits_after = writer.get_bit_position()
