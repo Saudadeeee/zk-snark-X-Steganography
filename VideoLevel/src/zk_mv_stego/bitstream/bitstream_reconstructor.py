@@ -659,15 +659,21 @@ class BitstreamReconstructor:
                 mb_meta = mb_metadata.get(slice_mb_idx, {}) if mb_metadata else {}
                 original_mb_type = mb_meta.get('mb_type', 0)  # Default to I_4x4
                 original_cbp = mb_meta.get('cbp', calculated_cbp)  # Use calculated if not available
+                is_skip_mb = mb_meta.get('is_skip_mb', False) or original_cbp == 0
                 
-                # CRITICAL: For LSB modifications, CBP should NOT change (coefficients stay non-zero)
-                # HOWEVER, we should use calculated_cbp to handle edge cases where LSB flip creates zeros
-                # Use calculated_cbp but validate it matches original (within expected differences)
-                cbp = calculated_cbp
-                
-                if slice_mb_idx == 0 and original_cbp != calculated_cbp:
-                    print(f"          [WARN] MB 0: Original CBP=0x{original_cbp:02x} != Calculated CBP=0x{calculated_cbp:02x}")
-                    print(f"          [INFO] Using calculated CBP to reflect actual block contents")
+                # CRITICAL FIX: Preserve skip MBs (CBP=0) without modification
+                # Skip MBs have no residual data and should use CBP=0
+                if is_skip_mb:
+                    cbp = 0  # Force CBP to 0 for skip MBs
+                    if slice_mb_idx == 0:
+                        print(f"          [INFO] MB 0 is skip MB (original CBP=0x00), preserving without reconstruction")
+                else:
+                    # For coded MBs, use calculated CBP to reflect actual block contents
+                    cbp = calculated_cbp
+                    
+                    if slice_mb_idx == 0 and original_cbp != calculated_cbp:
+                        print(f"          [WARN] MB 0: Original CBP=0x{original_cbp:02x} != Calculated CBP=0x{calculated_cbp:02x}")
+                        print(f"          [INFO] Using calculated CBP to reflect actual block contents")
                 
                 # Write MB type (use original from video)
                 writer.write_ue(original_mb_type)

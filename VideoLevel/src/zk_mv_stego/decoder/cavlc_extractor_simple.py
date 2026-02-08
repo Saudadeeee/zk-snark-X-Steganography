@@ -255,7 +255,14 @@ class SimpleCAVLCExtractor:
                          if not hasattr(self, 'neighbor_coeffs'): self.neighbor_coeffs = {}
                          self.neighbor_coeffs[(mb_x, mb_y, b)] = 0
                 
-                mbs.append({'mb_idx': mb_idx, 'coefficients': coeffs})
+                # CRITICAL: Include CBP metadata to prevent embedding in skip MBs
+                mbs.append({
+                    'mb_idx': mb_idx, 
+                    'coefficients': coeffs,
+                    'cbp': mb_data.coded_block_pattern,
+                    'mb_type': mb_data.mb_type,
+                    'is_skip_mb': mb_data.coded_block_pattern == 0
+                })
                 
                 current_mb_addr += 1
                 slice_mb_idx_counter += 1
@@ -327,8 +334,12 @@ class SimpleCAVLCExtractor:
                         except:
                             pass
                     
-                    # Store MB metadata
-                    mb_metadata[mb_idx] = {'mb_type': mb_type, 'cbp': cbp}
+                    # Store MB metadata (including skip MB flag)
+                    mb_metadata[mb_idx] = {
+                        'mb_type': mb_type, 
+                        'cbp': cbp,
+                        'is_skip_mb': cbp == 0
+                    }
                     
                     if cbp != 0:
                         for block_idx in range(24):  # 24 blocks per MB

@@ -82,15 +82,30 @@ class VisualQualityBenchmark:
         frame = frames[0]
         print(f"  Frame 0: {frame['total_coefficients']} coeffs, {frame['non_zero_count']} non-zero")
         
-        # Prepare coefficients
+        # Prepare coefficients (FILTER OUT SKIP MBs to prevent CBP mismatch)
         coefficients = []
+        skip_mb_count = 0
+        coded_mb_count = 0
+        
         for mb in frame['macroblocks']:
             mb_idx = mb['mb_idx']
             coeffs = mb['coefficients']
+            
+            # CRITICAL: Skip macroblocks with CBP=0 (skip/prediction-only MBs)
+            # These MBs have no residual data and should NOT be modified
+            is_skip_mb = mb.get('is_skip_mb', False) or mb.get('cbp', 1) == 0
+            
+            if is_skip_mb:
+                skip_mb_count += 1
+                continue  # Do NOT include skip MBs in coefficient list
+            
+            coded_mb_count += 1
             for block_idx in range(24):
                 start = block_idx * 16
                 block_coeffs = coeffs[start:start+16]
                 coefficients.append((mb_idx, block_idx, block_coeffs))
+        
+        print(f"  Coded MBs: {coded_mb_count}, Skip MBs: {skip_mb_count} (filtered out)")
         
         # Get safe positions
         safe_positions = self.embedder.safety_filter.get_safe_positions(coefficients, skip_dc=True)
@@ -118,7 +133,7 @@ class VisualQualityBenchmark:
             original_file=original_video,
             modified_coefficients=modified_coeffs,
             output_file=stego_video,
-            max_slices=100  # ← INCREASED: Test multi-frame support (~10 frames CIF)
+            max_slices=300  # Support full 300-frame video (CIF resolution)
         )
         
         print(f"\n[OK] Stego video created: {stego_video}")
