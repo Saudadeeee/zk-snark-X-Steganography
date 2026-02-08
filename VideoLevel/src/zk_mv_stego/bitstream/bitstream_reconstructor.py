@@ -351,7 +351,7 @@ class BitstreamReconstructor:
             if pps is None:
                 pps = PPSData()
             
-            slice_parser = SliceHeaderParser(reader, original_nal.nal_unit_type, sps, pps)
+            slice_parser = SliceHeaderParser(reader, original_nal, sps, pps)  # ← FIX: Pass nal object
             slice_header = slice_parser.parse()
             
             # Get slice header bytes from original
@@ -516,7 +516,7 @@ class BitstreamReconstructor:
             if pps is None:
                 pps = PPSData()
             
-            slice_parser = SliceHeaderParser(reader, original_nal.nal_unit_type, sps, pps)
+            slice_parser = SliceHeaderParser(reader, original_nal, sps, pps)  # ← FIX: Pass nal object
             slice_header = slice_parser.parse()
             
             # combined_blocks is already set above - use it directly!

@@ -68,8 +68,8 @@ class VisualQualityBenchmark:
         
         # NOTE: Currently limited to 1 frame due to BitstreamReconstructor limitation
         if max_frames > 1:
-            print(f"[WARN] BitstreamReconstructor only supports 1 frame. Using max_frames=1")
-            max_frames = 1
+            print(f"[INFO] Testing multi-frame with max_slices=100 (~10 frames)")
+            # Remove the limitation warning since we're testing it now
         
         # Create payload
         payload = b"X" * payload_size  # Simple test payload
@@ -118,10 +118,10 @@ class VisualQualityBenchmark:
             original_file=original_video,
             modified_coefficients=modified_coeffs,
             output_file=stego_video,
-            max_slices=10
+            max_slices=100  # ← INCREASED: Test multi-frame support (~10 frames CIF)
         )
         
-        print(f"\n✓ Stego video created: {stego_video}")
+        print(f"\n[OK] Stego video created: {stego_video}")
         
         return {
             'payload_size': len(payload),
@@ -554,7 +554,7 @@ class VisualQualityBenchmark:
         # Save chart
         chart_path = output_path / 'quality_benchmark_chart.png'
         plt.savefig(chart_path, dpi=300, bbox_inches='tight')
-        print(f"\n✓ Chart saved: {chart_path}")
+        print(f"\n[OK] Chart saved: {chart_path}")
         
         plt.close()
         
@@ -603,7 +603,7 @@ class VisualQualityBenchmark:
         print(f"Decoding stego video...")
         stego_yuv, _, _, _ = self.decode_video_to_yuv(stego_video, max_frames)
         
-        print(f"\n✓ Videos decoded: {width}x{height}, {num_frames} frames")
+        print(f"\n[OK] Videos decoded: {width}x{height}, {num_frames} frames")
         
         # Step 3: Compare pixel quality
         print(f"\n{'='*70}")
@@ -612,7 +612,7 @@ class VisualQualityBenchmark:
         
         metrics = self.compare_pixel_quality(orig_yuv, stego_yuv, width, height, num_frames)
         
-        print(f"\n✓ Metrics calculated:")
+        print(f"\n[OK] Metrics calculated:")
         print(f"  Average PSNR: {metrics['average_psnr']:.2f} dB")
         print(f"  Average SSIM: {metrics['average_ssim']:.4f}")
         print(f"  Average MSE: {metrics['average_mse']:.2f}")
@@ -648,17 +648,17 @@ class VisualQualityBenchmark:
         with open(json_path, 'w') as f:
             json.dump(results, f, indent=2)
         
-        print(f"✓ Results saved: {json_path}")
+        print(f"[OK] Results saved: {json_path}")
         
         # Print summary
         print(f"\n{'='*70}")
         print("BENCHMARK COMPLETE")
         print(f"{'='*70}")
-        print(f"\n📊 Quality Metrics:")
+        print(f"\n[METRICS] Quality Metrics:")
         print(f"  PSNR: {metrics['average_psnr']:.2f} dB")
         print(f"  SSIM: {metrics['average_ssim']:.4f}")
-        print(f"\n📈 Chart: {chart_path}")
-        print(f"📄 JSON: {json_path}")
+        print(f"\n[CHART] Chart: {chart_path}")
+        print(f"[DATA] JSON: {json_path}")
         
         return results
 

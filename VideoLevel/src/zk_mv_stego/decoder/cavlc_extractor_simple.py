@@ -298,7 +298,7 @@ class SimpleCAVLCExtractor:
             reader = BitstreamReader(nal.rbsp_byte)
             
             # Parse slice header
-            slice_parser = SliceHeaderParser(reader, nal.nal_unit_type, sps, pps)
+            slice_parser = SliceHeaderParser(reader, nal, sps, pps)  # ← FIX: Pass nal object, not nal.nal_unit_type
             slice_header = slice_parser.parse()
             
             # Calculate QP

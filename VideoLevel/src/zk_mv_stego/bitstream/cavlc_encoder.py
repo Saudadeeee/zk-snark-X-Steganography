@@ -225,25 +225,29 @@ class CAVLCEncoder:
             print(f"  active_coeffs length: {len(active_coeffs)}, total_coeffs: {total_coeffs}")
             print(f"  runs: {runs}, sum: {sum(runs)}")
         
-        # Additional H.264 VLC table constraint:
-        # The VLC tables for total_zeros are indexed by total_coeffs
-        # and go up to (15 - total_coeffs) for 4x4 blocks
-        # After stripping trailing zeros, we should always satisfy this
-        vlc_max = max_num_coeff - 1 - total_coeffs
-        if total_zeros > vlc_max:
-            print(f"[WARN] total_zeros ({total_zeros}) > VLC max ({vlc_max})")
-            # This should not happen after stripping trailing zeros
-            # But clamp just in case
-            excess = total_zeros - vlc_max
-            total_zeros = vlc_max
-            
-            # Adjust runs to maintain sum = clamped total_zeros
-            for i in range(len(runs) - 1, -1, -1):
-                if excess == 0:
-                    break
-                reduction = min(runs[i], excess)
-                runs[i] -= reduction
-                excess -= reduction
+        # Validate and clamp total_zeros ONLY if it will be encoded
+        # (i.e., when total_coeffs < max_num_coeff)
+        # When all coefficients are non-zero (total_coeffs == max_num_coeff),
+        # total_zeros is not encoded, so no VLC constraint applies
+        if total_coeffs < max_num_coeff:
+            # Additional H.264 VLC table constraint:
+            # The VLC tables for total_zeros are indexed by total_coeffs
+            # and go up to (max_num_coeff - 1 - total_coeffs) for blocks
+            vlc_max = max_num_coeff - 1 - total_coeffs
+            if total_zeros > vlc_max:
+                print(f"[WARN] total_zeros ({total_zeros}) > VLC max ({vlc_max}) - clamping")
+                # This should not happen after stripping trailing zeros
+                # But clamp just in case
+                excess = total_zeros - vlc_max
+                total_zeros = vlc_max
+                
+                # Adjust runs to maintain sum = clamped total_zeros
+                for i in range(len(runs) - 1, -1, -1):
+                    if excess == 0:
+                        break
+                    reduction = min(runs[i], excess)
+                    runs[i] -= reduction
+                    excess -= reduction
         
         return BlockAnalysis(
             total_coeffs=total_coeffs,
