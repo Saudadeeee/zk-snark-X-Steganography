@@ -20,9 +20,32 @@ from .bitstream.cavlc_decoder import CAVLCDecoder
 from .bitstream.h264_parser import H264BitstreamParser
 from .decoder.cavlc_extractor_simple import SimpleCAVLCExtractor
 
+# Exceptions for structured error handling
+from .exceptions import (
+    ZKStegoError,
+    VideoProcessingError,
+    CAVLCError,
+    EmbeddingError,
+    ExtractionError,
+    SafetyFilterError,
+    InsufficientCapacityError,
+    InvalidVideoFormatError,
+    ValidationError
+)
+
 __all__ = [
     "CAVLCEncoder",
     "CAVLCDecoder",
     "H264BitstreamParser",
     "SimpleCAVLCExtractor",
+    # Exceptions
+    "ZKStegoError",
+    "VideoProcessingError",
+    "CAVLCError",
+    "EmbeddingError",
+    "ExtractionError",
+    "SafetyFilterError",
+    "InsufficientCapacityError",
+    "InvalidVideoFormatError",
+    "ValidationError",
 ]

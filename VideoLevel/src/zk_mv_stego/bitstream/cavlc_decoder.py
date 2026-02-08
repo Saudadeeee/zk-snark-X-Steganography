@@ -139,9 +139,6 @@ class CAVLCDecoder:
         """
         table = get_coeff_token_table(nC)
         
-        if nC == -1:
-            print(f"[DEBUG] limit nC=-1 table keys: {list(table.keys())}")
-            
         if table == 'FLC6':
             # nC >= 8: use fixed-length code (8 bits total)
             # Format per H.264 spec: 6 bits TotalCoeff + 2 bits TrailingOnes
@@ -156,11 +153,11 @@ class CAVLCDecoder:
                 total_coeffs, trailing_ones = decode_vlc(self.reader, table, max_bits=16)
                 return (total_coeffs, trailing_ones)
             except ValueError as e:
-                print(f"⚠️ coeff_token decode error: {e}, returning (0,0)")
+                print(f"[WARN] coeff_token decode error: {e}, returning (0,0)")
                 return (0, 0)
         else:
             # Fallback for missing tables
-            print(f"⚠️ No coeff_token table for nC={nC}, using fallback")
+            print(f"[WARN] No coeff_token table for nC={nC}, using fallback")
             if self.reader.read_bits(1) == 0:
                 return (0, 0)
             total_coeffs = self.reader.read_ue() + 1
@@ -247,7 +244,7 @@ class CAVLCDecoder:
                 total_zeros = decode_vlc(self.reader, table, max_bits=9)
                 return total_zeros
             except ValueError as e:
-                print(f"⚠️ total_zeros decode error: {e}, using Exp-Golomb")
+                print(f"[WARN] total_zeros decode error: {e}, using Exp-Golomb")
                 return min(self.reader.read_ue(), max_num_coeff - total_coeffs)
         else:
             # Fallback for missing tables
@@ -365,7 +362,7 @@ def test_cavlc_decoder():
 if __name__ == '__main__':
     print("CAVLC Decoder Test")
     print("=" * 60)
-    print("\n⚠️  NOTE: This is a SIMPLIFIED implementation")
+    print("\n[NOTE] This is a SIMPLIFIED implementation")
     print("   Full CAVLC requires complete VLC tables from H.264 spec")
     print("   Current version uses placeholders for testing\n")
     

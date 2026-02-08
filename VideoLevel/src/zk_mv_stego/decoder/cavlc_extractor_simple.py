@@ -80,17 +80,53 @@ class SimpleCAVLCExtractor:
         # Logic copied from BitstreamReconstructor
         try:
             reader = BitstreamReader(nal.rbsp_byte)
-            # Parse SPS fields
+            # Parse SPS fields per H.264 spec
             profile_idc = reader.read_bits(8)
             constraint_flags = reader.read_bits(8)
             level_idc = reader.read_bits(8)
             seq_parameter_set_id = reader.read_ue()
+            
+            # High Profile extensions (profile 100, 110, 122, 244, 44, etc.)
+            high_profiles = [100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135]
+            if profile_idc in high_profiles:
+                chroma_format_idc = reader.read_ue()
+                if chroma_format_idc == 3:
+                    separate_colour_plane_flag = reader.read_bits(1)
+                
+                bit_depth_luma_minus8 = reader.read_ue()
+                bit_depth_chroma_minus8 = reader.read_ue()
+                qpprime_y_zero_transform_bypass_flag = reader.read_bits(1)
+                seq_scaling_matrix_present_flag = reader.read_bits(1)
+                
+                if seq_scaling_matrix_present_flag:
+                    # Skip scaling lists (complex, 8 lists for 4:2:0)
+                    num_lists = 12 if chroma_format_idc != 3 else 8
+                    for i in range(num_lists):
+                        seq_scaling_list_present_flag = reader.read_bits(1)
+                        if seq_scaling_list_present_flag:
+                            # Skip actual scaling list data
+                            size = 16 if i < 6 else 64
+                            last_scale = 8
+                            next_scale = 8
+                            for j in range(size):
+                                if next_scale != 0:
+                                    delta_scale = reader.read_se()
+                                    next_scale = (last_scale + delta_scale + 256) % 256
+                                last_scale = next_scale if next_scale != 0 else last_scale
             
             sps.log2_max_frame_num_minus4 = reader.read_ue()
             sps.pic_order_cnt_type = reader.read_ue()
             
             if sps.pic_order_cnt_type == 0:
                 sps.log2_max_pic_order_cnt_lsb_minus4 = reader.read_ue()
+            elif sps.pic_order_cnt_type == 1:
+                # Additional fields for POC type 1
+                delta_pic_order_always_zero_flag = reader.read_bits(1)
+                offset_for_non_ref_pic = reader.read_se()
+                offset_for_top_to_bottom_field = reader.read_se()
+                num_ref_frames_in_pic_order_cnt_cycle = reader.read_ue()
+                for i in range(num_ref_frames_in_pic_order_cnt_cycle):
+                    offset_for_ref_frame = reader.read_se()
             
             num_ref_frames = reader.read_ue()
             gaps_in_frame_num_value_allowed_flag = reader.read_bits(1)
@@ -100,8 +136,12 @@ class SimpleCAVLCExtractor:
             sps.pic_height_in_map_units_minus1 = reader.read_ue()
             sps.frame_mbs_only_flag = reader.read_bits(1) == 1
             
+            print(f"[SPS] Profile={profile_idc}, Dimensions={sps.pic_width_in_mbs_minus1+1}x{sps.pic_height_in_map_units_minus1+1} MBs")
+            
         except Exception as e:
             print(f"[CAVLC Extractor] SPS parsing error: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _parse_pps(self, nal, pps):
         """Parse PPS NAL unit to update PPSData object"""
@@ -136,7 +176,7 @@ class SimpleCAVLCExtractor:
         reader = BitstreamReader(nal.rbsp_byte)
         
         # Parse slice header using same method as reconstructor
-        slice_parser = SliceHeaderParser(reader, nal.nal_unit_type, sps, pps)
+        slice_parser = SliceHeaderParser(reader, nal, sps, pps)
         slice_header = slice_parser.parse()
         
         # Calculate QP from PPS init QP + slice QP delta
@@ -221,7 +261,9 @@ class SimpleCAVLCExtractor:
                 slice_mb_idx_counter += 1
                 
             except Exception as e:
-                # print(f"Extract error MB {slice_mb_idx_counter}: {e}")
+                print(f"[CAVLC Extract] MB {slice_mb_idx_counter} error: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
                 break
 
         
