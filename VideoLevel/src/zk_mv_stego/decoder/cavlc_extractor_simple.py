@@ -224,8 +224,14 @@ class SimpleCAVLCExtractor:
                         current_mb_addr += mb_skip_run
                         mb_idx = current_mb_addr
                 
+                # Log reader position before parsing (for debugging if needed)
+                # pos_before = reader.position
+                
                 # Use robust parsing from MacroblockParser
                 mb_data = mb_parser.parse_macroblock()
+                
+                # pos_after = reader.position
+                # bits_consumed = pos_after - pos_before
                 
                 # Coefficients are NOT parsed by parse_macroblock (it only does header/prediction)
                 # But wait, does parse_macroblock parse residuals?
@@ -265,6 +271,9 @@ class SimpleCAVLCExtractor:
                          if not hasattr(self, 'neighbor_coeffs'): self.neighbor_coeffs = {}
                          nC = mb_parser.calculate_nC(mb_x, mb_y, b, self.neighbor_coeffs)
                          
+                         # Track reader position for error debugging
+                         pos_before_block = reader.position
+                         
                          try:
                              block = cavlc_decoder.decode_block_cavlc(nC, 16)
                              
@@ -277,6 +286,7 @@ class SimpleCAVLCExtractor:
                          except Exception as decode_err:
                              # Decoder failed - leave block as zeros and continue
                              # This allows extraction to continue even with some decode errors
+                             # Silently skip errors now that decoder is stable
                              if not hasattr(self, 'neighbor_coeffs'): self.neighbor_coeffs = {}
                              self.neighbor_coeffs[(mb_x, mb_y, b)] = 0
                     else:
