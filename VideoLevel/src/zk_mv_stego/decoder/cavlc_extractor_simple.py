@@ -203,6 +203,27 @@ class SimpleCAVLCExtractor:
         while (total_bits - reader.pos) > 8 and slice_mb_idx_counter < max_mbs_in_frame:
             mb_idx = current_mb_addr
             try:
+                # H.264 Section 7.3.4: For P/B slices, MUST read mb_skip_run before mb_data
+                # This indicates number of consecutive skip MBs (no residuals)
+                if not mb_parser.is_i_slice:
+                    mb_skip_run = reader.read_ue()
+                    if mb_skip_run > 0:
+                        # Skip these MBs - they have no coded residuals
+                        for skip_i in range(mb_skip_run):
+                            skip_mb_idx = current_mb_addr + skip_i
+                            skip_coeffs = [0] * 384  # All zero coefficients
+                            mbs.append({
+                                'mb_idx': skip_mb_idx,
+                                'coefficients': skip_coeffs,
+                                'cbp': 0,
+                                'mb_type': None,
+                                'is_skip_mb': True
+                            })
+                            slice_mb_idx_counter += 1
+                        # Advance address past skip MBs
+                        current_mb_addr += mb_skip_run
+                        mb_idx = current_mb_addr
+                
                 # Use robust parsing from MacroblockParser
                 mb_data = mb_parser.parse_macroblock()
                 

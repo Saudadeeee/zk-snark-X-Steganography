@@ -93,7 +93,7 @@ COEFF_TOKEN_NC_0_1 = {
     '0000000000000110': (14, 1),
     '0000000000000101': (14, 2),
     '000000000001000': (14, 3),
-    
+
     # Note: TC=15-16 entries omitted (handled separately via FLC in spec)
 }
 
