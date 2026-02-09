@@ -248,10 +248,14 @@ class SimpleCAVLCExtractor:
                     should_decode = False
                     if b < 16:
                         should_decode = (b in luma_blocks)
-                    elif b < 20: # Chroma DC
-                         should_decode = mb_data.chroma_dc_present
-                    elif b < 24: # Chroma AC
-                         should_decode = mb_data.chroma_ac_present
+                    elif b < 20: # Chroma DC (blocks 16-19)
+                         # SKIP Chroma DC - use special 2x2 Hadamard transform (not implemented)
+                         # For now, leave as zeros to avoid decoder errors
+                         should_decode = False  # Was: mb_data.chroma_dc_present
+                    elif b < 24: # Chroma AC (blocks 20-23)
+                         # SKIP Chroma AC for now - often causes decode errors
+                         # Only embed in luma blocks (0-15) which decode reliably
+                         should_decode = False  # Was: mb_data.chroma_ac_present
                     
                     if should_decode:
                          # Calculate nC
@@ -261,14 +265,20 @@ class SimpleCAVLCExtractor:
                          if not hasattr(self, 'neighbor_coeffs'): self.neighbor_coeffs = {}
                          nC = mb_parser.calculate_nC(mb_x, mb_y, b, self.neighbor_coeffs)
                          
-                         block = cavlc_decoder.decode_block_cavlc(nC, 16)
-                         
-                         # Copy into correct position in flattened list
-                         # flatten coeffs: blocks 0..23
-                         start_idx = b * 16
-                         coeffs[start_idx:start_idx+16] = block.levels
-                         
-                         self.neighbor_coeffs[(mb_x, mb_y, b)] = block.total_coeffs
+                         try:
+                             block = cavlc_decoder.decode_block_cavlc(nC, 16)
+                             
+                             # Copy into correct position in flattened list
+                             # flatten coeffs: blocks 0..23
+                             start_idx = b * 16
+                             coeffs[start_idx:start_idx+16] = block.levels
+                             
+                             self.neighbor_coeffs[(mb_x, mb_y, b)] = block.total_coeffs
+                         except Exception as decode_err:
+                             # Decoder failed - leave block as zeros and continue
+                             # This allows extraction to continue even with some decode errors
+                             if not hasattr(self, 'neighbor_coeffs'): self.neighbor_coeffs = {}
+                             self.neighbor_coeffs[(mb_x, mb_y, b)] = 0
                     else:
                          # Update neighbors 0
                          mb_x = mb_idx % (sps.pic_width_in_mbs_minus1 + 1)

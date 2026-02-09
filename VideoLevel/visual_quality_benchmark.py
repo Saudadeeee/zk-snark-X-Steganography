@@ -100,7 +100,9 @@ class VisualQualityBenchmark:
                 continue  # Do NOT include skip MBs in coefficient list
             
             coded_mb_count += 1
-            for block_idx in range(24):
+            # CRITICAL: Only use luma blocks (0-15), skip chroma (16-23)
+            # Decoder cannot reliably decode chroma blocks, so skip them in embedding too
+            for block_idx in range(16):  # Was: range(24)
                 start = block_idx * 16
                 block_coeffs = coeffs[start:start+16]
                 coefficients.append((mb_idx, block_idx, block_coeffs))
