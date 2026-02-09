@@ -153,7 +153,7 @@ class CAVLCDecoder:
                 total_coeffs, trailing_ones = decode_vlc(self.reader, table, max_bits=16)
                 return (total_coeffs, trailing_ones)
             except ValueError as e:
-                print(f"[WARN] coeff_token decode error: {e}, returning (0,0)")
+                print(f"[WARN] coeff_token decode error (nC={nC}): {e}, returning (0,0)")
                 return (0, 0)
         else:
             # Fallback for missing tables
