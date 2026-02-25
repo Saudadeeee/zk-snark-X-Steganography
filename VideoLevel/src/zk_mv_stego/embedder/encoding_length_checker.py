@@ -51,22 +51,18 @@ class EncodingLengthChecker:
             levelCode = (abs_level - 1) * 2 + sign
         
         # Determine levelPrefix and levelSuffixSize
+        # CRITICAL FIX: When suffixLength=0, write levelCode directly as prefix (FFmpeg behavior)
         if suffix_length == 0:
-            # Special case: suffix_length = 0
-            if levelCode < 14:
-                # Normal encoding: prefix = levelCode, no suffix
-                levelPrefix = levelCode
-                levelSuffixSize = 0
-            else:
-                # Escape code: prefix = 14, 4-bit suffix
-                levelPrefix = 14
-                levelSuffixSize = 4
+            # No suffix, use prefix value directly as levelCode
+            # This matches how FFmpeg/x264 encodes and how our decoder interprets it
+            levelPrefix = levelCode
+            levelSuffixSize = 0
         else:
             # Normal case: split into prefix and suffix
             levelPrefix = levelCode >> suffix_length
             levelSuffixSize = suffix_length
             
-            # Check for escape (prefix >= 14)
+            # Check for escape (prefix >= 14, only when suffixLength > 0)
             if levelPrefix >= 14:
                 levelPrefix = 14
                 levelSuffixSize = 4
@@ -166,36 +162,42 @@ class EncodingLengthChecker:
         """
         Check if flipping LSB of value is safe for patching.
         
-        PRACTICAL HEURISTIC:
-        - value = ±1: NOT patchable (flips to 0, changes block structure)
-        - |value| >= 2: PATCHABLE (in practice, suffix_length adapts to make these stable)
-        
-        This heuristic is based on real-world CAVLC behavior where:
-        1. Blocks with multiple non-zero coeffs use suffix_length >= 1
-        2. With suffix_length >= 1, LSB flips of |value| >= 2 preserve encoding length
-        3. Only value = ±1 is problematic (flips to zero)
+        Uses ACTUAL CAVLC encoding length calculation to determine if LSB flip
+        preserves the bit length.
         
         Args:
             value: Original coefficient value
-            suffix_length: Ignored (kept for API compatibility)
+            suffix_length: CAVLC suffix length context (typically 0 or 1)
         
         Returns:
-            (is_patchable, estimated_bits, estimated_bits)
+            (is_patchable, original_bits, new_bits)
         """
-        # CRITICAL: Reject value = ±1 (flips to 0, changes block structure)
-        if abs(value) == 1:
+        # CRITICAL: Reject value = ±1 or 0 (changes zero/non-zero count)
+        if abs(value) <= 1:
             return False, 0, 0
         
-        # Reject value = 0 (flips to ±1, changes block structure)
-        if value == 0:
+        # Calculate new value after LSB flip
+        # For negative values: flip bit in magnitude representation
+        if value > 0:
+            new_value = value ^ 1  # XOR with 1
+        else:
+            # For negative: flip LSB of abs value, then negate
+            abs_val = abs(value)
+            new_abs = abs_val ^ 1
+            new_value = -new_abs
+        
+        # Don't allow flip that would create 0 or ±1
+        if abs(new_value) <= 1:
             return False, 0, 0
         
-        # For |value| >= 2, LSB flip is safe in practice
-        # Estimate encoding length (not exact, but good enough for reporting)
-        abs_val = abs(value)
-        estimated_bits = 3 + (abs_val.bit_length() - 1)  # Rough estimate
+        # Calculate actual encoding lengths
+        original_bits = self.get_level_encoding_length(value, suffix_length, is_first_after_t1s=False)
+        new_bits = self.get_level_encoding_length(new_value, suffix_length, is_first_after_t1s=False)
         
-        return True, estimated_bits, estimated_bits
+        # Patchable only if encoding length is preserved
+        is_patchable = (original_bits == new_bits) and (original_bits > 0)
+        
+        return is_patchable, original_bits, new_bits
 
 
 

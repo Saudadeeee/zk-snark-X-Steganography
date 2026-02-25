@@ -17,6 +17,9 @@ class SimpleCAVLCExtractor:
         parser = H264BitstreamParser(video_path)
         nal_units = parser.parse()  # No argument needed
         
+        # Track nC values for each block: {(mb_idx, block_idx): nC}
+        self.nC_map = {}
+        
         # Count NAL types
         slice_count = sum(1 for nal in nal_units if nal.nal_unit_type == NALUnitType.SLICE_IDR)
         print(f"[CAVLC Extractor] Found {len(nal_units)} total NAL units")
@@ -184,7 +187,11 @@ class SimpleCAVLCExtractor:
         
         # Current position is after slice header
         header_bits_end = reader.position
-        print(f"  Slice header parsed, reader at bit {header_bits_end}, QP={slice_qp}")
+        
+        # PRIORITY 1: Log slice type for debugging
+        slice_type_names = {0: 'P', 1: 'B', 2: 'I', 3: 'SP', 4: 'SI', 5: 'P', 6: 'B', 7: 'I', 8: 'SP', 9: 'SI'}
+        slice_type_name = slice_type_names.get(slice_header.slice_type, f'UNKNOWN({slice_header.slice_type})')
+        print(f"  Slice header: Type={slice_type_name} (code={slice_header.slice_type}), QP={slice_qp}, reader at bit {header_bits_end}")
         
         mb_parser = MacroblockParser(reader, slice_header.slice_type)
         cavlc_decoder = CAVLCDecoder(reader)
@@ -225,10 +232,45 @@ class SimpleCAVLCExtractor:
                         mb_idx = current_mb_addr
                 
                 # Log reader position before parsing (for debugging if needed)
-                # pos_before = reader.position
+                pos_before_mb = reader.position
                 
-                # Use robust parsing from MacroblockParser
-                mb_data = mb_parser.parse_macroblock()
+                # CRITICAL FIX: Use try-except to recover from MB parsing errors
+                try:
+                    # Use robust parsing from MacroblockParser
+                    mb_data = mb_parser.parse_macroblock()
+                    
+                    # Additional validation: Check if mb_data looks reasonable
+                    if mb_data.mb_type > 100:  # Sanity check
+                        raise ValueError(f"Unreasonable mb_type={mb_data.mb_type}, likely corrupted")
+                    if mb_data.coded_block_pattern > 47:
+                        # Already clamped in parser, but check anyway
+                        print(f"[WARN] MB {mb_idx}: CBP was out of range and was clamped")
+                    
+                except Exception as mb_parse_error:
+                    # RECOVERY: Skip this corrupted MB and continue
+                    print(f"[ERROR] MB {mb_idx} parsing failed: {mb_parse_error}")
+                    print(f"[RECOVERY] Skipping corrupted MB {mb_idx}, inserting zeros")
+                    
+                    # Create zero MB as placeholder
+                    zero_coeffs = [0] * 384
+                    mbs.append({
+                        'mb_idx': mb_idx,
+                        'coefficients': zero_coeffs,
+                        'cbp': 0,
+                        'mb_type': 'CORRUPTED',
+                        'is_skip_mb': False
+                    })
+                    
+                    # Advance to next MB - try to resync by advancing some bits
+                    # This is heuristic - advance by average MB size (~200-500 bits)
+                    try:
+                        self.reader.read_bits(min(300, total_bits - reader.pos - 16))  # Skip ~300 bits
+                    except:
+                        pass  # If we can't skip, we're near end anyway
+                    
+                    current_mb_addr += 1
+                    slice_mb_idx_counter += 1
+                    continue  # Skip to next MB
                 
                 # pos_after = reader.position
                 # bits_consumed = pos_after - pos_before
@@ -241,6 +283,7 @@ class SimpleCAVLCExtractor:
                 
                 # Determine blocks to decode
                 luma_blocks = mb_parser.get_luma_blocks_to_decode(mb_data)
+                
                 # Parse them
                 coeffs = [0] * 384
                 
@@ -264,37 +307,102 @@ class SimpleCAVLCExtractor:
                          should_decode = False  # Was: mb_data.chroma_ac_present
                     
                     if should_decode:
-                         # Calculate nC
-                         mb_x = mb_idx % (sps.pic_width_in_mbs_minus1 + 1)
-                         mb_y = mb_idx // (sps.pic_width_in_mbs_minus1 + 1)
+                         # PRIORITY 3 FIX: Use GLOBAL MB address for neighbor cache
+                         # Global MB address = first_mb_in_slice + current offset within slice
+                         mb_global_addr = current_mb_addr  # This is already global!
+                         mb_width = sps.pic_width_in_mbs_minus1 + 1
+                         mb_x = mb_global_addr % mb_width
+                         mb_y = mb_global_addr // mb_width
                          
                          if not hasattr(self, 'neighbor_coeffs'): self.neighbor_coeffs = {}
-                         nC = mb_parser.calculate_nC(mb_x, mb_y, b, self.neighbor_coeffs)
+                         
+                         # Use global MB address as cache key (NOT local mb_x, mb_y which reset per slice)
+                         cache_key = (mb_global_addr, b)
+                         nC = mb_parser.calculate_nC(mb_x, mb_y, b, self.neighbor_coeffs, mb_width=mb_width)
+                         
+                         # Store nC for Safety Filter (CRITICAL FIX)
+                         self.nC_map[cache_key] = nC
                          
                          # Track reader position for error debugging
                          pos_before_block = reader.position
                          
+                         # 🔴 TWIN LOGGING: Decoder side (log for first MB only)
+                         if mb_global_addr == 0 and b < 16:
+                             # Peek next 16 bits without consuming
+                             peek_bits = reader.peek_bits(16) if hasattr(reader, 'peek_bits') else "N/A"
+                             
+                             # CORRECT neighbor key calculation using H.264 block scan order
+                             # H.264 scan: 0 1 | 4 5
+                             #             2 3 | 6 7
+                             #             ----+----
+                             #             8 9 |12 13
+                             #            10 11|14 15
+                             # Map to (x,y): (0..3, 0..3)
+                             BLOCK_XY = [
+                                 (0,0), (1,0), (0,1), (1,1),
+                                 (2,0), (3,0), (2,1), (3,1),
+                                 (0,2), (1,2), (0,3), (1,3),
+                                 (2,2), (3,2), (2,3), (3,3)
+                             ]
+                             blk_x, blk_y = BLOCK_XY[b]
+                             
+                             # Left neighbor
+                             if blk_x > 0:
+                                 left_idx = next((i for i, (x,y) in enumerate(BLOCK_XY) if x==blk_x-1 and y==blk_y), None)
+                                 left_key = (mb_global_addr, left_idx) if left_idx is not None else None
+                             else:
+                                 left_key = None  # Edge (for now, ignore cross-MB)
+                             
+                             # Top neighbor
+                             if blk_y > 0:
+                                 top_idx = next((i for i, (x,y) in enumerate(BLOCK_XY) if x==blk_x and y==blk_y-1), None)
+                                 top_key = (mb_global_addr, top_idx) if top_idx is not None else None
+                             else:
+                                 top_key = None  # Edge
+                             
+                             nA = self.neighbor_coeffs.get(left_key, "edge") if left_key else "edge"
+                             nB = self.neighbor_coeffs.get(top_key, "edge") if top_key else "edge"
+                             print(f"[DEC] MB:{mb_global_addr} Blk:{b}({blk_x},{blk_y}) nC:{nC} (nA={nA}, nB={nB}) Pos:{pos_before_block} Peek:{peek_bits}")
+                         
+                         pos_decode_start = reader.position  # Save position BEFORE decode
+                         debug_key = (mb_global_addr, b) if mb_global_addr == 0 and b < 16 else None
+                         
+                         # CRITICAL FIX: Wrap CAVLC decode in try-except for error recovery
                          try:
-                             block = cavlc_decoder.decode_block_cavlc(nC, 16)
-                             
-                             # Copy into correct position in flattened list
-                             # flatten coeffs: blocks 0..23
-                             start_idx = b * 16
-                             coeffs[start_idx:start_idx+16] = block.levels
-                             
-                             self.neighbor_coeffs[(mb_x, mb_y, b)] = block.total_coeffs
-                         except Exception as decode_err:
-                             # Decoder failed - leave block as zeros and continue
-                             # This allows extraction to continue even with some decode errors
-                             # Silently skip errors now that decoder is stable
-                             if not hasattr(self, 'neighbor_coeffs'): self.neighbor_coeffs = {}
-                             self.neighbor_coeffs[(mb_x, mb_y, b)] = 0
+                             block = cavlc_decoder.decode_block_cavlc(nC, 16, debug_key=debug_key)
+                         except Exception as cavlc_error:
+                             # CAVLC decode failed - use zero block as fallback
+                             print(f"[ERROR] CAVLC decode failed for MB {mb_global_addr} block {b}: {cavlc_error}")
+                             print(f"[RECOVERY] Using zero block as fallback")
+                             # Create dummy block
+                             from .cavlc_decoder import CoefficientBlock
+                             block = CoefficientBlock(
+                                 levels=[0] * 16,
+                                 total_coeffs=0,
+                                 trailing_ones=0,
+                                 total_zeros=0
+                             )
+                         
+                         pos_decode_end = reader.position
+                         bits_consumed = pos_decode_end - pos_decode_start
+                         
+                         if mb_global_addr == 0 and b < 16:
+                             non_zero = [c for c in block.levels if c != 0]
+                             print(f"  -> Consumed {bits_consumed} bits, TC={block.total_coeffs}, Coeffs={non_zero[:3] if non_zero else []}")
+                         
+                         # Copy into correct position in flattened list
+                         # flatten coeffs: blocks 0..23
+                         start_idx = b * 16
+                         coeffs[start_idx:start_idx+16] = block.levels
+                        
+                         self.neighbor_coeffs[cache_key] = block.total_coeffs if hasattr(block, 'total_coeffs') else 0
                     else:
-                         # Update neighbors 0
-                         mb_x = mb_idx % (sps.pic_width_in_mbs_minus1 + 1)
-                         mb_y = mb_idx // (sps.pic_width_in_mbs_minus1 + 1)
+                         # Update neighbors 0 for skipped blocks
+                         mb_global_addr = current_mb_addr
                          if not hasattr(self, 'neighbor_coeffs'): self.neighbor_coeffs = {}
-                         self.neighbor_coeffs[(mb_x, mb_y, b)] = 0
+                         # PRIORITY 3: Use global MB address
+                         cache_key = (mb_global_addr, b)
+                         self.neighbor_coeffs[cache_key] = 0
                 
                 # CRITICAL: Include CBP metadata to prevent embedding in skip MBs
                 mbs.append({
@@ -317,9 +425,11 @@ class SimpleCAVLCExtractor:
         
         return {
             'frame_idx': idx,
+            'slice_header': slice_header,  # Store parsed slice header for reconstruction
             'macroblocks': mbs,
             'total_coefficients': len(mbs) * 384,
-            'non_zero_count': sum(sum(1 for c in mb['coefficients'] if c != 0) for mb in mbs)
+            'non_zero_count': sum(sum(1 for c in mb['coefficients'] if c != 0) for mb in mbs),
+            'nC_map': self.nC_map  # CRITICAL: Pass nC values to Safety Filter
         }
     
     def extract_coefficients_from_nal(self, nal, global_mb_idx: int = 0, sps=None, pps=None) -> Optional[Dict]:

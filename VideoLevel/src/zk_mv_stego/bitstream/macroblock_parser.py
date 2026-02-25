@@ -113,18 +113,54 @@ class MacroblockParser:
         """
         mb = MacroblockData(mb_type=0, mb_type_enum=None)
         
+        # DEBUG: Track bit consumption for first MB
+        pos_start = self.reader.position
+        debug_first_mb = False  # Disabled for production
+        
         # 1. Read mb_type
         mb.mb_type = self._read_mb_type()
         mb.mb_type_enum = self._interpret_mb_type(mb.mb_type)
+        
+        if debug_first_mb:
+            pos_after_type = self.reader.position
+            print(f"    [MB_BITS] After mb_type: Pos:{pos_after_type} (consumed {pos_after_type - pos_start} bits)")
+        
+        # CRITICAL FIX: Validate mb_type and recover from errors
+        if mb.mb_type_enum is None:
+            # Unknown mb_type - this shouldn't happen after fix in _interpret_mb_type
+            # but add safety check anyway
+            print(f"[ERROR] Unknown mb_type={mb.mb_type} in slice_type={self.slice_type}!")
+            print(f"[RECOVERY] Using I_4x4 fallback")
+            mb.mb_type_enum = MBType.I_4x4  # Safe default
+        
+        # ADDITIONAL CHECK: Validate we're not too far off alignment
+        if mb.mb_type > 100:  # Sanity check - no valid mb_type should be this high
+            print(f"[ERROR] mb_type={mb.mb_type} suggests severe bitstream corruption!")
+            print(f"[RECOVERY] Attempting to continue with fallback")
         
         # 2. Handle I_PCM special case
         if mb.mb_type_enum == MBType.I_PCM:
             self._parse_i_pcm(mb)
             return mb
         
-        # 3. Parse prediction mode for I_4x4
+        # 3. Parse prediction mode for I_4x4 (luma pred modes only)
         if mb.mb_type_enum == MBType.I_4x4:
-            self._parse_intra_4x4_pred_mode(mb)
+            self._parse_intra_4x4_pred_mode(mb)  # Parse luma modes
+            if debug_first_mb:
+                pos_after_pred = self.reader.position
+                print(f"    [MB_BITS] After intra_4x4_pred_mode: Pos:{pos_after_pred} (consumed {pos_after_pred - pos_after_type} bits)")
+        
+        # PRIORITY 2 FIX: Parse chroma pred mode for ALL Intra MBs (I_4x4 AND I_16x16)
+        # H.264 Spec: intra_chroma_pred_mode exists for both I_NxN and I_16x16!
+        # CRITICAL: Even if mb_type_enum is None (unknown), we're in I-slice, so MUST parse chroma mode!
+        if self.is_i_slice and mb.mb_type_enum != MBType.I_PCM:
+            # Parse for all MBs in I-slice except I_PCM (which returns early)
+            pos_before_chroma = self.reader.position
+            mb.intra_chroma_pred_mode = self.reader.read_ue()
+            # Disabled debug logging to reduce token usage
+        elif self.is_p_slice and self._is_i16x16(mb.mb_type_enum):
+            # I MBs within P-slice also need chroma pred mode
+            mb.intra_chroma_pred_mode = self.reader.read_ue()
         
         # 4. Parse Coded Block Pattern (if not I_16x16)
         if not self._is_i16x16(mb.mb_type_enum):
@@ -133,9 +169,22 @@ class MacroblockParser:
             # I_16x16: CBP is encoded in mb_type
             mb.coded_block_pattern = self._extract_cbp_from_i16x16(mb.mb_type_enum)
         
+        # CRITICAL FIX: Validate CBP range and clamp if invalid
+        if mb.coded_block_pattern < 0 or mb.coded_block_pattern > 47:
+            print(f"[WARN] Suspicious CBP={mb.coded_block_pattern} (valid: 0-47)")
+            print(f"[FIX] Clamping CBP to valid range")
+            mb.coded_block_pattern = min(max(mb.coded_block_pattern, 0), 47)  # Clamp to [0, 47]
+        
         # 5. Parse QP delta
         if mb.coded_block_pattern > 0 or self._is_i16x16(mb.mb_type_enum):
             mb.mb_qp_delta = self.reader.read_se()
+            
+            # CRITICAL FIX: Validate and clamp QP delta
+            if mb.mb_qp_delta < -26 or mb.mb_qp_delta > 25:
+                print(f"[WARN] Suspicious QP_delta={mb.mb_qp_delta} (valid: -26 to +25) - bitstream misalignment likely!")
+                print(f"[FIX] Clamping QP_delta to valid range")
+                mb.mb_qp_delta = min(max(mb.mb_qp_delta, -26), 25)  # Clamp to [-26, 25]
+            
             self.current_qp = (self.current_qp + mb.mb_qp_delta + 52) % 52
         
         # 6. Determine which blocks have residual
@@ -156,10 +205,17 @@ class MacroblockParser:
         return self.reader.read_ue()
     
     def _interpret_mb_type(self, mb_type: int) -> Optional[MBType]:
-        """Convert mb_type value to MBType enum"""
+        """Convert mb_type value to MBType enum with robust error handling"""
         if self.is_i_slice:
             if mb_type <= 25:
                 return MBType(mb_type)
+            else:
+                # CRITICAL FIX: mb_type > 25 indicates bitstream misalignment
+                # Instead of returning None (which causes cascade failures),
+                # treat as I_4x4 to allow parsing to continue
+                print(f"[WARN] mb_type={mb_type} > 25 in I-slice (slice_type={self.slice_type})")
+                print(f"[FIX] Treating as I_4x4 to prevent cascade failure")
+                return MBType.I_4x4  # Fallback to most common type
         elif self.is_p_slice:
             # P slice mapping (simplified)
             if mb_type == 0:
@@ -172,11 +228,22 @@ class MacroblockParser:
                 return MBType.P_8x8
             elif mb_type == 4:
                 return MBType.P_8x8ref0
-            # I types in P slice
+            # I types in P slice (offset by 5)
             elif mb_type >= 5 and mb_type <= 30:
-                return MBType(mb_type - 5)
+                # Map to I-slice types: mb_type 5→0, 6→1, ..., 30→25
+                i_type_val = mb_type - 5
+                return MBType(i_type_val)
+            else:
+                # CRITICAL FIX: Invalid mb_type in P-slice
+                print(f"[WARN] mb_type={mb_type} > 30 in P-slice (slice_type={self.slice_type})")
+                print(f"[FIX] Treating as P_L0_16x16 to prevent cascade failure")
+                return MBType.P_L0_16x16  # Fallback
+        else:
+            # Unknown slice type
+            print(f"[WARN] Unknown slice_type={self.slice_type}, mb_type={mb_type}")
+            return MBType.I_4x4  # Safe fallback
         
-        return None
+        return MBType.I_4x4  # Default fallback
     
     def _is_i16x16(self, mb_type: Optional[MBType]) -> bool:
         """Check if macroblock is I_16x16 type"""
@@ -199,7 +266,7 @@ class MacroblockParser:
             self.reader.read_bits(8)
     
     def _parse_intra_4x4_pred_mode(self, mb: MacroblockData):
-        """Parse prediction modes for I_4x4 blocks"""
+        """Parse LUMA prediction modes for I_4x4 blocks (chroma mode moved to main flow)"""
         mb.intra_4x4_pred_mode = []
         
         for blk_idx in range(16):
@@ -213,9 +280,7 @@ class MacroblockParser:
                 rem_mode = self.reader.read_bits(3)
                 mb.intra_4x4_pred_mode.append(rem_mode)
         
-        # Parse chroma intra prediction mode (ue(v))
-        if self.is_i_slice:
-            mb.intra_chroma_pred_mode = self.reader.read_ue()
+        # NOTE: intra_chroma_pred_mode is now parsed in parse_macroblock() for both I_4x4 and I_16x16
     
     def _read_coded_block_pattern(self) -> int:
         """
@@ -225,6 +290,7 @@ class MacroblockParser:
             CBP value (0-47)
         """
         # Read me(v) value using Exp-Golomb
+        pos_before = self.reader.position
         me_val = self.reader.read_ue()
         
         # Map using Table 9-4 (CodedBlockPatternMapping) - Intra
@@ -244,7 +310,12 @@ class MacroblockParser:
         
         # Use intra mapping if I-slice (simplified - should check mb_type)
         if self.is_i_slice and me_val < len(cbp_mapping_intra):
-            return cbp_mapping_intra[me_val]
+            cbp = cbp_mapping_intra[me_val]
+            # DEBUG: Log CBP mapping for first few MBs
+            if pos_before < 100:
+                pos_after = self.reader.position
+                print(f"    [CBP_READ] Pos:{pos_before} UE:{me_val} -> CBP:{cbp} (I-slice) (consumed {pos_after - pos_before} bits)")
+            return cbp
         elif not self.is_i_slice and me_val < len(cbp_mapping_inter):
             return cbp_mapping_inter[me_val]
         else:
@@ -256,26 +327,43 @@ class MacroblockParser:
         
         I_16x16_<Intra16x16PredMode>_<CodedBlockPatternChroma>_<CodedBlockPatternLuma>
         
+        According to H.264 spec Table 9-1:
+        - mb_type values 1-24 encode I_16x16 macroblocks
+        - Format: I_16x16_<pred>_<cbp_chroma>_<cbp_luma>
+        - Decoding: type_offset = mb_type - 1
+          - cbp_luma = type_offset % 2 (0 or 1)
+          - cbp_chroma = (type_offset % 4) // 2 (0, 1, or 2)
+          - pred_mode = (type_offset % 12) // 4 (0-3)
+        
         Returns:
-            CBP value
+            CBP value (6 bits: [chroma_cbp(2)][luma_cbp(4)])
         """
         if mb_type < MBType.I_16x16_0_0_0 or mb_type > MBType.I_16x16_3_2_1:
             return 0
         
         # Decode from mb_type
-        type_idx = mb_type - MBType.I_16x16_0_0_0
+        type_offset = mb_type - MBType.I_16x16_0_0_0
         
-        # Luma: 0 or 15 (all blocks)
-        luma_cbp = (type_idx // 12) * 15
+        # CRITICAL FIX: CBP_luma is type_offset % 2 (0 or 1)
+        # 0 → no luma residual (cbp_luma = 0)
+        # 1 → all luma blocks have residual (cbp_luma = 15)
+        cbp_luma_flag = type_offset % 2
+        luma_cbp = 15 if cbp_luma_flag else 0
         
-        # Chroma
-        chroma_idx = (type_idx % 12) // 4
+        # CRITICAL FIX: Chroma CBP calculation
+        # H.264 spec: CodedBlockPatternChroma = ((mb_type - 1) % 12) // 4
+        # Formula: (type_offset % 12) // 4, NOT (type_offset % 4) // 2!
+        # This was the root cause of missing ChromaAC parsing!
+        chroma_idx = (type_offset % 12) // 4  # 0, 1, or 2
+        # 0 → no chroma residual
+        # 1 → chroma DC only
+        # 2 → chroma DC + AC
         if chroma_idx == 0:
             chroma_cbp = 0  # No chroma
         elif chroma_idx == 1:
-            chroma_cbp = 0b01  # DC only
+            chroma_cbp = 0b01  # DC only (bit 4)
         else:  # chroma_idx == 2
-            chroma_cbp = 0b11  # DC + AC
+            chroma_cbp = 0b11  # DC + AC (bits 4 and 5)
         
         # Combine: [chroma(2 bits)][luma(4 bits)]
         return (chroma_cbp << 4) | luma_cbp
@@ -316,18 +404,32 @@ class MacroblockParser:
         return [i for i in range(16) if mb.luma_4x4_blocks[i]]
     
     def calculate_nC(self, mb_x: int, mb_y: int, blk_idx: int, 
-                     neighbor_coeffs: dict) -> int:
+                     neighbor_coeffs: dict, mb_width: Optional[int] = None) -> int:
         """
         Calculate nC (prediction for number of coefficients) from neighbors
         
         Args:
             mb_x, mb_y: Macroblock coordinates
             blk_idx: 4x4 block index within macroblock (0-15)
-            neighbor_coeffs: Dict of {(mb_x, mb_y, blk_idx): num_coeffs}
+            neighbor_coeffs: Dict of {(mb_global_addr, blk_idx): num_coeffs} OR legacy {(mb_x, mb_y, blk_idx): num_coeffs}
+            mb_width: Picture width in MBs (required for global addr conversion)
         
         Returns:
             nC value for CAVLC table selection
         """
+        # PRIORITY 3: Support both legacy (mb_x, mb_y, blk) and new (mb_global, blk) cache formats
+        # Detect which format by checking a sample key
+        use_global_addr = False
+        if neighbor_coeffs and mb_width is not None:
+            # Check first key to determine format
+            first_key = next(iter(neighbor_coeffs.keys()))
+            if len(first_key) == 2:  # (mb_global_addr, blk_idx)
+                use_global_addr = True
+        
+        # Convert mb_x, mb_y to global MB address if using new format
+        if use_global_addr and mb_width is not None:
+            mb_global_addr = mb_y * mb_width + mb_x
+        
         # Get left and top blocks
         # (Simplified - proper implementation needs full neighbor logic)
         
@@ -385,7 +487,12 @@ class MacroblockParser:
                  if bx == left_x and by == left_y:
                      left_idx = i
                      break
-             left_key = (mb_x, mb_y, left_idx)
+             
+             # Use appropriate cache key format
+             if use_global_addr:
+                 left_key = (mb_global_addr, left_idx)
+             else:
+                 left_key = (mb_x, mb_y, left_idx)
         else:
              # Neighbor MB (Left)
              # Rightmost column of left MB is x=3
@@ -397,7 +504,17 @@ class MacroblockParser:
                  if bx == left_x and by == left_y:
                      left_idx = i
                      break
-             left_key = (mb_x - 1, mb_y, left_idx)
+             
+             # Use appropriate cache key format
+             if use_global_addr and mb_width is not None:
+                 # Left MB is at (mb_x - 1, mb_y)
+                 if mb_x > 0:  # Check boundary
+                     left_mb_global = mb_y * mb_width + (mb_x - 1)
+                     left_key = (left_mb_global, left_idx)
+                 else:
+                     left_key = None  # No left neighbor at edge
+             else:
+                 left_key = (mb_x - 1, mb_y, left_idx) if mb_x > 0 else None
              
         # Top neighbor
         if blk_y > 0:
@@ -408,7 +525,12 @@ class MacroblockParser:
                  if bx == top_x and by == top_y:
                      top_idx = i
                      break
-             top_key = (mb_x, mb_y, top_idx)
+             
+             # Use appropriate cache key format
+             if use_global_addr:
+                 top_key = (mb_global_addr, top_idx)
+             else:
+                 top_key = (mb_x, mb_y, top_idx)
         else:
              # Neighbor MB (Top)
              top_x = blk_x
@@ -418,21 +540,47 @@ class MacroblockParser:
                  if bx == top_x and by == top_y:
                      top_idx = i
                      break
-             top_key = (mb_x, mb_y - 1, top_idx)
              
-        # Get neighbor counts
-        nA = neighbor_coeffs.get(left_key, 0)
-        nB = neighbor_coeffs.get(top_key, 0)
+             # Use appropriate cache key format
+             if use_global_addr and mb_width is not None:
+                 # Top MB is at (mb_x, mb_y - 1)
+                 if mb_y > 0:  # Check boundary
+                     top_mb_global = (mb_y - 1) * mb_width + mb_x
+                     top_key = (top_mb_global, top_idx)
+                 else:
+                     top_key = None  # No top neighbor at edge
+             else:
+                 top_key = (mb_x, mb_y - 1, top_idx) if mb_y > 0 else None
+             
+        # Get neighbor counts (handle None keys for edges)
+        nA = neighbor_coeffs.get(left_key, None) if left_key is not None else None
+        nB = neighbor_coeffs.get(top_key, None) if top_key is not None else None
         
-        # Calculate nC
-        if nA >= 0 and nB >= 0:
-            nC = (nA + nB + 1) // 2
-        elif nA >= 0:
+        # Debug nC calculation for first few blocks
+        debug_nC = False
+        if use_global_addr and mb_global_addr < 2 and blk_idx < 4:
+            debug_nC = True
+            print(f"        [nC_CALC] MB={mb_global_addr}, Blk={blk_idx} ({blk_x},{blk_y})")
+            print(f"        [nC_CALC] Left: key={left_key}, nA={nA}")
+            print(f"        [nC_CALC] Top:  key={top_key}, nB={nB}")
+            if len(neighbor_coeffs) <= 10:
+                print(f"        [nC_CALC] Cache: {dict(list(neighbor_coeffs.items())[:10])}")
+        
+        # Calculate nC per H.264 spec Table 9-4
+        # If both neighbors available: nC = (nA + nB + 1) >> 1
+        # If only one available: use that one
+        # If none available: nC = 0
+        if nA is not None and nB is not None:
+            nC = (nA + nB + 1) >> 1
+        elif nA is not None:
             nC = nA
-        elif nB >= 0:
+        elif nB is not None:
             nC = nB
         else:
             nC = 0
+        
+        if debug_nC:
+            print(f"        [nC_CALC] Result: nC={nC}")
         
         return nC
 

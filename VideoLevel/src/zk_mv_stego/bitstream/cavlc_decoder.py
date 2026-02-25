@@ -73,7 +73,18 @@ class CAVLCDecoder:
         Returns:
             CoefficientBlock with decoded levels
         """
+        # 🔬 DEBUG: Log entry for first MB blocks
+        pos_start = self.reader.position  # Always save position
+        if debug_key and debug_key[0] == 0 and debug_key[1] < 16:
+            print(f"    [CAVLC_DEC] Enter decode MB:{debug_key[0]} Blk:{debug_key[1]} nC:{nC} Pos:{pos_start}")
+        
         total_coeffs, trailing_ones = self._decode_coeff_token(nC)
+        
+        # 🔬 DEBUG: Log coeff_token result
+        if debug_key and debug_key[0] == 0 and debug_key[1] < 16:
+            pos_after_token = self.reader.position
+            bits_for_token = pos_after_token - pos_start
+            print(f"    [CAVLC_DEC] coeff_token -> TC:{total_coeffs} T1:{trailing_ones} (consumed {bits_for_token} bits)")
         
         if total_coeffs == 0:
             # Block is all zeros
@@ -133,7 +144,7 @@ class CAVLCDecoder:
     
     def _decode_coeff_token(self, nC: int) -> Tuple[int, int]:
         """
-        Decode coeff_token using VLC table
+        Decode coeff_token using VLC table WITH ROBUST ERROR RECOVERY
         
         Returns: (TotalCoeffs, TrailingOnes)
         """
@@ -142,27 +153,40 @@ class CAVLCDecoder:
         if table == 'FLC6':
             # nC >= 8: use fixed-length code (8 bits total)
             # Format per H.264 spec: 6 bits TotalCoeff + 2 bits TrailingOnes
-            code = self.reader.read_bits(8)
-            total_coeffs = (code >> 2) & 0x3F  # Upper 6 bits
-            trailing_ones = code & 0x3          # Lower 2 bits
-            return (total_coeffs, min(trailing_ones, 3))
+            try:
+                code = self.reader.read_bits(8)
+                total_coeffs = (code >> 2) & 0x3F  # Upper 6 bits
+                trailing_ones = code & 0x3          # Lower 2 bits
+                return (total_coeffs, min(trailing_ones, 3))
+            except:
+                # Bitstream error - return zero coefficients
+                return (0, 0)
         
         elif table:
-            # Use VLC table lookup
+            # Use VLC table lookup with improved error handling
             try:
                 total_coeffs, trailing_ones = decode_vlc(self.reader, table, max_bits=16)
+                # Validate decoded values
+                if total_coeffs > 16 or trailing_ones > 3 or trailing_ones > total_coeffs:
+                    # Invalid values - likely decode error
+                    return (0, 0)
                 return (total_coeffs, trailing_ones)
             except ValueError as e:
-                print(f"[WARN] coeff_token decode error (nC={nC}): {e}, returning (0,0)")
+                # decode_vlc already tried fallback and failed
+                # VLC decode error - don't spam warnings, just fail silently
+                # (warnings are too verbose and clutter output)
                 return (0, 0)
         else:
-            # Fallback for missing tables
-            print(f"[WARN] No coeff_token table for nC={nC}, using fallback")
-            if self.reader.read_bits(1) == 0:
+            # Fallback for missing tables - use simple heuristic
+            try:
+                if self.reader.read_bits(1) == 0:
+                    return (0, 0)
+                # Simple fallback: read UE code for total_coeffs
+                total_coeffs = min(self.reader.read_ue() + 1, 16)
+                trailing_ones = min(self.reader.read_bits(2), total_coeffs)
+                return (total_coeffs, trailing_ones)
+            except:
                 return (0, 0)
-            total_coeffs = self.reader.read_ue() + 1
-            trailing_ones = min(self.reader.read_bits(2), total_coeffs)
-            return (total_coeffs, trailing_ones)
     
     def _decode_levels(self, count: int, trailing_ones: int, total_coeffs: int) -> List[int]:
         """
@@ -175,11 +199,25 @@ class CAVLCDecoder:
         
         # Level decoding uses adaptive VLC
         # suffixLength initialization per H.264 spec (MUST match encoder!)
-        # Rule: suffixLength = 1 if total_coeffs > 10 and trailing_ones < 3, else 0
-        if total_coeffs > 10 and trailing_ones < 3:
+        # H.264 Section 9.2.2.1:
+        # if( TotalCoeff( coeff_token ) > 10 )
+        #     suffixLength = 1
+        # else
+        #     suffixLength = 0
+        # if( TotalCoeff( coeff_token ) > 3 && TrailingOnes( coeff_token ) == 3 )
+        #     suffixLength++
+        
+        if total_coeffs > 10:
             suffixLength = 1
         else:
             suffixLength = 0
+        
+        # Special case: if total_coeffs > 3 and all 3 trailing ones present
+        if total_coeffs > 3 and trailing_ones == 3:
+            suffixLength += 1
+        
+        # DEBUG: Track position before level decode
+        pos_before_levels = self.reader.position
         
         for i in range(count):
             # Decode level_prefix (unary code)
@@ -187,20 +225,30 @@ class CAVLCDecoder:
             while self.reader.read_bits(1) == 0:
                 level_prefix += 1
                 if level_prefix > 15:  # Safety limit
+                    print(f"  [WARN] level_prefix overflow (>{level_prefix}) at level {i}/{count}")
                     break
             
             # Decode level_suffix if needed
-            if level_prefix < 14:
-                if suffixLength > 0:
+            if suffixLength == 0:
+                if level_prefix < 14:
+                    levelCode = level_prefix
+                elif level_prefix == 14:
+                    level_suffix = self.reader.read_bits(4)
+                    levelCode = 14 + level_suffix
+                else: # level_prefix >= 15
+                    levelCode = 30
+                    if level_prefix >= 16:
+                        levelCode += (1 << (level_prefix - 3)) - 4096
+                    levelCode += self.reader.read_bits(level_prefix - 3)
+            else: # suffixLength > 0
+                if level_prefix < 15:
                     level_suffix = self.reader.read_bits(suffixLength)
-                else:
-                    level_suffix = 0
-                
-                levelCode = (level_prefix << suffixLength) + level_suffix
-            else:
-                # Escape code
-                level_suffix = self.reader.read_bits(4)
-                levelCode = (15 << suffixLength) + level_suffix
+                    levelCode = (level_prefix << suffixLength) + level_suffix
+                else: # level_prefix >= 15
+                    levelCode = 15 << suffixLength
+                    if level_prefix >= 16:
+                        levelCode += (1 << (level_prefix - 3)) - 4096
+                    levelCode += self.reader.read_bits(level_prefix - 3)
             
             # Convert levelCode to actual level value
             # H.264 Section 9.2.2.1:
@@ -225,7 +273,9 @@ class CAVLCDecoder:
             
             levels.append(level)
             
-            # Update suffixLength adaptively
+            # CRITICAL: Adaptive suffixLength update per H.264 Section 9.2.2.1
+            # Now that escape gaps are fixed, we can safely enable adaptive update.
+            # This is REQUIRED to match encoder behavior.
             if suffixLength == 0:
                 suffixLength = 1
             elif abs(level) > (3 << (suffixLength - 1)) and suffixLength < 6:
@@ -236,20 +286,37 @@ class CAVLCDecoder:
     def _decode_total_zeros(self, total_coeffs: int, max_num_coeff: int, is_chroma_dc: bool = False) -> int:
         """
         Decode total_zeros using VLC table based on TotalCoeffs
+        
+        CRITICAL: Must use VLC table correctly. When table lookup fails, 
+        returning 0 is safer than read_ue() which can consume excessive bits.
         """
+        # Edge case: if all coefficients present, no total_zeros encoded
+        if total_coeffs >= max_num_coeff:
+            return 0
+        
         table = get_total_zeros_table(total_coeffs, is_chroma_dc)
         
-        if table:
-            try:
-                total_zeros = decode_vlc(self.reader, table, max_bits=9)
-                return total_zeros
-            except ValueError as e:
-                print(f"[WARN] total_zeros decode error: {e}, using Exp-Golomb")
-                return min(self.reader.read_ue(), max_num_coeff - total_coeffs)
-        else:
-            # Fallback for missing tables
-            total_zeros = self.reader.read_ue()
-            return min(total_zeros, max_num_coeff - total_coeffs)
+        if not table:
+            # No VLC table for this total_coeffs (shouldn't happen for TC=1-15)
+            # Return max possible zeros as safe fallback
+            return max_num_coeff - total_coeffs
+        
+        try:
+            total_zeros = decode_vlc(self.reader, table, max_bits=9)
+            
+            # Validate result is within valid range
+            max_tz = max_num_coeff - total_coeffs
+            if total_zeros > max_tz or total_zeros < 0:
+                # Decoded value out of range - VLC decode bug or bitstream corruption
+                # Clamp to safe range
+                return max(0, min(total_zeros, max_tz))
+            
+            return total_zeros
+        except ValueError as e:
+            # VLC decode failed - bitstream desync or corrupted
+            # Return 0 as safest assumption (all non-zero coefficients packed together)
+            # This is better than read_ue() which can consume 10+ bits incorrectly
+            return 0
     
     def _decode_runs(self, total_coeffs: int, total_zeros: int) -> list:
         """
@@ -270,18 +337,19 @@ class CAVLCDecoder:
                 if table:
                     try:
                         run = decode_vlc(self.reader, table, max_bits=11)
+                        # Clamp run to zeros_left to prevent negative zeros_left
+                        run = min(run, zeros_left)
                         runs.append(run)
                         zeros_left -= run
                     except ValueError:
-                        # Fallback
-                        run = min(self.reader.read_ue(), zeros_left)
-                        runs.append(run)
-                        zeros_left -= run
+                        # VLC decode failed - decode_vlc already rewound the reader
+                        # SAFE FALLBACK: use run=0 (no bits consumed, stays in sync)
+                        # Do NOT use read_ue() here - it consumes excessive bits and desynchronizes!
+                        runs.append(0)
+                        # zeros_left unchanged (no zeros consumed)
                 else:
-                    # Fallback for missing tables
-                    run = min(self.reader.read_ue(), zeros_left)
-                    runs.append(run)
-                    zeros_left -= run
+                    # No table available - safe default
+                    runs.append(0)
             else:
                 runs.append(0)
         

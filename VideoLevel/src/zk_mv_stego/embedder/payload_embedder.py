@@ -5,7 +5,7 @@ Embeds payloads into extracted DCT coefficients using LSB modification
 with comprehensive CAVLC safety checks to prevent bitstream corruption.
 """
 
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 import logging
 import numpy as np
 
@@ -40,7 +40,8 @@ class PayloadEmbedder:
                  allow_small_values: bool = False,
                  use_safety_filter: bool = True,
                  enable_trailing_ones_protection: bool = True,
-                 enable_bit_length_check: bool = True):
+                 enable_bit_length_check: bool = True,
+                 max_modifications_per_block: int = 3):
         """
         Initialize embedder with CAVLC Safety Filter
         
@@ -52,11 +53,16 @@ class PayloadEmbedder:
             use_safety_filter: Enable comprehensive CAVLC safety checks (RECOMMENDED)
             enable_trailing_ones_protection: Protect trailing ±1 coefficients (RECOMMENDED)
             enable_bit_length_check: Check CAVLC encoding length invariance (optional)
+            max_modifications_per_block: Maximum modifications per block (1-4, default: 3)
+                                        1 = safest but lowest capacity
+                                        3 = balanced (recommended)
+                                        4+ = higher capacity but may affect quality
         """
         self.skip_dc = skip_dc
         self.skip_zeros = skip_zeros
         self.allow_small_values = allow_small_values
         self.use_safety_filter = use_safety_filter
+        self.max_modifications_per_block = max(1, min(max_modifications_per_block, 8))
         
         # Initialize CAVLC Safety Filter if enabled
         if self.use_safety_filter:
@@ -71,13 +77,14 @@ class PayloadEmbedder:
             self.safety_filter = None
     
     def embed_payload(self, coefficients: List[Tuple[int, int, List[int]]], 
-                     payload: bytes) -> Tuple[List[Tuple[int, int, List[int]]], int]:
+                     payload: bytes, nC_map: Optional[Dict[Tuple[int, int], int]] = None) -> Tuple[List[Tuple[int, int, List[int]]], int]:
         """
         Embed payload into coefficient blocks with CAVLC safety checks
         
         Args:
             coefficients: List of (mb_idx, block_idx, coeffs) tuples
             payload: Binary payload to embed
+            nC_map: Mapping of block keys to nC values (Crucial for safety filter accuracy)
         
         Returns:
             (modified_coefficients, bits_embedded)
@@ -87,14 +94,15 @@ class PayloadEmbedder:
         
         # Use safety filter if enabled
         if self.use_safety_filter and self.safety_filter:
-            return self._embed_with_safety_filter(coefficients, payload_bits)
+            return self._embed_with_safety_filter(coefficients, payload_bits, nC_map)
         else:
             return self._embed_legacy(coefficients, payload_bits)
     
     def _embed_with_safety_filter(
         self, 
         coefficients: List[Tuple[int, int, List[int]]], 
-        payload_bits: List[int]
+        payload_bits: List[int],
+        nC_map: Optional[Dict[Tuple[int, int], int]] = None
     ) -> Tuple[List[Tuple[int, int, List[int]]], int]:
         """
         Embed using CAVLC Safety Filter (RECOMMENDED)
@@ -104,8 +112,14 @@ class PayloadEmbedder:
         # Get all safe positions across all blocks
         safe_positions = self.safety_filter.get_safe_positions(
             coefficients, 
-            skip_dc=self.skip_dc
+            skip_dc=self.skip_dc,
+            nC_map=nC_map
         )
+        
+        # DEBUG
+        print(f"[EMBED_DEBUG] Payload bits: {len(payload_bits)}")
+        print(f"[EMBED_DEBUG] Safe positions: {len(safe_positions)}")
+        print(f"[EMBED_DEBUG] First 3 safe positions: {safe_positions[:3]}")
         
         # Build a map for fast lookup: (mb_idx, block_idx) -> safe_coeff_indices
         safe_map = {}
@@ -115,42 +129,73 @@ class PayloadEmbedder:
                 safe_map[key] = []
             safe_map[key].append(coeff_idx)
         
+        print(f"[EMBED_DEBUG] Safe_map keys (first 3): {list(safe_map.keys())[:3]}")
+        print(f"[EMBED_DEBUG] Coefficients keys (first 3): {[(mb, blk) for mb, blk, _ in coefficients[:3]]}")
+        
         # Embed payload
         modified = []
         bits_embedded = 0
         
         for mb_idx, block_idx, coeffs in coefficients:
-            new_coeffs = coeffs[:]
+            new_coeffs = coeffs[:]  # Shallow copy
             block_key = (mb_idx, block_idx)
+            
+            # Flag to track if this block was actually modified
+            block_modified = False
             
             # Get safe positions for this block
             if block_key in safe_map:
                 safe_indices = safe_map[block_key]
                 
+                # Modified approach: Allow multiple modifications per block (up to limit)
+                # Safety Filter validates each individual flip independently
+                # By limiting to max_modifications_per_block, we balance capacity vs safety
+                modifications_in_block = 0
+                
                 for coeff_idx in safe_indices:
                     if bits_embedded >= len(payload_bits):
                         break
                     
+                    if modifications_in_block >= self.max_modifications_per_block:
+                        break  # Reached limit for this block
+                    
                     payload_bit = payload_bits[bits_embedded]
+                    original_val = coeffs[coeff_idx]
                     
                     # Embed bit using LSB modification
                     new_coeffs[coeff_idx] = self._modify_lsb(
                         coeffs[coeff_idx], 
                         payload_bit
                     )
+                    modified_val = new_coeffs[coeff_idx]
+                    
+                    # Check if coefficient actually changed
+                    if modified_val != original_val:
+                        block_modified = True
+                    
+                    # CRITICAL FIX: Always increment modifications counter regardless 
+                    # of whether value changed, otherwise extractor cannot stay in sync!
+                    modifications_in_block += 1
+                    
+                    # DEBUG first modification
+                    if bits_embedded == 0:
+                        print(f"[EMBED_DEBUG] FIRST MOD: ({mb_idx},{block_idx},{coeff_idx}): {original_val} -> {modified_val} (bit={payload_bit})")
+                    
                     bits_embedded += 1
             
-            modified.append((mb_idx, block_idx, new_coeffs))
+            # CRITICAL FIX: Only append block if it was ACTUALLY modified
+            # Don't return original blocks - reconstructor will handle them
+            if block_modified:
+                modified.append((mb_idx, block_idx, new_coeffs))
             
             if bits_embedded >= len(payload_bits):
-                # Finished embedding, copy remaining blocks as-is
+                # Finished embedding, stop processing
                 break
         
-        # Copy any remaining blocks that weren't processed
-        remaining_start = len(modified)
-        for i in range(remaining_start, len(coefficients)):
-            mb_idx, block_idx, coeffs = coefficients[i]
-            modified.append((mb_idx, block_idx, coeffs[:]))
+        print(f"[EMBED_DEBUG] Bits embedded: {bits_embedded}")
+        print(f"[EMBED_DEBUG] Blocks actually modified: {len(modified)} (out of {len(coefficients)} total)")
+        
+        # DON'T copy remaining blocks - reconstructor will use original coefficients for them
         
         return modified, bits_embedded
     
@@ -203,8 +248,13 @@ class PayloadEmbedder:
         
         return modified, bits_embedded
     
-    def extract_payload(self, coefficients: List[Tuple[int, int, List[int]]],
-                       payload_length_bits: int, start_bit_offset: int = 0) -> bytes:
+    def extract_payload(
+        self, 
+        coefficients: List[Tuple[int, int, List[int]]],
+        payload_length_bits: int,
+        start_bit_offset: int = 0,
+        nC_map: Optional[Dict[Tuple[int, int], int]] = None
+    ) -> bytes:
         """
         Extract payload from coefficient blocks
         
@@ -212,6 +262,7 @@ class PayloadEmbedder:
             coefficients: List of (mb_idx, block_idx, coeffs) tuples
             payload_length_bits: Number of bits to extract
             start_bit_offset: Skip this many bits before starting extraction
+            nC_map: Mapping of block keys to nC values (Crucial for safety filter accuracy)
         
         Returns:
             Extracted payload as bytes
@@ -238,7 +289,7 @@ class PayloadEmbedder:
         
         # Use safety filter routing if enabled (MUST match embedding!)
         if self.use_safety_filter and self.safety_filter:
-            return self._extract_with_safety_filter(coefficients, payload_length_bits, start_bit_offset)
+            return self._extract_with_safety_filter(coefficients, payload_length_bits, start_bit_offset, nC_map)
         else:
             return self._extract_legacy(coefficients, payload_length_bits, start_bit_offset)
     
@@ -246,7 +297,8 @@ class PayloadEmbedder:
         self, 
         coefficients: List[Tuple[int, int, List[int]]],
         payload_length_bits: int,
-        start_bit_offset: int = 0
+        start_bit_offset: int = 0,
+        nC_map: Optional[Dict[Tuple[int, int], int]] = None
     ) -> bytes:
         """
         Extract using CAVLC Safety Filter (same positions as embedding)
@@ -256,35 +308,52 @@ class PayloadEmbedder:
         # Get all safe positions (same calculation as embedding)
         safe_positions = self.safety_filter.get_safe_positions(
             coefficients, 
-            skip_dc=self.skip_dc
+            skip_dc=self.skip_dc,
+            nC_map=nC_map
         )
         
         # Build coefficient lookup map for fast access
         coeff_map = {}
         for mb_idx, block_idx, coeffs in coefficients:
             coeff_map[(mb_idx, block_idx)] = coeffs
+            
+        # Group safe positions by block to mirror embedder
+        safe_map = {}
+        for mb_idx, block_idx, coeff_idx in safe_positions:
+            key = (mb_idx, block_idx)
+            if key not in safe_map:
+                safe_map[key] = []
+            safe_map[key].append(coeff_idx)
         
-        # Extract bits from safe positions only
         extracted_bits = []
         bits_skipped = 0
         
-        for mb_idx, block_idx, coeff_idx in safe_positions:
-            # Skip offset bits first
-            if bits_skipped < start_bit_offset:
-                bits_skipped += 1
+        for mb_idx, block_idx, coeffs in coefficients:
+            block_key = (mb_idx, block_idx)
+            if block_key not in safe_map:
                 continue
+                
+            safe_indices = safe_map[block_key]
+            extractions_in_block = 0
             
-            if len(extracted_bits) >= payload_length_bits:
-                break
-            
-            # Get coefficient value from map
-            key = (mb_idx, block_idx)
-            if key in coeff_map:
-                coeffs = coeff_map[key]
-                coeff = coeffs[coeff_idx]
+            for coeff_idx in safe_indices:
+                if len(extracted_bits) >= payload_length_bits:
+                    break
+                    
+                if extractions_in_block >= self.max_modifications_per_block:
+                    break  # Respect block capacity limits mirroring embedder
+                    
+                # Skip offset bits first
+                if bits_skipped < start_bit_offset:
+                    bits_skipped += 1
+                    extractions_in_block += 1
+                    continue
+                
                 # Extract LSB
+                coeff = coeffs[coeff_idx]
                 lsb = abs(coeff) & 1
                 extracted_bits.append(lsb)
+                extractions_in_block += 1
         
         return self._bits_to_bytes(extracted_bits)
     

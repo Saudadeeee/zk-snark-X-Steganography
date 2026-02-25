@@ -29,6 +29,24 @@ class BitstreamReader:
         """Get current bit position (alias for position property)"""
         return self.pos
     
+    def peek_bits(self, n: int) -> str:
+        """Peek next n bits without consuming them (for debugging)"""
+        saved_pos = self.pos
+        bits = ""
+        try:
+            for _ in range(min(n, (len(self.data) * 8) - self.pos)):
+                byte_pos = self.pos // 8
+                bit_pos = 7 - (self.pos % 8)
+                if byte_pos < len(self.data):
+                    bit = (self.data[byte_pos] >> bit_pos) & 1
+                    bits += str(bit)
+                    self.pos += 1
+                else:
+                    break
+        finally:
+            self.pos = saved_pos  # Restore position
+        return bits
+    
     def seek(self, pos: int):
         """Seek to a specific bit position"""
         if pos < 0 or pos > len(self.data) * 8:
@@ -290,6 +308,29 @@ class BitstreamWriter:
             Total bits (including unflushed bits)
         """
         return len(self.buffer) * 8 + self.bit_count
+    
+    def get_bits_as_list(self) -> list:
+        """
+        Get all written bits as a list of 0/1 integers.
+        
+        This is used by BitstreamPatcher to extract encoded coefficient bits.
+        
+        Returns:
+            List of bits [0, 1, 1, 0, ...]
+        """
+        bits = []
+        
+        # Convert completed bytes to bits
+        for byte in self.buffer:
+            for i in range(7, -1, -1):
+                bits.append((byte >> i) & 1)
+        
+        # Add pending bits from bit_buffer
+        if self.bit_count > 0:
+            for i in range(self.bit_count - 1, -1, -1):
+                bits.append((self.bit_buffer >> i) & 1)
+        
+        return bits
     
     def get_byte_count(self) -> int:
         """

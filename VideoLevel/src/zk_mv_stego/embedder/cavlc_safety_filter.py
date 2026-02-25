@@ -37,6 +37,8 @@ import numpy as np
 
 from .encoding_length_checker import EncodingLengthChecker
 from ..exceptions import SafetyFilterError
+from ..bitstream.cavlc_encoder import CAVLCEncoder
+from ..bitstream.bitstream_io import BitstreamWriter
 
 
 @dataclass
@@ -184,10 +186,10 @@ class CAVLCSafetyFilter:
                 )
         
         # Additional heuristic: Magnitude threshold
-        if abs(original_value) < self.min_safe_magnitude:
+        if min(abs(original_value), abs(new_value)) < self.min_safe_magnitude:
             return SafetyCheckResult(
                 is_safe=False,
-                reason=f"Heuristic: Magnitude |{original_value}| < {self.min_safe_magnitude} (unstable)",
+                reason=f"Heuristic: Magnitude |{original_value}| or |{new_value}| < {self.min_safe_magnitude} (unstable)",
                 original_value=original_value,
                 modified_value=new_value,
                 encoding_bits_original=0,
@@ -224,9 +226,18 @@ class CAVLCSafetyFilter:
         """
         trailing_positions = set()
         
+        # Safety check: ensure coeffs is valid
+        if not coeffs or len(coeffs) == 0:
+            return trailing_positions
+        
+        # Ensure we have enough coefficients
+        if len(coeffs) < 16:
+            # Pad with zeros if needed
+            coeffs = list(coeffs) + [0] * (16 - len(coeffs))
+        
         # Find first non-zero coefficient from the end
         last_nonzero_idx = -1
-        for i in range(15, -1, -1):
+        for i in range(min(15, len(coeffs) - 1), -1, -1):
             if coeffs[i] != 0:
                 last_nonzero_idx = i
                 break
@@ -248,10 +259,85 @@ class CAVLCSafetyFilter:
         
         return trailing_positions
     
+    def _verify_block_bit_length_invariance(
+        self,
+        original_block: List[int],
+        modified_block: List[int],
+        nC: int = 0
+    ) -> Tuple[bool, int, int]:
+        """
+        **CRITICAL FIX**: Verify block modification preserves bit length via ACTUAL CAVLC encoding
+        
+        This replaces the broken heuristic check with ground-truth verification.
+        We encode BOTH blocks and compare actual bit lengths.
+        
+        Args:
+            original_block: Original 16 DCT coefficients (zigzag order)
+            modified_block: Modified coefficients (with LSB flips)
+            nC: Neighbor context for CAVLC encoding (default: 0)
+        
+        Returns:
+            (is_safe, original_bits, modified_bits)
+            - is_safe: True if bit lengths match AND zero-preservation maintained
+            - original_bits: Actual encoding length of original block
+            - modified_bits: Actual encoding length of modified block
+        
+        Example:
+            >>> original = [-1, 3, 1, 0, 0, ...]
+            >>> modified = [-1, 2, 1, 0, 0, ...]  # Flipped coeff[1]: 3 -> 2
+            >>> is_safe, orig_len, mod_len = filter._verify_block_bit_length_invariance(original, modified)
+            >>> # is_safe = False (28 bits -> 31 bits, length changed!)
+        """
+        try:
+            # CRITICAL: Enforce zero-preservation at block level
+            # Count non-zero coefficients in both blocks
+            original_nonzeros = sum(1 for c in original_block if c != 0)
+            modified_nonzeros = sum(1 for c in modified_block if c != 0)
+            
+            # Reject if total coefficient count changed (zero->non-zero or non-zero->zero)
+            if original_nonzeros != modified_nonzeros:
+                # This is impossible to patch:
+                # - All-zero block: 1-2 bits (coeff_token only)
+                # - Non-zero block: 20+ bits (coeff_token + levels + total_zeros + runs)
+                # Cannot patch different TotalCoeffs without breaking bitstream!
+                return False, 0, 0
+            
+            # Encode original block
+            writer_orig = BitstreamWriter()
+            encoder_orig = CAVLCEncoder(writer_orig)
+            encoder_orig.encode_block_cavlc(original_block, nC=nC, max_num_coeff=16)
+            original_bits = writer_orig.get_bit_position()
+            
+            # Encode modified block
+            # CRITICAL FIX: Pass override_total_coeffs=original_nonzeros
+            # The bitstream_patcher uses this to preserve suffixLength. 
+            # If the safety filter doesn't use it, it will estimate a DIFFERENT length!
+            writer_mod = BitstreamWriter()
+            encoder_mod = CAVLCEncoder(writer_mod)
+            encoder_mod.encode_block_cavlc(
+                modified_block, 
+                nC=nC, 
+                max_num_coeff=16,
+                override_total_coeffs=original_nonzeros
+            )
+            modified_bits = writer_mod.get_bit_position()
+            
+            # Compare lengths (must match exactly for patchable modifications)
+            is_safe = (original_bits == modified_bits)
+            
+            return is_safe, original_bits, modified_bits
+            
+        except Exception as e:
+            # If encoding fails, it's definitely not safe
+            # This is EXPECTED for corrupt blocks (TC=16, etc.)
+            # Silently reject without printing (too verbose)
+            return False, 0, 0
+    
     def get_safe_positions(
         self,
         coefficients: List[Tuple[int, int, List[int]]],
-        skip_dc: bool = True
+        skip_dc: bool = True,
+        nC_map: Dict[Tuple[int, int], int] = None
     ) -> List[Tuple[int, int, int]]:
         """
         Get list of safe embedding positions across all blocks
@@ -259,6 +345,7 @@ class CAVLCSafetyFilter:
         Args:
             coefficients: List of (mb_idx, block_idx, coeffs) tuples
             skip_dc: Skip DC coefficient (position 0)
+            nC_map: Dictionary mapping (mb_idx, block_idx) to actual nC values from extraction
         
         Returns:
             List of (mb_idx, block_idx, coeff_idx) tuples that are safe to modify
@@ -266,6 +353,8 @@ class CAVLCSafetyFilter:
         Raises:
             SafetyFilterError: If coefficient data is invalid
         """
+        if nC_map is None:
+            nC_map = {}
         if not coefficients:
             raise SafetyFilterError("Empty coefficient list provided")
         
@@ -279,49 +368,65 @@ class CAVLCSafetyFilter:
         safe_positions = []
         
         for mb_idx, block_idx, coeffs in coefficients:
+            total_coeffs = sum(1 for c in coeffs if c != 0)
+            if total_coeffs == 0:
+                continue  # All-zero block: nothing to embed
+
             # Detect trailing ones for this block
             trailing_positions = self._detect_trailing_ones(coeffs)
-            
-            # Check each coefficient
+
+            # Check each coefficient position
             for coeff_idx in range(len(coeffs)):
                 # Skip DC if requested
                 if skip_dc and coeff_idx == 0:
                     continue
-                
-                # Skip zeros
+
+                # Skip zeros (Rule 1: zero-preservation)
                 if coeffs[coeff_idx] == 0:
                     continue
-                
-                # Skip trailing ones
+
+                # Skip trailing ones (Rule 2)
                 if coeff_idx in trailing_positions:
                     continue
-                
-                # Skip small magnitudes
-                if abs(coeffs[coeff_idx]) < self.min_safe_magnitude:
-                    continue
-                
+
                 # Calculate LSB-flipped value
                 original = coeffs[coeff_idx]
                 sign = 1 if original > 0 else -1
                 abs_val = abs(original)
                 new_abs = (abs_val & ~1) | ((abs_val & 1) ^ 1)  # Flip LSB
                 new_val = sign * new_abs
-                
+
+                # Symmetric magnitude check (both orig and mod must be >= min_safe)
+                if min(abs_val, new_abs) < self.min_safe_magnitude:
+                    continue
+
                 # Ensure not creating zero
                 if new_val == 0:
                     continue
-                
-                # Check bit-length invariance if enabled
-                if self.enable_bit_length and self.length_checker:
-                    is_patchable, _, _ = self.length_checker.check_lsb_flip_patchability(
-                        original
+
+                # Rule 3: Verify bit-length preservation via ACTUAL CAVLC encoding
+                if self.enable_bit_length:
+                    modified_block = coeffs[:]
+                    modified_block[coeff_idx] = new_val
+
+                    block_key = (mb_idx, block_idx)
+                    actual_nC = nC_map.get(block_key, 0)
+
+                    is_safe, orig_bits, mod_bits = self._verify_block_bit_length_invariance(
+                        coeffs,
+                        modified_block,
+                        nC=actual_nC
                     )
-                    if not is_patchable:
+
+                    if not is_safe:
+                        if len(safe_positions) < 10:
+                            print(f"[SAFETY_FILTER] REJECT ({mb_idx},{block_idx},{coeff_idx}): "
+                                  f"{original}->{new_val}, bits {orig_bits}->{mod_bits}")
                         continue
-                
+
                 # SAFE!
                 safe_positions.append((mb_idx, block_idx, coeff_idx))
-        
+
         return safe_positions
     
     def filter_blocks_for_embedding(
@@ -352,22 +457,32 @@ class CAVLCSafetyFilter:
                     continue
                 if coeff_idx in trailing_positions:
                     continue
-                if abs(coeffs[coeff_idx]) < self.min_safe_magnitude:
-                    continue
-                
                 # Check LSB flip
                 original = coeffs[coeff_idx]
                 sign = 1 if original > 0 else -1
                 abs_val = abs(original)
                 new_abs = (abs_val & ~1) | ((abs_val & 1) ^ 1)
                 new_val = sign * new_abs
+
+                # Symmetric magnitude check
+                if min(abs_val, new_abs) < self.min_safe_magnitude:
+                    continue
                 
                 if new_val == 0:
                     continue
                 
-                if self.enable_bit_length and self.length_checker:
-                    is_patchable, _, _ = self.length_checker.check_lsb_flip_patchability(original)
-                    if not is_patchable:
+                # **CRITICAL FIX**: Verify with actual CAVLC encoding
+                if self.enable_bit_length:
+                    modified_block = coeffs[:]
+                    modified_block[coeff_idx] = new_val
+                    
+                    is_safe, _, _ = self._verify_block_bit_length_invariance(
+                        coeffs,
+                        modified_block,
+                        nC=0
+                    )
+                    
+                    if not is_safe:
                         continue
                 
                 block_safe_positions.append(coeff_idx)
@@ -425,16 +540,38 @@ class CAVLCSafetyFilter:
                     rejected_by_rule['trailing_ones'] += 1
                     continue
                 
-                # Magnitude
-                if abs(val) < self.min_safe_magnitude:
+                # Calculate LSB-flipped value
+                sign = 1 if val > 0 else -1
+                abs_val = abs(val)
+                new_abs = (abs_val & ~1) | ((abs_val & 1) ^ 1)
+                new_val = sign * new_abs
+
+                # Symmetric Magnitude check
+                if min(abs_val, new_abs) < self.min_safe_magnitude:
                     is_safe = False
                     rejected_by_rule['magnitude_threshold'] += 1
                     continue
                 
-                # Bit-length
-                if self.enable_bit_length and self.length_checker:
-                    is_patchable, _, _ = self.length_checker.check_lsb_flip_patchability(val)
-                    if not is_patchable:
+                # Bit-length - **CRITICAL FIX**: Use actual CAVLC encoding
+                if self.enable_bit_length:
+                    
+                    if new_val != 0:
+                        # Create modified block
+                        modified_block = coeffs[:]
+                        modified_block[coeff_idx] = new_val
+                        
+                        # Verify with actual encoding
+                        is_length_safe, _, _ = self._verify_block_bit_length_invariance(
+                            coeffs,
+                            modified_block,
+                            nC=0
+                        )
+                        
+                        if not is_length_safe:
+                            is_safe = False
+                            rejected_by_rule['bit_length'] += 1
+                            continue
+                    else:
                         is_safe = False
                         rejected_by_rule['bit_length'] += 1
                         continue

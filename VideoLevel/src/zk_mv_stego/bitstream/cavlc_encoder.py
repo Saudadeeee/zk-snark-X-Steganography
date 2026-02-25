@@ -31,7 +31,8 @@ ZIGZAG_4X4 = [
 @dataclass
 class BlockAnalysis:
     """Analysis of coefficient block for encoding"""
-    total_coeffs: int
+    total_coeffs: int  # Actual non-zero count for coeff_token
+    total_coeffs_for_suffix: int  # For suffixLength (may use override)
     trailing_ones: int
     trailing_signs: List[int]  # +1 or -1
     levels: List[int]  # All non-zero coefficients
@@ -55,7 +56,8 @@ class CAVLCEncoder:
     def __init__(self, writer: BitstreamWriter):
         self.writer = writer
     
-    def encode_block_cavlc(self, coeffs: List[int], nC: int, max_num_coeff: int = 16, debug_key=None):
+    def encode_block_cavlc(self, coeffs: List[int], nC: int, max_num_coeff: int = 16, 
+                          debug_key=None, override_total_coeffs: int = None):
         """
         Encode one coefficient block using CAVLC
         
@@ -64,14 +66,20 @@ class CAVLCEncoder:
             nC: Neighbor prediction for context
             max_num_coeff: Maximum coefficients (16 for 4x4, 15 for chroma DC)
             debug_key: Optional (mb_idx, block_idx) for debugging
+            override_total_coeffs: Override for total_coeffs (for re-encoding with preserved suffixLength)
         """
-        # Debug: log what we're encoding
-        if debug_key and debug_key[0] == 0 and debug_key[1] in [16, 17, 18, 19]:
-            non_zero = [c for c in coeffs if c != 0]
-            print(f"      [CAVLC_ENC] Encoding MB{debug_key[0]} block{debug_key[1]}: {non_zero[:5]}...")
-        
         # Analyze block
-        analysis = self._analyze_block(coeffs, max_num_coeff)
+        analysis = self._analyze_block(coeffs, max_num_coeff, override_total_coeffs=override_total_coeffs)
+        
+        # DEBUG: Show encoding parameters for MB 0 and MB 309 (frame 0 and frame 1)
+        if debug_key and (debug_key[0] == 0 or debug_key[0] == 309):
+            print(f"[ENC_DEBUG] Block {debug_key}: total_coeffs={analysis.total_coeffs}, "
+                  f"total_coeffs_for_suffix={analysis.total_coeffs_for_suffix}, "
+                  f"trailing_ones={analysis.trailing_ones}, total_zeros={analysis.total_zeros}")
+            print(f"  Override: {override_total_coeffs}, nC={nC}")
+        
+        # Track bit position before encoding
+        bits_before = len(self.writer.get_bits_as_list()) if hasattr(self.writer, 'get_bits_as_list') else 0
         
         # 1. Encode coeff_token
         coeff_token_code = find_coeff_token_code(
@@ -101,7 +109,9 @@ class CAVLCEncoder:
                 print(f"      [CAVLC_ENC] Constraint: total_zeros <= {max_num_coeff - analysis.total_coeffs}")
             
             # Validate total_zeros is within valid range for VLC tables
-            max_tz = max_num_coeff - 1 - analysis.total_coeffs
+            # Correct formula: max total_zeros = max_num_coeff - TC
+            # (there are TC non-zero coefficients, so at most max_num_coeff-TC zeros)
+            max_tz = max_num_coeff - analysis.total_coeffs
             if analysis.total_zeros > max_tz:
                 # This should not happen after our validation in _analyze_block,
                 # but add safety check anyway
@@ -120,13 +130,15 @@ class CAVLCEncoder:
         # 5. Encode run_before values
         self._encode_run_before(analysis)
     
-    def _analyze_block(self, coeffs: List[int], max_num_coeff: int) -> BlockAnalysis:
+    def _analyze_block(self, coeffs: List[int], max_num_coeff: int, override_total_coeffs: int = None) -> BlockAnalysis:
         """
         Analyze coefficient block to extract encoding parameters
         
         Args:
             coeffs: Coefficients in zigzag order
             max_num_coeff: Maximum number of coefficients
+            override_total_coeffs: If provided, use this total_coeffs for suffixLength calculation
+                                   (used when re-encoding modified blocks to preserve bit length)
         
         Returns:
             BlockAnalysis with all parameters
@@ -144,6 +156,7 @@ class CAVLCEncoder:
         if last_nonzero_idx == -1:
             return BlockAnalysis(
                 total_coeffs=0,
+                total_coeffs_for_suffix=0,
                 trailing_ones=0,
                 trailing_signs=[],
                 levels=[],
@@ -157,12 +170,17 @@ class CAVLCEncoder:
         
         # Find non-zero coefficients within active range
         non_zero_indices = [i for i, c in enumerate(active_coeffs) if c != 0]
-        total_coeffs = len(non_zero_indices)
+        
+        # CRITICAL: For re-encoding modified blocks, use override_total_coeffs for suffixLength
+        # but actual total_coeffs for coeff_token encoding
+        actual_total_coeffs = len(non_zero_indices)  # For coeff_token
+        total_coeffs_for_suffix = override_total_coeffs if override_total_coeffs is not None else actual_total_coeffs
         
         # Sanity check (should never happen after stripping trailing zeros)
-        if total_coeffs == 0:
+        if actual_total_coeffs == 0:
             return BlockAnalysis(
                 total_coeffs=0,
+                total_coeffs_for_suffix=0,
                 trailing_ones=0,
                 trailing_signs=[],
                 levels=[],
@@ -213,27 +231,25 @@ class CAVLCEncoder:
         # By definition: total_zeros = sum(runs)
         total_zeros = sum(runs)
         
-        # VALIDATION: For active_coeffs of length N with total_coeffs non-zero values:
-        # max_total_zeros = N - total_coeffs
+        # VALIDATION: For active_coeffs of length N with actual_total_coeffs non-zero values:
+        # max_total_zeros = N - actual_total_coeffs
         # Since we stripped trailing zeros, N = last_nonzero_idx + 1
-        max_total_zeros = len(active_coeffs) - total_coeffs
+        max_total_zeros = len(active_coeffs) - actual_total_coeffs
         
         # Sanity check: total_zeros should equal max by construction
         # (since active_coeffs has no trailing zeros)
         if total_zeros != max_total_zeros:
             print(f"[WARN] total_zeros mismatch: calculated={total_zeros}, max={max_total_zeros}")
-            print(f"  active_coeffs length: {len(active_coeffs)}, total_coeffs: {total_coeffs}")
+            print(f"  active_coeffs length: {len(active_coeffs)}, actual_total_coeffs: {actual_total_coeffs}")
             print(f"  runs: {runs}, sum: {sum(runs)}")
         
         # Validate and clamp total_zeros ONLY if it will be encoded
-        # (i.e., when total_coeffs < max_num_coeff)
-        # When all coefficients are non-zero (total_coeffs == max_num_coeff),
+        # (i.e., when actual_total_coeffs < max_num_coeff)
+        # When all coefficients are non-zero (actual_total_coeffs == max_num_coeff),
         # total_zeros is not encoded, so no VLC constraint applies
-        if total_coeffs < max_num_coeff:
-            # Additional H.264 VLC table constraint:
-            # The VLC tables for total_zeros are indexed by total_coeffs
-            # and go up to (max_num_coeff - 1 - total_coeffs) for blocks
-            vlc_max = max_num_coeff - 1 - total_coeffs
+        if actual_total_coeffs < max_num_coeff:
+            # VLC table constraint: max total_zeros = max_num_coeff - TC
+            vlc_max = max_num_coeff - actual_total_coeffs
             if total_zeros > vlc_max:
                 print(f"[WARN] total_zeros ({total_zeros}) > VLC max ({vlc_max}) - clamping")
                 # This should not happen after stripping trailing zeros
@@ -250,7 +266,8 @@ class CAVLCEncoder:
                     excess -= reduction
         
         return BlockAnalysis(
-            total_coeffs=total_coeffs,
+            total_coeffs=actual_total_coeffs,  # Actual count for coeff_token
+            total_coeffs_for_suffix=total_coeffs_for_suffix,  # Original or actual for suffixLength
             trailing_ones=trailing_ones,
             trailing_signs=trailing_signs,
             levels=levels,
@@ -270,77 +287,93 @@ class CAVLCEncoder:
         if not levels_to_encode:
             return
         
-        # Initialize suffix length
-        if analysis.total_coeffs > 10 and analysis.trailing_ones < 3:
+        # Initialize suffix length per H.264 Section 9.2.2.1 EXACTLY
+        # CRITICAL: Must match H.264 spec precisely for round-trip encoding!
+        #
+        # H.264 spec initialization:
+        # if( TotalCoeff( coeff_token ) > 10 )
+        #     suffixLength = 1
+        # else
+        #     suffixLength = 0
+        # if( TotalCoeff( coeff_token ) > 3 && TrailingOnes( coeff_token ) == 3 )
+        #     suffixLength++
+        
+        # Use total_coeffs_for_suffix (not total_coeffs) to preserve bit length
+        # when re-encoding modified blocks with override_total_coeffs
+        if analysis.total_coeffs_for_suffix > 10:
             suffixLength = 1
         else:
             suffixLength = 0
+        
+        # Special case: if total_coeffs > 3 and all 3 trailing ones present
+        if analysis.total_coeffs_for_suffix > 3 and analysis.trailing_ones == 3:
+            suffixLength += 1
         
         for i, level in enumerate(levels_to_encode):
             abs_level = abs(level)
             sign = 1 if level < 0 else 0
             
             # Calculate levelCode WITH sign embedded (H.264 Section 9.2.2.1 Table 9-6)
-            # Normal: levelCode = (abs_level - 1) * 2 + sign
-            # Special: If trailing_ones == 3 and this is first level, offset by 2
-            #          because abs_level cannot be 1 (already used by T1s)
-            #          so levelCode = (abs_level - 1 - 2) * 2 + sign for abs_level >= 2
-            
             if i == 0 and analysis.trailing_ones == 3:
-                # First level after 3 T1s: special encoding  
-                # H.264 Spec 9.2.2.1: This level cannot be ±1 (already in T1s), so abs_level >= 2
-                # Map abs_level >= 2 to levelCode starting from 0:
-                # levelCode = 2*(abs_level - 2) + sign
-                # Decoder reverses: abs_level = (levelCode - sign)/2 + 2
                 levelCode = (abs_level - 2) * 2 + sign
             else:
-                # Standard encoding: levelCode = (abs_level - 1) * 2 + sign
                 levelCode = (abs_level - 1) * 2 + sign
             
+            # suffixLength should already be set to avoid gaps for all levels in block
+            
+            # Determine levelPrefix and levelSuffixSize (H.264 Section 9.2.2.1)
             # Determine levelPrefix and levelSuffixSize (H.264 Section 9.2.2.1)
             if suffixLength == 0:
-                # For suffixLength=0, escape code threshold is 14 (decoder checks prefix < 14)
-                # Decoder: if prefix < 14 → normal, else → escape (4-bit suffix)
-                # So encoder must use escape when levelCode >= 14
                 if levelCode < 14:
-                    # Normal encoding: prefix = levelCode, no suffix
                     levelPrefix = levelCode
                     levelSuffixSize = 0
                     levelSuffix = 0
+                elif levelCode < 30:
+                    levelPrefix = 14
+                    levelSuffixSize = 4
+                    levelSuffix = levelCode - 14
                 else:
-                    # Escape code: levelPrefix = 14, 4-bit suffix
-                    # Decoder formula: levelCode = 15 + suffix
-                    # So: suffix = levelCode - 15
-                    levelPrefix = 14
-                    levelSuffixSize = 4
-                    levelSuffix = levelCode - 15
-                    # Validate suffix fits in 4 bits (must be >= 0 for levelCode >= 15)
-                    if levelSuffix < 0:
-                        # levelCode=14: suffix would be -1, but decoder expects 4-bit value
-                        # This is a problem! Can't encode levelCode=14 with suffixLength=0
-                        # Force suffix=0, will decode as levelCode=15 (off by 1 error)
-                        levelSuffix = 0
-                    elif levelSuffix > 15:
-                        # Cap at maximum 4-bit value
-                        levelSuffix = 15
+                    # Escape code for large values (prefix >= 15)
+                    levelPrefix = 15
+                    levelSuffixSize = 12
+                    while True:
+                        if levelPrefix == 15:
+                            min_val = 30
+                            max_val = 30 + 4095
+                        else:
+                            min_val = 30 + (1 << (levelPrefix - 3)) - 4096
+                            max_val = min_val + (1 << (levelPrefix - 3)) - 1
+                        
+                        if levelCode <= max_val:
+                            levelSuffix = levelCode - min_val
+                            break
+                        
+                        levelPrefix += 1
+                        levelSuffixSize += 1
             else:
-                # Normal case: split into prefix and suffix
-                levelPrefix = levelCode >> suffixLength
-                levelSuffix = levelCode & ((1 << suffixLength) - 1)
-                levelSuffixSize = suffixLength
-                
-                # Check for escape (levelPrefix >= 14)
-                # Decoder treats all prefix>=14 as escape with 4-bit suffix
-                # Decoder formula: levelCode = (15 << suffixLength) + suffix
-                if levelPrefix >= 14:
-                    levelPrefix = 14
-                    levelSuffixSize = 4
-                    levelSuffix = levelCode - (15 << suffixLength)
-                    # Validate suffix fits in 4 bits
-                    if levelSuffix < 0:
-                        levelSuffix = 0
-                    elif levelSuffix > 15:
-                        levelSuffix = 15
+                if levelCode < (15 << suffixLength):
+                    levelPrefix = levelCode >> suffixLength
+                    levelSuffixSize = suffixLength
+                    levelSuffix = levelCode & ((1 << suffixLength) - 1)
+                else:
+                    # Escape code for large values (prefix >= 15)
+                    levelPrefix = 15
+                    levelSuffixSize = 12
+                    base = 15 << suffixLength
+                    while True:
+                        if levelPrefix == 15:
+                            min_val = base
+                            max_val = base + 4095
+                        else:
+                            min_val = base + (1 << (levelPrefix - 3)) - 4096
+                            max_val = min_val + (1 << (levelPrefix - 3)) - 1
+                        
+                        if levelCode <= max_val:
+                            levelSuffix = levelCode - min_val
+                            break
+                        
+                        levelPrefix += 1
+                        levelSuffixSize += 1
             
             # Write level_prefix (unary)
             self.writer.write_unary(levelPrefix)
@@ -351,16 +384,17 @@ class CAVLCEncoder:
             
             # NO SIGN BIT - sign is embedded in levelCode!
             
-            # Update suffixLength adaptively (H.264 Section 9.2.2.1)
-            # Rule: After encoding first level, set suffixLength = 1 if it was 0
-            # Then increase when abs_level exceeds threshold
+            # CRITICAL: Adaptive suffixLength update per H.264 Section 9.2.2.1
+            # Now that escape gaps are fixed, we can safely enable adaptive update.
+            # This is REQUIRED to match original encoder behavior (ffmpeg uses adaptive).
             if suffixLength == 0:
                 suffixLength = 1
             elif suffixLength > 0 and suffixLength < 6:
-                # Increase when abs_level > (3 << (suffixLength - 1))
+                # Threshold for increasing suffixLength
                 threshold = 3 << (suffixLength - 1)
                 if abs_level > threshold:
                     suffixLength += 1
+
     
     def _encode_run_before(self, analysis: BlockAnalysis):
         """
@@ -377,14 +411,11 @@ class CAVLCEncoder:
         
         # Encode all runs except the last (which is implicit)
         for run in analysis.runs[:-1]:
-            # CRITICAL: Ensure run < zeros_left (strictly less than)
-            # H.264 spec: run_before must be in range [0, zeros_left-1]
-            # If run >= zeros_left, clamp it to zeros_left - 1
-            if run >= zeros_left:
-                if zeros_left > 0:
-                    run = zeros_left - 1
-                else:
-                    run = 0
+            # H.264 spec: run_before is in range [0, zeros_left]
+            # Note: run CAN equal zeros_left (all remaining zeros before this coeff)
+            # So only clamp if run > zeros_left (strictly greater)
+            if run > zeros_left:
+                run = zeros_left
             
             run_before_code = find_run_before_code(run, zeros_left)
             self.writer.write_bit_string(run_before_code)

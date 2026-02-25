@@ -1,7 +1,7 @@
 pragma circom 2.0.0;
 
-include "../node_modules/circomlib/circuits/sha256/sha256.circom";
-include "../node_modules/circomlib/circuits/bitify.circom";
+include "node_modules/circomlib/circuits/sha256/sha256.circom";
+include "node_modules/circomlib/circuits/bitify.circom";
 
 /*
  * ZK-SNARK Circuit for Video Steganography Payload Verification
@@ -49,9 +49,15 @@ template PayloadVerify() {
         sha.in[i] <== input_bits[i];
     }
     
-    // Verify commitment matches
+    // Store computed commitment in intermediate signal
+    signal computed_commitment[256];
     for (var i = 0; i < 256; i++) {
-        commitment[i] === sha.out[i];
+        computed_commitment[i] <== sha.out[i];
+    }
+    
+    // Verify commitment matches computed value
+    for (var i = 0; i < 256; i++) {
+        commitment[i] === computed_commitment[i];
     }
     
     // Verify payload_length is reasonable (0 < length < 1MB)

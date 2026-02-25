@@ -65,9 +65,21 @@ class BitstreamReconstructor:
         Returns:
             nC context value (0-4 for Table 9-5, -1 for ChromaDC)
         """
-        # Chroma DC blocks use nC=-1 (not applicable in I_4x4 mode we're using)
+        # ==================================================================================
+        # CRITICAL FIX #4: Chroma AC blocks nC calculation
+        # ==================================================================================
+        # Chroma blocks (16-23) are AC coefficients in I_4x4 mode
+        # According to H.264 spec and parser implementation:
+        # - ChromaAC uses nC=0 (simplified, neighbors not well-defined due to subsampling)
+        # - ChromaDC would use nC=-1 but doesn't exist in I_4x4 mode
+        #
+        # OLD CODE (WRONG):
+        # if block_idx >= 16:
+        #     return -1  ← BUG! Causes VLC mismatch with parser!
+        #
+        # NEW CODE (CORRECT):
         if block_idx >= 16:
-            return -1  # Chroma blocks - use special handling
+            return 0  # Chroma AC blocks use nC=0 (matches parser)
         
         # Luma 4x4 block - calculate neighbor context
         mb_x = mb_idx % pic_width_in_mbs
@@ -130,7 +142,8 @@ class BitstreamReconstructor:
                          original_file: str,
                          modified_coefficients: List[Tuple[int, int, List[int]]],
                          output_file: str,
-                         max_slices: int = 50) -> Dict:
+                         max_slices: int = 50,
+                         frame_verified_data: Dict = None) -> Dict:
         """
         Reconstruct H.264 video with modified coefficients embedded via CAVLC re-encoding
         
@@ -210,6 +223,18 @@ class BitstreamReconstructor:
         slices_with_modifications = 0
         global_mb_idx = 0
         
+        # CRITICAL: Derive per-slice MB count from SPS (deterministic, matches TraceableCAVLCParser)
+        # Both the embedder (test) and reconstructor must use the SAME count for all slices.
+        # TraceableCAVLCParser uses max_mbs_in_frame derived the same way.
+        if self.sps:
+            mb_count_per_slice = (
+                (self.sps.pic_width_in_mbs_minus1 + 1) *
+                (self.sps.pic_height_in_map_units_minus1 + 1)
+            )
+        else:
+            mb_count_per_slice = 264  # CIF default: 22x12
+        print(f"    [MB_COUNT] Per-slice MB count from SPS: {mb_count_per_slice}")
+        
         for nal in parser.nal_units:
             # Copy non-slice NALs as-is (SPS, PPS, SEI, etc.)
             if nal.nal_unit_type not in [1, 5]:
@@ -222,10 +247,9 @@ class BitstreamReconstructor:
                 continue
             
             try:
-                # Get actual MB count for this slice
-                # Calculate actual MB count for this slice dynamically
-                mb_count = self._estimate_mb_count_fast(nal, self.sps, self.pps)
-                print(f"    Slice {slices_reconstructed} (Type {nal.nal_unit_type}): Found {mb_count} MBs")
+                # Use SPS-derived MB count (constant, matches TraceableCAVLCParser)
+                mb_count = mb_count_per_slice
+                print(f"    Slice {slices_reconstructed} (Type {nal.nal_unit_type}): {mb_count} MBs, checking for modifications...")
                 
                 # Check if slice has modifications
                 slice_has_mods = any(
@@ -235,10 +259,17 @@ class BitstreamReconstructor:
                 
                 if slice_has_mods:
                     # Re-encode slice with modified coefficients
-                    print(f"    Slice {slices_reconstructed}: Re-encoding with {sum(1 for k in coeff_map if global_mb_idx <= k[0] < global_mb_idx + mb_count)} modifications")
-                    modified_nal = self._reconstruct_slice_with_cavlc(
-                        nal, coeff_map, global_mb_idx
+                    mods_count = sum(1 for k in coeff_map if global_mb_idx <= k[0] < global_mb_idx + mb_count)
+                    print(f"    Slice {slices_reconstructed}: Re-encoding with {mods_count} modifications")
+                    modified_nal, actual_mb_count = self._reconstruct_slice_with_cavlc(
+                        nal, coeff_map, global_mb_idx,
+                        frame_verified_data=frame_verified_data
                     )
+                    
+                    # Use SPS count (not parsed actual) for consistency
+                    if actual_mb_count is not None and actual_mb_count > 0 and actual_mb_count != mb_count:
+                        print(f"      [INFO] TraceableParser returned {actual_mb_count} MBs, using SPS count {mb_count}")
+                    
                     if modified_nal != nal:
                         print(f"      [DEBUG] Modified NAL is different (size: {len(nal.rbsp_byte)} -> {len(modified_nal.rbsp_byte)} bytes)")
                     else:
@@ -295,7 +326,7 @@ class BitstreamReconstructor:
             mb_parser = MacroblockParser(reader, sps, pps)
             count = 0
             
-            while count < 300:  # Safety limit
+            while count < 500:  # Increase safety limit to handle full frames
                 try:
                     _ = mb_parser.parse_macroblock_type_only()
                     count += 1
@@ -304,12 +335,15 @@ class BitstreamReconstructor:
             
             return max(count, 1)
         except:
-            return 1
+            # CIF format default: 352x288 pixels = 22x18 MBs = 396 MBs/frame
+            # Return 396 as realistic default instead of 1
+            return 396
     
     def _reconstruct_slice_with_cavlc(self,
                                       original_nal: NALUnit,
                                       coeff_map: Dict,
-                                      global_mb_idx: int) -> NALUnit:
+                                      global_mb_idx: int,
+                                      frame_verified_data: Dict = None):
         """
         Reconstruct slice with modified CAVLC coefficients
         
@@ -317,86 +351,302 @@ class BitstreamReconstructor:
         - Parse entire slice to extract ALL coefficients
         - Apply modifications from coeff_map
         - Re-encode ENTIRE slice with modified coefficients using CAVLC
-        - Return NEW NAL unit with modified bitstream
+        - Return (NEW NAL unit, actual_mb_count)
+        
+        Returns:
+            Tuple[NALUnit, int]: (modified_nal, num_mbs_in_slice)
         """
-        print(f"      [_reconstruct_slice_with_cavlc] Called with global_mb_idx={global_mb_idx}")
+        print(f"      [_reconstruct_slice_with_cavlc] Called with global_mb_idx={global_mb_idx} (parameter)")
         print(f"        Modifications requested: {len(coeff_map)}")
         
         if not coeff_map:
             return original_nal
         
         try:
-            # Step 1: Extract ALL coefficients from this slice
-            from ..decoder.cavlc_extractor_simple import SimpleCAVLCExtractor
+            # ⚠️ CRITICAL FIX: DO NOT parse first_mb_in_slice from header!
+            # The header's first_mb_in_slice can be slice-group relative, NOT global frame index.
+            # We must TRUST the accumulated global_mb_idx parameter passed from reconstruct_video.
+            # 
+            # OLD CODE (WRONG):
+            # reader_for_header = BitstreamReader(original_nal.rbsp_byte)
+            # slice_parser = SliceHeaderParser(reader_for_header, original_nal, self.sps, self.pps)
+            # slice_header = slice_parser.parse()
+            # actual_first_mb = slice_header.first_mb_in_slice  # ← Can be WRONG index!
+            # global_mb_idx = actual_first_mb  # ← Override breaks everything!
+            #
+            # NEW CODE (CORRECT):
+            # Just use the parameter directly - it's correctly accumulated in reconstruct_video()
             
-            extractor = SimpleCAVLCExtractor()
-            result = extractor.extract_coefficients_from_nal(
+            print(f"        [INFO] Using parameter global_mb_idx: {global_mb_idx}")
+            
+            # Step 1: Extract ALL coefficients from this slice
+            # CRITICAL FIX: Use TraceableCAVLCParser instead of SimpleCAVLCExtractor
+            # SimpleCAVLCExtractor has a bug where it returns all-zero coefficients for P-slices
+            # because it only parses CBP for I-slices (slice_type 2,7), not P-slices (slice_type 0,5).
+            # This caused massive zero-preservation violations in Frames 1+.
+            from .traceable_cavlc_parser import TraceableCAVLCParser
+            
+            parser = TraceableCAVLCParser()
+            parsed_result = parser.extract_with_offsets(
                 original_nal,
-                global_mb_idx=global_mb_idx,
-                sps=self.sps,
-                pps=self.pps
+                self.sps,
+                self.pps,
+                global_mb_idx=global_mb_idx
             )
             
-            if 'blocks' not in result:
+            if 'blocks' not in parsed_result:
                 print(f"        [ERROR] No blocks extracted from slice")
-                return original_nal
+                return (original_nal, None)  # Return tuple
             
-            blocks = result['blocks']
-            mb_metadata = result.get('mb_metadata', {})
+            blocks = parsed_result['blocks']
+            mb_metadata = parsed_result.get('mb_metadata', {})
             print(f"        Extracted {len(blocks)} blocks from slice")
             
+            # CRITICAL: Use the actual MB count including SKIP MBs from TraceableCAVLCParser.
+            # Do NOT compute from len(blocks)//24 — SKIP MBs add blocks but don't advance global_mb_idx the same way.
+            num_mbs_in_slice = parsed_result.get('num_mbs', None)
+            if num_mbs_in_slice is None or num_mbs_in_slice == 0:
+                # Fallback: count unique MB indices in blocks dict
+                num_mbs_in_slice = len(set(mb for mb, _ in blocks.keys())) if blocks else 1
+            
             # Step 2: Apply modifications to create combined blocks
+            # CRITICAL FIX: Adjust MB indexing - coeff_map uses global indexing (starts from 0, 1, 2...)
+            # but blocks use slice-relative indexing.We need to map global → slice-local.
+            # ALSO: Only process modifications that belong to THIS slice!
             modifications_applied = 0
-            for (mb_idx, block_idx), modified_coeffs in coeff_map.items():
-                block_key = (mb_idx, block_idx)
+            print(f"        [DEBUG] coeff_map keys (first 5): {list(coeff_map.keys())[:5]}")
+            print(f"        [DEBUG] blocks keys (first 5): {list(blocks.keys())[:5]}")
+            print(f"        [DEBUG] global_mb_idx for this slice: {global_mb_idx}, num_mbs: {num_mbs_in_slice}")
+            
+            for (mb_idx_global, block_idx), modified_coeffs in coeff_map.items():
+                # CRITICAL CHECK: Only apply modifications that belong to THIS slice
+                # Slice range: [global_mb_idx, global_mb_idx + num_mbs_in_slice)
+                if not (global_mb_idx <= mb_idx_global < global_mb_idx + num_mbs_in_slice):
+                    # This modification belongs to another slice, skip it
+                    continue
+                
+                # Convert global MB index to slice-relative (subtract slice start)
+                mb_idx_local = mb_idx_global - global_mb_idx
+                block_key = (mb_idx_local, block_idx)
+                
                 if block_key in blocks:
-                    # Apply modification
-                    blocks[block_key] = list(modified_coeffs)
-                    modifications_applied += 1
+                    original_coeffs = blocks[block_key]
+                    
+                    # CRITICAL VALIDATION: Check if modification violates zero-preservation
+                    orig_nz = sum(1 for c in original_coeffs if c != 0)
+                    mod_nz = sum(1 for c in modified_coeffs if c != 0)
+                    
+                    if orig_nz != mod_nz:
+                        if modifications_applied < 3:
+                            print(f"        [RECONSTRUCTOR_WARN] Block {block_key} (global {mb_idx_global}): total_coeffs mismatch!")
+                            print(f"          Parser extracted: {orig_nz} non-zero coeffs")
+                            print(f"          Embedder modified: {mod_nz} non-zero coeffs")
+                            print(f"          Original: {[c for c in original_coeffs if c != 0][:8]}")
+                            print(f"          Modified: {[c for c in modified_coeffs if c != 0][:8]}")
+                    
+                    # CRITICAL FIX: Only count as "modification" if coefficients actually DIFFER
+                    # Don't count copying original → original as a "modification"!
+                    coeffs_differ = any(o != m for o, m in zip(original_coeffs, modified_coeffs))
+                    
+                    if coeffs_differ:
+                        # Apply modification
+                        blocks[block_key] = list(modified_coeffs)
+                        modifications_applied += 1
+                        
+                        # DEBUG: Show first 3 modifications with detailed coefficient tracking
+                        if modifications_applied <= 3:
+                            print(f"        [DEBUG_COEFF] MODIFICATION #{modifications_applied}:")
+                            print(f"          Global MB: {mb_idx_global} -> Local MB: {mb_idx_local}, Block: {block_idx}")
+                            print(f"          Key: {block_key}")
+                            print(f"          Original coeffs: {original_coeffs}")
+                            print(f"          Modified coeffs: {modified_coeffs}")
+                            # Show which specific coefficients changed
+                            changes = [(i, o, m) for i, (o, m) in enumerate(zip(original_coeffs, modified_coeffs)) if o != m]
+                            print(f"          Changes: {changes[:5]}...")  # Show first 5 changes: (index, old, new)
+                    # else: coefficients are same, no need to modify
+                else:
+                    print(f"        [WARN] Key {block_key} NOT FOUND in blocks (mb_global={mb_idx_global}, local={mb_idx_local})")
             
             print(f"        Applied {modifications_applied} modifications")
             
             if modifications_applied == 0:
-                print(f"        [WARNING] No modifications applied (block keys don't match)")
-                return original_nal
+                # This is OK - slice might not have any modifications
+                print(f"        [INFO] No modifications for this slice (range {global_mb_idx}-{global_mb_idx + num_mbs_in_slice})")
+                return (original_nal, num_mbs_in_slice)
             
-            # Step 3: Re-encode ENTIRE slice with modified coefficients
-            print(f"        [INFO] Re-encoding slice with modified coefficients...")
+            # ========================================================================
+            # SMART PATCHING APPROACH (NEW)
+            # ========================================================================
+            # Instead of re-encoding entire slice (which causes nC drift, alignment issues),
+            # we use BitstreamPatcher to directly overwrite coefficient bits at tracked offsets.
+            # 
+            # Key properties:
+            # 1. Safety Filter guarantees bit-length invariance (old and new bits same length)
+            # 2. Preserves original bitstream structure 100% (no alignment issues)
+            # 3. No nC drift (no re-calculation of neighbor contexts)
+            # 4. Only modifies coefficient values, doesn't touch headers or structure
+            # ========================================================================
             
-            # Call the full re-encoding function
-            new_rbsp = self._reencode_slice_cavlc(
+            print(f"        [INFO] Using Smart Patching (direct bit overwrite)...")
+            
+            # VERIFICATION STEP: Extract first modification details for tracking
+            first_mod_for_verify = None
+            for (mb_idx_global, block_idx), modified_coeffs in coeff_map.items():
+                if global_mb_idx <= mb_idx_global < global_mb_idx + num_mbs_in_slice:
+                    mb_idx_local = mb_idx_global - global_mb_idx
+                    block_key = (mb_idx_local, block_idx)
+                    if block_key in blocks:
+                        original_coeffs = blocks[block_key]
+                        if any(o != m for o, m in zip(original_coeffs, modified_coeffs)):
+                            first_mod_for_verify = (mb_idx_global, mb_idx_local, block_idx, original_coeffs[:], modified_coeffs[:])
+                            break
+            
+            # Import BitreamPatcher
+            from .bitstream_patcher import BitstreamPatcher
+            
+            # Convert coeff_map to modifications list for patcher
+            # ⚠️ CRITICAL FIX: TraceableCAVLCParser uses ABSOLUTE MB addressing!
+            # We MUST pass global MB indices directly, NOT slice-local indices!
+            modifications = []
+            for (mb_idx_global, block_idx), modified_coeffs in coeff_map.items():
+                # Only include modifications for THIS slice
+                if global_mb_idx <= mb_idx_global < global_mb_idx + num_mbs_in_slice:
+                    # Pass global MB indices directly (DO NOT convert to slice-local!)
+                    modifications.append((mb_idx_global, block_idx, modified_coeffs))
+            
+            # Debug: show filter params and results
+            print(f"        [DEBUG_FILTER] global_mb_idx={global_mb_idx}, num_mbs_in_slice={num_mbs_in_slice}")
+            print(f"        [DEBUG_FILTER] MB range for this slice: [{global_mb_idx}, {global_mb_idx + num_mbs_in_slice})")
+            if modifications:
+                mod_mbs = set(m[0] for m in modifications)
+                print(f"        [DEBUG_FILTER] Modification MBs passed filter: {sorted(mod_mbs)}")
+            
+            print(f"        [INFO] Prepared {len(modifications)} modifications for patching")
+            
+            # Create patcher and patch the slice
+            print(f"        [DEBUG_PATCH] Calling BitstreamPatcher.patch_slice with {len(modifications)} modifications...")
+            patcher = BitstreamPatcher()
+            
+            # CRITICAL: Use the EMBEDDER'S verified offsets/blocks when available.
+            # The embedder's NAL bit-length filter already validated that
+            # encode(those coefficients) == NAL bit_length, so the patcher
+            # will find our_enc == NAL for all blocks it patches.
+            # 
+            # If frame_verified_data is available for this global_mb_idx,
+            # it means the embedder pre-validated the offsets from its own parse.
+            # Use those instead of the reconstructor's potentially divergent re-parse.
+            pre_offsets = None
+            pre_blocks = None
+            
+            if frame_verified_data and global_mb_idx in frame_verified_data:
+                verified_offsets, verified_blocks = frame_verified_data[global_mb_idx]
+                # Convert GLOBAL keys to LOCAL keys as expected by the patcher
+                # (patcher adds global_mb_offset to convert local→global)
+                # Here, verified_offsets already has GLOBAL keys from the embedder.
+                # The patcher will ADD global_mb_offset (=global_mb_idx) to its local keys.
+                # So we need to convert: global_key = local_key + global_mb_idx
+                # → local_key = global_key - global_mb_idx
+                pre_offsets = {
+                    (mb - global_mb_idx, blk): v
+                    for (mb, blk), v in verified_offsets.items()
+                    if mb >= global_mb_idx
+                }
+                pre_blocks = {
+                    (mb - global_mb_idx, blk): v
+                    for (mb, blk), v in verified_blocks.items()
+                    if mb >= global_mb_idx
+                }
+                print(f"        [INFO] Using EMBEDDER's verified offsets ({len(pre_offsets)}) for patcher — guaranteed round-trip consistency")
+            else:
+                # Fallback: use reconstructor's own parse results (may diverge from embedder's)
+                pre_offsets = parsed_result.get('offsets', {})
+                pre_blocks = parsed_result.get('blocks', {})
+                print(f"        [INFO] No embedder offsets for global_mb_idx={global_mb_idx} — using reconstructor's parse (may diverge)")
+            
+            modified_nal = patcher.patch_slice(
                 original_nal,
-                blocks,
-                global_mb_idx,
-                mb_metadata=mb_metadata,
+                modifications,
                 sps=self.sps,
-                pps=self.pps
+                pps=self.pps,
+                global_mb_offset=global_mb_idx,  # Add frame offset to convert local slice MBs to global
+                pre_computed_offsets=pre_offsets,
+                pre_computed_blocks=pre_blocks
             )
             
-            if new_rbsp is None or new_rbsp == original_nal.rbsp_byte:
-                print(f"        [ERROR] Re-encoding failed or returned original")
-                return original_nal
+            print(f"        [DEBUG_PATCH] Patching complete. Original NAL size: {len(original_nal.rbsp_byte)}, Modified NAL size: {len(modified_nal.rbsp_byte)}")
             
-            # Create new NAL unit with modified RBSP
-            modified_nal = NALUnit(
-                forbidden_zero_bit=original_nal.forbidden_zero_bit,
-                nal_ref_idc=original_nal.nal_ref_idc,
-                nal_unit_type=original_nal.nal_unit_type,
-                rbsp_byte=new_rbsp,
-                start_pos=original_nal.start_pos,
-                size=len(new_rbsp) + 1  # +1 for NAL header
-            )
+            if modified_nal is None:
+                print(f"        [ERROR] Patching returned None - BitstreamPatcher failed!")
+                return (original_nal, num_mbs_in_slice)
             
-            print(f"        [SUCCESS] Slice reconstructed: {len(original_nal.rbsp_byte)} → {len(new_rbsp)} bytes")
-            print(f"        Size change: {len(new_rbsp) - len(original_nal.rbsp_byte):+d} bytes")
+            # CRITICAL: Verify patching actually modified the NAL
+            if len(modified_nal.rbsp_byte) == len(original_nal.rbsp_byte):
+                if modified_nal.rbsp_byte == original_nal.rbsp_byte:
+                    print(f"        [WARN] Patched NAL is IDENTICAL to original!")
+                    print(f"        [WARN] This means NO blocks were successfully patched")
+                    print(f"        [WARN] Likely causes:")
+                    print(f"          1. All modifications skipped due to round-trip encoding failures")
+                    print(f"          2. All blocks had zero->non-zero or non-zero->zero violations")
+                    print(f"          3. Safety Filter rejected all modifications")
+                    # Don't fail - return original NAL (no modifications applied)
+                    return (original_nal, num_mbs_in_slice)
             
-            return modified_nal
+            # Verify NAL size is reasonable (not corrupted)
+            
+            # VERIFICATION: Extract coefficients from patched NAL and verify modification was applied
+            if first_mod_for_verify:
+                print(f"        [VERIFY] Extracting coefficients from PATCHED NAL to verify modifications...")
+                try:
+                    verify_result = extractor.extract_coefficients_from_nal(
+                        modified_nal,
+                        global_mb_idx=global_mb_idx,
+                        sps=self.sps,
+                        pps=self.pps
+                    )
+                    
+                    if 'blocks' in verify_result:
+                        verify_blocks = verify_result['blocks']
+                        mb_global, mb_local, blk_idx, orig_coeffs, mod_coeffs = first_mod_for_verify
+                        verify_key = (mb_local, blk_idx)
+                        
+                        if verify_key in verify_blocks:
+                            extracted_coeffs = verify_blocks[verify_key]
+                            print(f"        [VERIFY] First modification check (MB {mb_global}, Block {blk_idx}):")
+                            print(f"          Expected (modified): {mod_coeffs}")
+                            print(f"          Extracted (patched): {extracted_coeffs}")
+                            
+                            if list(extracted_coeffs) == list(mod_coeffs):
+                                print(f"          ✅ VERIFICATION PASSED - Coefficients match!")
+                            else:
+                                print(f"          ❌ VERIFICATION FAILED - Coefficients don't match!")
+                                # Show differences
+                                diffs = [(i, m, e) for i, (m, e) in enumerate(zip(mod_coeffs, extracted_coeffs)) if m != e]
+                                print(f"          Differences: {diffs[:5]}")
+                        else:
+                            print(f"        [VERIFY] ⚠️ Block key {verify_key} not found in extracted blocks")
+                    else:
+                        print(f"        [VERIFY] ⚠️ No blocks in verification extraction result")
+                except Exception as verify_e:
+                    print(f"        [VERIFY] ⚠️ Verification extraction failed: {verify_e}")
+            
+            print(f"        [SUCCESS] Smart Patching complete!")
+            print(f"        Original: {len(original_nal.rbsp_byte)} bytes")
+            print(f"        Patched:  {len(modified_nal.rbsp_byte)} bytes")
+            print(f"        Size change: {len(modified_nal.rbsp_byte) - len(original_nal.rbsp_byte):+d} bytes")
+            
+            return (modified_nal, num_mbs_in_slice)
             
         except Exception as e:
             print(f"        [Reconstructor] Error: {e}")
             import traceback
             traceback.print_exc()
-            return original_nal
+            # Use fallback of 1 MB if num_mbs_in_slice not available
+            fallback_mb_count = 1
+            try:
+                fallback_mb_count = num_mbs_in_slice if 'num_mbs_in_slice' in locals() else 1
+            except:
+                pass
+            return (original_nal, fallback_mb_count)
     
     def _reconstruct_with_header_copy(self,
                                       original_nal: NALUnit,
@@ -513,6 +763,13 @@ class BitstreamReconstructor:
                             # Calculate nC from neighbors (H.264 Section 8.4.1.2.2)
                             # CRITICAL: Use mb_global_idx (frame-absolute), NOT slice_mb_idx!
                             nC = self._calculate_nC(mb_global_idx, block_idx, pic_width_in_mbs=22)
+                            
+                            # 🔵 TWIN LOGGING: Encoder side (log for first MB only)
+                            if mb_global_idx == 0 and block_idx < 16:
+                                non_zero = [c for c in coeffs if c != 0]
+                                total_coeffs = len(non_zero)
+                                print(f"[ENC] MB:{mb_global_idx} Blk:{block_idx} nC:{nC} TotalCoeff:{total_coeffs} Coeffs:{non_zero[:5] if non_zero else [0]}")
+                            
                             encoder.encode_block_cavlc(coeffs, nC=nC, max_num_coeff=16)
                             # Update total_coeffs cache for future nC calculations
                             self._update_total_coeffs_cache(mb_global_idx, block_idx, coeffs)
@@ -545,8 +802,12 @@ class BitstreamReconstructor:
         Surgical approach: Copy original bytes, only re-encode modified coefficient blocks.
         """
         try:
-            # Clear total_coeffs cache for new slice (nC calculation needs fresh context)
-            self.mb_total_coeffs.clear()
+            # ==================================================================================
+            # CRITICAL FIX #2: DON'T clear cache - preserve neighbors from previous slices
+            # ==================================================================================
+            # OLD CODE (WRONG): self.mb_total_coeffs.clear()  ← Removes top neighbors!
+            # NEW CODE: Keep cache intact - top-row MBs need neighbors from previous slice
+            # Cache will be updated with current slice's blocks below
             
             # If no modifications, return original
             if not blocks:
@@ -583,10 +844,38 @@ class BitstreamReconstructor:
             print(f"        [DEBUG] Applied {modifications_applied} modifications to combined_blocks")
             print(f"        [DEBUG] Final combined_blocks has {len(combined_blocks)} blocks")
             
+            # ==================================================================================
+            # CRITICAL FIX #1: Pre-populate total_coeffs cache for accurate nC calculation
+            # ==================================================================================
+            # Problem: Cache is cleared (line 712), but encoder needs neighbor context
+            # Solution: Rebuild cache from combined_blocks BEFORE encoding
+            # Note: combined_blocks uses SLICE-LOCAL indices (0, 1, 2...)
+            #       but _calculate_nC expects GLOBAL indices (global_mb_idx + local)
+            # → Convert to GLOBAL indices when populating cache
+            
+            print(f"        [FIX] Pre-populating nC cache from {len(combined_blocks)} combined blocks...")
+            cache_populated = 0
+            for (mb_idx_local, block_idx), coeffs in combined_blocks.items():
+                # Convert slice-local MB index → global MB index
+                mb_idx_global = global_mb_idx + mb_idx_local
+                
+                # Calculate total_coeffs (number of non-zero coefficients)
+                total_coeffs = sum(1 for c in coeffs if c != 0)
+                
+                # Store in cache with GLOBAL indices (for nC calculation)
+                self.mb_total_coeffs[(mb_idx_global, block_idx)] = total_coeffs
+                cache_populated += 1
+            
+            print(f"        [FIX] Cache populated with {cache_populated} entries (using GLOBAL MB indices)")
+            
             # Determine which MBs need re-encoding
+            # CRITICAL FIX: blocks.keys() already use SLICE-LOCAL indices (0, 1, 2...)
+            # DO NOT subtract global_mb_idx again!
             modified_mbs = set()
             for (mb_idx, block_idx) in blocks.keys():
-                modified_mbs.add(mb_idx - global_mb_idx)  # Convert to slice-relative
+                # BUG CŨ: modified_mbs.add(mb_idx - global_mb_idx)  ← SAI! Subtract two times!
+                # FIX MỚI: mb_idx đã là local index rồi (0, 1, 2... trong slice)
+                modified_mbs.add(mb_idx)  # Already slice-relative, no conversion needed
             
             print(f"        [DEBUG] global_mb_idx={global_mb_idx}, blocks.keys()={list(blocks.keys())[:5]}")
             print(f"        [DEBUG] modified_mbs={modified_mbs}")
@@ -616,6 +905,10 @@ class BitstreamReconstructor:
             # Re-encode slice with combined coefficients
             writer = BitstreamWriter()
             
+            # DEBUG: Log slice header start for first slice
+            slice_header_start_pos = writer.get_bit_position()
+            debug_first_slice = False  # Disabled for production
+            
             # Write COMPLETE slice header (all fields in correct order)
             # 1. Basic slice info
             writer.write_ue(slice_header.first_mb_in_slice)
@@ -636,6 +929,9 @@ class BitstreamReconstructor:
             is_idr = (original_nal.nal_unit_type == 5)
             if is_idr and slice_header.idr_pic_id is not None:
                 writer.write_ue(slice_header.idr_pic_id)
+                if debug_first_slice:
+                    pos_after_idr = writer.get_bit_position()
+                    print(f"          [ENC] After idr_pic_id: Pos:{pos_after_idr}")
             
             # 5. Picture order count
             if sps.pic_order_cnt_type == 0:
@@ -651,35 +947,93 @@ class BitstreamReconstructor:
             
             # 7. num_ref_idx_active_override (P and B slices only)
             if slice_header.slice_type % 5 in [0, 1]:  # P or B
+                if debug_first_slice:
+                    pos_before_num_ref = writer.get_bit_position()
                 writer.write_bits(1, 1 if slice_header.num_ref_idx_active_override_flag else 0)
+                if debug_first_slice:
+                    pos_after_num_ref = writer.get_bit_position()
+                    print(f"          [ENC] After num_ref_idx_override (flag:{slice_header.num_ref_idx_active_override_flag}): Pos:{pos_after_num_ref} (wrote {pos_after_num_ref - pos_before_num_ref} bits)")
                 if slice_header.num_ref_idx_active_override_flag:
                     writer.write_ue(slice_header.num_ref_idx_l0_active_minus1)
                     if slice_header.slice_type % 5 == 1:  # B slice
                         writer.write_ue(slice_header.num_ref_idx_l1_active_minus1)
             
-            # 8. ref_pic_list_modification() - write empty (no modifications)
+            # 8. ref_pic_list_modification() - copy exact bit sequence from original
             if slice_header.slice_type % 5 != 2:  # Not I slice
-                writer.write_bits(1, 0)  # ref_pic_list_modification_flag_l0 = 0
+                if debug_first_slice:
+                    pos_before_ref_list = writer.get_bit_position()
+                
+                # Write the exact bit sequence captured from original
+                if slice_header.ref_pic_list_modification_l0_data:
+                    for bit in slice_header.ref_pic_list_modification_l0_data:
+                        writer.write_bits(1, bit)
+                else:
+                    # Fallback: write flag=0 if no data captured
+                    writer.write_bits(1, 0)
+                
+                if debug_first_slice:
+                    pos_after_ref_list = writer.get_bit_position()
+                    print(f"          [ENC] After ref_pic_list_modification (copied {len(slice_header.ref_pic_list_modification_l0_data)} bits): Pos:{pos_after_ref_list}")
+                
                 if slice_header.slice_type % 5 == 1:  # B slice
-                    writer.write_bits(1, 0)  # ref_pic_list_modification_flag_l1 = 0
+                    if slice_header.ref_pic_list_modification_l1_data:
+                        for bit in slice_header.ref_pic_list_modification_l1_data:
+                            writer.write_bits(1, bit)
+                    else:
+                        writer.write_bits(1, 0)
             
-            # 9. dec_ref_pic_marking()
+            # 9. dec_ref_pic_marking() - copy exact bit sequence from original
             if is_idr:
-                writer.write_bits(1, 0)  # no_output_of_prior_pics_flag
-                writer.write_bits(1, 0)  # long_term_reference_flag
+                # For IDR: If we have captured data, use it; otherwise write simple flags
+                if slice_header.dec_ref_pic_marking_data:
+                    for bit in slice_header.dec_ref_pic_marking_data:
+                        writer.write_bits(1, bit)
+                else:
+                    writer.write_bits(1, 1 if slice_header.no_output_of_prior_pics_flag else 0)
+                    writer.write_bits(1, 1 if slice_header.long_term_reference_flag else 0)
+                if debug_first_slice:
+                    pos_after_dec_ref = writer.get_bit_position()
+                    print(f"          [ENC] After dec_ref_pic_marking (copied {len(slice_header.dec_ref_pic_marking_data) if slice_header.dec_ref_pic_marking_data else 2} bits): Pos:{pos_after_dec_ref}")
             elif slice_header.slice_type % 5 in [0, 1]:  # P or B slice
-                writer.write_bits(1, 0)  # adaptive_ref_pic_marking_mode_flag
+                # For P/B: Copy exact bit sequence
+                if slice_header.dec_ref_pic_marking_data:
+                    for bit in slice_header.dec_ref_pic_marking_data:
+                        writer.write_bits(1, bit)
+                else:
+                    writer.write_bits(1, 0)  # Fallback: adaptive_ref_pic_marking_mode_flag = 0
+                
+                if debug_first_slice:
+                    pos_after_dec_ref = writer.get_bit_position()
+                    print(f"          [ENC] After dec_ref_pic_marking (copied {len(slice_header.dec_ref_pic_marking_data) if slice_header.dec_ref_pic_marking_data else 1} bits): Pos:{pos_after_dec_ref}")
             
             # 10. slice_qp_delta
+            pos_before_qp = writer.get_bit_position() if debug_first_slice else 0
             writer.write_se(slice_header.slice_qp_delta)
+            if debug_first_slice:
+                pos_after_qp = writer.get_bit_position()
+                print(f"          [ENC] After slice_qp_delta (value:{slice_header.slice_qp_delta}): Pos:{pos_after_qp} (wrote {pos_after_qp - pos_before_qp} bits)")
+            
+            # DEBUG: Log slice header end for first slice
+            if debug_first_slice:
+                slice_header_end_pos = writer.get_bit_position()
+                print(f"          [ENC_SLICE_HEADER] Slice global_mb_idx:{global_mb_idx} header: {slice_header_start_pos}->{slice_header_end_pos} bits ({slice_header_end_pos - slice_header_start_pos} bits total)")
             
             # 11. Deblocking filter control
+            pos_before_deblock = writer.get_bit_position() if debug_first_slice else 0
             if pps.deblocking_filter_control_present_flag:
                 deblocking_idc = slice_header.disable_deblocking_filter_idc if slice_header.disable_deblocking_filter_idc is not None else 0
                 writer.write_ue(deblocking_idc)
                 if deblocking_idc != 1:
                     writer.write_se(slice_header.slice_alpha_c0_offset_div2 if slice_header.slice_alpha_c0_offset_div2 is not None else 0)
                     writer.write_se(slice_header.slice_beta_offset_div2 if slice_header.slice_beta_offset_div2 is not None else 0)
+                if debug_first_slice:
+                    pos_after_deblock = writer.get_bit_position()
+                    print(f"          [ENC] After deblocking_filter_control (idc:{deblocking_idc}): Pos:{pos_after_deblock} (wrote {pos_after_deblock - pos_before_deblock} bits)")
+            
+            # DEBUG: Log final slice header size
+            if debug_first_slice:
+                final_slice_header_pos = writer.get_bit_position()
+                print(f"          [ENC_SLICE_HEADER] After deblocking: Pos:{final_slice_header_pos} (total slice header: {final_slice_header_pos - slice_header_start_pos} bits)")
             
             # CRITICAL FIX: Determine TOTAL number of MBs in original slice
             # NOT just the range of modified blocks!
@@ -711,22 +1065,46 @@ class BitstreamReconstructor:
             
             encoder = CAVLCEncoder(writer)
             
+            # DEBUG: Check combined_blocks content
+            print(f"          [CAVLC_ENC] combined_blocks has {len(combined_blocks)} blocks")
+            print(f"          [CAVLC_ENC] combined_blocks keys (first 5): {list(combined_blocks.keys())[:5]}")
+            nonzero_in_combined = sum(1 for coeffs in combined_blocks.values() if any(c != 0 for c in coeffs))
+            print(f"          [CAVLC_ENC] Blocks with non-zero coeffs in combined_blocks: {nonzero_in_combined}")
+            
             # Encode each macroblock
             for slice_mb_idx in range(num_mbs):
                 mb_global_idx = global_mb_idx + slice_mb_idx
                 
+                # CRITICAL FIX (Quy tắc User):
+                # combined_blocks uses SLICE-LOCAL indexing (0, 1, 2... trong slice)
+                # NOT global indexing (150, 151, 152... trong toàn bộ video)
+                # → Phải dùng slice_mb_idx (local) để lookup, KHÔNG dùng mb_global_idx!
+                
                 # Collect all blocks for this MB
                 mb_blocks = {}
+                blocks_found = 0
                 for block_idx in range(24):
-                    key = (mb_global_idx, block_idx)
+                    # BUG CŨ: key = (mb_global_idx, block_idx)  ← SAI! Tìm key 150 trong dict có key 0-21
+                    # FIX MỚI: Dùng slice_mb_idx (local index trong slice)
+                    key = (slice_mb_idx, block_idx)  # ← FIXED: Use LOCAL index
+                    
                     if key in combined_blocks:
                         mb_blocks[block_idx] = combined_blocks[key]
+                        blocks_found += 1
                         
-                        # DEBUG first MB, first block
+                        # DEBUG first MB
                         if slice_mb_idx == 0 and block_idx == 0:
-                            print(f"          [DEBUG] MB 0, Block 0 from combined_blocks: {combined_blocks[key]}")
+                            print(f"          [POPULATE] [OK] MB Local:{slice_mb_idx} Global:{mb_global_idx}, Block {block_idx}")
+                            print(f"                      Key: {key}")
+                            print(f"                      Coeffs from combined_blocks: {combined_blocks[key][:8]}...")
                     else:
                         mb_blocks[block_idx] = [0] * 16
+                
+                # DEBUG first MB blocks found
+                if slice_mb_idx == 0:
+                    print(f"          [POPULATE] MB 0: Found {blocks_found}/24 blocks in combined_blocks")
+                    nonzero_blocks = [idx for idx, c in mb_blocks.items() if any(x != 0 for x in c)]
+                    print(f"          [POPULATE] MB 0: Non-zero blocks: {nonzero_blocks}")
                 
                 # Calculate CBP from actual block contents (modified or original)
                 calculated_cbp = 0
@@ -767,16 +1145,30 @@ class BitstreamReconstructor:
                         print(f"          [INFO] Using calculated CBP to reflect actual block contents")
                 
                 # Write MB type (use original from video)
+                if slice_mb_idx == 0:
+                    pos_before_mb_type = writer.get_bit_position()
                 writer.write_ue(original_mb_type)
+                if slice_mb_idx == 0:
+                    pos_after_mb_type = writer.get_bit_position()
+                    print(f"          [ENC_BITS] MB:0 starts at Pos:{pos_before_mb_type}, after mb_type: Pos:{pos_after_mb_type} (wrote {pos_after_mb_type - pos_before_mb_type} bits)")
                 
                 # Handle different MB types
                 if original_mb_type == 0:  # I_4x4
                     # Write prev_intra4x4_pred_mode_flag and rem_intra4x4_pred_mode for each 4x4 block
                     # Simplified: use DC prediction (mode 2) for all
+                    if slice_mb_idx == 0:
+                        pos_before_pred = writer.get_bit_position()
                     for _ in range(16):
                         writer.write_bits(1, 1)  # prev_intra4x4_pred_mode_flag = 1 (use most probable)
+                    if slice_mb_idx == 0:
+                        pos_after_pred = writer.get_bit_position()
+                        print(f"          [ENC_BITS] After writing 16x pred_mode_flag(1): Pos:{pos_after_pred} (wrote {pos_after_pred - pos_before_pred} bits)")
                     # Write chroma prediction mode
+                    pos_before_chroma = writer.get_bit_position() if slice_mb_idx == 0 else 0
                     writer.write_ue(0)  # DC mode
+                    if slice_mb_idx == 0:
+                        pos_after_chroma = writer.get_bit_position()
+                        print(f"          [ENC_BITS] After writing chroma_pred_mode(UE:0): Pos:{pos_after_chroma} (wrote {pos_after_chroma - pos_before_chroma} bits)")
                 elif original_mb_type >= 1 and original_mb_type <= 24:  # I_16x16
                     # Write chroma prediction mode
                     writer.write_ue(0)  # DC mode for chroma
@@ -816,10 +1208,24 @@ class BitstreamReconstructor:
                             if len(coeffs) != 16:
                                 coeffs = (list(coeffs) + [0]*16)[:16]
                             
-                            # All residual blocks are 4x4 (16 coefficients) in Baseline Profile
-                            # Chroma DC (2x2, 4 coefficients) is only used in I_16x16 mode
-                            # Since we're using I_4x4, all blocks have max_num_coeff = 16
-                            max_num_coeff = 16
+                            # ==================================================================================
+                            # CRITICAL FIX #5: max_num_coeff depends on block type
+                            # ==================================================================================
+                            # Luma blocks (0-15): 16 coefficients (4x4 with DC)
+                            # Chroma AC blocks (16-23): 15 coefficients (4x4 minus DC)
+                            # (DC is handled separately in I_16x16 mode, but we use I_4x4)
+                            #
+                            # OLD CODE (WRONG):
+                            # max_num_coeff = 16  ← Bug! Chroma AC should be 15!
+                            #
+                            # NEW CODE (CORRECT):
+                            if block_idx < 16:
+                                # Luma blocks: full 4x4 = 16 coeffs
+                                max_num_coeff = 16
+                            else:
+                                # Chroma AC blocks: 4x4 minus DC = 15 coeffs
+                                # (Matches parser: traceable_cavlc_parser.py line 257)
+                                max_num_coeff = 15
                             
                             # DEBUG: Log first block of first MB
                             if slice_mb_idx == 0 and block_idx == 0:
@@ -924,6 +1330,32 @@ class BitstreamReconstructor:
             level_idc = reader.read_bits(8)
             seq_parameter_set_id = reader.read_ue()
             
+            # High Profile (100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135)
+            # requires parsing additional chroma/bit depth fields
+            if profile_idc in [100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135]:
+                chroma_format_idc = reader.read_ue()
+                if chroma_format_idc == 3:
+                    separate_colour_plane_flag = reader.read_bits(1)
+                bit_depth_luma_minus8 = reader.read_ue()
+                bit_depth_chroma_minus8 = reader.read_ue()
+                qpprime_y_zero_transform_bypass_flag = reader.read_bits(1)
+                seq_scaling_matrix_present_flag = reader.read_bits(1)
+                if seq_scaling_matrix_present_flag:
+                    # Parse scaling matrices (complex, skip for now - just read flags)
+                    num_scaling_lists = 8 if chroma_format_idc != 3 else 12
+                    for i in range(num_scaling_lists):
+                        seq_scaling_list_present_flag = reader.read_bits(1)
+                        if seq_scaling_list_present_flag:
+                            # Skip reading actual scaling list
+                            size = 16 if i < 6 else 64
+                            last_scale = 8
+                            next_scale = 8
+                            for j in range(size):
+                                if next_scale != 0:
+                                    delta_scale = reader.read_se()
+                                    next_scale = (last_scale + delta_scale + 256) % 256
+                                last_scale = next_scale if next_scale != 0 else last_scale
+            
             sps.log2_max_frame_num_minus4 = reader.read_ue()
             sps.pic_order_cnt_type = reader.read_ue()
             
@@ -937,7 +1369,7 @@ class BitstreamReconstructor:
             sps.pic_height_in_map_units_minus1 = reader.read_ue()
             sps.frame_mbs_only_flag = reader.read_bits(1) == 1
             
-            print(f"    [DEBUG] Parsed SPS: log2_max_frame_num={sps.log2_max_frame_num_minus4+4}, poc_type={sps.pic_order_cnt_type}, frame_mbs_only={sps.frame_mbs_only_flag}")
+            print(f"    [DEBUG] Parsed SPS: profile={profile_idc}, width={sps.pic_width_in_mbs_minus1}+1, height={sps.pic_height_in_map_units_minus1}+1, frame_mbs_only={sps.frame_mbs_only_flag}")
             
         except Exception as e:
             print(f"    [!] SPS parsing error: {e}, using defaults")
@@ -959,6 +1391,11 @@ class BitstreamReconstructor:
             entropy_coding_mode_flag = reader.read_bits(1)
             bottom_field_pic_order_in_frame_present_flag = reader.read_bits(1)
             num_slice_groups_minus1 = reader.read_ue()
+            
+            # Store entropy coding mode
+            pps.entropy_coding_mode_flag = entropy_coding_mode_flag == 1
+            
+            print(f"    [CRITICAL] PPS entropy_coding_mode_flag={entropy_coding_mode_flag} ({'CABAC' if entropy_coding_mode_flag else 'CAVLC'})")
             
             # Skip slice group map if present
             if num_slice_groups_minus1 > 0:

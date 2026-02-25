@@ -194,6 +194,10 @@ class GrothProofGenerator:
         if not self.setup_complete:
             raise RuntimeError("Circuit setup not complete. Run setup_circuit() first.")
         
+        # Use default secret if not provided
+        if secret is None:
+            secret = "default_zk_secret_2026"
+        
         # Calculate payload hash
         payload_hash = hashlib.sha256(payload).digest()
         
@@ -278,19 +282,20 @@ class GrothProofGenerator:
         
         # Binary serialization with options
         if use_binary:
-            from .proof_serializer import serialize_with_signals
+            from .proof_serializer import ProofSerializer
             
-            # Use format that includes public signals for verification
-            binary_proof = serialize_with_signals(proof_obj)
+            # Use compact format (336 bytes: header + commitment + π_A + π_B + π_C + signals_hash)
+            # Public signals can be recomputed from payload during verification
+            binary_proof = ProofSerializer.serialize(proof_obj)
             
             return {
-                "format": "binary_with_signals",
+                "format": "binary_compact",
                 "proof_data": binary_proof,
                 "size_bytes": len(binary_proof),
                 "commitment": commitment.hex(),
                 "payload_length": len(payload),
                 "timestamp": proof_obj["timestamp"],
-                "note": "Binary proof with public signals for verification"
+                "note": "Compact binary Groth16 proof (336 bytes)"
             }
         
         return proof_obj
