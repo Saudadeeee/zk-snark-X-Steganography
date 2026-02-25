@@ -236,8 +236,11 @@ class BitstreamReconstructor:
         print(f"    [MB_COUNT] Per-slice MB count from SPS: {mb_count_per_slice}")
         
         for nal in parser.nal_units:
-            # Copy non-slice NALs as-is (SPS, PPS, SEI, etc.)
-            if nal.nal_unit_type not in [1, 5]:
+            # Copy non-slice NALs and P/B-Frame slices as-is (SPS, PPS, SEI, P-slices, B-slices)
+            # ONLY process I-Frames (NAL type 5) for coefficient modification
+            if nal.nal_unit_type != 5:
+                if nal.nal_unit_type == 1:
+                    print(f"    [BYPASS] Skipping P/B-Frame NAL intact (Binary Copy)")
                 reconstructed_nals.append(nal)
                 continue
             

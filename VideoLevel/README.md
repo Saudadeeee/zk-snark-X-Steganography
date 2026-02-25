@@ -706,10 +706,14 @@ npm install
 cd ..
 
 # 3. VERY IMPORTANT: Prepare your video
-# ZK-SNARK proofs are large (~300 bytes). If your video is heavily compressed,
-# the Safety Filter will reject it due to a lack of AC coefficients.
-# You MUST encode your raw video using high-quality parameters (QP 10) and All-Intra (GOP 1):
-ffmpeg -i your_raw_video.y4m -c:v libx264 -profile:v baseline -coder 0 -qp 10 -g 1 -y output_ready.h264
+# ZK-SNARK proofs are large (~300 bytes). The system embeds the proof strictly inside I-Frames 
+# (Intra-frames) and natively bypasses P-Frames/B-Frames to preserve video compression!
+# 
+# Depending on the duration of your video, you should adjust the GOP size (`-g`) to ensure
+# there are enough I-Frames to hold the 2336-bit proof (approx 2-3 I-Frames needed).
+#
+# For a short 10-second video (300 frames), a GOP of 100 provides exactly 3 I-Frames:
+ffmpeg -i your_raw_video.y4m -c:v libx264 -profile:v baseline -coder 0 -qp 10 -g 100 -y output_ready.h264
 
 # 4. You're ready! Try the example:
 python e2e_extraction_test.py
@@ -1090,6 +1094,11 @@ python -c "from src.zk_mv_stego.prover.groth_proof_generator import GrothProofGe
 
 3. **Multi-Chunk Embedding & Position Sync** ✅
    - Fixed position offset accumulation, added `start_bit_offset` yielding 100% extraction recovery.
+
+4. **NAL-Layer P-Frame Bypassing (GOP-N Support)** ✅
+   - Implemented binary-copy bypass for NAL Type 1 (`SLICE_NON_IDR`). 
+   - The embedder now actively skips P/B frames, exclusively modifying safe DCT coefficients inside I-Frames (`SLICE_IDR`). 
+   - **Result:** Strict All-Intra (`-g 1`) is no longer required. Videos can now be natively compressed with normal P-frames for massive size reduction while preserving embedding perfection.
 
 4. **Multi-Chunk Embedding** ✅
    - Changed from sequential to concatenated payload
