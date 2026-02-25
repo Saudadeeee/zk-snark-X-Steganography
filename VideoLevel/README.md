@@ -2,7 +2,7 @@
 
 Zero-Knowledge Proof Video Steganography with H.264 CAVLC Safety Filter
 
-**Status:** ✅ Production Ready | **Version:** 3.0-CAVLC-Safety | **Last Updated:** February 6, 2026
+**Status:** ✅ Production Ready | **Version:** 3.1-CAVLC-Safety | **Last Updated:** February 25, 2026
 
 ## Table of Contents
 
@@ -693,9 +693,9 @@ print(f"Proof: {proof.hex()[:32]}...")
 **What you need:**
 - Python 3.8 or newer
 - Node.js 14 or newer (for ZK proofs)
-- A H.264 video file
+- A H.264 video file **MUST be encoded with specific parameters** to ensure sufficient capacity for payload embedding.
 
-**Installation:**
+**Installation & Execution:**
 ```bash
 # 1. Install Python dependencies
 pip install numpy
@@ -705,8 +705,14 @@ cd circuits
 npm install
 cd ..
 
-# 3. You're ready! Try the example:
-python embed_complete.py -i your_video.h264 -m "Hello World"
+# 3. VERY IMPORTANT: Prepare your video
+# ZK-SNARK proofs are large (~300 bytes). If your video is heavily compressed,
+# the Safety Filter will reject it due to a lack of AC coefficients.
+# You MUST encode your raw video using high-quality parameters (QP 10) and All-Intra (GOP 1):
+ffmpeg -i your_raw_video.y4m -c:v libx264 -profile:v baseline -coder 0 -qp 10 -g 1 -y output_ready.h264
+
+# 4. You're ready! Try the example:
+python e2e_extraction_test.py
 ```
 
 ### For Experts
@@ -1071,22 +1077,19 @@ python -c "from src.zk_mv_stego.prover.groth_proof_generator import GrothProofGe
 - Or reduce payload size
 - Each frame holds ~95 bits (12 bytes)
 
-## Recent Fixes (Feb 6, 2026)
+## Recent Fixes (Feb 25, 2026)
 
 1. **SPS High Profile Parser** ✅
    - Added chroma_format_idc, bit_depth, scaling matrix parsing
    - Fixed video dimensions (was 1×3, now correctly 22×18 MBs)
    - Result: Full frame extraction (152,064 coefficients vs 384)
 
-2. **Unicode Encoding** ✅
-   - Replaced all emoji warnings (⚠️) with ASCII ([WARN])
-   - Fixed Windows console crashes (cp1252 codec errors)
-   - Result: MB parsing completed successfully
+2. **Windows Unicode Fixes** ✅
+   - Resolved `UnicodeEncodeError: 'charmap' codec can't encode character` when piping Python output on Windows.
+   - Re-configured stdout directly within extraction scripts to force UTF-8: `sys.stdout.reconfigure(encoding='utf-8')`.
 
-3. **Position Synchronization** ✅
-   - Added `start_bit_offset` to extract_payload()
-   - Implemented `_extract_with_safety_filter()` routing
-   - Result: 0% → 100% chunk recovery
+3. **Multi-Chunk Embedding & Position Sync** ✅
+   - Fixed position offset accumulation, added `start_bit_offset` yielding 100% extraction recovery.
 
 4. **Multi-Chunk Embedding** ✅
    - Changed from sequential to concatenated payload
