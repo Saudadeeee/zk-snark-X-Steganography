@@ -94,15 +94,21 @@ class MacroblockParser:
     """
     Parse macroblock layer from H.264 slice data
     """
-    
-    def __init__(self, reader: BitstreamReader, slice_type: int):
+
+    def __init__(self, reader: BitstreamReader, slice_type: int,
+                 num_ref_idx_l0_active_minus1: int = 0):
         self.reader = reader
         self.slice_type = slice_type
         self.is_i_slice = slice_type in [2, 7]  # I or IDR
         self.is_p_slice = slice_type in [0, 5]  # P slice
-        
+        self.num_ref_idx_l0_active_minus1 = num_ref_idx_l0_active_minus1
+
         # Current QP (starts from PPS QP, updated by mb_qp_delta)
         self.current_qp = 26  # Default, should be from PPS
+
+        # Track whether the MB currently being parsed is intra type
+        # (used for CBP mapping selection for I-MBs within P-slices)
+        self._current_is_intra = True
     
     def parse_macroblock(self) -> MacroblockData:
         """
@@ -132,36 +138,39 @@ class MacroblockParser:
             print(f"[ERROR] Unknown mb_type={mb.mb_type} in slice_type={self.slice_type}!")
             print(f"[RECOVERY] Using I_4x4 fallback")
             mb.mb_type_enum = MBType.I_4x4  # Safe default
-        
+
         # ADDITIONAL CHECK: Validate we're not too far off alignment
         if mb.mb_type > 100:  # Sanity check - no valid mb_type should be this high
             print(f"[ERROR] mb_type={mb.mb_type} suggests severe bitstream corruption!")
             print(f"[RECOVERY] Attempting to continue with fallback")
-        
+
         # 2. Handle I_PCM special case
         if mb.mb_type_enum == MBType.I_PCM:
             self._parse_i_pcm(mb)
             return mb
-        
+
+        # Determine if this MB is an intra type (used for CBP mapping below)
+        self._current_is_intra = self.is_i_slice or self._is_intra_type(mb.mb_type_enum)
+
+        # 2b. For P-slices: read motion prediction data (ref_idx + MVDs) for P-type MBs
+        # This MUST happen before reading CBP.
+        # For I-type MBs inside a P-slice, skip this (they have no motion vectors).
+        if self.is_p_slice and not self._is_intra_type(mb.mb_type_enum):
+            self._parse_p_mb_prediction(mb)
+
         # 3. Parse prediction mode for I_4x4 (luma pred modes only)
         if mb.mb_type_enum == MBType.I_4x4:
             self._parse_intra_4x4_pred_mode(mb)  # Parse luma modes
             if debug_first_mb:
                 pos_after_pred = self.reader.position
                 print(f"    [MB_BITS] After intra_4x4_pred_mode: Pos:{pos_after_pred} (consumed {pos_after_pred - pos_after_type} bits)")
-        
+
         # PRIORITY 2 FIX: Parse chroma pred mode for ALL Intra MBs (I_4x4 AND I_16x16)
         # H.264 Spec: intra_chroma_pred_mode exists for both I_NxN and I_16x16!
-        # CRITICAL: Even if mb_type_enum is None (unknown), we're in I-slice, so MUST parse chroma mode!
-        if self.is_i_slice and mb.mb_type_enum != MBType.I_PCM:
-            # Parse for all MBs in I-slice except I_PCM (which returns early)
-            pos_before_chroma = self.reader.position
+        # Also applies to I-type MBs within P-slices (not just pure I-slices).
+        if self._current_is_intra and mb.mb_type_enum != MBType.I_PCM:
             mb.intra_chroma_pred_mode = self.reader.read_ue()
-            # Disabled debug logging to reduce token usage
-        elif self.is_p_slice and self._is_i16x16(mb.mb_type_enum):
-            # I MBs within P-slice also need chroma pred mode
-            mb.intra_chroma_pred_mode = self.reader.read_ue()
-        
+
         # 4. Parse Coded Block Pattern (if not I_16x16)
         if not self._is_i16x16(mb.mb_type_enum):
             mb.coded_block_pattern = self._read_coded_block_pattern()
@@ -169,11 +178,13 @@ class MacroblockParser:
             # I_16x16: CBP is encoded in mb_type
             mb.coded_block_pattern = self._extract_cbp_from_i16x16(mb.mb_type_enum)
         
-        # CRITICAL FIX: Validate CBP range and clamp if invalid
-        if mb.coded_block_pattern < 0 or mb.coded_block_pattern > 47:
-            print(f"[WARN] Suspicious CBP={mb.coded_block_pattern} (valid: 0-47)")
-            print(f"[FIX] Clamping CBP to valid range")
-            mb.coded_block_pattern = min(max(mb.coded_block_pattern, 0), 47)  # Clamp to [0, 47]
+        # Validate CBP range for non-I_16x16 MBs (table values: 0-47)
+        # I_16x16 MBs can have CBP up to 63 (bits[5:4] = 0b11 for DC+AC chroma)
+        if not self._is_i16x16(mb.mb_type_enum):
+            if mb.coded_block_pattern < 0 or mb.coded_block_pattern > 47:
+                print(f"[WARN] Suspicious CBP={mb.coded_block_pattern} (valid: 0-47)")
+                print(f"[FIX] Clamping CBP to valid range")
+                mb.coded_block_pattern = min(max(mb.coded_block_pattern, 0), 47)
         
         # 5. Parse QP delta
         if mb.coded_block_pattern > 0 or self._is_i16x16(mb.mb_type_enum):
@@ -250,6 +261,70 @@ class MacroblockParser:
         if mb_type is None:
             return False
         return MBType.I_16x16_0_0_0 <= mb_type <= MBType.I_16x16_3_2_1
+
+    def _is_intra_type(self, mb_type: Optional[MBType]) -> bool:
+        """Check if macroblock is any intra type (I_4x4 or I_16x16)"""
+        if mb_type is None:
+            return False
+        return mb_type == MBType.I_4x4 or MBType.I_16x16_0_0_0 <= mb_type <= MBType.I_16x16_3_2_1
+
+    def _parse_p_mb_prediction(self, mb: MacroblockData):
+        """
+        Read motion prediction syntax for P-type MBs in P-slices.
+
+        H.264 Section 7.3.5.2: sub_mb_pred / mb_pred for P slices.
+        Must be read BEFORE coded_block_pattern.
+
+        Partitions:
+          P_L0_16x16  (raw mb_type=0) : 1 partition
+          P_L0_L0_16x8 (raw mb_type=1) : 2 partitions
+          P_L0_L0_8x16 (raw mb_type=2) : 2 partitions
+          P_8x8       (raw mb_type=3) : 4 sub-MBs (reads sub_mb_type first)
+          P_8x8ref0   (raw mb_type=4) : 4 sub-MBs, all ref=0
+        """
+        raw_mb_type = mb.mb_type  # Original raw value in P-slice
+
+        if raw_mb_type <= 2:
+            # Simple 16x16 (1 partition) or 16x8/8x16 (2 partitions)
+            num_partitions = 1 if raw_mb_type == 0 else 2
+            for _ in range(num_partitions):
+                # ref_idx_l0: te(v) — only written when max > 0 (i.e. >1 reference frame)
+                if self.num_ref_idx_l0_active_minus1 > 0:
+                    self.reader.read_ue()  # te(v) approximated as ue(v)
+                # Motion vector difference (horizontal, then vertical)
+                self.reader.read_se()   # mvd_l0 x
+                self.reader.read_se()   # mvd_l0 y
+
+        elif raw_mb_type == 3:  # P_8x8
+            # Step 1: sub_mb_type for each of the 4 sub-MBs
+            sub_mb_types = [self.reader.read_ue() for _ in range(4)]
+            # Step 2: ref_idx for each sub-MB (if >1 reference)
+            if self.num_ref_idx_l0_active_minus1 > 0:
+                for _ in range(4):
+                    self.reader.read_ue()  # ref_idx_l0[s]
+            # Step 3: MVDs per sub-partition
+            for smt in sub_mb_types:
+                # Number of sub-partitions per sub-MB type:
+                #   0 → P_L0_8x8  : 1 sub-partition
+                #   1 → P_L0_8x4  : 2 sub-partitions
+                #   2 → P_L0_4x8  : 2 sub-partitions
+                #   3 → P_L0_4x4  : 4 sub-partitions
+                num_subparts = 4 if smt == 3 else (2 if smt in (1, 2) else 1)
+                for _ in range(num_subparts):
+                    self.reader.read_se()  # mvd x
+                    self.reader.read_se()  # mvd y
+
+        elif raw_mb_type == 4:  # P_8x8ref0
+            # Step 1: sub_mb_type for each of the 4 sub-MBs
+            sub_mb_types = [self.reader.read_ue() for _ in range(4)]
+            # No ref_idx (reference is always 0)
+            # Step 2: MVDs per sub-partition
+            for smt in sub_mb_types:
+                num_subparts = 4 if smt == 3 else (2 if smt in (1, 2) else 1)
+                for _ in range(num_subparts):
+                    self.reader.read_se()  # mvd x
+                    self.reader.read_se()  # mvd y
+        # else: unknown P-type, skip gracefully (no motion data consumed)
     
     def _parse_i_pcm(self, mb: MacroblockData):
         """Parse I_PCM macroblock (raw pixel data)"""
@@ -308,15 +383,15 @@ class MacroblockParser:
             17, 18, 20, 24, 19, 21, 26, 28, 23, 27, 29, 30, 22, 25, 38, 41
         ]
         
-        # Use intra mapping if I-slice (simplified - should check mb_type)
-        if self.is_i_slice and me_val < len(cbp_mapping_intra):
+        # Use intra mapping for intra MBs (I-slice or I-type within P-slice)
+        if self._current_is_intra and me_val < len(cbp_mapping_intra):
             cbp = cbp_mapping_intra[me_val]
             # DEBUG: Log CBP mapping for first few MBs
             if pos_before < 100:
                 pos_after = self.reader.position
-                print(f"    [CBP_READ] Pos:{pos_before} UE:{me_val} -> CBP:{cbp} (I-slice) (consumed {pos_after - pos_before} bits)")
+                print(f"    [CBP_READ] Pos:{pos_before} UE:{me_val} -> CBP:{cbp} (I-type) (consumed {pos_after - pos_before} bits)")
             return cbp
-        elif not self.is_i_slice and me_val < len(cbp_mapping_inter):
+        elif not self._current_is_intra and me_val < len(cbp_mapping_inter):
             return cbp_mapping_inter[me_val]
         else:
             return me_val  # Fallback
@@ -344,16 +419,14 @@ class MacroblockParser:
         # Decode from mb_type
         type_offset = mb_type - MBType.I_16x16_0_0_0
         
-        # CRITICAL FIX: CBP_luma is type_offset % 2 (0 or 1)
-        # 0 → no luma residual (cbp_luma = 0)
-        # 1 → all luma blocks have residual (cbp_luma = 15)
-        cbp_luma_flag = type_offset % 2
+        # H.264 I_16x16 CBP encoding:
+        # type_offset = pred(0-3) + chroma(0-2)*4 + luma(0-1)*12
+        # Therefore: luma_flag = type_offset // 12  (0 for offsets 0-11, 1 for 12-23)
+        # NOT type_offset % 2 (which alternates every 2, not every 12!)
+        cbp_luma_flag = type_offset // 12
         luma_cbp = 15 if cbp_luma_flag else 0
-        
-        # CRITICAL FIX: Chroma CBP calculation
-        # H.264 spec: CodedBlockPatternChroma = ((mb_type - 1) % 12) // 4
-        # Formula: (type_offset % 12) // 4, NOT (type_offset % 4) // 2!
-        # This was the root cause of missing ChromaAC parsing!
+
+        # Chroma: (type_offset % 12) // 4 → 0=no chroma, 1=DC only, 2=DC+AC
         chroma_idx = (type_offset % 12) // 4  # 0, 1, or 2
         # 0 → no chroma residual
         # 1 → chroma DC only

@@ -252,4 +252,4 @@ class ZKSnarkBridge:
             shell=True
         )
         output = (result.stdout + result.stderr).lower()
-        return "ok" in output or "valid" in output
+        return "ok" in output and "invalid" not in output

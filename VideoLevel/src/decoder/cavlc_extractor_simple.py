@@ -156,15 +156,15 @@ class SimpleCAVLCExtractor:
             bottom_field_pic_order_in_frame_present_flag = reader.read_bits(1)
             num_slice_groups_minus1 = reader.read_ue()
             
-            num_ref_idx_l0_default_active_minus1 = reader.read_ue()
-            num_ref_idx_l1_default_active_minus1 = reader.read_ue()
+            pps.num_ref_idx_l0_default_active_minus1 = reader.read_ue()
+            pps.num_ref_idx_l1_default_active_minus1 = reader.read_ue()
             weighted_pred_flag = reader.read_bits(1)
             weighted_bipred_idc = reader.read_bits(2)
             
             pps.pic_init_qp_minus26 = reader.read_se()
             pic_init_qs_minus26 = reader.read_se()
             chroma_qp_index_offset = reader.read_se()
-            
+
             pps.deblocking_filter_control_present_flag = reader.read_bits(1) == 1
             constrained_intra_pred_flag = reader.read_bits(1)
             pps.redundant_pic_cnt_present_flag = reader.read_bits(1) == 1
@@ -174,6 +174,7 @@ class SimpleCAVLCExtractor:
     def _extract_slice(self, nal, sps, pps, idx, global_mb_offset=0):
         # Reset neighbor context for this slice
         self.neighbor_coeffs = {}
+        self.chroma_neighbor_coeffs = {}  # {(mb_addr, comp, blk_in_comp): total_coeffs} for AC chroma
         
         # Create reader from NAL data
         reader = BitstreamReader(nal.rbsp_byte)
@@ -193,12 +194,18 @@ class SimpleCAVLCExtractor:
         slice_type_name = slice_type_names.get(slice_header.slice_type, f'UNKNOWN({slice_header.slice_type})')
         print(f"  Slice header: Type={slice_type_name} (code={slice_header.slice_type}), QP={slice_qp}, reader at bit {header_bits_end}")
         
-        mb_parser = MacroblockParser(reader, slice_header.slice_type)
+        # Determine effective num_ref_idx_l0_active_minus1 for motion vector parsing in P-frames
+        # Use the slice header override if present, otherwise fall back to PPS default
+        if slice_header.num_ref_idx_active_override_flag:
+            num_ref_idx_l0 = slice_header.num_ref_idx_l0_active_minus1
+        else:
+            num_ref_idx_l0 = pps.num_ref_idx_l0_default_active_minus1
+
+        mb_parser = MacroblockParser(reader, slice_header.slice_type,
+                                     num_ref_idx_l0_active_minus1=num_ref_idx_l0)
         cavlc_decoder = CAVLCDecoder(reader)
-        
+
         mbs = []
-        
-        # Calculate theoretical max MBs to prevent infinite loops
         max_mbs_in_frame = (sps.pic_width_in_mbs_minus1 + 1) * (sps.pic_height_in_map_units_minus1 + 1)
         slice_mb_idx_counter = 0 # Counter for MBs processed within this slice
         current_mb_addr = slice_header.first_mb_in_slice # Global MB address
@@ -264,7 +271,7 @@ class SimpleCAVLCExtractor:
                     # Advance to next MB - try to resync by advancing some bits
                     # This is heuristic - advance by average MB size (~200-500 bits)
                     try:
-                        self.reader.read_bits(min(300, total_bits - reader.pos - 16))  # Skip ~300 bits
+                        reader.read_bits(min(300, total_bits - reader.pos - 16))  # Skip ~300 bits
                     except:
                         pass  # If we can't skip, we're near end anyway
                     
@@ -283,16 +290,58 @@ class SimpleCAVLCExtractor:
                 
                 # Determine blocks to decode
                 luma_blocks = mb_parser.get_luma_blocks_to_decode(mb_data)
-                
+
                 # Parse them
                 coeffs = [0] * 384
-                
+
+                mb_global_addr = current_mb_addr
+                mb_width = sps.pic_width_in_mbs_minus1 + 1
+                mb_x = mb_global_addr % mb_width
+                mb_y = mb_global_addr // mb_width
+                if not hasattr(self, 'neighbor_coeffs'): self.neighbor_coeffs = {}
+
+                # CRITICAL FIX: For I_16x16 MBs, the luma DC block (4x4, 16 coeffs)
+                # ALWAYS precedes the luma AC blocks in the bitstream.
+                # If we don't consume it, all subsequent block reads are desynchronized.
+                # Block index -1 is used as a virtual key for the I_16x16 DC block.
+                if mb_parser._is_i16x16(mb_data.mb_type_enum):
+                    # nC for I_16x16 luma DC: per H.264 spec Section 9.2.1, nC is
+                    # derived ONLY from adjacent I_16x16 DC neighbors (key -1).
+                    # If a neighbor is NOT I_16x16 (e.g. I_4x4), it does NOT contribute
+                    # (nA/nB = 0, not available). Using regular 4x4 block TCs as fallback
+                    # is WRONG: it gives nC=13 when nC=0 is correct, causing 5+ bit
+                    # over-consumption via FLC6 table instead of 1-bit VLC → desync.
+                    left_mb_dc_tc = None
+                    top_mb_dc_tc = None
+                    if mb_x > 0:
+                        left_mb_addr = mb_y * mb_width + (mb_x - 1)
+                        left_mb_dc_tc = self.neighbor_coeffs.get((left_mb_addr, -1))
+                        # NOTE: Do NOT fall back to regular 4x4 block TC here
+                    if mb_y > 0:
+                        top_mb_addr = (mb_y - 1) * mb_width + mb_x
+                        top_mb_dc_tc = self.neighbor_coeffs.get((top_mb_addr, -1))
+                        # NOTE: Do NOT fall back to regular 4x4 block TC here
+                    if left_mb_dc_tc is not None and top_mb_dc_tc is not None:
+                        nC_dc = (left_mb_dc_tc + top_mb_dc_tc + 1) >> 1
+                    elif left_mb_dc_tc is not None:
+                        nC_dc = left_mb_dc_tc
+                    elif top_mb_dc_tc is not None:
+                        nC_dc = top_mb_dc_tc
+                    else:
+                        nC_dc = 0  # No I_16x16 DC neighbors → encoder uses nC=0
+                    try:
+                        dc_block = cavlc_decoder.decode_block_cavlc(nC_dc, 16)
+                        self.neighbor_coeffs[(mb_global_addr, -1)] = dc_block.total_coeffs
+                    except Exception:
+                        self.neighbor_coeffs[(mb_global_addr, -1)] = 0
+
                 # We need all 24 blocks ordered 0..23
                 # luma_blocks contains indices 0..15.
                 # chroma blocks? parse_macroblock handles cbp decoding.
                 # We need to trust cbp from mb_data.
-                
+
                 # Iterate all 24 potential blocks
+                cavlc_block_failed = False
                 for b in range(24):
                     should_decode = False
                     if b < 16:
@@ -371,17 +420,18 @@ class SimpleCAVLCExtractor:
                          try:
                              block = cavlc_decoder.decode_block_cavlc(nC, 16, debug_key=debug_key)
                          except Exception as cavlc_error:
-                             # CAVLC decode failed - use zero block as fallback
+                             # CAVLC decode failed - reader position is now unreliable.
+                             # Stop decoding remaining blocks to prevent cascade desync.
                              print(f"[ERROR] CAVLC decode failed for MB {mb_global_addr} block {b}: {cavlc_error}")
-                             print(f"[RECOVERY] Using zero block as fallback")
-                             # Create dummy block
-                             from .cavlc_decoder import CoefficientBlock
+                             print(f"[RECOVERY] Aborting remaining blocks for this MB to prevent cascade desync")
+                             from ..bitstream.cavlc_decoder import CoefficientBlock
                              block = CoefficientBlock(
                                  levels=[0] * 16,
                                  total_coeffs=0,
                                  trailing_ones=0,
                                  total_zeros=0
                              )
+                             cavlc_block_failed = True
                          
                          pos_decode_end = reader.position
                          bits_consumed = pos_decode_end - pos_decode_start
@@ -396,6 +446,8 @@ class SimpleCAVLCExtractor:
                          coeffs[start_idx:start_idx+16] = block.levels
                         
                          self.neighbor_coeffs[cache_key] = block.total_coeffs if hasattr(block, 'total_coeffs') else 0
+                         if cavlc_block_failed:
+                             break  # Stop decoding remaining blocks - reader position is unreliable
                     else:
                          # Update neighbors 0 for skipped blocks
                          mb_global_addr = current_mb_addr
@@ -404,6 +456,66 @@ class SimpleCAVLCExtractor:
                          cache_key = (mb_global_addr, b)
                          self.neighbor_coeffs[cache_key] = 0
                 
+                # Consume chroma residuals to keep reader aligned for next MB.
+                # The for-b loop above only decodes luma (b<16). If we don't consume
+                # chroma bytes here, the reader stays at chroma data and the next
+                # MB's parse_macroblock() reads chroma bytes as MB header → garbage.
+                # Skip chroma if luma decode already failed (reader position unreliable).
+                # H.264 cbp_chroma = bits[5:4] as a 2-bit field (NOT individual bits).
+                cbp_val = mb_data.coded_block_pattern
+                cbp_chroma = (cbp_val >> 4) & 3  # 0=no chroma, 1=DC only, 2=DC+AC
+                if not cavlc_block_failed and cbp_chroma >= 1:  # Chroma DC present (Cb DC + Cr DC)
+                    for _ in range(2):  # nC=-1, 2x2 block → max 4 coeffs
+                        try:
+                            cavlc_decoder.decode_block_cavlc(-1, 4)
+                        except Exception:
+                            pass
+                if not cavlc_block_failed and cbp_chroma >= 2:  # Chroma AC present (4 Cb AC + 4 Cr AC)
+                    # Chroma 2x2 block layout within MB:
+                    #   blk=0: (bx=0,by=0)  blk=1: (bx=1,by=0)
+                    #   blk=2: (bx=0,by=1)  blk=3: (bx=1,by=1)
+                    # CRITICAL: Use only CROSS-MB neighbors (not same-MB chroma blocks).
+                    # x264 encodes chroma AC VLC using only neighbors from adjacent MBs.
+                    # Using same-MB decoded blocks as neighbors produces incorrect nC values.
+                    # Cross-MB left neighbors: only bx=0 blocks (blk0, blk2) touch left MB
+                    #   blk0(bx=0,by=0) → left_MB.blk1(bx=1,by=0)
+                    #   blk2(bx=0,by=1) → left_MB.blk3(bx=1,by=1)
+                    # Cross-MB top neighbors: only by=0 blocks (blk0, blk1) touch top MB
+                    #   blk0(bx=0,by=0) → top_MB.blk2(bx=0,by=1)
+                    #   blk1(bx=1,by=0) → top_MB.blk3(bx=1,by=1)
+                    CHROMA_LEFT_X = [1, None, 3, None]  # cross-MB left blk index (None=interior)
+                    CHROMA_TOP_X  = [2, 3, None, None]  # cross-MB top blk index (None=interior)
+                    if not hasattr(self, 'chroma_neighbor_coeffs'):
+                        self.chroma_neighbor_coeffs = {}
+                    for comp in range(2):   # 0=Cb, 1=Cr
+                        for blk_in_comp in range(4):
+                            # Left neighbor nC (cross-MB only)
+                            cross_left = CHROMA_LEFT_X[blk_in_comp]
+                            if mb_x > 0 and cross_left is not None:
+                                nA = self.chroma_neighbor_coeffs.get((mb_global_addr - 1, comp, cross_left))
+                            else:
+                                nA = None
+                            # Top neighbor nC (cross-MB only)
+                            cross_top = CHROMA_TOP_X[blk_in_comp]
+                            if mb_y > 0 and cross_top is not None:
+                                nB = self.chroma_neighbor_coeffs.get((mb_global_addr - mb_width, comp, cross_top))
+                            else:
+                                nB = None
+                            # Compute nC
+                            if nA is not None and nB is not None:
+                                nC_chroma = (nA + nB + 1) >> 1
+                            elif nA is not None:
+                                nC_chroma = nA
+                            elif nB is not None:
+                                nC_chroma = nB
+                            else:
+                                nC_chroma = 0
+                            try:
+                                blk = cavlc_decoder.decode_block_cavlc(nC_chroma, 15)
+                                self.chroma_neighbor_coeffs[(mb_global_addr, comp, blk_in_comp)] = blk.total_coeffs
+                            except Exception:
+                                self.chroma_neighbor_coeffs[(mb_global_addr, comp, blk_in_comp)] = 0
+
                 # CRITICAL: Include CBP metadata to prevent embedding in skip MBs
                 mbs.append({
                     'mb_idx': mb_idx, 

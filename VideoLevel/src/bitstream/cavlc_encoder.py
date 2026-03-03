@@ -56,20 +56,24 @@ class CAVLCEncoder:
     def __init__(self, writer: BitstreamWriter):
         self.writer = writer
     
-    def encode_block_cavlc(self, coeffs: List[int], nC: int, max_num_coeff: int = 16, 
-                          debug_key=None, override_total_coeffs: int = None):
+    def encode_block_cavlc(self, coeffs: List[int], nC: int, max_num_coeff: int = 16,
+                          debug_key=None, override_total_coeffs: int = None,
+                          override_trailing_ones: int = None):
         """
         Encode one coefficient block using CAVLC
-        
+
         Args:
             coeffs: Coefficient array in zigzag order (length max_num_coeff)
             nC: Neighbor prediction for context
             max_num_coeff: Maximum coefficients (16 for 4x4, 15 for chroma DC)
             debug_key: Optional (mb_idx, block_idx) for debugging
             override_total_coeffs: Override for total_coeffs (for re-encoding with preserved suffixLength)
+            override_trailing_ones: Override T1 count to match original decoder's T1 (prevents
+                                    encoder from choosing a higher T1 than the original)
         """
         # Analyze block
-        analysis = self._analyze_block(coeffs, max_num_coeff, override_total_coeffs=override_total_coeffs)
+        analysis = self._analyze_block(coeffs, max_num_coeff, override_total_coeffs=override_total_coeffs,
+                                       override_trailing_ones=override_trailing_ones)
         
         # DEBUG: Show encoding parameters for MB 0 and MB 309 (frame 0 and frame 1)
         if debug_key and (debug_key[0] == 0 or debug_key[0] == 309):
@@ -130,16 +134,19 @@ class CAVLCEncoder:
         # 5. Encode run_before values
         self._encode_run_before(analysis)
     
-    def _analyze_block(self, coeffs: List[int], max_num_coeff: int, override_total_coeffs: int = None) -> BlockAnalysis:
+    def _analyze_block(self, coeffs: List[int], max_num_coeff: int, override_total_coeffs: int = None,
+                       override_trailing_ones: int = None) -> BlockAnalysis:
         """
         Analyze coefficient block to extract encoding parameters
-        
+
         Args:
             coeffs: Coefficients in zigzag order
             max_num_coeff: Maximum number of coefficients
             override_total_coeffs: If provided, use this total_coeffs for suffixLength calculation
                                    (used when re-encoding modified blocks to preserve bit length)
-        
+            override_trailing_ones: If provided, force this T1 count (capped at actual trailing ±1 count).
+                                    Used by BitstreamPatcher to match original encoder's T1 choice.
+
         Returns:
             BlockAnalysis with all parameters
         """
@@ -194,13 +201,20 @@ class CAVLCEncoder:
         # Count trailing ±1s (from highest frequency, max 3)
         trailing_ones = 0
         trailing_signs = []
-        
+
         for level in levels:
             if abs(level) == 1 and trailing_ones < 3:
                 trailing_ones += 1
                 trailing_signs.append(level)
             else:
                 break
+
+        # Apply override_trailing_ones if provided
+        # Cap at the actual count (can't claim more T1s than exist)
+        if override_trailing_ones is not None:
+            capped = min(override_trailing_ones, trailing_ones)
+            trailing_ones = capped
+            trailing_signs = trailing_signs[:capped]
         
         # Calculate total_zeros (H.264 Section 9.2.1)
         # total_zeros = number of zero-valued coefficients BEFORE the last non-zero coefficient
@@ -411,6 +425,11 @@ class CAVLCEncoder:
         
         # Encode all runs except the last (which is implicit)
         for run in analysis.runs[:-1]:
+            # H.264 spec: when zeros_left == 0, all remaining run_before values
+            # are implicitly 0 (decoder stops reading; encoder must stop writing).
+            if zeros_left == 0:
+                break
+
             # H.264 spec: run_before is in range [0, zeros_left]
             # Note: run CAN equal zeros_left (all remaining zeros before this coeff)
             # So only clamp if run > zeros_left (strictly greater)

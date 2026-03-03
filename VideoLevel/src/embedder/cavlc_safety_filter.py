@@ -263,25 +263,35 @@ class CAVLCSafetyFilter:
         self,
         original_block: List[int],
         modified_block: List[int],
-        nC: int = 0
+        nC: int = 0,
+        nal_bit_length: int = None,
+        t1_override: int = None
     ) -> Tuple[bool, int, int]:
         """
         **CRITICAL FIX**: Verify block modification preserves bit length via ACTUAL CAVLC encoding
-        
+
         This replaces the broken heuristic check with ground-truth verification.
         We encode BOTH blocks and compare actual bit lengths.
-        
+
         Args:
             original_block: Original 16 DCT coefficients (zigzag order)
             modified_block: Modified coefficients (with LSB flips)
             nC: Neighbor context for CAVLC encoding (default: 0)
-        
+            nal_bit_length: Actual bit length of the block in the NAL stream.
+                            If provided, original encoder output must match this
+                            length, otherwise the block cannot be round-tripped
+                            by the patcher and will be rejected.
+            t1_override: Optional trailing_ones override value required to bit-exactly
+                         reproduce the original NAL encoding for this block. When set,
+                         both original and modified blocks are encoded with this override
+                         (matching the patcher's behavior for T1-override blocks).
+
         Returns:
             (is_safe, original_bits, modified_bits)
             - is_safe: True if bit lengths match AND zero-preservation maintained
             - original_bits: Actual encoding length of original block
             - modified_bits: Actual encoding length of modified block
-        
+
         Example:
             >>> original = [-1, 3, 1, 0, 0, ...]
             >>> modified = [-1, 2, 1, 0, 0, ...]  # Flipped coeff[1]: 3 -> 2
@@ -305,20 +315,31 @@ class CAVLCSafetyFilter:
             # Encode original block
             writer_orig = BitstreamWriter()
             encoder_orig = CAVLCEncoder(writer_orig)
-            encoder_orig.encode_block_cavlc(original_block, nC=nC, max_num_coeff=16)
+            encoder_orig.encode_block_cavlc(original_block, nC=nC, max_num_coeff=16,
+                                            override_trailing_ones=t1_override)
             original_bits = writer_orig.get_bit_position()
-            
+
+            # CRITICAL: If actual NAL bit length is known, the encoder's output
+            # must match it exactly.  If they differ the patcher will reject this
+            # block (it compares the re-encoded candidate against the original
+            # NAL length).  Reject early so the safety filter never marks such
+            # blocks as embeddable.
+            if nal_bit_length is not None and original_bits != nal_bit_length:
+                return False, original_bits, 0
+
+
             # Encode modified block
             # CRITICAL FIX: Pass override_total_coeffs=original_nonzeros
-            # The bitstream_patcher uses this to preserve suffixLength. 
+            # The bitstream_patcher uses this to preserve suffixLength.
             # If the safety filter doesn't use it, it will estimate a DIFFERENT length!
             writer_mod = BitstreamWriter()
             encoder_mod = CAVLCEncoder(writer_mod)
             encoder_mod.encode_block_cavlc(
-                modified_block, 
-                nC=nC, 
+                modified_block,
+                nC=nC,
                 max_num_coeff=16,
-                override_total_coeffs=original_nonzeros
+                override_total_coeffs=original_nonzeros,
+                override_trailing_ones=t1_override
             )
             modified_bits = writer_mod.get_bit_position()
             
@@ -337,24 +358,38 @@ class CAVLCSafetyFilter:
         self,
         coefficients: List[Tuple[int, int, List[int]]],
         skip_dc: bool = True,
-        nC_map: Dict[Tuple[int, int], int] = None
+        nC_map: Dict[Tuple[int, int], int] = None,
+        nal_length_map: Dict[Tuple[int, int], int] = None,
+        t1_override_map: Dict[Tuple[int, int], int] = None
     ) -> List[Tuple[int, int, int]]:
         """
         Get list of safe embedding positions across all blocks
-        
+
         Args:
             coefficients: List of (mb_idx, block_idx, coeffs) tuples
             skip_dc: Skip DC coefficient (position 0)
             nC_map: Dictionary mapping (mb_idx, block_idx) to actual nC values from extraction
-        
+            nal_length_map: Dictionary mapping (mb_idx, block_idx) to the actual NAL bit
+                            length of each block. When provided, blocks whose encoder output
+                            differs from the NAL length are rejected (keeps filter in sync
+                            with the patcher).
+            t1_override_map: Dictionary mapping (mb_idx, block_idx) to the trailing_ones
+                             override value required to bit-exactly reproduce the original
+                             NAL encoding. Blocks in this map use override_trailing_ones
+                             when verifying bit-length invariance (matching patcher behavior).
+
         Returns:
             List of (mb_idx, block_idx, coeff_idx) tuples that are safe to modify
-        
+
         Raises:
             SafetyFilterError: If coefficient data is invalid
         """
         if nC_map is None:
             nC_map = {}
+        if nal_length_map is None:
+            nal_length_map = {}
+        if t1_override_map is None:
+            t1_override_map = {}
         if not coefficients:
             raise SafetyFilterError("Empty coefficient list provided")
         
@@ -366,11 +401,20 @@ class CAVLCSafetyFilter:
                     index=i, item_type=type(item)
                 )
         safe_positions = []
-        
+
         for mb_idx, block_idx, coeffs in coefficients:
             total_coeffs = sum(1 for c in coeffs if c != 0)
             if total_coeffs == 0:
                 continue  # All-zero block: nothing to embed
+
+            # Skip blocks explicitly marked as non-patchable by get_unpatchable_blocks.
+            # This check is INDEPENDENT of enable_bit_length so that the sentinel -1
+            # correctly excludes non-patchable blocks even when bit-length checking is
+            # disabled.  Without this, the patcher would silently skip the block and
+            # create a bit-shift in the embedded bit-stream.
+            block_key = (mb_idx, block_idx)
+            if nal_length_map.get(block_key) == -1:
+                continue
 
             # Detect trailing ones for this block
             trailing_positions = self._detect_trailing_ones(coeffs)
@@ -409,23 +453,48 @@ class CAVLCSafetyFilter:
                     modified_block = coeffs[:]
                     modified_block[coeff_idx] = new_val
 
-                    block_key = (mb_idx, block_idx)
                     actual_nC = nC_map.get(block_key, 0)
+                    t1_override = t1_override_map.get(block_key)
 
                     is_safe, orig_bits, mod_bits = self._verify_block_bit_length_invariance(
                         coeffs,
                         modified_block,
-                        nC=actual_nC
+                        nC=actual_nC,
+                        nal_bit_length=nal_length_map.get(block_key),
+                        t1_override=t1_override
                     )
 
                     if not is_safe:
-                        if len(safe_positions) < 10:
-                            print(f"[SAFETY_FILTER] REJECT ({mb_idx},{block_idx},{coeff_idx}): "
-                                  f"{original}->{new_val}, bits {orig_bits}->{mod_bits}")
                         continue
 
                 # SAFE!
                 safe_positions.append((mb_idx, block_idx, coeff_idx))
+
+        # Sign-bit positions for trailing ±1 coefficients.
+        # Flipping the sign of a trailing one (±1 → ∓1) is bit-length invariant ONLY
+        # when the coefficient is truly encoded as a trailing-one sign bit (1 bit per sign).
+        # For blocks with t1_override, some ±1 values are encoded as regular levels where
+        # +1 and -1 have different VLC lengths — must verify invariance before adding.
+        # Use ~coeff_idx (always negative) to mark these as sign-bit positions.
+        for mb_idx, block_idx, coeffs in coefficients:
+            block_key = (mb_idx, block_idx)
+            nal_len = nal_length_map.get(block_key)
+            if nal_len is None or nal_len == -1:
+                continue
+            trailing_positions = self._detect_trailing_ones(coeffs)
+            actual_nC = nC_map.get(block_key, 0)
+            t1_override = t1_override_map.get(block_key)
+            for coeff_idx in sorted(trailing_positions):
+                # Verify bit-length invariance for sign flip before adding
+                modified_block = list(coeffs)
+                modified_block[coeff_idx] = -modified_block[coeff_idx]
+                is_safe, _, _ = self._verify_block_bit_length_invariance(
+                    coeffs, modified_block, nC=actual_nC,
+                    nal_bit_length=nal_len,
+                    t1_override=t1_override
+                )
+                if is_safe:
+                    safe_positions.append((mb_idx, block_idx, ~coeff_idx))
 
         return safe_positions
     

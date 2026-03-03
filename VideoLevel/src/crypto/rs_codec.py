@@ -121,7 +121,6 @@ class ProofRSCodec:
                     errata1 = bytearray(b'')
                 block_errors.append(('Block 1', len(errata1), True))
             except Exception as e1:
-                print(f"   [DEBUG] Block 1 decode failed: Too many errors (>64 bytes)")
                 block_errors.append(('Block 1', -1, False))
                 raise
             
@@ -134,7 +133,6 @@ class ProofRSCodec:
                     errata2 = bytearray(b'')
                 block_errors.append(('Block 2', len(errata2), True))
             except Exception as e2:
-                print(f"   [DEBUG] Block 2 decode failed: Too many errors (>64 bytes)")
                 block_errors.append(('Block 2', -1, False))
                 raise
             
@@ -147,16 +145,9 @@ class ProofRSCodec:
                     errata3 = bytearray(b'')
                 block_errors.append(('Block 3', len(errata3), True))
             except Exception as e3:
-                print(f"   [DEBUG] Block 3 decode failed: Too many errors (>64 bytes)")
                 block_errors.append(('Block 3', -1, False))
                 raise
-            
-            # Print per-block stats if all successful
-            print(f"   [DEBUG] Per-block error correction:")
-            for block_name, errors, success in block_errors:
-                status = "[+]" if success else "[X]"
-                print(f"      {status} {block_name}: {errors} errors corrected")
-            
+
             # Count total errors corrected across all 3 blocks
             num_errors = len(errata1) + len(errata2) + len(errata3)
             

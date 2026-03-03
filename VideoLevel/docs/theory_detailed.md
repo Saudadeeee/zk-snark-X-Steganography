@@ -261,7 +261,7 @@ Matrix Embedding (Hamming codes):
 
 | Property | Groth16 | STARKs | Bulletproofs |
 |----------|---------|--------|--------------|
-| **Proof size** | 192 bytes | 40-200 KB | 1-2 KB |
+| **Proof size** | 256 bytes | 40-200 KB | 1-2 KB |
 | **Prover time** | 7s | 30-60s | 2-5s |
 | **Verifier time** | 2ms | 50-100ms | 10-20s |
 | **Trusted setup** | Yes (toxic waste) | No | No |
@@ -272,7 +272,7 @@ Matrix Embedding (Hamming codes):
 
 ```
 Priority 1: Small proof size (fits in capacity)
-  - Groth16: 192 bytes ✓ Fits in 832 bytes capacity
+  - Groth16: 256 bytes ✓ Fits in available capacity across IDR frames
   - STARKs: 40 KB ✗ Needs 48 frames (too many)
   - Bulletproofs: 1.5 KB ✓ Fits in 2 frames, but...
 
@@ -1254,17 +1254,8 @@ print(f"PSNR: {10 * np.log10(255**2 / (D * 352 * 288)):.2f} dB")
 | 25% | 0.000006 | 50 | High | 38,016 bits |
 | 50% | 0.000012 | 47 | Very High | 76,032 bits |
 
-Ouroperating point (1.1%) balances security and capacity.
-
-[Continue with remaining sections in next message due to length...]
+Our operating point (1.1%) balances security and capacity.
 
 ---
 
-*Due to the massive length of the fully extended theory document, I'm creating this in the comprehensive file. The complete extended version would be 150+ pages with all sections expanded similarly. Would you like me to:*
-
-1. **Continue expanding specific sections** you're most interested in?
-2. **Create separate detailed files** for each major topic (CAVLC, ZK-SNARKs, etc.)?
-3. **Add more code examples and tutorials** for implementation?
-4. **Include troubleshooting guides** for common issues?
-
-*Let me know which aspects you want more detail on!*
+*This document covers the theoretical foundations for the ZK-SNARK Video Steganography system. For implementation details, see [README.md](../README.md). For test results, run `python src/runtest/run_all.py`.*

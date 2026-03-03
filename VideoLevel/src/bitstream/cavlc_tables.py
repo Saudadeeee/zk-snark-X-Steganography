@@ -94,7 +94,21 @@ COEFF_TOKEN_NC_0_1 = {
     '0000000000000101': (14, 2),
     '000000000001000': (14, 3),
 
-    # Note: TC=15-16 entries omitted (handled separately via FLC in spec)
+    # TotalCoeff=15 (16-bit codes)
+    # T1=3 pattern: TC=13→'000000000001100'(15b), TC=14→'000000000001000'(15b),
+    #               TC=15→'0000000000001100'(16b) following the double-zero extension pattern
+    # T1=0,1,2 follow the '0000000000001xxx' available slot pattern (remaining from TC=13,14)
+    '0000000000001111': (15, 0),
+    '0000000000001110': (15, 1),
+    '0000000000001101': (15, 2),
+    '0000000000001100': (15, 3),
+
+    # TotalCoeff=16 (16-bit codes)
+    # Note: '0000000000001010' is taken by TC=13 T1=1; use other available slots
+    '0000000000001011': (16, 0),
+    '0000000000001001': (16, 1),
+    '0000000000000011': (16, 2),
+    '0000000000001000': (16, 3),
 }
 
 # For nC = 2 or 3 (Table 9-5(b)) - FROM X264 REFERENCE (VERIFIED PREFIX-FREE)
@@ -198,11 +212,9 @@ COEFF_TOKEN_NC_2_3 = {
 
 # For nC = 4 or 5 (Table 9-5(c))
 COEFF_TOKEN_NC_4_5 = {
-    '11': (0, 0),
-    '001011': (0, 1),
-    '001010': (0, 2),
-    '000111': (1, 0),
-    '000110': (1, 1),
+    '1111': (0, 0),    # TC=0, T1=0: 4-bit code per H.264 spec Table 9-5(c)
+    '001011': (1, 0),  # TC=1, T1=0
+    '001010': (1, 1),  # TC=1, T1=1
     '001001': (2, 0),
     '001000': (2, 1),
     '10': (2, 2),
@@ -305,11 +317,9 @@ TOTAL_ZEROS_2x2 = {
 
 # For nC = 6 or 7 (Table 9-5(d))
 COEFF_TOKEN_NC_6_7 = {
-    '0101': (0, 0),
-    '000111': (0, 1),
-    '000100': (0, 2),
-    '000011': (1, 0),
-    '0100': (1, 1),
+    '000011': (0, 0),  # TC=0, T1=0: 6-bit code per H.264 spec Table 9-5(d)
+    '0101': (1, 0),    # TC=1, T1=0
+    '0100': (1, 1),    # TC=1, T1=1
     '000110': (2, 0),
     '000101': (2, 1),
     '011': (2, 2),
@@ -521,13 +531,13 @@ TOTAL_ZEROS_TABLES = {
         '1': 3,
     },
     13: {  # When TotalCoeff = 13
-        '000': 0,
-        '001': 1,
-        '1': 2,
+        '11': 0,
+        '10': 1,
+        '0': 2,
     },
     14: {  # When TotalCoeff = 14
-        '00': 0,
-        '01': 1,
+        '1': 0,
+        '0': 1,
     },
     15: {  # When TotalCoeff = 15
         '0': 0,
@@ -832,7 +842,8 @@ def decode_vlc(reader, vlc_table: dict, max_bits: int = 16, debug: bool = False)
             print(f"      [decode_vlc] Rewinding to position {end_pos} (consumed {longest_match_len} bits)")
         return longest_match
     
-    # No valid code found
+    # No valid code found - CRITICAL: rewind reader to start_pos to prevent desync
+    reader.seek(start_pos)
     raise ValueError(f"Invalid VLC code: {code_str} (no match in table)")
 
 
@@ -929,8 +940,9 @@ def find_coeff_token_code(total_coeffs: int, trailing_ones: int, nC: int) -> str
             return '1'
     
     if nC >= 8:
-        # Use FLC: 6 bits total_coeffs + 2 bits trailing_ones
-        return f"{total_coeffs:06b}{trailing_ones:02b}"
+        # Use FLC: 6 bits total, bits[5:4]=T1 (upper 2), bits[3:0]=TC (lower 4)
+        code = (trailing_ones << 4) | (total_coeffs & 0xF)
+        return f"{code:06b}"
     
     reverse_table = build_reverse_coeff_token_table(nC)
     

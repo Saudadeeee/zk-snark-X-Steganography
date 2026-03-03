@@ -8,7 +8,8 @@ Leverages Safety Filter's bit-length invariance guarantee.
 from typing import List, Tuple, Dict
 from .traceable_cavlc_parser import TraceableCAVLCParser
 from .cavlc_encoder import CAVLCEncoder
-from .bitstream_io import BitstreamWriter  # Use actual BitstreamWriter
+from .bitstream_io import BitstreamWriter, BitstreamReader
+from .cavlc_decoder import CAVLCDecoder
 from .nal_handler import SPSData, PPSData
 
 
@@ -95,14 +96,11 @@ class BitstreamPatcher:
         Returns:
             Patched NAL unit with same structure
         """
-        print(f"[PATCHER] Patching {len(modifications)} blocks (global_mb_offset={global_mb_offset})...")
-        
         # Step 1: Get bit offsets (use pre-computed if available, otherwise re-parse)
         if pre_computed_offsets is not None and pre_computed_blocks is not None:
             # Use pre-computed data from the reconstructor's parse — avoids double-parse divergence
             block_offsets = pre_computed_offsets
             original_blocks = pre_computed_blocks
-            print(f"[PATCHER] Using pre-computed offsets ({len(block_offsets)} offsets) — skipping re-parse")
         else:
             # Fallback: re-parse the NAL internally
             # ⚠️ WARNING: Re-parsing can diverge from embedder's parse due to parser state!
@@ -125,64 +123,14 @@ class BitstreamPatcher:
         for (mb_local, blk_idx), offset_data in block_offsets.items():
             mb_global = mb_local + global_mb_offset
             global_block_offsets[(mb_global, blk_idx)] = offset_data
-        
+
         for (mb_local, blk_idx), coeffs in original_blocks.items():
             mb_global = mb_local + global_mb_offset
             global_original_blocks[(mb_global, blk_idx)] = coeffs
-        
-        # DEBUG: Show first 10 entries in both dicts
-        print(f"[PATCHER_DEBUG] Sample block_offsets (local): {list(block_offsets.keys())[:10]}")
-        print(f"[PATCHER_DEBUG] Sample original_blocks (local): {list(original_blocks.keys())[:10]}")
-        print(f"[PATCHER_DEBUG] Sample global_block_offsets: {list(global_block_offsets.keys())[:10]}")
-        print(f"[PATCHER_DEBUG] Sample global_original_blocks: {list(global_original_blocks.keys())[:10]}")
-        if global_mb_offset == 309:  # Frame 1
-            # Check if block (0, 6) exists in original_blocks
-            test_key_local = (0, 6)
-            test_key_global = (309, 6)
-            if test_key_local in original_blocks:
-                test_coeffs_local = original_blocks[test_key_local]
-                nz_local = [c for c in test_coeffs_local if c != 0]
-                print(f"[PATCHER_DEBUG] original_blocks[(0,6)]: {len(nz_local)} non-zero coeffs: {nz_local}")
-            else:
-                print(f"[PATCHER_DEBUG] original_blocks[(0,6)]: NOT FOUND")
-                
-            if test_key_global in global_original_blocks:
-                test_coeffs_global = global_original_blocks[test_key_global]
-                nz_global = [c for c in test_coeffs_global if c != 0]
-                print(f"[PATCHER_DEBUG] global_original_blocks[(309,6)]: {len(nz_global)} non-zero coeffs: {nz_global}")
-            else:
-                print(f"[PATCHER_DEBUG] global_original_blocks[(309,6)]: NOT FOUND")
-        
+
         # Step 2: Convert RBSP bytes to BitArray (mutable bit-level structure)
         rbsp_bits = BitArray(original_nal.rbsp_byte)
-        
-        print(f"[PATCHER] Original RBSP: {len(rbsp_bits)} bits")
-        print(f"[PATCHER] Tracked offsets: {len(block_offsets)} blocks (slice-local) -> {len(global_block_offsets)} blocks (global)")
-        
-        # Debug: Show modification targets vs available offsets
-        mod_keys = set((mb, blk) for mb, blk, _ in modifications)
-        offset_keys = set(global_block_offsets.keys())  # Use global offsets!
-        overlap = mod_keys & offset_keys
-        
-        print(f"[PATCHER_DEBUG] Modifications target: {len(mod_keys)} blocks")
-        print(f"[PATCHER_DEBUG] First 5 modification keys: {sorted(list(mod_keys))[:5]}")
-        print(f"[PATCHER_DEBUG] First 5 offset keys: {sorted(list(offset_keys))[:5]}")
-        print(f"[PATCHER_DEBUG] Overlap: {len(overlap)} blocks can be patched")
-        # NEW: Show actual overlap or mismatch
-        if overlap:
-            print(f"[PATCHER_DEBUG] Overlapping keys (first 10): {sorted(list(overlap))[:10]}")
-        elif mod_keys and offset_keys:
-            # Show the gap
-            print(f"[PATCHER_DEBUG] [WARN] NO OVERLAP!")
-            print(f"[PATCHER_DEBUG]   Mod keys range: {min(mb for mb,_ in mod_keys)} to {max(mb for mb,_ in mod_keys)}")
-            print(f"[PATCHER_DEBUG]   Offset keys range: {min(mb for mb,_ in offset_keys)} to {max(mb for mb,_ in offset_keys)}")
-            # Show if it's an offset mismatch
-            mod_mbs = sorted(set(mb for mb,_ in mod_keys))
-            offset_mbs = sorted(set(mb for mb,_ in offset_keys))
-            print(f"[PATCHER_DEBUG]   Mod MBs: {mod_mbs[:10]}")
-            print(f"[PATCHER_DEBUG]   Offset MBs: {offset_mbs[:10]}")
-        
-        
+
         # Step 3: Patch each modified block
         patched_count = 0
         skipped_count = 0
@@ -199,18 +147,7 @@ class BitstreamPatcher:
             start_bit = offset_info['start_bit']
             end_bit = offset_info['end_bit']
             original_length = offset_info['bit_length']
-            
-            # ==================================================================================
-            # CRITICAL FIX: Only patch blocks that have bitstream offsets
-            # ==================================================================================
-            # Step 4: Verify block has offset data (was actually coded in NAL)
-            # We need offset data to know WHERE to patch in the bitstream
-            if key not in global_block_offsets:
-                if patched_count == 0:  # Show debug for first occurrence only
-                    print(f"[PATCHER] SKIP {key}: Block has no bitstream offset (wasn't coded in NAL)")
-                skipped_count += 1
-                continue
-            
+
             # Get original coefficients from blocks dict (GLOBAL keys!)
             # CRITICAL FIX: Use global_original_blocks, not original_blocks
             # original_blocks hasLOCAL keys (0,1,2...), we need GLOBAL keys (94,95,96...)
@@ -231,167 +168,176 @@ class BitstreamPatcher:
                 print(f"[PATCHER_WARN] {key}: Parser extracted {parser_total} coeffs, embedder has {modified_total} coeffs")
                 print(f"  This indicates parser extraction inconsistency!")
             
-            # Apply modifications to ORIGINAL coefficients (not FFmpeg approximations!)
-            # modified_coeffs = copy of original + apply same bit flips
-            # For now, we'll use new_coeffs but this needs investigation
-            
-            # [WARN] TODO: This is still using FFmpeg-modified coefficients which may not be encodable!
-            # Need to: 1) Extract mod positions from new_coeffs
-            #          2) Apply same mods to original_coeffs
-            #          3) Encode the modified-original coefficients
-            
-            # For debugging: try to encode ORIGINAL coefficients first
-            if patched_count == 0:
-                print(f"[PATCHER_DEBUG] Testing encodability of ORIGINAL coefficients for {key}")
-                print(f"  Original coeffs (non-zero): {[c for c in original_coeffs if c != 0][:10]}")
-                print(f"  Modified coeffs (non-zero): {[c for c in new_coeffs if c != 0][:10]}")
-            
-            # CRITICAL: Use actual nC from offset tracking!
-            # Must match the nC used by Safety Filter validation
-            nC = offset_info.get('nC', 0)
-            
-            # DEBUG: Show nC value and coefficient details for first few blocks in frame 0 and frame 1
-            if patched_count < 4 or (key[0] >= 309 and key[0] < 312):  # Frame 0 first 4, or Frame 1 first few MBs
-                print(f"[PATCHER_DEBUG] Block {key}: using nC={nC} for encoding")
-                print(f"  Original coeffs (from NAL): {[c for c in original_coeffs if c != 0][:10]}")
-                print(f"  Modified coeffs (from embedder): {[c for c in new_coeffs if c != 0][:10]}")
-                # Show which coefficients changed
-                changes = [(i, o, n) for i, (o, n) in enumerate(zip(original_coeffs, new_coeffs)) if o != n]
-                if changes:
-                    print(f"  Changes at indices: {changes}")
-                
-                # CRITICAL TEST: Check if extraction is correct
-                # Extract actual bits from NAL
-                actual_nal_bits = rbsp_bits[start_bit:end_bit]
-                print(f"  Actual NAL bits: {len(actual_nal_bits)} bits")
-                if len(actual_nal_bits) <= 30:
-                    print(f"    Bits: {actual_nal_bits}")
-            
-            # LENGTH-ONLY pre-check: verify our encoder produces the same BIT COUNT
-            # as the original NAL (even if the exact VLC bits differ — both are valid H.264).
-            # If lengths differ, we cannot patch in-place without shifting subsequent bits.
-            orig_bits = self._encode_coefficients_to_bits(original_coeffs, nC, max_num_coeff=16)
-            if len(orig_bits) != original_length:
-                if patched_count < 5:
-                    print(f"[PATCHER] SKIP {key}: Length mismatch (our_enc={len(orig_bits)}, NAL={original_length})")
-                    print(f"  Our encoder produces different-length encoding than FFmpeg (both valid H.264)")
-                    print(f"  Cannot patch in-place. nC={nC}, coeffs={[c for c in original_coeffs if c != 0][:6]}")
-                skipped_count += 1
-                continue
-            
-            if patched_count == 0:
-                print(f"[PATCHER] Patching block {key} (nC={nC}, length={original_length}bits matched)")
-                nz_orig = [c for c in original_coeffs if c != 0]
-                nz_mod = [c for c in new_coeffs if c != 0]
-                print(f"  Original non-zero: {nz_orig[:6]}")
-                print(f"  Modified non-zero: {nz_mod[:6]}")
-            
-            # CRITICAL: Extract original total_coeffs to preserve suffixLength when re-encoding
-            # Count non-zero coefficients in original block
-            original_total_coeffs = sum(1 for c in original_coeffs if c != 0)
-            
-            # CRITICAL FIX: Skip blocks where original is all-zeros but modified has non-zeros
-            # This is impossible to patch because:
-            # - All-zero block encodes as 1-2 bits (coeff_token only)
-            # - Non-zero block encodes as 20+ bits (coeff_token + levels + total_zeros + runs)
-            # No override_total_coeffs can fix this fundamental difference
-            modified_total_coeffs = sum(1 for c in new_coeffs if c != 0)
-            
-            if original_total_coeffs == 0 and modified_total_coeffs > 0:
-                if patched_count ==0:  # Show detailed debug for first occurrence only
-                    print(f"[PATCHER] SKIP {key}: Original is all-zeros ({original_total_coeffs} coeffs) "
-                          f"but modified has {modified_total_coeffs} non-zero coeffs - impossible to patch!")
-                    print(f"  Original: {original_coeffs}")
-                    print(f"  Modified: {new_coeffs}")
-                skipped_count += 1
-                continue
-            
-            # CRITICAL DEBUG: Analyze why bit lengths differ
-            # Check if total_coeffs changed (should be caught above for 0->n, but what about n->m?)
-            if original_total_coeffs != modified_total_coeffs:
-                if patched_count < 2:  # Show for first 2 cases
-                    print(f"[PATCHER_DEBUG] {key}: total_coeffs changed {original_total_coeffs}->{modified_total_coeffs}")
-                    print(f"  Original non-zero positions: {[i for i, c in enumerate(original_coeffs) if c != 0]}")
-                    print(f"  Modified non-zero positions: {[i for i, c in enumerate(new_coeffs) if c != 0]}")
-                    print(f"  WARNING override_total_coeffs={original_total_coeffs} should preserve suffixLength")
-                    # Check for zero->non-zero violations
-                    zero_to_nonzero = [(i, original_coeffs[i], new_coeffs[i]) 
-                                      for i in range(len(original_coeffs)) 
-                                      if original_coeffs[i] == 0 and new_coeffs[i] != 0]
-                    if zero_to_nonzero:
-                        print(f"  [!] ZERO->NON-ZERO violations: {zero_to_nonzero[:5]}")
-                    # Check for non-zero->zero violations
-                    nonzero_to_zero = [(i, original_coeffs[i], new_coeffs[i]) 
-                                      for i in range(len(original_coeffs)) 
-                                      if original_coeffs[i] != 0 and new_coeffs[i] == 0]
-                    if nonzero_to_zero:
-                        print(f"  [!] NON-ZERO->ZERO violations: {nonzero_to_zero[:5]}")
-            
-            # Re-encode modified coefficients WITH original total_coeffs override
-            # This ensures suffixLength remains the same, maintaining bit length
-            new_bits = self._encode_coefficients_to_bits(new_coeffs, nC, max_num_coeff=16, 
-                                                         override_total_coeffs=original_total_coeffs,
-                                                         debug_key=key)
-            
-            if patched_count < 4 or (key[0] >= 309 and key[0] < 312):
-                print(f"  Re-encoded original: {len(orig_bits)} bits")
-                if len(orig_bits) <= 30:
-                    print(f"    Bits: {orig_bits}")
-                print(f"  Re-encoded modified: {len(new_bits)} bits")
-                
-                # Check match
-                actual_nal_bits = rbsp_bits[start_bit:end_bit]
-                if orig_bits == actual_nal_bits:
-                    print(f"  [OK] Re-encoded MATCHES actual NAL!")
-                else:
-                    print(f"  ❌ Re-encoded DOES NOT MATCH NAL!")
-                    if len(orig_bits) == len(actual_nal_bits):
-                        # Count bit differences
-                        diff_count = sum(1 for a, b in zip(orig_bits, actual_nal_bits) if a != b)
-                        print(f"     Bit differences: {diff_count}/{len(orig_bits)}")
-                    else:
-                        print(f"     Length mismatch prevents comparison")
+            # ==================================================================================
+            # BIT-EXACT nC SCANNING VIA RE-DECODE
+            # ==================================================================================
+            # Problem: SimpleCAVLCExtractor may compute nC differently from FFmpeg, giving
+            # wrong coefficients. Even with the correct nC, encode(wrong_coeffs) != NAL bits.
+            #
+            # Solution: Re-decode the raw NAL bits at the stored offset with each nC and
+            # verify the round-trip: encode(decode(bits, nC)) == bits.
+            # This finds both the correct nC AND the true coefficient sequence, independent
+            # of any discrepancy between our extractor and FFmpeg.
+            #
+            # nC regions: 0-1 -> Table NC_0_1, 2-3 -> NC_2_3, 4-7 -> NC_4_7, 8+ -> NC_8
+            # ==================================================================================
 
-            
-            # Step 5: CRITICAL - Verify bit length (Safety Filter guarantee)
+            actual_nal_bits = list(rbsp_bits[start_bit:end_bit])
+            # Use a 64-bit lookahead buffer to avoid padding-zero artifacts:
+            # when the block is not byte-aligned the decoder would otherwise
+            # read padding zeros that look like valid CAVLC data, shifting the
+            # consumed-bit count and failing the original_length check.
+            lookahead_end = min(end_bit + 64, len(rbsp_bits))
+            raw_nal_bytes = self._bits_to_bytes(list(rbsp_bits[start_bit:lookahead_end]))
+
+            matched_nC = None
+            matched_nal_coeffs = None  # Coefficients decoded directly from the NAL
+            orig_bits = None
+            matched_trailing_ones = None  # T1 override that produced the correct round-trip
+
+            for nC_try in [0, 2, 4, 6, 8]:
+                try:
+                    reader = BitstreamReader(raw_nal_bytes)
+                    dec = CAVLCDecoder(reader)
+                    block = dec.decode_block_cavlc(nC_try, max_num_coeff=16)
+                    consumed = reader.pos
+                    if consumed != original_length:
+                        continue  # Wrong nC: decoder consumed wrong number of bits
+                    # Verify round-trip: encode(decode(bits)) == bits
+                    nal_coeffs = list(block.levels)
+                    # First try without T1 override (encoder chooses max T1)
+                    candidate = self._encode_coefficients_to_bits(nal_coeffs, nC_try, max_num_coeff=16)
+                    if len(candidate) == original_length and list(candidate) == actual_nal_bits:
+                        matched_nC = nC_try
+                        matched_nal_coeffs = nal_coeffs
+                        orig_bits = candidate
+                        matched_trailing_ones = None  # No override needed
+                        break
+                    # If standard encode fails, try with T1 override = decoded trailing_ones.
+                    # Some original encoders choose a smaller T1 than the maximum possible.
+                    t1_decoded = block.trailing_ones
+                    candidate_t1 = self._encode_coefficients_to_bits(
+                        nal_coeffs, nC_try, max_num_coeff=16,
+                        override_trailing_ones=t1_decoded
+                    )
+                    if len(candidate_t1) == original_length and list(candidate_t1) == actual_nal_bits:
+                        matched_nC = nC_try
+                        matched_nal_coeffs = nal_coeffs
+                        orig_bits = candidate_t1
+                        matched_trailing_ones = t1_decoded
+                        break
+                except Exception:
+                    continue
+
+            if matched_nC is None:
+                if patched_count < 5:
+                    lens = {}
+                    for nC_try in [0, 2, 4, 6, 8]:
+                        try:
+                            reader = BitstreamReader(raw_nal_bytes)
+                            dec = CAVLCDecoder(reader)
+                            dec.decode_block_cavlc(nC_try, max_num_coeff=16)
+                            lens[nC_try] = reader.pos
+                        except Exception:
+                            lens[nC_try] = None
+                    print(f"[PATCHER] SKIP {key}: No nC round-trips exactly "
+                          f"(NAL={original_length}b). nC->consumed={lens}")
+                skipped_count += 1
+                continue
+
+            nC = matched_nC  # Confirmed correct nC via round-trip decode-encode
+            # Use matched_nal_coeffs as the ground-truth original coefficients
+            # from NAL, not the extractor's (potentially wrong) version.
+
+            # ──────────────────────────────────────────────────────────────────
+            # Apply the embedder's LSB intent to the NAL-decoded coeffs.
+            # Instead of a delta (which assumes identical parsing between the
+            # embedder's TraceableCAVLCParser and the patcher's BitstreamDecoder),
+            # we use the INTENDED LSB from the embedder's result.
+            #
+            # For each position where the embedder changed original_coeffs[i]:
+            #   intended_lsb = abs(new_coeffs[i]) % 2
+            # We set matched_nal_coeffs[i]'s LSB to intended_lsb.
+            # If the current LSB already matches, no modification is needed.
+            #
+            # This is robust to parsing inconsistencies (root cause of safe_pos
+            # divergence): the stego coefficient's LSB always equals the embedded
+            # bit regardless of the patcher's decoded base value.
+            # ──────────────────────────────────────────────────────────────────
+            original_total_coeffs = sum(1 for c in matched_nal_coeffs if c != 0)
+
+            # Build modified NAL coefficients using intended-LSB / intended-sign approach
+            modified_nal_coeffs = list(matched_nal_coeffs)
+            for i in range(min(len(original_coeffs), len(modified_nal_coeffs))):
+                if original_coeffs[i] != new_coeffs[i] and original_coeffs[i] != 0:
+                    if abs(original_coeffs[i]) == abs(new_coeffs[i]):
+                        # Sign-bit change: absolute values are equal but signs differ.
+                        # Applies to trailing ±1 coefficients encoded via sign-bit embedding.
+                        intended_positive = new_coeffs[i] > 0
+                        nal_positive = matched_nal_coeffs[i] > 0
+                        if intended_positive != nal_positive:
+                            modified_nal_coeffs[i] = -matched_nal_coeffs[i]
+                        # else: sign already matches — no change needed
+                    else:
+                        # Standard LSB modification
+                        intended_lsb = abs(new_coeffs[i]) % 2
+                        matched_abs = abs(matched_nal_coeffs[i])
+                        current_lsb = matched_abs % 2
+                        if current_lsb != intended_lsb:
+                            sign = 1 if matched_nal_coeffs[i] >= 0 else -1
+                            new_abs = (matched_abs & ~1) | intended_lsb
+                            if new_abs == 0:
+                                new_abs = matched_abs  # Safety: cannot create zero
+                            modified_nal_coeffs[i] = sign * new_abs
+                        # else: current LSB already matches intended — no change needed
+
+            modified_total_coeffs = sum(1 for c in modified_nal_coeffs if c != 0)
+
+            # Skip if modification would introduce zero→non-zero or total_coeffs change
+            # (these cannot be patched safely)
+            if original_total_coeffs == 0 and modified_total_coeffs > 0:
+                skipped_count += 1
+                continue
+            if original_total_coeffs != modified_total_coeffs:
+                # Safety filter should have prevented this — skip as a safeguard
+                skipped_count += 1
+                continue
+
+            # Re-encode modified coefficients with trailing_ones override only.
+            # Note: override_total_coeffs is intentionally OMITTED — the intended-LSB
+            # approach never changes zero/non-zero status, so the encoder computes the
+            # correct total_coeffs from actual values.  Omitting the override keeps the
+            # stego encoding reproducible by get_unpatchable_blocks (which doesn't try
+            # override_total_coeffs variations), ensuring consistent nal_length_map
+            # between original and stego extraction passes.
+            new_bits = self._encode_coefficients_to_bits(
+                modified_nal_coeffs, nC, max_num_coeff=16,
+                override_trailing_ones=matched_trailing_ones)
+
+            # Bit-exact match already confirmed for original in nC scanning above.
+
+            # Step 5: Verify bit length (Safety Filter guarantee)
             if len(new_bits) != original_length:
-                if patched_count < 2:  # Show first few errors
+                if patched_count < 2:
                     print(f"[PATCHER] SKIP {key}: Modified coefficients encode to different length!")
                     print(f"  Original NAL: {original_length} bits")
                     print(f"  Re-encoded:   {len(new_bits)} bits")
-                    print(f"  [SAFETY VIOLATION] This should never happen if Safety Filter worked correctly")
-                
                 skipped_count += 1
                 continue
-            
+
             # Step 6: Overwrite bits at specific position
             try:
                 rbsp_bits[start_bit:end_bit] = new_bits
                 patched_count += 1
-                
-                # Debug first patch
-                if patched_count == 1:
-                    print(f"[PATCHER] First patch at {key}:")
-                    print(f"  Bit offset: {start_bit}-{end_bit} ({original_length} bits)")
-                    non_zero_orig = [c for c in original_coeffs if c != 0]
-                    non_zero_new = [c for c in new_coeffs if c != 0]
-                    print(f"  Original coeffs: {non_zero_orig[:5] if non_zero_orig else [0]}")
-                    print(f"  New coeffs:      {non_zero_new[:5] if non_zero_new else [0]}")
-            
             except Exception as e:
                 print(f"[PATCHER] Error patching block {key}: {e}")
                 skipped_count += 1
                 continue
         
-        print(f"[PATCHER] Successfully patched: {patched_count}/{len(modifications)}", flush=True)
+        print(f"[PATCHER] Successfully patched: {patched_count}/{len(modifications)}")
         if skipped_count > 0:
-            print(f"[PATCHER] Skipped: {skipped_count} blocks (not coded or length mismatch)", flush=True)
-        
-        # FORCE OUTPUT TO STDOUT
-        import sys
-        sys.stdout.flush()
-        sys.stderr.flush()
-        
+            print(f"[PATCHER] Skipped: {skipped_count} blocks (not coded or length mismatch)")
+
         # Step 7: Convert BitArray back to bytes
         patched_rbsp = rbsp_bits.to_bytes()
         
@@ -408,33 +354,120 @@ class BitstreamPatcher:
         
         return PatchedNAL(original_nal, patched_rbsp)
     
-    def _encode_coefficients_to_bits(self, coeffs: List[int], nC: int, max_num_coeff: int, 
-                                     override_total_coeffs: int = None, debug_key=None) -> List[int]:
+    def _bits_to_bytes(self, bits: List[int]) -> bytes:
+        """Pack list of 0/1 ints into bytes (MSB first), padding to byte boundary."""
+        padded = bits + [0] * ((8 - len(bits) % 8) % 8)
+        result = bytearray()
+        for i in range(0, len(padded), 8):
+            byte = sum(padded[i + j] << (7 - j) for j in range(8))
+            result.append(byte)
+        return bytes(result)
+
+    def get_unpatchable_blocks(self, rbsp_bytes: bytes, block_offsets: Dict):
+        """
+        Return the set of (mb_local, blk_idx) keys that CANNOT be successfully
+        round-tripped (decode → re-encode produces different bits from the NAL).
+
+        These blocks must be excluded from embedding: the patcher would silently
+        skip them at patch-time, leaving original coefficients in the stego and
+        breaking embedding/extraction sync.
+
+        Also returns verified nC and coefficient values for patchable blocks.
+        These are the CORRECT decoded values (using the nC that bit-exactly
+        reproduces the NAL encoding), which avoids nC table mismatches between
+        TraceableCAVLCParser and the patcher's BitstreamDecoder.
+
+        Args:
+            rbsp_bytes:    Raw RBSP bytes of the slice NAL (original_nal.rbsp_byte).
+            block_offsets: Dict {(mb_local, blk_idx): {'start_bit':…,'end_bit':…,'bit_length':…}}
+                           (LOCAL indices, as returned by TraceableCAVLCParser).
+
+        Returns:
+            (unpatchable, matched_info)
+            - unpatchable: Set of (mb_local, blk_idx) keys that are NOT safely patchable.
+            - matched_info: Dict {(mb_local, blk_idx): (matched_nC, coefficients)}
+                            for patchable blocks — the bit-exact-verified nC and coefficients.
+        """
+        rbsp_bits = BitArray(rbsp_bytes)
+        unpatchable = set()
+        matched_info = {}
+
+        for key, offset_data in block_offsets.items():
+            start_bit = offset_data.get('start_bit')
+            end_bit = offset_data.get('end_bit')
+            original_length = offset_data.get('bit_length')
+
+            if start_bit is None or end_bit is None or original_length is None or original_length <= 0:
+                continue
+
+            actual_nal_bits = list(rbsp_bits[start_bit:end_bit])
+            lookahead_end = min(end_bit + 64, len(rbsp_bits))
+            raw_nal_bytes = self._bits_to_bytes(list(rbsp_bits[start_bit:lookahead_end]))
+
+            found = False
+            for nC_try in [0, 2, 4, 6, 8]:
+                try:
+                    reader = BitstreamReader(raw_nal_bytes)
+                    dec = CAVLCDecoder(reader)
+                    block = dec.decode_block_cavlc(nC_try, max_num_coeff=16)
+                    consumed = reader.pos
+                    if consumed != original_length:
+                        continue
+                    nal_coeffs = list(block.levels)
+                    # Standard encode (encoder picks max trailing-ones)
+                    candidate = self._encode_coefficients_to_bits(
+                        nal_coeffs, nC_try, max_num_coeff=16)
+                    if len(candidate) == original_length and list(candidate) == actual_nal_bits:
+                        found = True
+                        matched_info[key] = (nC_try, nal_coeffs, None)  # no T1 override needed
+                        break
+                    # Retry with the decoded trailing_ones override
+                    t1_decoded = block.trailing_ones
+                    candidate_t1 = self._encode_coefficients_to_bits(
+                        nal_coeffs, nC_try, max_num_coeff=16,
+                        override_trailing_ones=t1_decoded)
+                    if len(candidate_t1) == original_length and list(candidate_t1) == actual_nal_bits:
+                        found = True
+                        matched_info[key] = (nC_try, nal_coeffs, t1_decoded)  # T1 override required
+                        break
+                except Exception:
+                    continue
+
+            if not found:
+                unpatchable.add(key)
+
+        return unpatchable, matched_info
+
+    def _encode_coefficients_to_bits(self, coeffs: List[int], nC: int, max_num_coeff: int,
+                                     override_total_coeffs: int = None, debug_key=None,
+                                     override_trailing_ones: int = None) -> List[int]:
         """
         Encode coefficient block to bit sequence.
-        
+
         CRITICAL: Uses SAME CAVLCEncoder as Safety Filter to ensure consistency.
-        
+
         Args:
-            coeffs: Coefficient values  
+            coeffs: Coefficient values
             nC: Neighbor context (for VLC table selection)
             max_num_coeff: Maximum coefficients (16 for 4x4 blocks)
             override_total_coeffs: Optional override for total_coeffs (for re-encoding modified blocks)
             debug_key: Optional (mb_idx, block_idx) for debugging
-            
+            override_trailing_ones: Optional T1 count override to match original encoder's choice
+
         Returns:
             List of bits [0, 1, 1, 0, ...]
         """
         # Create temporary writer
         temp_writer = BitstreamWriter()
         encoder = CAVLCEncoder(temp_writer)
-        
+
         # Encode block (same call as Safety Filter)
-        encoder.encode_block_cavlc(coeffs, nC=nC, max_num_coeff=max_num_coeff, 
+        encoder.encode_block_cavlc(coeffs, nC=nC, max_num_coeff=max_num_coeff,
                                    override_total_coeffs=override_total_coeffs,
+                                   override_trailing_ones=override_trailing_ones,
                                    debug_key=debug_key)
-        
+
         # Extract bits as list
         bits = temp_writer.get_bits_as_list()
-        
+
         return bits

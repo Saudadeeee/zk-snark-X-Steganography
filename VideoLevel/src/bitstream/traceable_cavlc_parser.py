@@ -69,7 +69,8 @@ class TraceableCAVLCParser(SimpleCAVLCExtractor):
             
             # Position after slice header
             header_end_pos = reader.position
-            
+            print(f"[TraceableParser] Slice header END pos: {header_end_pos} bits (first_mb={slice_header.first_mb_in_slice}, slice_type={slice_header.slice_type})")
+
             # Calculate QP
             slice_qp = 26 + pps.pic_init_qp_minus26 + slice_header.slice_qp_delta
             
@@ -152,17 +153,41 @@ class TraceableCAVLCParser(SimpleCAVLCExtractor):
                     
                     # CRITICAL FIX: Parse I_16x16 DC block first (H.264 spec 8.5.6)
                     if is_i16x16:
-                        # Parse Intra16x16DCLevel (4x4 DC coefficients)
+                        # nC for I_16x16 luma DC: per H.264 spec Section 9.2.1, nC is
+                        # derived ONLY from adjacent I_16x16 DC neighbors (sentinel key -1).
+                        # If neighbor MB is NOT I_16x16, it does NOT contribute (nA/nB = 0).
+                        # Using nC=-1 is WRONG (chroma DC table); using regular 4x4 TCs is also
+                        # WRONG. x264 uses nC=0 when no I_16x16 DC neighbors are available.
+                        mb_x_dc = mb_idx % mb_width
+                        mb_y_dc = mb_idx // mb_width
+                        dc_left_tc = None
+                        dc_top_tc = None
+                        if mb_x_dc > 0:
+                            dc_left_tc = self.neighbor_coeffs.get((mb_idx - 1, -1))
+                        if mb_y_dc > 0:
+                            dc_top_tc = self.neighbor_coeffs.get((mb_idx - mb_width, -1))
+                        if dc_left_tc is not None and dc_top_tc is not None:
+                            nC_dc = (dc_left_tc + dc_top_tc + 1) >> 1
+                        elif dc_left_tc is not None:
+                            nC_dc = dc_left_tc
+                        elif dc_top_tc is not None:
+                            nC_dc = dc_top_tc
+                        else:
+                            nC_dc = 0  # No I_16x16 DC neighbors → encoder uses nC=0
+                        # Parse Intra16x16DCLevel (4x4 DC coefficients, max_num_coeff=16)
                         try:
-                            luma_dc_block = cavlc_decoder.decode_block_cavlc(nC=-1, max_num_coeff=16)
+                            luma_dc_block = cavlc_decoder.decode_block_cavlc(nC_dc, max_num_coeff=16)
+                            self.neighbor_coeffs[(mb_idx, -1)] = luma_dc_block.total_coeffs
                             if mb_idx <= 5:
                                 pos_after = reader.position
-                                print(f"    [I16DC] MB={mb_idx}: TC={luma_dc_block.total_coeffs}")
+                                print(f"    [I16DC] MB={mb_idx}: nC_dc={nC_dc} TC={luma_dc_block.total_coeffs}")
                         except Exception as e:
+                            self.neighbor_coeffs[(mb_idx, -1)] = 0
                             pass  # Skip on error
                     
                     # Parse luma AC blocks (0-15) for all MB types
                     luma_parsed_count = 0
+                    cavlc_block_failed = False
                     for block_idx in range(16):
                         should_decode = (block_idx in luma_blocks)
                         
@@ -180,14 +205,28 @@ class TraceableCAVLCParser(SimpleCAVLCExtractor):
                             
                             # 🔑 KEY: Track bit position BEFORE decoding
                             block_start_bit = reader.position
-                            
+
+                            # DIAGNOSTIC: Log per-block positions for MB0
+                            if mb_idx == 0 and block_idx < 4:
+                                peek_val = 0
+                                try:
+                                    peek_val = reader.peek_bits(16) if hasattr(reader, 'peek_bits') else 0
+                                except:
+                                    pass
+                                print(f"    [TRACE_BLK] MB=0 Blk={block_idx} nC={nC} Pos={block_start_bit} Peek={peek_val}")
+
                             try:
                                 # Decode block (use 15 coeffs for I_16x16 AC, 16 for others)
                                 max_coeffs = 15 if is_i16x16 else 16
                                 block = cavlc_decoder.decode_block_cavlc(nC, max_coeffs)
-                                
+
                                 # 🔑 KEY: Track bit position AFTER decoding
                                 block_end_bit = reader.position
+
+                                # DIAGNOSTIC: Log post-decode for MB0
+                                if mb_idx == 0 and block_idx < 4:
+                                    non_zero = [c for c in block.levels if c != 0]
+                                    print(f"    [TRACE_BLK_END] MB=0 Blk={block_idx} TC={block.total_coeffs} Pos={block_end_bit} Bits={block_end_bit-block_start_bit} First3={non_zero[:3]}")
                                 
                                 # SANITY CHECK: TC must be in [0, max_coeffs] — reject desync'd blocks
                                 if block.total_coeffs < 0 or block.total_coeffs > max_coeffs:
@@ -221,16 +260,19 @@ class TraceableCAVLCParser(SimpleCAVLCExtractor):
                                 luma_parsed_count += 1
                                 
                             except Exception as decode_err:
-                                # Decoder failed - use zeros
+                                # Decoder failed - reader position is now unreliable
+                                # Stop decoding remaining blocks to prevent cascade desync
                                 blocks[cache_key] = [0] * 16
                                 self.neighbor_coeffs[cache_key] = 0
-                                
+
                                 # Log decode failures for debugging
                                 if mb_idx < 3:
                                     err_msg = str(decode_err)[:60]
                                     print(f"        [DECODE_ERR] MB={mb_idx}, Blk={block_idx}: {err_msg}")
-                                
+
                                 # No offset stored for failed blocks
+                                cavlc_block_failed = True
+                                break  # Stop decoding remaining blocks - reader position is unreliable
                         else:
                             # Block not coded - all zeros
                             cache_key = (mb_idx, block_idx)
@@ -252,7 +294,7 @@ class TraceableCAVLCParser(SimpleCAVLCExtractor):
                     chroma_dc_present = cbp_chroma >= 1
                     chroma_ac_present = cbp_chroma >= 2
                     
-                    if chroma_dc_present:
+                    if not cavlc_block_failed and chroma_dc_present:
                         pos_before_cdc = reader.position
                         # Parse 2 ChromaDC blocks (Cb and Cr, each 2x2)
                         for chroma_idx in range(2):  # 0=Cb, 1=Cr
@@ -266,7 +308,7 @@ class TraceableCAVLCParser(SimpleCAVLCExtractor):
                         if mb_idx <= 5:
                             print(f"    [CDC] MB={mb_idx}: 2 blocks, bits={pos_after_cdc - pos_before_cdc}, pos={pos_before_cdc}->{pos_after_cdc}")
                     
-                    if chroma_ac_present:
+                    if not cavlc_block_failed and chroma_ac_present:
                         pos_before_cac = reader.position
                         # Parse 8 ChromaAC blocks (4 Cb + 4 Cr, each 4x4 minus DC)
                         for chroma_block_idx in range(8):  # blocks 16-23

@@ -1,8 +1,8 @@
 import sys
 import os
 
-from src.zk_mv_stego.decoder.cavlc_extractor_simple import SimpleCAVLCExtractor
-from src.zk_mv_stego.embedder.cavlc_safety_filter import CAVLCSafetyFilter
+from src.decoder.cavlc_extractor_simple import SimpleCAVLCExtractor
+from src.embedder.cavlc_safety_filter import CAVLCSafetyFilter
 
 def analyze_video(video_path):
     print(f"\n{'='*50}")

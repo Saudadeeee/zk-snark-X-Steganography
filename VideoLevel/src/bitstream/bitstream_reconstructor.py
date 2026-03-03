@@ -84,35 +84,50 @@ class BitstreamReconstructor:
         # Luma 4x4 block - calculate neighbor context
         mb_x = mb_idx % pic_width_in_mbs
         mb_y = mb_idx // pic_width_in_mbs
-        
-        # Block position within MB (4x4 grid, 0-15)
-        block_x = block_idx % 4
-        block_y = block_idx // 4
-        
+
+        # H.264 scan order block position mapping (same as macroblock_parser.py)
+        BLOCK_XY = [
+            (0,0), (1,0), (0,1), (1,1),
+            (2,0), (3,0), (2,1), (3,1),
+            (0,2), (1,2), (0,3), (1,3),
+            (2,2), (3,2), (2,3), (3,3)
+        ]
+        blk_x, blk_y = BLOCK_XY[block_idx]
+
+        def find_block_idx(x, y):
+            for i, (bx, by) in enumerate(BLOCK_XY):
+                if bx == x and by == y:
+                    return i
+            return -1
+
         # Get left neighbor (nA)
         nA = None
-        if block_x > 0:
+        if blk_x > 0:
             # Left block is within same MB
-            left_block_idx = block_idx - 1
-            nA = self.mb_total_coeffs.get((mb_idx, left_block_idx), 0)
+            left_block_idx = find_block_idx(blk_x - 1, blk_y)
+            if left_block_idx >= 0:
+                nA = self.mb_total_coeffs.get((mb_idx, left_block_idx), 0)
         elif mb_x > 0:
-            # Left block is in left MB (rightmost column, block 3, 7, 11, 15)
+            # Left block is in left MB (x=3, same y)
             left_mb_idx = mb_idx - 1
-            left_block_idx = block_idx + 3  # Map to right edge of left MB
-            nA = self.mb_total_coeffs.get((left_mb_idx, left_block_idx), 0)
-        
+            left_block_idx = find_block_idx(3, blk_y)
+            if left_block_idx >= 0:
+                nA = self.mb_total_coeffs.get((left_mb_idx, left_block_idx), 0)
+
         # Get top neighbor (nB)
         nB = None
-        if block_y > 0:
+        if blk_y > 0:
             # Top block is within same MB
-            top_block_idx = block_idx - 4
-            nB = self.mb_total_coeffs.get((mb_idx, top_block_idx), 0)
+            top_block_idx = find_block_idx(blk_x, blk_y - 1)
+            if top_block_idx >= 0:
+                nB = self.mb_total_coeffs.get((mb_idx, top_block_idx), 0)
         elif mb_y > 0:
-            # Top block is in top MB (bottom row, block 12, 13, 14, 15)
+            # Top block is in top MB (same x, y=3)
             top_mb_idx = mb_idx - pic_width_in_mbs
-            top_block_idx = block_idx + 12  # Map to bottom edge of top MB
-            nB = self.mb_total_coeffs.get((top_mb_idx, top_block_idx), 0)
-        
+            top_block_idx = find_block_idx(blk_x, 3)
+            if top_block_idx >= 0:
+                nB = self.mb_total_coeffs.get((top_mb_idx, top_block_idx), 0)
+
         # Calculate nC according to H.264 spec
         if nA is not None and nB is not None:
             nC = (nA + nB + 1) >> 1
@@ -123,7 +138,7 @@ class BitstreamReconstructor:
         else:
             # No neighbors available (top-left corner) - use default
             nC = 0
-        
+
         return nC
     
     def _update_total_coeffs_cache(self, mb_idx: int, block_idx: int, coeffs: List[int]):
@@ -214,7 +229,6 @@ class BitstreamReconstructor:
             mb_indices = [mb_idx for mb_idx, _, _ in modified_coefficients]
             print(f"    MB range: {min(mb_indices)} - {max(mb_indices)}")
             print(f"    Unique MBs modified: {len(set(mb_indices))}")
-            print(f"    [DEBUG] First 5 keys in coeff_map: {list(coeff_map.keys())[:5]}")
         
         # Reconstruct NAL units
         print(f"\n[2] Reconstructing slices with CAVLC re-encoding...")
@@ -241,6 +255,7 @@ class BitstreamReconstructor:
             if nal.nal_unit_type != 5:
                 if nal.nal_unit_type == 1:
                     print(f"    [BYPASS] Skipping P/B-Frame NAL intact (Binary Copy)")
+                    global_mb_idx += mb_count_per_slice  # advance counter for each P-frame slice
                 reconstructed_nals.append(nal)
                 continue
             
@@ -273,10 +288,6 @@ class BitstreamReconstructor:
                     if actual_mb_count is not None and actual_mb_count > 0 and actual_mb_count != mb_count:
                         print(f"      [INFO] TraceableParser returned {actual_mb_count} MBs, using SPS count {mb_count}")
                     
-                    if modified_nal != nal:
-                        print(f"      [DEBUG] Modified NAL is different (size: {len(nal.rbsp_byte)} -> {len(modified_nal.rbsp_byte)} bytes)")
-                    else:
-                        print(f"      [WARN] Modified NAL is SAME as original!")
                     reconstructed_nals.append(modified_nal)
                     slices_with_modifications += 1
                 else:
@@ -359,9 +370,6 @@ class BitstreamReconstructor:
         Returns:
             Tuple[NALUnit, int]: (modified_nal, num_mbs_in_slice)
         """
-        print(f"      [_reconstruct_slice_with_cavlc] Called with global_mb_idx={global_mb_idx} (parameter)")
-        print(f"        Modifications requested: {len(coeff_map)}")
-        
         if not coeff_map:
             return original_nal
         
@@ -379,9 +387,7 @@ class BitstreamReconstructor:
             #
             # NEW CODE (CORRECT):
             # Just use the parameter directly - it's correctly accumulated in reconstruct_video()
-            
-            print(f"        [INFO] Using parameter global_mb_idx: {global_mb_idx}")
-            
+
             # Step 1: Extract ALL coefficients from this slice
             # CRITICAL FIX: Use TraceableCAVLCParser instead of SimpleCAVLCExtractor
             # SimpleCAVLCExtractor has a bug where it returns all-zero coefficients for P-slices
@@ -403,8 +409,7 @@ class BitstreamReconstructor:
             
             blocks = parsed_result['blocks']
             mb_metadata = parsed_result.get('mb_metadata', {})
-            print(f"        Extracted {len(blocks)} blocks from slice")
-            
+
             # CRITICAL: Use the actual MB count including SKIP MBs from TraceableCAVLCParser.
             # Do NOT compute from len(blocks)//24 — SKIP MBs add blocks but don't advance global_mb_idx the same way.
             num_mbs_in_slice = parsed_result.get('num_mbs', None)
@@ -417,10 +422,7 @@ class BitstreamReconstructor:
             # but blocks use slice-relative indexing.We need to map global → slice-local.
             # ALSO: Only process modifications that belong to THIS slice!
             modifications_applied = 0
-            print(f"        [DEBUG] coeff_map keys (first 5): {list(coeff_map.keys())[:5]}")
-            print(f"        [DEBUG] blocks keys (first 5): {list(blocks.keys())[:5]}")
-            print(f"        [DEBUG] global_mb_idx for this slice: {global_mb_idx}, num_mbs: {num_mbs_in_slice}")
-            
+
             for (mb_idx_global, block_idx), modified_coeffs in coeff_map.items():
                 # CRITICAL CHECK: Only apply modifications that belong to THIS slice
                 # Slice range: [global_mb_idx, global_mb_idx + num_mbs_in_slice)
@@ -455,17 +457,6 @@ class BitstreamReconstructor:
                         # Apply modification
                         blocks[block_key] = list(modified_coeffs)
                         modifications_applied += 1
-                        
-                        # DEBUG: Show first 3 modifications with detailed coefficient tracking
-                        if modifications_applied <= 3:
-                            print(f"        [DEBUG_COEFF] MODIFICATION #{modifications_applied}:")
-                            print(f"          Global MB: {mb_idx_global} -> Local MB: {mb_idx_local}, Block: {block_idx}")
-                            print(f"          Key: {block_key}")
-                            print(f"          Original coeffs: {original_coeffs}")
-                            print(f"          Modified coeffs: {modified_coeffs}")
-                            # Show which specific coefficients changed
-                            changes = [(i, o, m) for i, (o, m) in enumerate(zip(original_coeffs, modified_coeffs)) if o != m]
-                            print(f"          Changes: {changes[:5]}...")  # Show first 5 changes: (index, old, new)
                     # else: coefficients are same, no need to modify
                 else:
                     print(f"        [WARN] Key {block_key} NOT FOUND in blocks (mb_global={mb_idx_global}, local={mb_idx_local})")
@@ -476,37 +467,23 @@ class BitstreamReconstructor:
                 # This is OK - slice might not have any modifications
                 print(f"        [INFO] No modifications for this slice (range {global_mb_idx}-{global_mb_idx + num_mbs_in_slice})")
                 return (original_nal, num_mbs_in_slice)
-            
+
             # ========================================================================
-            # SMART PATCHING APPROACH (NEW)
+            # SMART PATCHING APPROACH
             # ========================================================================
             # Instead of re-encoding entire slice (which causes nC drift, alignment issues),
             # we use BitstreamPatcher to directly overwrite coefficient bits at tracked offsets.
-            # 
+            #
             # Key properties:
             # 1. Safety Filter guarantees bit-length invariance (old and new bits same length)
             # 2. Preserves original bitstream structure 100% (no alignment issues)
             # 3. No nC drift (no re-calculation of neighbor contexts)
             # 4. Only modifies coefficient values, doesn't touch headers or structure
             # ========================================================================
-            
-            print(f"        [INFO] Using Smart Patching (direct bit overwrite)...")
-            
-            # VERIFICATION STEP: Extract first modification details for tracking
-            first_mod_for_verify = None
-            for (mb_idx_global, block_idx), modified_coeffs in coeff_map.items():
-                if global_mb_idx <= mb_idx_global < global_mb_idx + num_mbs_in_slice:
-                    mb_idx_local = mb_idx_global - global_mb_idx
-                    block_key = (mb_idx_local, block_idx)
-                    if block_key in blocks:
-                        original_coeffs = blocks[block_key]
-                        if any(o != m for o, m in zip(original_coeffs, modified_coeffs)):
-                            first_mod_for_verify = (mb_idx_global, mb_idx_local, block_idx, original_coeffs[:], modified_coeffs[:])
-                            break
-            
-            # Import BitreamPatcher
+
+            # Import BitstreamPatcher
             from .bitstream_patcher import BitstreamPatcher
-            
+
             # Convert coeff_map to modifications list for patcher
             # ⚠️ CRITICAL FIX: TraceableCAVLCParser uses ABSOLUTE MB addressing!
             # We MUST pass global MB indices directly, NOT slice-local indices!
@@ -516,18 +493,6 @@ class BitstreamReconstructor:
                 if global_mb_idx <= mb_idx_global < global_mb_idx + num_mbs_in_slice:
                     # Pass global MB indices directly (DO NOT convert to slice-local!)
                     modifications.append((mb_idx_global, block_idx, modified_coeffs))
-            
-            # Debug: show filter params and results
-            print(f"        [DEBUG_FILTER] global_mb_idx={global_mb_idx}, num_mbs_in_slice={num_mbs_in_slice}")
-            print(f"        [DEBUG_FILTER] MB range for this slice: [{global_mb_idx}, {global_mb_idx + num_mbs_in_slice})")
-            if modifications:
-                mod_mbs = set(m[0] for m in modifications)
-                print(f"        [DEBUG_FILTER] Modification MBs passed filter: {sorted(mod_mbs)}")
-            
-            print(f"        [INFO] Prepared {len(modifications)} modifications for patching")
-            
-            # Create patcher and patch the slice
-            print(f"        [DEBUG_PATCH] Calling BitstreamPatcher.patch_slice with {len(modifications)} modifications...")
             patcher = BitstreamPatcher()
             
             # CRITICAL: Use the EMBEDDER'S verified offsets/blocks when available.
@@ -543,12 +508,6 @@ class BitstreamReconstructor:
             
             if frame_verified_data and global_mb_idx in frame_verified_data:
                 verified_offsets, verified_blocks = frame_verified_data[global_mb_idx]
-                # Convert GLOBAL keys to LOCAL keys as expected by the patcher
-                # (patcher adds global_mb_offset to convert local→global)
-                # Here, verified_offsets already has GLOBAL keys from the embedder.
-                # The patcher will ADD global_mb_offset (=global_mb_idx) to its local keys.
-                # So we need to convert: global_key = local_key + global_mb_idx
-                # → local_key = global_key - global_mb_idx
                 pre_offsets = {
                     (mb - global_mb_idx, blk): v
                     for (mb, blk), v in verified_offsets.items()
@@ -559,25 +518,21 @@ class BitstreamReconstructor:
                     for (mb, blk), v in verified_blocks.items()
                     if mb >= global_mb_idx
                 }
-                print(f"        [INFO] Using EMBEDDER's verified offsets ({len(pre_offsets)}) for patcher — guaranteed round-trip consistency")
             else:
                 # Fallback: use reconstructor's own parse results (may diverge from embedder's)
                 pre_offsets = parsed_result.get('offsets', {})
                 pre_blocks = parsed_result.get('blocks', {})
-                print(f"        [INFO] No embedder offsets for global_mb_idx={global_mb_idx} — using reconstructor's parse (may diverge)")
             
             modified_nal = patcher.patch_slice(
                 original_nal,
                 modifications,
                 sps=self.sps,
                 pps=self.pps,
-                global_mb_offset=global_mb_idx,  # Add frame offset to convert local slice MBs to global
+                global_mb_offset=global_mb_idx,
                 pre_computed_offsets=pre_offsets,
                 pre_computed_blocks=pre_blocks
             )
-            
-            print(f"        [DEBUG_PATCH] Patching complete. Original NAL size: {len(original_nal.rbsp_byte)}, Modified NAL size: {len(modified_nal.rbsp_byte)}")
-            
+
             if modified_nal is None:
                 print(f"        [ERROR] Patching returned None - BitstreamPatcher failed!")
                 return (original_nal, num_mbs_in_slice)
@@ -595,48 +550,11 @@ class BitstreamReconstructor:
                     return (original_nal, num_mbs_in_slice)
             
             # Verify NAL size is reasonable (not corrupted)
-            
-            # VERIFICATION: Extract coefficients from patched NAL and verify modification was applied
-            if first_mod_for_verify:
-                print(f"        [VERIFY] Extracting coefficients from PATCHED NAL to verify modifications...")
-                try:
-                    verify_result = extractor.extract_coefficients_from_nal(
-                        modified_nal,
-                        global_mb_idx=global_mb_idx,
-                        sps=self.sps,
-                        pps=self.pps
-                    )
-                    
-                    if 'blocks' in verify_result:
-                        verify_blocks = verify_result['blocks']
-                        mb_global, mb_local, blk_idx, orig_coeffs, mod_coeffs = first_mod_for_verify
-                        verify_key = (mb_local, blk_idx)
-                        
-                        if verify_key in verify_blocks:
-                            extracted_coeffs = verify_blocks[verify_key]
-                            print(f"        [VERIFY] First modification check (MB {mb_global}, Block {blk_idx}):")
-                            print(f"          Expected (modified): {mod_coeffs}")
-                            print(f"          Extracted (patched): {extracted_coeffs}")
-                            
-                            if list(extracted_coeffs) == list(mod_coeffs):
-                                print(f"          ✅ VERIFICATION PASSED - Coefficients match!")
-                            else:
-                                print(f"          ❌ VERIFICATION FAILED - Coefficients don't match!")
-                                # Show differences
-                                diffs = [(i, m, e) for i, (m, e) in enumerate(zip(mod_coeffs, extracted_coeffs)) if m != e]
-                                print(f"          Differences: {diffs[:5]}")
-                        else:
-                            print(f"        [VERIFY] ⚠️ Block key {verify_key} not found in extracted blocks")
-                    else:
-                        print(f"        [VERIFY] ⚠️ No blocks in verification extraction result")
-                except Exception as verify_e:
-                    print(f"        [VERIFY] ⚠️ Verification extraction failed: {verify_e}")
-            
-            print(f"        [SUCCESS] Smart Patching complete!")
-            print(f"        Original: {len(original_nal.rbsp_byte)} bytes")
-            print(f"        Patched:  {len(modified_nal.rbsp_byte)} bytes")
-            print(f"        Size change: {len(modified_nal.rbsp_byte) - len(original_nal.rbsp_byte):+d} bytes")
-            
+            if len(modified_nal.rbsp_byte) == len(original_nal.rbsp_byte):
+                if modified_nal.rbsp_byte == original_nal.rbsp_byte:
+                    print(f"        [WARN] Patched NAL is IDENTICAL to original — no blocks patched")
+                    return (original_nal, num_mbs_in_slice)
+
             return (modified_nal, num_mbs_in_slice)
             
         except Exception as e:
@@ -826,10 +744,7 @@ class BitstreamReconstructor:
             # Get ORIGINAL coefficients for all blocks
             original_blocks = result.get('blocks', {})
             mb_metadata = result.get('mb_metadata', {})
-            
-            print(f"        [DEBUG] Extracted {len(original_blocks)} original blocks")
-            print(f"        [DEBUG] Have {len(blocks)} modified blocks")
-            
+
             # Combine: Start with original, then apply modifications
             combined_blocks = dict(original_blocks)  # Copy all original blocks
             
@@ -843,9 +758,6 @@ class BitstreamReconstructor:
                     # Modification for block not in original - still add it
                     combined_blocks[key] = modified_coeffs
                     modifications_applied += 1
-            
-            print(f"        [DEBUG] Applied {modifications_applied} modifications to combined_blocks")
-            print(f"        [DEBUG] Final combined_blocks has {len(combined_blocks)} blocks")
             
             # ==================================================================================
             # CRITICAL FIX #1: Pre-populate total_coeffs cache for accurate nC calculation
@@ -880,12 +792,8 @@ class BitstreamReconstructor:
                 # FIX MỚI: mb_idx đã là local index rồi (0, 1, 2... trong slice)
                 modified_mbs.add(mb_idx)  # Already slice-relative, no conversion needed
             
-            print(f"        [DEBUG] global_mb_idx={global_mb_idx}, blocks.keys()={list(blocks.keys())[:5]}")
-            print(f"        [DEBUG] modified_mbs={modified_mbs}")
-            
             # If no MBs modified in this slice, return original
             if not modified_mbs:
-                print(f"        [DEBUG] No modified MBs, returning original")
                 return original_nal.rbsp_byte
             
             # Strategy: Re-encode entire slice with mixed original + modified coefficients
@@ -1178,17 +1086,10 @@ class BitstreamReconstructor:
                 
                 # Write CBP (use calculated CBP based on actual block contents)
                 # CRITICAL: Use me(v) mapping for CBP, NOT raw Exp-Golomb!
-                if slice_mb_idx == 0:
-                    bits_before_cbp = writer.get_bit_position()
-                
                 # Determine if this is Intra MB
                 is_intra = (original_mb_type >= 0 and original_mb_type <= 25)  # I_4x4 or I_16x16
                 writer.write_me_cbp(cbp, is_intra=is_intra)
-                
-                if slice_mb_idx == 0:
-                    bits_after_cbp = writer.get_bit_position()
-                    print(f"          [DEBUG] Wrote CBP={cbp} = 0b{cbp:b} (Intra={is_intra}), consumed {bits_after_cbp - bits_before_cbp} bits")
-                
+
                 # Write QP delta (0 = no change)
                 if cbp > 0:
                     writer.write_se(0)
@@ -1230,32 +1131,15 @@ class BitstreamReconstructor:
                                 # (Matches parser: traceable_cavlc_parser.py line 257)
                                 max_num_coeff = 15
                             
-                            # DEBUG: Log first block of first MB
-                            if slice_mb_idx == 0 and block_idx == 0:
-                                bits_before = writer.get_bit_position()
-                                print(f"          [DEBUG] MB 0, Block 0 coeffs: {coeffs}")
-                                print(f"          [DEBUG] Bitstream position before CAVLC: {bits_before} bits")
-                            
                             # Calculate nC from neighbors (H.264 Section 8.4.1.2.2)
                             # CRITICAL: Use mb_global_idx (frame-absolute), NOT slice_mb_idx!
                             nC = self._calculate_nC(mb_global_idx, block_idx, pic_width_in_mbs=22)
-                            debug_key = (slice_mb_idx, block_idx) if slice_mb_idx == 0 else None
-                            encoder.encode_block_cavlc(coeffs, nC=nC, max_num_coeff=max_num_coeff, debug_key=debug_key)
+                            encoder.encode_block_cavlc(coeffs, nC=nC, max_num_coeff=max_num_coeff)
                             # Update total_coeffs cache for future nC calculations
                             self._update_total_coeffs_cache(mb_global_idx, block_idx, coeffs)
-                            
-                            if slice_mb_idx == 0 and block_idx == 0:
-                                bits_after = writer.get_bit_position()
-                                print(f"          [DEBUG] Bitstream position after CAVLC: {bits_after} bits")
-                                print(f"          [DEBUG] CAVLC consumed: {bits_after - bits_before} bits")
-                            
+
                             blocks_encoded += 1
                     
-                    if slice_mb_idx == 0:
-                        print(f"          MB 0: Encoded {blocks_encoded} blocks (CBP indicates {bin(cbp)})")
-            
-            print(f"          Re-encoded {num_mbs} macroblocks with modifications")
-            
             # Add stop bit
             writer.write_bit(1)
             
@@ -1371,9 +1255,7 @@ class BitstreamReconstructor:
             sps.pic_width_in_mbs_minus1 = reader.read_ue()
             sps.pic_height_in_map_units_minus1 = reader.read_ue()
             sps.frame_mbs_only_flag = reader.read_bits(1) == 1
-            
-            print(f"    [DEBUG] Parsed SPS: profile={profile_idc}, width={sps.pic_width_in_mbs_minus1}+1, height={sps.pic_height_in_map_units_minus1}+1, frame_mbs_only={sps.frame_mbs_only_flag}")
-            
+
         except Exception as e:
             print(f"    [!] SPS parsing error: {e}, using defaults")
         
@@ -1398,8 +1280,6 @@ class BitstreamReconstructor:
             # Store entropy coding mode
             pps.entropy_coding_mode_flag = entropy_coding_mode_flag == 1
             
-            print(f"    [CRITICAL] PPS entropy_coding_mode_flag={entropy_coding_mode_flag} ({'CABAC' if entropy_coding_mode_flag else 'CAVLC'})")
-            
             # Skip slice group map if present
             if num_slice_groups_minus1 > 0:
                 # Complex slice group parsing - skip for now
@@ -1415,9 +1295,7 @@ class BitstreamReconstructor:
             pps.deblocking_filter_control_present_flag = reader.read_bits(1) == 1
             constrained_intra_pred_flag = reader.read_bits(1)
             pps.redundant_pic_cnt_present_flag = reader.read_bits(1) == 1
-            
-            print(f"    [DEBUG] Parsed PPS: qp_offset={pps.pic_init_qp_minus26}, deblocking={pps.deblocking_filter_control_present_flag}, redundant={pps.redundant_pic_cnt_present_flag}")
-            
+
         except Exception as e:
             print(f"    [!] PPS parsing error: {e}, using defaults")
         

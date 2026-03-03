@@ -79,13 +79,17 @@ class CAVLCDecoder:
             print(f"    [CAVLC_DEC] Enter decode MB:{debug_key[0]} Blk:{debug_key[1]} nC:{nC} Pos:{pos_start}")
         
         total_coeffs, trailing_ones = self._decode_coeff_token(nC)
-        
+
+        # Sanity check: coeff_token values > max_num_coeff indicate bitstream desync
+        if total_coeffs > max_num_coeff:
+            raise ValueError(f"Invalid total_coeffs={total_coeffs} > max_num_coeff={max_num_coeff} - bitstream desync")
+
         # 🔬 DEBUG: Log coeff_token result
         if debug_key and debug_key[0] == 0 and debug_key[1] < 16:
             pos_after_token = self.reader.position
             bits_for_token = pos_after_token - pos_start
             print(f"    [CAVLC_DEC] coeff_token -> TC:{total_coeffs} T1:{trailing_ones} (consumed {bits_for_token} bits)")
-        
+
         if total_coeffs == 0:
             # Block is all zeros
             return CoefficientBlock(
@@ -145,36 +149,58 @@ class CAVLCDecoder:
     def _decode_coeff_token(self, nC: int) -> Tuple[int, int]:
         """
         Decode coeff_token using VLC table WITH ROBUST ERROR RECOVERY
-        
+
         Returns: (TotalCoeffs, TrailingOnes)
         """
         table = get_coeff_token_table(nC)
-        
+        start_pos = self.reader.tell()  # Save position for reset/fallback
+
         if table == 'FLC6':
-            # nC >= 8: use fixed-length code (8 bits total)
-            # Format per H.264 spec: 6 bits TotalCoeff + 2 bits TrailingOnes
+            # nC >= 8: use fixed-length code (6 bits)
+            # H.264 spec Table 9-5: 6-bit FLC where:
+            #   bits[5:4] (upper 2 bits) = TrailingOnes (0-3)
+            #   bits[3:0] (lower 4 bits) = TotalCoeff (0-15)
             try:
-                code = self.reader.read_bits(8)
-                total_coeffs = (code >> 2) & 0x3F  # Upper 6 bits
-                trailing_ones = code & 0x3          # Lower 2 bits
+                code = self.reader.read_bits(6)
+                total_coeffs = code & 0xF           # Lower 4 bits = TC
+                trailing_ones = (code >> 4) & 0x3   # Upper 2 bits = T1
                 return (total_coeffs, min(trailing_ones, 3))
             except:
                 # Bitstream error - return zero coefficients
                 return (0, 0)
-        
+
         elif table:
             # Use VLC table lookup with improved error handling
+            primary_failed = False
             try:
                 total_coeffs, trailing_ones = decode_vlc(self.reader, table, max_bits=16)
                 # Validate decoded values
                 if total_coeffs > 16 or trailing_ones > 3 or trailing_ones > total_coeffs:
-                    # Invalid values - likely decode error
-                    return (0, 0)
-                return (total_coeffs, trailing_ones)
-            except ValueError as e:
-                # decode_vlc already tried fallback and failed
-                # VLC decode error - don't spam warnings, just fail silently
-                # (warnings are too verbose and clutter output)
+                    # CRITICAL FIX: Reset reader before falling through to fallback.
+                    # Without this the reader is left advanced by the matched prefix → desync.
+                    self.reader.seek(start_pos)
+                    primary_failed = True
+                else:
+                    return (total_coeffs, trailing_ones)
+            except ValueError:
+                # decode_vlc already reset reader to start_pos on failure
+                primary_failed = True
+
+            if primary_failed:
+                # FALLBACK: Try NC_0_1 table when primary table failed.
+                # H.264 encoders (e.g. x264) sometimes select a lower nC VLC table
+                # than what the spec computes from neighbor TCs. This recovers from
+                # encoder/decoder nC mismatch (e.g. encoder used nC=0, we computed nC=2).
+                if nC >= 2:
+                    fallback_table = get_coeff_token_table(0)  # NC_0_1
+                    try:
+                        tc, t1 = decode_vlc(self.reader, fallback_table, max_bits=16)
+                        if 0 <= tc <= 16 and 0 <= t1 <= 3 and t1 <= tc:
+                            return (tc, t1)
+                        else:
+                            self.reader.seek(start_pos)
+                    except ValueError:
+                        pass  # decode_vlc already reset reader
                 return (0, 0)
         else:
             # Fallback for missing tables - use simple heuristic
@@ -224,9 +250,8 @@ class CAVLCDecoder:
             level_prefix = 0
             while self.reader.read_bits(1) == 0:
                 level_prefix += 1
-                if level_prefix > 15:  # Safety limit
-                    print(f"  [WARN] level_prefix overflow (>{level_prefix}) at level {i}/{count}")
-                    break
+                if level_prefix > 15:  # Hard cap - values >15 are abnormal for standard video content
+                    raise ValueError(f"level_prefix overflow ({level_prefix}>15) at level {i}/{count} - bitstream desync")
             
             # Decode level_suffix if needed
             if suffixLength == 0:
@@ -407,7 +432,7 @@ class CAVLCDecoder:
 
 def test_cavlc_decoder():
     """Test CAVLC decoder with synthetic data"""
-    from src.zk_mv_stego.bitstream.bitstream_io import BitstreamReader
+    from src.bitstream.bitstream_io import BitstreamReader
     
     # Create test bitstream (would come from real H.264 slice)
     test_data = bytes([0xFF, 0xAA, 0x55, 0x00, 0x01, 0x02, 0x03])

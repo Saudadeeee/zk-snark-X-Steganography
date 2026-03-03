@@ -59,3 +59,11 @@ node_modules/
 *.bak
 
 benchmark_*/
+
+# Debug & scratch scripts
+debug_*.py
+tmp*.py
+check_*.py
+*_output.txt
+tmpclaude-*/
+tmpclaude-*-cwd
