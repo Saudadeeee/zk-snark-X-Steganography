@@ -1162,9 +1162,13 @@ class BitstreamReconstructor:
         """
         with open(output_file, 'wb') as f:
             for nal in nal_units:
-                # Write start code (0x00000001)
-                f.write(self.start_code)
-                
+                # Preserve original start code size (3 or 4 bytes) to avoid byte shifts
+                sc_size = getattr(nal, 'start_code_size', 4)
+                if sc_size == 3:
+                    f.write(b'\x00\x00\x01')
+                else:
+                    f.write(b'\x00\x00\x00\x01')
+
                 # Write NAL unit header (1 byte)
                 nal_header = (
                     (nal.forbidden_zero_bit << 7) |
@@ -1172,7 +1176,7 @@ class BitstreamReconstructor:
                     int(nal.nal_unit_type)
                 )
                 f.write(bytes([nal_header]))
-                
+
                 # Write RBSP (with emulation prevention if needed)
                 rbsp = self._add_emulation_prevention(nal.rbsp_byte)
                 f.write(rbsp)

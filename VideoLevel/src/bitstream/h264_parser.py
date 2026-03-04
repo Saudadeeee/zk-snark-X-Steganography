@@ -109,7 +109,8 @@ class H264BitstreamParser:
                     nal_unit_type=nal_unit_type,
                     rbsp_byte=rbsp,
                     start_pos=pos,
-                    size=nal_end - pos
+                    size=nal_end - pos,
+                    start_code_size=start_code_len,
                 )
                 
                 nal_units.append(nal)

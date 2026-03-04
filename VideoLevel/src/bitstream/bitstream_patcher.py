@@ -195,7 +195,17 @@ class BitstreamPatcher:
             orig_bits = None
             matched_trailing_ones = None  # T1 override that produced the correct round-trip
 
-            for nC_try in [0, 2, 4, 6, 8]:
+            # Prefer TraceableCAVLCParser's pre-computed nC (matches FFmpeg's H.264 spec nC
+            # computation from neighbor total_coeffs).  Scanning from nC=0 first causes ~43%
+            # of blocks to pick the wrong nC table by coincidence, which makes re-encoded bits
+            # undecodable by FFmpeg → CAVLC sync loss → catastrophic PSNR.
+            tracer_nC = offset_info.get('nC', None) if isinstance(offset_info, dict) else None
+            if tracer_nC is not None:
+                nC_scan_order = [tracer_nC] + [nc for nc in [0, 2, 4, 6, 8] if nc != tracer_nC]
+            else:
+                nC_scan_order = [0, 2, 4, 6, 8]
+
+            for nC_try in nC_scan_order:
                 try:
                     reader = BitstreamReader(raw_nal_bytes)
                     dec = CAVLCDecoder(reader)
@@ -351,6 +361,7 @@ class BitstreamPatcher:
                 self.rbsp_byte = new_rbsp
                 self.start_pos = original_nal.start_pos
                 self.size = len(new_rbsp) + 1  # +1 for NAL header
+                self.start_code_size = getattr(original_nal, 'start_code_size', 4)
         
         return PatchedNAL(original_nal, patched_rbsp)
     
@@ -404,8 +415,15 @@ class BitstreamPatcher:
             lookahead_end = min(end_bit + 64, len(rbsp_bits))
             raw_nal_bytes = self._bits_to_bytes(list(rbsp_bits[start_bit:lookahead_end]))
 
+            # Prefer TraceableCAVLCParser's pre-computed nC (matches FFmpeg's H.264 spec nC)
+            tracer_nC = offset_data.get('nC', None) if isinstance(offset_data, dict) else None
+            if tracer_nC is not None:
+                nC_scan_order = [tracer_nC] + [nc for nc in [0, 2, 4, 6, 8] if nc != tracer_nC]
+            else:
+                nC_scan_order = [0, 2, 4, 6, 8]
+
             found = False
-            for nC_try in [0, 2, 4, 6, 8]:
+            for nC_try in nC_scan_order:
                 try:
                     reader = BitstreamReader(raw_nal_bytes)
                     dec = CAVLCDecoder(reader)

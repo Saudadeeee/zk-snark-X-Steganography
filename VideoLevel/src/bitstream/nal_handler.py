@@ -53,6 +53,7 @@ class NALUnit:
     rbsp_byte: bytes  # Raw Byte Sequence Payload
     start_pos: int  # Position in file
     size: int
+    start_code_size: int = 4  # Start code length in bytes (3 or 4)
     
     def __repr__(self):
         type_name = self.nal_unit_type.name_str if isinstance(self.nal_unit_type, NALUnitType) else str(self.nal_unit_type)
@@ -77,60 +78,61 @@ class NALParser:
         """Parse all NAL units from bitstream"""
         self.nal_units = []
         positions = self._find_start_codes()
-        
+
         for i in range(len(positions)):
-            start = positions[i]
-            end = positions[i + 1] if i + 1 < len(positions) else len(self.data)
-            
+            start, sc_size = positions[i]
+            end = positions[i + 1][0] if i + 1 < len(positions) else len(self.data)
+
             # Extract NAL unit
-            nal = self._extract_nal_unit(start, end)
+            nal = self._extract_nal_unit(start, end, sc_size)
             if nal:
                 self.nal_units.append(nal)
-        
+
         return self.nal_units
-        
-    def _find_start_codes(self) -> List[int]:
-        """Find all NAL unit start codes"""
+
+    def _find_start_codes(self) -> List[Tuple[int, int]]:
+        """Find all NAL unit start codes. Returns list of (position_after_sc, sc_size)."""
         positions = []
         i = 0
         while i < len(self.data) - 3:
-            if self.data[i:i+3] == b'\x00\x00\x01':
-                positions.append(i + 3)
-                i += 3
-            elif self.data[i:i+4] == b'\x00\x00\x00\x01':
-                positions.append(i + 4)
+            if self.data[i:i+4] == b'\x00\x00\x00\x01':
+                positions.append((i + 4, 4))
                 i += 4
+            elif self.data[i:i+3] == b'\x00\x00\x01':
+                positions.append((i + 3, 3))
+                i += 3
             else:
                 i += 1
         return positions
 
-    def _extract_nal_unit(self, start: int, end: int) -> Optional[NALUnit]:
+    def _extract_nal_unit(self, start: int, end: int, sc_size: int = 4) -> Optional[NALUnit]:
         """Extract NAL unit from data range"""
         if start >= end or start >= len(self.data):
             return None
-            
+
         nal_header = self.data[start]
         forbidden = (nal_header >> 7) & 1
         ref_idc = (nal_header >> 5) & 3
         unit_type = nal_header & 0x1F
-        
+
         try:
             nal_type = NALUnitType(unit_type)
         except ValueError:
             nal_type = NALUnitType.UNKNOWN
-            
+
         payload = self.data[start+1:end]
-        
+
         # Remove emulation prevention bytes
         clean_payload = self._remove_emulation_prevention(payload)
-        
+
         return NALUnit(
             forbidden_zero_bit=forbidden,
             nal_ref_idc=ref_idc,
             nal_unit_type=nal_type,
             rbsp_byte=clean_payload,
-            start_pos=start - (3 if start > 2 and self.data[start-3:start] == b'\x00\x00\x01' else 4),
-            size=end-start+1 # Approx size including header
+            start_pos=start - sc_size,
+            size=end - start + 1,
+            start_code_size=sc_size,
         )
 
     def _remove_emulation_prevention(self, data: bytes) -> bytes:
