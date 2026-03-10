@@ -1,0 +1,982 @@
+"""
+Embedder: CAVLC Coefficient Embedding Pipeline
+===============================================
+
+Merged module combining:
+  - EncodingLengthChecker: CAVLC VLC bit-length analysis for patchability
+  - CAVLCSafetyFilter:     5-rule safety gate (zero-preservation, T1, bit-length, magnitude)
+  - PayloadEmbedder:       LSB steganographic payload embedding/extraction
+
+Pipeline: EncodingLengthChecker ← CAVLCSafetyFilter ← PayloadEmbedder
+"""
+
+from typing import Tuple
+
+from ..bitstream.cavlc import CAVLCEncoder
+from ..bitstream.bitstream_io import BitstreamWriter
+
+
+
+class EncodingLengthChecker:
+    """Check if coefficient values have same CAVLC encoding length"""
+    
+    def get_level_encoding_length(self, level: int, suffix_length: int = 0, is_first_after_t1s: bool = False) -> int:
+        """
+        Get the number of bits required to encode a level value using H.264 CAVLC
+        
+        This implements the exact VLC length calculation from H.264 Section 9.2.2.1
+        
+        Args:
+            level: Coefficient level value (signed integer)
+            suffix_length: Current suffix length context (0-6)
+            is_first_after_t1s: True if this is the first level after 3 trailing ones
+        
+        Returns:
+            Number of bits in VLC encoding (prefix + suffix)
+        """
+        if level == 0:
+            # Zero levels are not encoded in CAVLC (handled by total_zeros/run_before)
+            return 0
+        
+        abs_level = abs(level)
+        sign = 1 if level < 0 else 0
+        
+        # Calculate levelCode (H.264 Section 9.2.2.1, Table 9-6)
+        # Sign is embedded in levelCode
+        if is_first_after_t1s:
+            # Special case: first level after 3 trailing ones
+            # Cannot be ±1 (already in T1s), so abs_level >= 2
+            # levelCode = 2*(abs_level - 2) + sign
+            levelCode = (abs_level - 2) * 2 + sign
+        else:
+            # Standard encoding
+            # levelCode = 2*(abs_level - 1) + sign
+            levelCode = (abs_level - 1) * 2 + sign
+        
+        # Determine levelPrefix and levelSuffixSize
+        # CRITICAL FIX: When suffixLength=0, write levelCode directly as prefix (FFmpeg behavior)
+        if suffix_length == 0:
+            # No suffix, use prefix value directly as levelCode
+            # This matches how FFmpeg/x264 encodes and how our decoder interprets it
+            levelPrefix = levelCode
+            levelSuffixSize = 0
+        else:
+            # Normal case: split into prefix and suffix
+            levelPrefix = levelCode >> suffix_length
+            levelSuffixSize = suffix_length
+            
+            # Check for escape (prefix >= 14, only when suffixLength > 0)
+            if levelPrefix >= 14:
+                levelPrefix = 14
+                levelSuffixSize = 4
+        
+        # Calculate total bits
+        # level_prefix is encoded as unary: prefix + 1 bits (prefix zeros + one '1')
+        prefix_bits = levelPrefix + 1
+        suffix_bits = levelSuffixSize
+        
+        return prefix_bits + suffix_bits
+
+    def check_lsb_flip_patchability(self, value: int, suffix_length: int = 0) -> Tuple[bool, int, int]:
+        """
+        Check if flipping LSB of value is safe for patching.
+        
+        Uses ACTUAL CAVLC encoding length calculation to determine if LSB flip
+        preserves the bit length.
+        
+        Args:
+            value: Original coefficient value
+            suffix_length: CAVLC suffix length context (typically 0 or 1)
+        
+        Returns:
+            (is_patchable, original_bits, new_bits)
+        """
+        # CRITICAL: Reject value = ±1 or 0 (changes zero/non-zero count)
+        if abs(value) <= 1:
+            return False, 0, 0
+        
+        # Calculate new value after LSB flip
+        # For negative values: flip bit in magnitude representation
+        if value > 0:
+            new_value = value ^ 1  # XOR with 1
+        else:
+            # For negative: flip LSB of abs value, then negate
+            abs_val = abs(value)
+            new_abs = abs_val ^ 1
+            new_value = -new_abs
+        
+        # Don't allow flip that would create 0 or ±1
+        if abs(new_value) <= 1:
+            return False, 0, 0
+        
+        # Calculate actual encoding lengths
+        original_bits = self.get_level_encoding_length(value, suffix_length, is_first_after_t1s=False)
+        new_bits = self.get_level_encoding_length(new_value, suffix_length, is_first_after_t1s=False)
+        
+        # Patchable only if encoding length is preserved
+        is_patchable = (original_bits == new_bits) and (original_bits > 0)
+        
+        return is_patchable, original_bits, new_bits
+
+
+# =============================================================================
+# CAVLC SAFETY FILTER  (formerly cavlc_safety_filter.py)
+# =============================================================================
+
+from typing import List, Tuple, Optional, Set, Dict
+from dataclasses import dataclass
+from functools import lru_cache
+import numpy as np
+
+from ..exceptions import SafetyFilterError
+from ..bitstream.cavlc import CAVLCEncoder
+from ..bitstream.bitstream_io import BitstreamWriter
+
+
+@dataclass
+class CoefficientInfo:
+    """Information about a coefficient for safety checking"""
+    block_idx: Tuple[int, int]  # (mb_idx, block_idx)
+    coeff_idx: int               # Position in zigzag (0-15)
+    value: int                   # Coefficient value
+    is_trailing_one: bool        # Part of trailing ±1 sequence
+    is_dc: bool                  # DC coefficient (position 0)
+    encoding_bits: int           # CAVLC encoding length
+
+
+@dataclass
+class SafetyCheckResult:
+    """Result of safety filter check"""
+    is_safe: bool
+    reason: str
+    original_value: int
+    modified_value: int
+    encoding_bits_original: int
+    encoding_bits_modified: int
+
+
+class CAVLCSafetyFilter:
+    """
+    Comprehensive safety filter for CAVLC-based video steganography
+    
+    Usage:
+        filter = CAVLCSafetyFilter()
+        safe_positions = filter.get_safe_positions(coefficients)
+        for pos in safe_positions:
+            # Embed data safely
+            pass
+    """
+    
+    def __init__(self, 
+                 enable_zero_preservation: bool = True,
+                 enable_trailing_ones_protection: bool = True,
+                 enable_bit_length_check: bool = True,
+                 min_safe_magnitude: int = 3):
+        """
+        Initialize safety filter
+        
+        Args:
+            enable_zero_preservation: Enforce Rule 1 (strongly recommended)
+            enable_trailing_ones_protection: Enforce Rule 2 (recommended)
+            enable_bit_length_check: Enforce Rule 3 (optional but safer)
+            min_safe_magnitude: Minimum |value| for safe embedding (default: 3)
+        
+        Raises:
+            SafetyFilterError: If configuration is invalid
+        """
+        if min_safe_magnitude < 1:
+            raise SafetyFilterError(
+                "min_safe_magnitude must be >= 1",
+                min_safe_magnitude=min_safe_magnitude
+            )
+        
+        self.enable_zero_preservation = enable_zero_preservation
+        self.enable_trailing_ones = enable_trailing_ones_protection
+        self.enable_bit_length = enable_bit_length_check
+        self.min_safe_magnitude = min_safe_magnitude
+        
+        # Initialize encoding length checker for Rule 3
+        if self.enable_bit_length:
+            self.length_checker = EncodingLengthChecker()
+        else:
+            self.length_checker = None
+        
+        # Cache for trailing ones detection (performance optimization)
+        self._trailing_ones_cache: Dict[Tuple[int, ...], Set[int]] = {}
+    
+    def check_coefficient_safety(
+        self,
+        block_coeffs: List[int],
+        coeff_idx: int,
+        new_value: int,
+        suffix_length: int = 1
+    ) -> SafetyCheckResult:
+        """
+        Check if modifying a coefficient is safe according to all enabled rules
+        
+        Args:
+            block_coeffs: All 16 coefficients in block (zigzag order)
+            coeff_idx: Index of coefficient to modify (0-15)
+            new_value: Proposed new value
+            suffix_length: CAVLC suffix_length context (typically 1)
+        
+        Returns:
+            SafetyCheckResult with detailed information
+        """
+        original_value = block_coeffs[coeff_idx]
+        
+        # RULE 1: Zero-Preservation
+        if self.enable_zero_preservation:
+            if original_value == 0 and new_value != 0:
+                return SafetyCheckResult(
+                    is_safe=False,
+                    reason="Rule 1: Cannot change zero to non-zero (breaks TotalCoeffs)",
+                    original_value=original_value,
+                    modified_value=new_value,
+                    encoding_bits_original=0,
+                    encoding_bits_modified=0
+                )
+            
+            if original_value != 0 and new_value == 0:
+                return SafetyCheckResult(
+                    is_safe=False,
+                    reason="Rule 1: Cannot change non-zero to zero (breaks TotalCoeffs)",
+                    original_value=original_value,
+                    modified_value=new_value,
+                    encoding_bits_original=0,
+                    encoding_bits_modified=0
+                )
+        
+        # RULE 2: Trailing Ones Preservation
+        if self.enable_trailing_ones:
+            trailing_positions = self._detect_trailing_ones(block_coeffs)
+            if coeff_idx in trailing_positions:
+                return SafetyCheckResult(
+                    is_safe=False,
+                    reason=f"Rule 2: Coefficient is trailing ±1 at position {coeff_idx} (CAVLC special encoding)",
+                    original_value=original_value,
+                    modified_value=new_value,
+                    encoding_bits_original=1,
+                    encoding_bits_modified=1
+                )
+        
+        # RULE 3: Bit-Length Invariance
+        if self.enable_bit_length and self.length_checker:
+            is_patchable, orig_bits, new_bits = self.length_checker.check_lsb_flip_patchability(
+                original_value, 
+                suffix_length
+            )
+            
+            if not is_patchable:
+                return SafetyCheckResult(
+                    is_safe=False,
+                    reason=f"Rule 3: Encoding length changes ({orig_bits}→{new_bits} bits)",
+                    original_value=original_value,
+                    modified_value=new_value,
+                    encoding_bits_original=orig_bits,
+                    encoding_bits_modified=new_bits
+                )
+        
+        # Additional heuristic: Magnitude threshold
+        if min(abs(original_value), abs(new_value)) < self.min_safe_magnitude:
+            return SafetyCheckResult(
+                is_safe=False,
+                reason=f"Heuristic: Magnitude |{original_value}| or |{new_value}| < {self.min_safe_magnitude} (unstable)",
+                original_value=original_value,
+                modified_value=new_value,
+                encoding_bits_original=0,
+                encoding_bits_modified=0
+            )
+        
+        # PASSED ALL CHECKS
+        return SafetyCheckResult(
+            is_safe=True,
+            reason="All safety checks passed",
+            original_value=original_value,
+            modified_value=new_value,
+            encoding_bits_original=0,
+            encoding_bits_modified=0
+        )
+    
+    def _detect_trailing_ones(self, coeffs: List[int]) -> Set[int]:
+        """
+        Detect positions of trailing ±1 coefficients
+        
+        CAVLC encodes up to 3 trailing ±1 values specially.
+        We need to identify these positions and protect them.
+        
+        Algorithm:
+        1. Scan coefficients in REVERSE zigzag order (high freq → DC)
+        2. Find consecutive ±1 values at the end
+        3. Take up to 3 of them
+        
+        Args:
+            coeffs: 16 coefficients in zigzag order
+        
+        Returns:
+            Set of indices that are trailing ones (empty if none)
+        """
+        trailing_positions = set()
+        
+        # Safety check: ensure coeffs is valid
+        if not coeffs or len(coeffs) == 0:
+            return trailing_positions
+        
+        # Ensure we have enough coefficients
+        if len(coeffs) < 16:
+            # Pad with zeros if needed
+            coeffs = list(coeffs) + [0] * (16 - len(coeffs))
+        
+        # Find first non-zero coefficient from the end
+        last_nonzero_idx = -1
+        for i in range(min(15, len(coeffs) - 1), -1, -1):
+            if coeffs[i] != 0:
+                last_nonzero_idx = i
+                break
+        
+        if last_nonzero_idx == -1:
+            # All zeros
+            return trailing_positions
+        
+        # Scan backward from last non-zero, looking for ±1
+        # CAVLC encodes MAXIMUM 3 trailing ones
+        count = 0
+        for i in range(last_nonzero_idx, -1, -1):
+            if coeffs[i] in [-1, 1] and count < 3:
+                trailing_positions.add(i)
+                count += 1
+            else:
+                # Hit a non-±1 coefficient, stop
+                break
+        
+        return trailing_positions
+    
+    def _verify_block_bit_length_invariance(
+        self,
+        original_block: List[int],
+        modified_block: List[int],
+        nC: int = 0,
+        nal_bit_length: int = None,
+        t1_override: int = None
+    ) -> Tuple[bool, int, int]:
+        """
+        **CRITICAL FIX**: Verify block modification preserves bit length via ACTUAL CAVLC encoding
+
+        This replaces the broken heuristic check with ground-truth verification.
+        We encode BOTH blocks and compare actual bit lengths.
+
+        Args:
+            original_block: Original 16 DCT coefficients (zigzag order)
+            modified_block: Modified coefficients (with LSB flips)
+            nC: Neighbor context for CAVLC encoding (default: 0)
+            nal_bit_length: Actual bit length of the block in the NAL stream.
+                            If provided, original encoder output must match this
+                            length, otherwise the block cannot be round-tripped
+                            by the patcher and will be rejected.
+            t1_override: Optional trailing_ones override value required to bit-exactly
+                         reproduce the original NAL encoding for this block. When set,
+                         both original and modified blocks are encoded with this override
+                         (matching the patcher's behavior for T1-override blocks).
+
+        Returns:
+            (is_safe, original_bits, modified_bits)
+            - is_safe: True if bit lengths match AND zero-preservation maintained
+            - original_bits: Actual encoding length of original block
+            - modified_bits: Actual encoding length of modified block
+
+        Example:
+            >>> original = [-1, 3, 1, 0, 0, ...]
+            >>> modified = [-1, 2, 1, 0, 0, ...]  # Flipped coeff[1]: 3 -> 2
+            >>> is_safe, orig_len, mod_len = filter._verify_block_bit_length_invariance(original, modified)
+            >>> # is_safe = False (28 bits -> 31 bits, length changed!)
+        """
+        try:
+            # CRITICAL: Enforce zero-preservation at block level
+            # Count non-zero coefficients in both blocks
+            original_nonzeros = sum(1 for c in original_block if c != 0)
+            modified_nonzeros = sum(1 for c in modified_block if c != 0)
+            
+            # Reject if total coefficient count changed (zero->non-zero or non-zero->zero)
+            if original_nonzeros != modified_nonzeros:
+                # This is impossible to patch:
+                # - All-zero block: 1-2 bits (coeff_token only)
+                # - Non-zero block: 20+ bits (coeff_token + levels + total_zeros + runs)
+                # Cannot patch different TotalCoeffs without breaking bitstream!
+                return False, 0, 0
+            
+            # Encode original block
+            writer_orig = BitstreamWriter()
+            encoder_orig = CAVLCEncoder(writer_orig)
+            encoder_orig.encode_block_cavlc(original_block, nC=nC, max_num_coeff=16,
+                                            override_trailing_ones=t1_override)
+            original_bits = writer_orig.get_bit_position()
+
+            # CRITICAL: If actual NAL bit length is known, the encoder's output
+            # must match it exactly.  If they differ the patcher will reject this
+            # block (it compares the re-encoded candidate against the original
+            # NAL length).  Reject early so the safety filter never marks such
+            # blocks as embeddable.
+            if nal_bit_length is not None and original_bits != nal_bit_length:
+                return False, original_bits, 0
+
+
+            # Encode modified block
+            # CRITICAL FIX: Pass override_total_coeffs=original_nonzeros
+            # The bitstream_patcher uses this to preserve suffixLength.
+            # If the safety filter doesn't use it, it will estimate a DIFFERENT length!
+            writer_mod = BitstreamWriter()
+            encoder_mod = CAVLCEncoder(writer_mod)
+            encoder_mod.encode_block_cavlc(
+                modified_block,
+                nC=nC,
+                max_num_coeff=16,
+                override_total_coeffs=original_nonzeros,
+                override_trailing_ones=t1_override
+            )
+            modified_bits = writer_mod.get_bit_position()
+            
+            # Compare lengths (must match exactly for patchable modifications)
+            is_safe = (original_bits == modified_bits)
+            
+            return is_safe, original_bits, modified_bits
+            
+        except Exception as e:
+            # If encoding fails, it's definitely not safe
+            # This is EXPECTED for corrupt blocks (TC=16, etc.)
+            # Silently reject without printing (too verbose)
+            return False, 0, 0
+    
+    def get_safe_positions(
+        self,
+        coefficients: List[Tuple[int, int, List[int]]],
+        skip_dc: bool = True,
+        nC_map: Dict[Tuple[int, int], int] = None,
+        nal_length_map: Dict[Tuple[int, int], int] = None,
+        t1_override_map: Dict[Tuple[int, int], int] = None
+    ) -> List[Tuple[int, int, int]]:
+        """
+        Get list of safe embedding positions across all blocks
+
+        Args:
+            coefficients: List of (mb_idx, block_idx, coeffs) tuples
+            skip_dc: Skip DC coefficient (position 0)
+            nC_map: Dictionary mapping (mb_idx, block_idx) to actual nC values from extraction
+            nal_length_map: Dictionary mapping (mb_idx, block_idx) to the actual NAL bit
+                            length of each block. When provided, blocks whose encoder output
+                            differs from the NAL length are rejected (keeps filter in sync
+                            with the patcher).
+            t1_override_map: Dictionary mapping (mb_idx, block_idx) to the trailing_ones
+                             override value required to bit-exactly reproduce the original
+                             NAL encoding. Blocks in this map use override_trailing_ones
+                             when verifying bit-length invariance (matching patcher behavior).
+
+        Returns:
+            List of (mb_idx, block_idx, coeff_idx) tuples that are safe to modify
+
+        Raises:
+            SafetyFilterError: If coefficient data is invalid
+        """
+        if nC_map is None:
+            nC_map = {}
+        if nal_length_map is None:
+            nal_length_map = {}
+        if t1_override_map is None:
+            t1_override_map = {}
+        if not coefficients:
+            raise SafetyFilterError("Empty coefficient list provided")
+        
+        # Validate coefficient format
+        for i, item in enumerate(coefficients[:3]):  # Check first 3 for efficiency
+            if not isinstance(item, tuple) or len(item) != 3:
+                raise SafetyFilterError(
+                    f"Invalid coefficient format at index {i}: expected (mb_idx, block_idx, coeffs)",
+                    index=i, item_type=type(item)
+                )
+        safe_positions = []
+
+        for mb_idx, block_idx, coeffs in coefficients:
+            total_coeffs = sum(1 for c in coeffs if c != 0)
+            if total_coeffs == 0:
+                continue  # All-zero block: nothing to embed
+
+            # Skip blocks explicitly marked as non-patchable by get_unpatchable_blocks.
+            # This check is INDEPENDENT of enable_bit_length so that the sentinel -1
+            # correctly excludes non-patchable blocks even when bit-length checking is
+            # disabled.  Without this, the patcher would silently skip the block and
+            # create a bit-shift in the embedded bit-stream.
+            block_key = (mb_idx, block_idx)
+            if nal_length_map.get(block_key) == -1:
+                continue
+
+            # Detect trailing ones for this block
+            trailing_positions = self._detect_trailing_ones(coeffs)
+
+            # Check each coefficient position
+            for coeff_idx in range(len(coeffs)):
+                # Skip DC if requested
+                if skip_dc and coeff_idx == 0:
+                    continue
+
+                # Skip zeros (Rule 1: zero-preservation)
+                if coeffs[coeff_idx] == 0:
+                    continue
+
+                # Skip trailing ones (Rule 2) — these are handled separately by the
+                # sign-bit loop below (uses ~coeff_idx marker).
+                if coeff_idx in trailing_positions:
+                    continue
+
+                # Calculate LSB-flipped value
+                original = coeffs[coeff_idx]
+                sign = 1 if original > 0 else -1
+                abs_val = abs(original)
+                new_abs = (abs_val & ~1) | ((abs_val & 1) ^ 1)  # Flip LSB
+                new_val = sign * new_abs
+
+                # Symmetric magnitude check (both orig and mod must be >= min_safe)
+                if min(abs_val, new_abs) < self.min_safe_magnitude:
+                    continue
+
+                # Ensure not creating zero
+                if new_val == 0:
+                    continue
+
+                # Rule 3: Verify bit-length preservation via ACTUAL CAVLC encoding
+                if self.enable_bit_length:
+                    modified_block = coeffs[:]
+                    modified_block[coeff_idx] = new_val
+
+                    actual_nC = nC_map.get(block_key, 0)
+                    t1_override = t1_override_map.get(block_key)
+
+                    is_safe, orig_bits, mod_bits = self._verify_block_bit_length_invariance(
+                        coeffs,
+                        modified_block,
+                        nC=actual_nC,
+                        nal_bit_length=nal_length_map.get(block_key),
+                        t1_override=t1_override
+                    )
+
+                    if not is_safe:
+                        continue
+
+                # SAFE!
+                safe_positions.append((mb_idx, block_idx, coeff_idx))
+
+        # Sign-bit positions for trailing ±1 coefficients.
+        # Flipping the sign of a trailing one (±1 → ∓1) is bit-length invariant ONLY
+        # when the coefficient is truly encoded as a trailing-one sign bit (1 bit per sign).
+        # For blocks with t1_override, some ±1 values are encoded as regular levels where
+        # +1 and -1 have different VLC lengths — must verify invariance before adding.
+        # Use ~coeff_idx (always negative) to mark these as sign-bit positions.
+        for mb_idx, block_idx, coeffs in coefficients:
+            block_key = (mb_idx, block_idx)
+            nal_len = nal_length_map.get(block_key)
+            if nal_len is None or nal_len == -1:
+                continue
+            actual_nC = nC_map.get(block_key, 0)
+            t1_override = t1_override_map.get(block_key)
+            # Determine the TRUE T1 candidate positions (those actually encoded as
+            # trailing_one_sign_flags in the bitstream, not as regular level codes).
+            #
+            # When t1_override is not None:  the original encoder used T1 = t1_override
+            #   (may be less than the maximum possible consecutive ±1 run).  Only the
+            #   LAST t1_override non-zero positions are genuine T1 sign-flag positions;
+            #   earlier ±1 values are encoded as regular level codes whose sign bits lie
+            #   within a VLC codeword — flipping them produces spec-non-compliant bits.
+            #
+            # When t1_override is None:  standard encoder path used the maximum available
+            #   T1 count, so _detect_trailing_ones() correctly identifies all T1 positions.
+            if t1_override is not None:
+                nz_pos_t1 = [i for i in range(len(coeffs)) if coeffs[i] != 0]
+                t1_actual = min(t1_override, len(nz_pos_t1))
+                trailing_positions = set(nz_pos_t1[-t1_actual:]) if t1_actual > 0 else set()
+            else:
+                trailing_positions = self._detect_trailing_ones(coeffs)
+            for coeff_idx in sorted(trailing_positions):
+                # Verify bit-length invariance for sign flip before adding
+                modified_block = list(coeffs)
+                modified_block[coeff_idx] = -modified_block[coeff_idx]
+                is_safe, _, _ = self._verify_block_bit_length_invariance(
+                    coeffs, modified_block, nC=actual_nC,
+                    nal_bit_length=nal_len,
+                    t1_override=t1_override
+                )
+                if is_safe:
+                    safe_positions.append((mb_idx, block_idx, ~coeff_idx))
+
+        return safe_positions
+
+
+# =============================================================================
+# PAYLOAD EMBEDDER  (formerly payload_embedder.py)
+# =============================================================================
+
+from typing import List, Tuple, Optional, Dict
+
+from ..exceptions import EmbeddingError, InsufficientCapacityError
+
+
+class PayloadEmbedder:
+    """
+    Embed binary payload into DCT coefficients using LSB substitution
+    with CAVLC Safety Filter (5 rules to prevent corruption)
+    
+    SAFETY RULES (enforced by CAVLCSafetyFilter):
+    1. Zero-Preservation: Never 0→nonzero or nonzero→0 (breaks TotalCoeffs)
+    2. Trailing Ones: Never modify last 3 ±1 coeffs (special CAVLC encoding)
+    3. Bit-Length Invariance: Only modify if encoding length unchanged
+    4. Magnitude Threshold: Only |value| >= 3 (guarantees structure preservation after LSB flip)
+    5. CAVLC Re-encoding: Always re-encode modified blocks
+    
+    CAPACITY OPTIMIZATION:
+    - Use coefficients with |value| >= 3 (guarantees no structure change after LSB flip)
+    - Optionally include |value| == 1 with caution (may flip to 0)
+    - Skip DC (position 0) for stability
+    - Skip zeros (would become ±1, changing block structure)
+    """
+    
+    def __init__(self,
+                 skip_dc: bool = True,
+                 skip_zeros: bool = True,
+                 allow_small_values: bool = False,
+                 use_safety_filter: bool = True,
+                 enable_trailing_ones_protection: bool = True,
+                 enable_bit_length_check: bool = True,
+                 max_modifications_per_block: int = 1):
+        """
+        Initialize embedder with CAVLC Safety Filter
+        
+        Args:
+            skip_dc: Skip DC coefficients (position 0 in zigzag)
+            skip_zeros: Skip zero coefficients
+            allow_small_values: Allow embedding in |coeff| == 1 (RISKY: may flip to 0)
+                               Set to True for higher capacity (up to 2x), but less stable
+            use_safety_filter: Enable comprehensive CAVLC safety checks (RECOMMENDED)
+            enable_trailing_ones_protection: Protect trailing ±1 coefficients (RECOMMENDED)
+            enable_bit_length_check: Check CAVLC encoding length invariance (optional)
+            max_modifications_per_block: Maximum modifications per block (1-4, default: 3)
+                                        1 = safest but lowest capacity
+                                        3 = balanced (recommended)
+                                        4+ = higher capacity but may affect quality
+        """
+        self.skip_dc = skip_dc
+        self.skip_zeros = skip_zeros
+        self.allow_small_values = allow_small_values
+        self.use_safety_filter = use_safety_filter
+        self.max_modifications_per_block = max(1, min(max_modifications_per_block, 8))
+        
+        # Initialize CAVLC Safety Filter if enabled
+        if self.use_safety_filter:
+            min_magnitude = 1 if allow_small_values else 3
+            self.safety_filter = CAVLCSafetyFilter(
+                enable_zero_preservation=True,
+                enable_trailing_ones_protection=enable_trailing_ones_protection,
+                enable_bit_length_check=enable_bit_length_check,
+                min_safe_magnitude=min_magnitude
+            )
+        else:
+            self.safety_filter = None
+    
+    def embed_payload(self, coefficients: List[Tuple[int, int, List[int]]],
+                     payload: bytes, nC_map: Optional[Dict[Tuple[int, int], int]] = None,
+                     nal_length_map: Optional[Dict[Tuple[int, int], int]] = None,
+                     t1_override_map: Optional[Dict[Tuple[int, int], int]] = None) -> Tuple[List[Tuple[int, int, List[int]]], int]:
+        """
+        Embed payload into coefficient blocks with CAVLC safety checks
+        
+        Args:
+            coefficients: List of (mb_idx, block_idx, coeffs) tuples
+            payload: Binary payload to embed
+            nC_map: Mapping of block keys to nC values (Crucial for safety filter accuracy)
+        
+        Returns:
+            (modified_coefficients, bits_embedded)
+        """
+        # Convert payload to bits
+        payload_bits = self._bytes_to_bits(payload)
+        
+        # Use safety filter if enabled
+        if self.use_safety_filter and self.safety_filter:
+            return self._embed_with_safety_filter(coefficients, payload_bits, nC_map, nal_length_map, t1_override_map)
+        else:
+            return self._embed_legacy(coefficients, payload_bits)
+    
+    def _embed_with_safety_filter(
+        self,
+        coefficients: List[Tuple[int, int, List[int]]],
+        payload_bits: List[int],
+        nC_map: Optional[Dict[Tuple[int, int], int]] = None,
+        nal_length_map: Optional[Dict[Tuple[int, int], int]] = None,
+        t1_override_map: Optional[Dict[Tuple[int, int], int]] = None
+    ) -> Tuple[List[Tuple[int, int, List[int]]], int]:
+        """
+        Embed using CAVLC Safety Filter (RECOMMENDED)
+
+        This method enforces all 5 CAVLC safety rules to prevent corruption.
+        """
+        # Get all safe positions across all blocks
+        safe_positions = self.safety_filter.get_safe_positions(
+            coefficients,
+            skip_dc=self.skip_dc,
+            nC_map=nC_map,
+            nal_length_map=nal_length_map,
+            t1_override_map=t1_override_map
+        )
+
+        # Build a map for fast lookup: (mb_idx, block_idx) -> safe_coeff_indices
+        safe_map = {}
+        for mb_idx, block_idx, coeff_idx in safe_positions:
+            key = (mb_idx, block_idx)
+            if key not in safe_map:
+                safe_map[key] = []
+            safe_map[key].append(coeff_idx)
+        
+        # Embed payload
+        modified = []
+        bits_embedded = 0
+        
+        for mb_idx, block_idx, coeffs in coefficients:
+            new_coeffs = coeffs[:]  # Shallow copy
+            block_key = (mb_idx, block_idx)
+            
+            # Flag to track if this block was actually modified
+            block_modified = False
+            
+            # Get safe positions for this block
+            if block_key in safe_map:
+                safe_indices = safe_map[block_key]
+                
+                # Modified approach: Allow multiple modifications per block (up to limit)
+                # Safety Filter validates each individual flip independently
+                # By limiting to max_modifications_per_block, we balance capacity vs safety
+                modifications_in_block = 0
+                
+                for coeff_idx in safe_indices:
+                    if bits_embedded >= len(payload_bits):
+                        break
+                    
+                    if modifications_in_block >= self.max_modifications_per_block:
+                        break  # Reached limit for this block
+                    
+                    payload_bit = payload_bits[bits_embedded]
+
+                    if coeff_idx >= 0:
+                        # Standard LSB modification
+                        original_val = coeffs[coeff_idx]
+                        new_coeffs[coeff_idx] = self._modify_lsb(
+                            coeffs[coeff_idx],
+                            payload_bit
+                        )
+                        modified_val = new_coeffs[coeff_idx]
+                    else:
+                        # Sign-bit modification for trailing ±1 coefficients.
+                        # ~coeff_idx recovers the original zigzag index.
+                        real_idx = ~coeff_idx
+                        original_val = coeffs[real_idx]
+                        abs_val = abs(coeffs[real_idx])
+                        new_val = abs_val if payload_bit == 0 else -abs_val
+                        new_coeffs[real_idx] = new_val
+                        modified_val = new_val
+                    
+                    # Check if coefficient actually changed
+                    if modified_val != original_val:
+                        block_modified = True
+                    
+                    # CRITICAL FIX: Always increment modifications counter regardless
+                    # of whether value changed, otherwise extractor cannot stay in sync!
+                    modifications_in_block += 1
+                    bits_embedded += 1
+
+            # CRITICAL FIX: Only append block if it was ACTUALLY modified
+            # Don't return original blocks - reconstructor will handle them
+            if block_modified:
+                modified.append((mb_idx, block_idx, new_coeffs))
+
+            if bits_embedded >= len(payload_bits):
+                # Finished embedding, stop processing
+                break
+
+        # DON'T copy remaining blocks - reconstructor will use original coefficients for them
+        
+        return modified, bits_embedded
+
+    def extract_payload(
+        self,
+        coefficients: List[Tuple[int, int, List[int]]],
+        payload_length_bits: int,
+        start_bit_offset: int = 0,
+        nC_map: Optional[Dict[Tuple[int, int], int]] = None,
+        nal_length_map: Optional[Dict[Tuple[int, int], int]] = None,
+        precomputed_safe_positions: Optional[List[Tuple[int, int, int]]] = None
+    ) -> bytes:
+        """
+        Extract payload from coefficient blocks
+        
+        Args:
+            coefficients: List of (mb_idx, block_idx, coeffs) tuples
+            payload_length_bits: Number of bits to extract
+            start_bit_offset: Skip this many bits before starting extraction
+            nC_map: Mapping of block keys to nC values (Crucial for safety filter accuracy)
+            precomputed_safe_positions: If provided, skip safety filter recomputation and use
+                                        these positions directly (must match embedding positions).
+                                        Pass the safe_positions list saved during embed_payload.
+
+        Returns:
+            Extracted payload as bytes
+        
+        Raises:
+            EmbeddingError: If coefficient data is invalid
+            InsufficientCapacityError: If not enough bits available
+        """
+        # Validate inputs
+        if not coefficients:
+            raise EmbeddingError("Empty coefficient list provided for extraction")
+        
+        if payload_length_bits <= 0:
+            raise EmbeddingError(
+                f"Invalid payload length: {payload_length_bits} bits",
+                payload_length_bits=payload_length_bits
+            )
+        
+        if start_bit_offset < 0:
+            raise EmbeddingError(
+                f"Invalid start offset: {start_bit_offset}",
+                start_bit_offset=start_bit_offset
+            )
+        
+        # Use safety filter routing if enabled (MUST match embedding!)
+        if self.use_safety_filter and self.safety_filter:
+            return self._extract_with_safety_filter(coefficients, payload_length_bits, start_bit_offset, nC_map, nal_length_map, precomputed_safe_positions)
+        else:
+            return self._extract_legacy(coefficients, payload_length_bits, start_bit_offset)
+    
+    def _extract_with_safety_filter(
+        self,
+        coefficients: List[Tuple[int, int, List[int]]],
+        payload_length_bits: int,
+        start_bit_offset: int = 0,
+        nC_map: Optional[Dict[Tuple[int, int], int]] = None,
+        nal_length_map: Optional[Dict[Tuple[int, int], int]] = None,
+        precomputed_safe_positions: Optional[List[Tuple[int, int, int]]] = None
+    ) -> bytes:
+        """
+        Extract using CAVLC Safety Filter (same positions as embedding)
+
+        CRITICAL: Must use SAME safe positions as embedding to ensure sync!
+        If precomputed_safe_positions is provided, it is used directly (bypassing
+        recomputation from stego coefficients, which would differ due to patched values).
+        """
+        # Use pre-computed positions from the embedding phase if provided.
+        # This avoids recomputing safe_positions from stego coefficients — after patching,
+        # some blocks have different base values which changes the block-level bit-length
+        # check for other coefficients in the same block, causing safe_positions divergence.
+        if precomputed_safe_positions is not None:
+            safe_positions = precomputed_safe_positions
+        else:
+            # Get all safe positions (same calculation as embedding)
+            safe_positions = self.safety_filter.get_safe_positions(
+                coefficients,
+                skip_dc=self.skip_dc,
+                nC_map=nC_map,
+                nal_length_map=nal_length_map
+            )
+        
+        # Build coefficient lookup map for fast access
+        coeff_map = {}
+        for mb_idx, block_idx, coeffs in coefficients:
+            coeff_map[(mb_idx, block_idx)] = coeffs
+            
+        # Group safe positions by block to mirror embedder
+        safe_map = {}
+        for mb_idx, block_idx, coeff_idx in safe_positions:
+            key = (mb_idx, block_idx)
+            if key not in safe_map:
+                safe_map[key] = []
+            safe_map[key].append(coeff_idx)
+        
+        extracted_bits = []
+        bits_skipped = 0
+        
+        for mb_idx, block_idx, coeffs in coefficients:
+            block_key = (mb_idx, block_idx)
+            if block_key not in safe_map:
+                continue
+                
+            safe_indices = safe_map[block_key]
+            extractions_in_block = 0
+            
+            for coeff_idx in safe_indices:
+                if len(extracted_bits) >= payload_length_bits:
+                    break
+                    
+                if extractions_in_block >= self.max_modifications_per_block:
+                    break  # Respect block capacity limits mirroring embedder
+                    
+                # Skip offset bits first
+                if bits_skipped < start_bit_offset:
+                    bits_skipped += 1
+                    extractions_in_block += 1
+                    continue
+                
+                # Extract bit — handle LSB and sign-bit positions
+                if coeff_idx >= 0:
+                    lsb = abs(coeffs[coeff_idx]) & 1
+                else:
+                    # Sign-bit position: real index recovered via ~coeff_idx
+                    real_idx = ~coeff_idx
+                    lsb = 0 if coeffs[real_idx] > 0 else 1
+                extracted_bits.append(lsb)
+                extractions_in_block += 1
+        
+        return self._bits_to_bytes(extracted_bits)
+
+    def _modify_lsb(self, coeff: int, bit: int) -> int:
+        """
+        Modify LSB of coefficient absolute value
+        
+        Args:
+            coeff: Original coefficient
+            bit: Bit to embed (0 or 1)
+        
+        Returns:
+            Modified coefficient with sign preserved
+            CRITICAL: Never returns 0 (would create new zeros that confuse extraction)
+        """
+        if coeff == 0:
+            return 0
+        
+        abs_val = abs(coeff)
+        new_abs = (abs_val & ~1) | bit  # Clear LSB and set new bit
+        
+        # CRITICAL FIX: Never create new zeros
+        # If modification would result in 0, keep original value
+        if new_abs == 0:
+            return coeff
+        
+        # Preserve sign
+        return new_abs if coeff > 0 else -new_abs
+    
+    def _bytes_to_bits(self, data: bytes) -> List[int]:
+        """Convert bytes to list of bits"""
+        bits = []
+        for byte in data:
+            for i in range(7, -1, -1):
+                bits.append((byte >> i) & 1)
+        return bits
+    
+    def _bits_to_bytes(self, bits: List[int]) -> bytes:
+        """Convert list of bits to bytes"""
+        # Pad to byte boundary
+        while len(bits) % 8 != 0:
+            bits.append(0)
+        
+        bytes_list = []
+        for i in range(0, len(bits), 8):
+            byte_bits = bits[i:i+8]
+            byte_val = 0
+            for bit in byte_bits:
+                byte_val = (byte_val << 1) | bit
+            bytes_list.append(byte_val)
+        
+        return bytes(bytes_list)

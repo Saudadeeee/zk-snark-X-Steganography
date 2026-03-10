@@ -1,6 +1,3 @@
 """
-Cryptographic modules for ZK-SNARK integration
+Crypto module for video-level steganography.
 """
-from .proof_generator import GrothProofGenerator, ZKProofGenerator
-from .proof_wrapper import ZKProofWrapper
-from .proof_serializer import ProofSerializer

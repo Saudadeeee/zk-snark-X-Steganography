@@ -28,25 +28,7 @@ class BitstreamReader:
     def tell(self) -> int:
         """Get current bit position (alias for position property)"""
         return self.pos
-    
-    def peek_bits(self, n: int) -> str:
-        """Peek next n bits without consuming them (for debugging)"""
-        saved_pos = self.pos
-        bits = ""
-        try:
-            for _ in range(min(n, (len(self.data) * 8) - self.pos)):
-                byte_pos = self.pos // 8
-                bit_pos = 7 - (self.pos % 8)
-                if byte_pos < len(self.data):
-                    bit = (self.data[byte_pos] >> bit_pos) & 1
-                    bits += str(bit)
-                    self.pos += 1
-                else:
-                    break
-        finally:
-            self.pos = saved_pos  # Restore position
-        return bits
-    
+
     def seek(self, pos: int):
         """Seek to a specific bit position"""
         if pos < 0 or pos > len(self.data) * 8:
@@ -98,15 +80,6 @@ class BitstreamReader:
         # Map: 0->0, 1->1, 2->-1, 3->2, 4->-2, ...
         return (code_num + 1) // 2 if code_num % 2 == 1 else -(code_num // 2)
     
-    def byte_aligned(self) -> bool:
-        """Check if at byte boundary"""
-        return self.pos % 8 == 0
-    
-    def align_to_byte(self):
-        """Skip bits to align to next byte boundary"""
-        if not self.byte_aligned():
-            self.pos = ((self.pos // 8) + 1) * 8
-            
     def peek_bits(self, n: int) -> int:
         """Peek n bits without advancing position"""
         saved_pos = self.pos
@@ -331,21 +304,6 @@ class BitstreamWriter:
                 bits.append((self.bit_buffer >> i) & 1)
         
         return bits
-    
-    def get_byte_count(self) -> int:
-        """
-        Get number of complete bytes written
-        
-        Returns:
-            Number of bytes
-        """
-        return len(self.buffer)
-    
-    def reset(self):
-        """Reset writer to initial state"""
-        self.buffer.clear()
-        self.bit_buffer = 0
-        self.bit_count = 0
     
     def __repr__(self):
         return f"BitstreamWriter({len(self.buffer)} bytes, {self.bit_count} pending bits)"

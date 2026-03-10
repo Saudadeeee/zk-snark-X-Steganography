@@ -18,7 +18,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Tuple, Dict, Optional
+from typing import Tuple
 
 from .zk_payload_format import proof_to_bytes, bytes_to_proof
 
@@ -89,41 +89,6 @@ class ZKSnarkBridge:
         print("  [ZK] Verifying Groth16 proof...")
         return self._snarkjs_verify(proof_dict, public_dict)
 
-    def verify_extracted(
-        self, extracted_payload: bytes, proof_bytes: bytes, secret_key_hint: Optional[bytes] = None
-    ) -> Tuple[bool, dict]:
-        """
-        Verify a deserialized proof against an extracted payload.
-
-        This reconstructs the public signals from the payload and verifies
-        the proof without needing the secret key (it's encoded in the commitment).
-
-        Args:
-            extracted_payload: Bytes extracted from the video.
-            proof_bytes:       256-byte serialized proof from the video.
-            secret_key_hint:   Optional — if provided, recomputes commitment for cross-check.
-
-        Returns:
-            (is_valid, info_dict)
-        """
-        proof_dict = bytes_to_proof(proof_bytes)
-
-        # We need the public signals (which were embedded alongside the proof).
-        # The public.json is saved during prove step; here we recompute from payload.
-        # Note: without secret_key we cannot recompute commitment, but we can
-        # still verify by reading the public signals from public_dict if provided.
-        #
-        # For the embed pipeline: we save public.json in the blob comment area or
-        # recompute from known secret during extraction (test scenario).
-        if secret_key_hint is not None:
-            public_dict = self._build_public_signals(extracted_payload, secret_key_hint)
-            valid = self._snarkjs_verify(proof_dict, public_dict)
-            payload_hash_hex = hashlib.sha256(extracted_payload).hexdigest()
-            return valid, {"payload_hash": payload_hash_hex, "verified": valid}
-        else:
-            # Without secret we cannot reconstruct public signals — return False
-            return False, {"error": "secret_key required for verification"}
-
     def proof_to_bytes(self, proof_dict: dict) -> bytes:
         """Serialize proof dict → 256 bytes."""
         return proof_to_bytes(proof_dict)
@@ -167,20 +132,14 @@ class ZKSnarkBridge:
             "secret":       self._bytes_to_bits(secret_key),
         }
 
-    def _build_public_signals(self, payload_bytes: bytes, secret_key: bytes) -> dict:
-        """Build public signals dict for verification (matches circuit public outputs)."""
+    def _build_public_signals(self, payload_bytes: bytes, secret_key: bytes) -> list:
+        """Build the public signals list for snarkjs verification."""
         payload_hash_bytes = hashlib.sha256(payload_bytes).digest()
         commitment_input = payload_hash_bytes + secret_key
         commitment_bytes = hashlib.sha256(commitment_input).digest()
-
-        # snarkjs public.json is a flat list of field elements (as decimal strings).
-        # Order matches circuit signal declaration:
-        #   payload_hash[256], commitment[256], payload_length  → 513 values
         payload_hash_bits = self._bytes_to_bits(payload_hash_bytes)
         commitment_bits = self._bytes_to_bits(commitment_bytes)
-
-        signals = payload_hash_bits + commitment_bits + [str(len(payload_bytes))]
-        return signals   # list of 513 strings
+        return payload_hash_bits + commitment_bits + [str(len(payload_bytes))]
 
     def _compute_witness(self, circuit_input: dict) -> Path:
         """Run generate_witness.js via Node.js to produce witness.wtns."""

@@ -1,38 +1,644 @@
 """
-H.264 Bitstream Reconstructor with CAVLC Re-encoding
+Bitstream Operations: Patcher and Reconstructor
+================================================
 
-Rebuilds H.264 bitstream after modifying DCT coefficients for video-only steganography.
+Merged module combining:
+  - BitArray / BitstreamPatcher: Direct bit-level patching at tracked offsets
+  - BitstreamReconstructor: Full CAVLC re-encoding of H.264 slices
 
-This implementation performs TRUE coefficient embedding by:
-1. Extracting ALL coefficients from original video
-2. Applying LSB modifications to embed payload
-3. Re-encoding CAVLC residual data with modified coefficients
-4. Reconstructing video with embedded data
-
-The approach uses simplified macroblock syntax to handle common cases while
-maintaining video playability and proof extraction capability.
-
-Reference: ITU-T H.264 (2021) Sections 7, 8, 9
+H.264 steganography embedding via smart bitstream patching.
 """
 
 from typing import List, Tuple, Dict, Optional
-import struct
 from dataclasses import dataclass
 
-from .nal_handler import NALUnit, NALUnitType, SliceHeaderParser, SPSData, PPSData
-from .macroblock_parser import MacroblockParser
-from .cavlc_encoder import CAVLCEncoder
-from .cavlc_decoder import CAVLCDecoder
+from .h264 import (
+    NALUnit, NALUnitType, SliceHeaderParser, SPSData, PPSData,
+    H264BitstreamParser, TraceableCAVLCParser,
+)
+from .cavlc import CAVLCEncoder, CAVLCDecoder
 from .bitstream_io import BitstreamWriter, BitstreamReader
 
 
-@dataclass
-class ModifiedSliceData:
-    """Data for a modified slice"""
-    nal_unit: NALUnit
-    sps: SPSData
-    pps: PPSData
-    modified_coefficients: List[Tuple[int, int, List[int]]]  # (mb_idx, block_idx, coeffs)
+# =============================================================================
+# BITSTREAM PATCHER  (formerly bitstream_patcher.py)
+# =============================================================================
+
+
+
+class BitArray:
+    """Simple bit array for bit-level operations"""
+    
+    def __init__(self, data: bytes):
+        """Initialize from bytes"""
+        self.bits = []
+        for byte in data:
+            for i in range(7, -1, -1):
+                self.bits.append((byte >> i) & 1)
+    
+    def __len__(self):
+        return len(self.bits)
+    
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            return self.bits[key]
+        return self.bits[key]
+    
+    def __setitem__(self, key, value):
+        if isinstance(key, slice):
+            # Slice assignment
+            start, stop, step = key.indices(len(self.bits))
+            if step != 1:
+                raise ValueError("Only contiguous slices supported")
+            
+            # Replace bits
+            if isinstance(value, list):
+                self.bits[start:stop] = value
+            else:
+                raise ValueError("Value must be list of bits")
+        else:
+            self.bits[key] = value
+    
+    def to_bytes(self) -> bytes:
+        """Convert bit array back to bytes"""
+        # Pad to byte boundary if needed
+        if len(self.bits) % 8 != 0:
+            padding_needed = 8 - (len(self.bits) % 8)
+            padded_bits = self.bits + [0] * padding_needed
+        else:
+            padded_bits = self.bits
+        
+        result = bytearray()
+        for i in range(0, len(padded_bits), 8):
+            byte = 0
+            for j in range(8):
+                byte |= (padded_bits[i + j] << (7 - j))
+            result.append(byte)
+        
+        return bytes(result)
+
+
+class BitstreamPatcher:
+    """
+    Patches H.264 bitstream by overwriting coefficient bits at specific offsets.
+    
+    Key property: Safety Filter guarantees bit length invariance
+    -> Old and new coefficients encode to SAME bit length
+    -> Safe to overwrite without alignment issues
+    """
+    
+    def __init__(self):
+        self.parser = TraceableCAVLCParser()
+    
+    def patch_slice(self, original_nal, modifications: List[Tuple[int, int, List[int]]], 
+                    sps: SPSData, pps: PPSData, global_mb_offset: int = 0,
+                    pre_computed_offsets: Dict = None, pre_computed_blocks: Dict = None):
+        """
+        Patch a slice with modified coefficients using direct bit overwrite.
+        
+        Args:
+            original_nal: Original NAL unit
+            modifications: List of (mb_idx_GLOBAL, block_idx, new_coeffs)  <- GLOBAL MB indices!
+            sps: SPS data
+            pps: PPS data
+            global_mb_offset: Global MB offset for this slice (to convert local->global MB indices)
+            pre_computed_offsets: Optional pre-computed block offsets {(mb_local, blk): offset_data}
+                                  If provided, skip internal re-parse to avoid divergence.
+            pre_computed_blocks: Optional pre-computed blocks {(mb_local, blk): [coeffs]}
+            
+        Returns:
+            Patched NAL unit with same structure
+        """
+        # Step 1: Get bit offsets (use pre-computed if available, otherwise re-parse)
+        if pre_computed_offsets is not None and pre_computed_blocks is not None:
+            # Use pre-computed data from the reconstructor's parse — avoids double-parse divergence
+            block_offsets = pre_computed_offsets
+            original_blocks = pre_computed_blocks
+        else:
+            # Fallback: re-parse the NAL internally
+            # ⚠️ WARNING: Re-parsing can diverge from embedder's parse due to parser state!
+            result = self.parser.extract_with_offsets(original_nal, sps, pps)
+            block_offsets = result['offsets']  # Keys are (mb_idx_LOCAL, block_idx)
+            original_blocks = result['blocks']
+        
+        if not block_offsets:
+            print(f"[PATCHER] Warning: No offsets extracted!")
+            return original_nal
+        
+        global_block_offsets = {}
+        global_original_blocks = {}  # CRITICAL: Also convert blocks dict!
+        
+        for (mb_local, blk_idx), offset_data in block_offsets.items():
+            mb_global = mb_local + global_mb_offset
+            global_block_offsets[(mb_global, blk_idx)] = offset_data
+
+        for (mb_local, blk_idx), coeffs in original_blocks.items():
+            mb_global = mb_local + global_mb_offset
+            global_original_blocks[(mb_global, blk_idx)] = coeffs
+
+        # Step 2: Convert RBSP bytes to BitArray (mutable bit-level structure)
+        rbsp_bits = BitArray(original_nal.rbsp_byte)
+
+        # Build reverse lookup: end_bit → (key, offset_data) for retroactive boundary check.
+        # When patching block B, we verify that the immediately preceding block A (whose
+        # end_bit == B.start_bit) is not extended by the modified bits.  A H.264 decoder
+        # reads block A's encoding in a streaming fashion; if B's new bits happen to form
+        # the tail of a longer valid CAVLC codeword starting at A, the decoder overruns A
+        # and misaligns all subsequent blocks — cascade desync.
+        end_to_block = {}
+        for blk_key, blk_offset in global_block_offsets.items():
+            eb = blk_offset.get('end_bit')
+            if eb is not None:
+                end_to_block[eb] = (blk_key, blk_offset)
+
+        # Step 3: Patch each modified block
+        patched_count = 0
+        skipped_count = 0
+        
+        for mb_idx, block_idx, new_coeffs in modifications:
+            key = (mb_idx, block_idx)  # Already global from embedder!
+            
+            if key not in global_block_offsets:  # Use global offsets!
+                print(f"[PATCHER] Warning: Block {key} not in global offset map (skip MB or not coded)")
+                skipped_count += 1
+                continue
+            
+            offset_info = global_block_offsets[key]  # Use global offsets!
+            start_bit = offset_info['start_bit']
+            end_bit = offset_info['end_bit']
+            original_length = offset_info['bit_length']
+
+            # Get original coefficients from blocks dict (GLOBAL keys!)
+            # CRITICAL FIX: Use global_original_blocks, not original_blocks
+            # original_blocks hasLOCAL keys (0,1,2...), we need GLOBAL keys (94,95,96...)
+            original_coeffs = global_original_blocks.get(key, None)
+            
+            # CRITICAL: If block not found in extracted coeffs, SKIP IT!
+            # This means the block wasn't actually coded in the NAL
+            if original_coeffs is None:
+                if patched_count == 0:  # Show debug for first occurrence only
+                    print(f"[PATCHER] SKIP {key}: Block not found in extracted coeffs (wasn't coded in NAL)")
+                skipped_count += 1
+                continue
+            
+            # PARSER CONSISTENCY CHECK: Verify total_coeffs match between parser and embedder
+            parser_total = sum(1 for c in original_coeffs if c != 0)
+            modified_total = sum(1 for c in new_coeffs if c != 0)
+            if parser_total != modified_total and patched_count < 5:
+                print(f"[PATCHER_WARN] {key}: Parser extracted {parser_total} coeffs, embedder has {modified_total} coeffs")
+                print(f"  This indicates parser extraction inconsistency!")
+            
+            actual_nal_bits = list(rbsp_bits[start_bit:end_bit])
+            # Use a 64-bit lookahead buffer to avoid padding-zero artifacts:
+            # when the block is not byte-aligned the decoder would otherwise
+            # read padding zeros that look like valid CAVLC data, shifting the
+            # consumed-bit count and failing the original_length check.
+            lookahead_end = min(end_bit + 64, len(rbsp_bits))
+            raw_nal_bytes = self._bits_to_bytes(list(rbsp_bits[start_bit:lookahead_end]))
+
+            matched_nC = None
+            matched_nal_coeffs = None  # Coefficients decoded directly from the NAL
+            orig_bits = None
+            matched_trailing_ones = None  # T1 override that produced the correct round-trip
+
+            # Use TraceableCAVLCParser's pre-computed nC exclusively when available.
+            # This nC matches FFmpeg's H.264 spec computation from running neighbor TC values.
+            #
+            # CRITICAL: Never fall back to other nC values when tracer_nC is known.
+            # Fallback scanning produces false-positive nC matches: e.g. nC=2 may
+            # coincidentally round-trip for a block originally encoded with nC=4. The
+            # forward check with nC=2 also passes (zero-padded gives the right bit count),
+            # but FFmpeg computes nC=4 from context and reads 19 bits instead of 11,
+            # causing cascade desync in the rest of the slice.
+            tracer_nC = offset_info.get('nC', None) if isinstance(offset_info, dict) else None
+            if tracer_nC is not None:
+                nC_scan_order = [tracer_nC]  # ONLY use tracer_nC — fallbacks cause false positives
+            else:
+                nC_scan_order = [0, 2, 4, 6, 8]
+
+            for nC_try in nC_scan_order:
+                try:
+                    reader = BitstreamReader(raw_nal_bytes)
+                    dec = CAVLCDecoder(reader)
+                    block = dec.decode_block_cavlc(nC_try, max_num_coeff=16)
+                    consumed = reader.pos
+                    if consumed != original_length:
+                        continue  # Wrong nC: decoder consumed wrong number of bits
+                    # Verify round-trip: encode(decode(bits)) == bits
+                    nal_coeffs = list(block.levels)
+                    # First try without T1 override (encoder chooses max T1)
+                    candidate = self._encode_coefficients_to_bits(nal_coeffs, nC_try, max_num_coeff=16)
+                    if len(candidate) == original_length and list(candidate) == actual_nal_bits:
+                        matched_nC = nC_try
+                        matched_nal_coeffs = nal_coeffs
+                        orig_bits = candidate
+                        matched_trailing_ones = None  # No override needed
+                        break
+                    # If standard encode fails, try with T1 override = decoded trailing_ones.
+                    # Some original encoders choose a smaller T1 than the maximum possible.
+                    t1_decoded = block.trailing_ones
+                    candidate_t1 = self._encode_coefficients_to_bits(
+                        nal_coeffs, nC_try, max_num_coeff=16,
+                        override_trailing_ones=t1_decoded
+                    )
+                    if len(candidate_t1) == original_length and list(candidate_t1) == actual_nal_bits:
+                        matched_nC = nC_try
+                        matched_nal_coeffs = nal_coeffs
+                        orig_bits = candidate_t1
+                        matched_trailing_ones = t1_decoded
+                        break
+                except Exception:
+                    continue
+
+            if matched_nC is None:
+                if patched_count < 5:
+                    lens = {}
+                    for nC_try in [0, 2, 4, 6, 8]:
+                        try:
+                            reader = BitstreamReader(raw_nal_bytes)
+                            dec = CAVLCDecoder(reader)
+                            dec.decode_block_cavlc(nC_try, max_num_coeff=16)
+                            lens[nC_try] = reader.pos
+                        except Exception:
+                            lens[nC_try] = None
+                    print(f"[PATCHER] SKIP {key}: No nC round-trips exactly "
+                          f"(NAL={original_length}b). nC->consumed={lens}")
+                skipped_count += 1
+                continue
+
+            nC = matched_nC  # Confirmed correct nC via round-trip decode-encode
+            # Use matched_nal_coeffs as the ground-truth original coefficients
+            # from NAL, not the extractor's (potentially wrong) version.
+
+            # ──────────────────────────────────────────────────────────────────
+            # Apply the embedder's LSB intent to the NAL-decoded coeffs.
+            # Instead of a delta (which assumes identical parsing between the
+            # embedder's TraceableCAVLCParser and the patcher's BitstreamDecoder),
+            # we use the INTENDED LSB from the embedder's result.
+            #
+            # For each position where the embedder changed original_coeffs[i]:
+            #   intended_lsb = abs(new_coeffs[i]) % 2
+            # We set matched_nal_coeffs[i]'s LSB to intended_lsb.
+            # If the current LSB already matches, no modification is needed.
+            #
+            # This is robust to parsing inconsistencies (root cause of safe_pos
+            # divergence): the stego coefficient's LSB always equals the embedded
+            # bit regardless of the patcher's decoded base value.
+            # ──────────────────────────────────────────────────────────────────
+            original_total_coeffs = sum(1 for c in matched_nal_coeffs if c != 0)
+
+            # Build modified NAL coefficients using intended-LSB / intended-sign approach
+            modified_nal_coeffs = list(matched_nal_coeffs)
+            for i in range(min(len(original_coeffs), len(modified_nal_coeffs))):
+                if original_coeffs[i] != new_coeffs[i] and original_coeffs[i] != 0:
+                    if abs(original_coeffs[i]) == abs(new_coeffs[i]):
+                        # Sign-bit change: absolute values are equal but signs differ.
+                        # Applies to trailing ±1 coefficients encoded via sign-bit embedding.
+                        intended_positive = new_coeffs[i] > 0
+                        nal_positive = matched_nal_coeffs[i] > 0
+                        if intended_positive != nal_positive:
+                            modified_nal_coeffs[i] = -matched_nal_coeffs[i]
+                        # else: sign already matches — no change needed
+                    else:
+                        # Standard LSB modification
+                        intended_lsb = abs(new_coeffs[i]) % 2
+                        matched_abs = abs(matched_nal_coeffs[i])
+                        current_lsb = matched_abs % 2
+                        if current_lsb != intended_lsb:
+                            sign = 1 if matched_nal_coeffs[i] >= 0 else -1
+                            new_abs = (matched_abs & ~1) | intended_lsb
+                            if new_abs == 0:
+                                new_abs = matched_abs  # Safety: cannot create zero
+                            modified_nal_coeffs[i] = sign * new_abs
+                        # else: current LSB already matches intended — no change needed
+
+            modified_total_coeffs = sum(1 for c in modified_nal_coeffs if c != 0)
+
+            # Skip if modification would introduce zero→non-zero or total_coeffs change
+            # (these cannot be patched safely)
+            if original_total_coeffs == 0 and modified_total_coeffs > 0:
+                skipped_count += 1
+                continue
+            if original_total_coeffs != modified_total_coeffs:
+                # Safety filter should have prevented this — skip as a safeguard
+                skipped_count += 1
+                continue
+
+            # NOTE: T1 Position Safety Check was previously here but was removed once
+            # CAVLCEncoder/Decoder sufLen progression was fixed to follow H.264 spec
+            # (two separate if-statements instead of if/elif).  The round-trip forward
+            # check (Step 6a) and retroactive boundary check (Step 6b) below are now
+            # sufficient to catch any modifications that would produce invalid bitstreams.
+
+            # Re-encode modified coefficients with trailing_ones override only.
+            new_bits = self._encode_coefficients_to_bits(
+                modified_nal_coeffs, nC, max_num_coeff=16,
+                override_trailing_ones=matched_trailing_ones)
+
+            # Bit-exact match already confirmed for original in nC scanning above.
+
+            # Step 5: Verify bit length (Safety Filter guarantee)
+            if len(new_bits) != original_length:
+                if patched_count < 2:
+                    print(f"[PATCHER] SKIP {key}: Modified coefficients encode to different length!")
+                    print(f"  Original NAL: {original_length} bits")
+                    print(f"  Re-encoded:   {len(new_bits)} bits")
+                skipped_count += 1
+                continue
+
+            # Step 6a: Forward round-trip check — verify decode(new_bits, nC) consumes
+            # EXACTLY original_length bits.  Length equality alone is insufficient:
+            # for FLC6 (nC≥8) a T1 change (e.g. T1=2→0) can produce new_bits with the
+            # same *count* of bits but a structurally-incomplete encoding that the
+            # decoder overruns by 9+ bits into the next block, causing cascade desync.
+            try:
+                fwd_raw = self._bits_to_bytes(new_bits + [0] * 64)
+                fwd_reader = BitstreamReader(fwd_raw)
+                fwd_dec = CAVLCDecoder(fwd_reader)
+                fwd_dec.decode_block_cavlc(nC, max_num_coeff=16)
+                if fwd_reader.pos != original_length:
+                    if patched_count < 2:
+                        print(f"[PATCHER] SKIP {key}: new_bits decode consumes "
+                              f"{fwd_reader.pos}b != {original_length}b (incomplete encoding)")
+                    skipped_count += 1
+                    continue
+            except Exception:
+                skipped_count += 1
+                continue
+
+            # Step 6b: Retroactive boundary corruption check.
+            # Verify that placing new_bits at [start_bit, end_bit) does NOT extend the
+            # CAVLC decoding of any ancestor block reachable by walking the directly-
+            # connected chain backwards up to CHAIN_LOOKBACK_PATCH steps.
+            # Short intermediate blocks (e.g. 1-bit) can be "transparent" gaps that
+            # a mis-decoding ancestor overruns through, so a single-step check is not
+            # sufficient.
+            CHAIN_LOOKBACK_PATCH = 8
+            chain_boundary_patch = start_bit
+            retro_skip = False
+            for _hop in range(CHAIN_LOOKBACK_PATCH):
+                anc_entry = end_to_block.get(chain_boundary_patch)
+                if anc_entry is None:
+                    break
+                anc_key_p, anc_offset_p = anc_entry
+                anc_nC_p = anc_offset_p.get('nC')
+                anc_start_p = anc_offset_p.get('start_bit')
+                anc_len_p = anc_offset_p.get('bit_length')
+                if anc_nC_p is None or anc_start_p is None or anc_len_p is None or anc_len_p <= 0:
+                    break
+                # ancestor A's own bits + unchanged intermediate bits between A's end and B
+                anc_bits_p = list(rbsp_bits[anc_start_p:chain_boundary_patch])
+                intermediate_p = list(rbsp_bits[chain_boundary_patch:start_bit])
+                combined = self._bits_to_bytes(anc_bits_p + intermediate_p + new_bits + [0] * 64)
+                try:
+                    retro_reader = BitstreamReader(combined)
+                    retro_dec = CAVLCDecoder(retro_reader)
+                    retro_dec.decode_block_cavlc(anc_nC_p, max_num_coeff=16)
+                    if retro_reader.pos != anc_len_p:
+                        retro_skip = True
+                        break
+                except Exception:
+                    retro_skip = True
+                    break
+                chain_boundary_patch = anc_start_p
+
+            if retro_skip:
+                skipped_count += 1
+                continue
+
+            # Step 6: Overwrite bits at specific position
+            try:
+                rbsp_bits[start_bit:end_bit] = new_bits
+                patched_count += 1
+            except Exception as e:
+                print(f"[PATCHER] Error patching block {key}: {e}")
+                skipped_count += 1
+                continue
+        
+        print(f"[PATCHER] Successfully patched: {patched_count}/{len(modifications)}")
+        if skipped_count > 0:
+            print(f"[PATCHER] Skipped: {skipped_count} blocks (not coded or length mismatch)")
+
+        # Step 7: Convert BitArray back to bytes
+        patched_rbsp = rbsp_bits.to_bytes()
+        
+        # Step 8: Create new NAL unit with patched RBSP
+        # Create a simple NAL-like object (match original structure)
+        class PatchedNAL:
+            def __init__(self, original_nal, new_rbsp):
+                self.forbidden_zero_bit = original_nal.forbidden_zero_bit
+                self.nal_ref_idc = original_nal.nal_ref_idc
+                self.nal_unit_type = original_nal.nal_unit_type
+                self.rbsp_byte = new_rbsp
+                self.start_pos = original_nal.start_pos
+                self.size = len(new_rbsp) + 1  # +1 for NAL header
+                self.start_code_size = getattr(original_nal, 'start_code_size', 4)
+        
+        return PatchedNAL(original_nal, patched_rbsp)
+    
+    def _bits_to_bytes(self, bits: List[int]) -> bytes:
+        """Pack list of 0/1 ints into bytes (MSB first), padding to byte boundary."""
+        padded = bits + [0] * ((8 - len(bits) % 8) % 8)
+        result = bytearray()
+        for i in range(0, len(padded), 8):
+            byte = sum(padded[i + j] << (7 - j) for j in range(8))
+            result.append(byte)
+        return bytes(result)
+
+    def get_unpatchable_blocks(self, rbsp_bytes: bytes, block_offsets: Dict):
+        """
+        Return the set of (mb_local, blk_idx) keys that CANNOT be successfully
+        round-tripped (decode → re-encode produces different bits from the NAL).
+
+        These blocks must be excluded from embedding: the patcher would silently
+        skip them at patch-time, leaving original coefficients in the stego and
+        breaking embedding/extraction sync.
+
+        Also returns verified nC and coefficient values for patchable blocks.
+        These are the CORRECT decoded values (using the nC that bit-exactly
+        reproduces the NAL encoding), which avoids nC table mismatches between
+        TraceableCAVLCParser and the patcher's BitstreamDecoder.
+
+        Args:
+            rbsp_bytes:    Raw RBSP bytes of the slice NAL (original_nal.rbsp_byte).
+            block_offsets: Dict {(mb_local, blk_idx): {'start_bit':…,'end_bit':…,'bit_length':…}}
+                           (LOCAL indices, as returned by TraceableCAVLCParser).
+
+        Returns:
+            (unpatchable, matched_info)
+            - unpatchable: Set of (mb_local, blk_idx) keys that are NOT safely patchable.
+            - matched_info: Dict {(mb_local, blk_idx): (matched_nC, coefficients)}
+                            for patchable blocks — the bit-exact-verified nC and coefficients.
+        """
+        rbsp_bits = BitArray(rbsp_bytes)
+        unpatchable = set()
+        matched_info = {}
+
+        # Build end_to_block reverse lookup for retroactive boundary check (second pass).
+        end_to_block_retro = {}
+        for blk_key, blk_offset in block_offsets.items():
+            eb = blk_offset.get('end_bit')
+            if eb is not None:
+                end_to_block_retro[eb] = (blk_key, blk_offset)
+
+        for key, offset_data in block_offsets.items():
+            start_bit = offset_data.get('start_bit')
+            end_bit = offset_data.get('end_bit')
+            original_length = offset_data.get('bit_length')
+
+            if start_bit is None or end_bit is None or original_length is None or original_length <= 0:
+                continue
+
+            actual_nal_bits = list(rbsp_bits[start_bit:end_bit])
+            lookahead_end = min(end_bit + 64, len(rbsp_bits))
+            raw_nal_bytes = self._bits_to_bytes(list(rbsp_bits[start_bit:lookahead_end]))
+
+            # Prefer TraceableCAVLCParser's pre-computed nC (matches FFmpeg's H.264 spec nC)
+            # CRITICAL: Only use tracer_nC when available — fallbacks cause false positives.
+            tracer_nC = offset_data.get('nC', None) if isinstance(offset_data, dict) else None
+            if tracer_nC is not None:
+                nC_scan_order = [tracer_nC]  # ONLY use tracer_nC — fallbacks cause false positives
+            else:
+                nC_scan_order = [0, 2, 4, 6, 8]
+
+            found = False
+            for nC_try in nC_scan_order:
+                try:
+                    reader = BitstreamReader(raw_nal_bytes)
+                    dec = CAVLCDecoder(reader)
+                    block = dec.decode_block_cavlc(nC_try, max_num_coeff=16)
+                    consumed = reader.pos
+                    if consumed != original_length:
+                        continue
+                    nal_coeffs = list(block.levels)
+                    # Standard encode (encoder picks max trailing-ones)
+                    candidate = self._encode_coefficients_to_bits(
+                        nal_coeffs, nC_try, max_num_coeff=16)
+                    if len(candidate) == original_length and list(candidate) == actual_nal_bits:
+                        found = True
+                        matched_info[key] = (nC_try, nal_coeffs, None)  # no T1 override needed
+                        break
+                    # Retry with the decoded trailing_ones override
+                    t1_decoded = block.trailing_ones
+                    candidate_t1 = self._encode_coefficients_to_bits(
+                        nal_coeffs, nC_try, max_num_coeff=16,
+                        override_trailing_ones=t1_decoded)
+                    if len(candidate_t1) == original_length and list(candidate_t1) == actual_nal_bits:
+                        found = True
+                        matched_info[key] = (nC_try, nal_coeffs, t1_decoded)  # T1 override required
+                        break
+                except Exception:
+                    continue
+
+            if not found:
+                unpatchable.add(key)
+
+        # Second pass: retroactive boundary corruption check.
+        # For each patchable block B, verify that NO single-bit flip of B's encoding
+        # extends the CAVLC decoding of any ancestor block reachable by walking the
+        # directly-connected block chain backwards up to CHAIN_LOOKBACK steps.
+        #
+        # Why multi-hop? Short intermediate blocks (e.g. 1-bit) can act as transparent
+        # "gaps" that a mis-decoding ancestor overruns through.  A single-step check
+        # would miss these transitive corruptions.
+        CHAIN_LOOKBACK = 8  # Walk up to 8 blocks back; covers worst-case short chains
+        for key in list(matched_info.keys()):
+            offset_data = block_offsets.get(key, {})
+            start_bit_b = offset_data.get('start_bit')
+            end_bit_b = offset_data.get('end_bit')
+            bit_length_b = offset_data.get('bit_length')
+            if start_bit_b is None or bit_length_b is None or bit_length_b <= 0:
+                continue
+
+            b_orig_bits = list(rbsp_bits[start_bit_b:end_bit_b])
+
+            retroactively_constrained = False
+
+            # Walk the chain of directly-connected predecessors backward
+            chain_boundary = start_bit_b  # The bit where B (or current chain head) starts
+            for _hop in range(CHAIN_LOOKBACK):
+                anc_entry = end_to_block_retro.get(chain_boundary)
+                if anc_entry is None:
+                    break  # Chain ends; no more predecessors
+
+                anc_key, anc_offset = anc_entry
+                anc_nC = anc_offset.get('nC')
+                anc_start = anc_offset.get('start_bit')
+                anc_len = anc_offset.get('bit_length')
+                if anc_nC is None or anc_start is None or anc_len is None or anc_len <= 0:
+                    break
+
+                # ancestor A's own bits + intermediate bits between A's end and B's start
+                anc_bits = list(rbsp_bits[anc_start:chain_boundary])         # A's encoding
+                intermediate = list(rbsp_bits[chain_boundary:start_bit_b])   # gap bits (0 when direct)
+
+                # Test each single-bit flip of B against ancestor A
+                for p in range(bit_length_b):
+                    b_flipped = b_orig_bits[:]
+                    b_flipped[p] ^= 1
+                    combined = self._bits_to_bytes(anc_bits + intermediate + b_flipped + [0] * 64)
+                    try:
+                        rr = BitstreamReader(combined)
+                        rd = CAVLCDecoder(rr)
+                        rd.decode_block_cavlc(anc_nC, max_num_coeff=16)
+                        if rr.pos != anc_len:
+                            retroactively_constrained = True
+                            break
+                    except Exception:
+                        retroactively_constrained = True
+                        break
+
+                if retroactively_constrained:
+                    break
+
+                # Step one block further back
+                chain_boundary = anc_start
+
+            if retroactively_constrained:
+                unpatchable.add(key)
+                del matched_info[key]
+
+        return unpatchable, matched_info
+
+    def _encode_coefficients_to_bits(self, coeffs: List[int], nC: int, max_num_coeff: int,
+                                     override_total_coeffs: int = None, debug_key=None,
+                                     override_trailing_ones: int = None) -> List[int]:
+        """
+        Encode coefficient block to bit sequence.
+
+        CRITICAL: Uses SAME CAVLCEncoder as Safety Filter to ensure consistency.
+
+        Args:
+            coeffs: Coefficient values
+            nC: Neighbor context (for VLC table selection)
+            max_num_coeff: Maximum coefficients (16 for 4x4 blocks)
+            override_total_coeffs: Optional override for total_coeffs (for re-encoding modified blocks)
+            debug_key: Optional (mb_idx, block_idx) for debugging
+            override_trailing_ones: Optional T1 count override to match original encoder's choice
+
+        Returns:
+            List of bits [0, 1, 1, 0, ...]
+        """
+        # Create temporary writer
+        temp_writer = BitstreamWriter()
+        encoder = CAVLCEncoder(temp_writer)
+
+        # Encode block (same call as Safety Filter)
+        encoder.encode_block_cavlc(coeffs, nC=nC, max_num_coeff=max_num_coeff,
+                                   override_total_coeffs=override_total_coeffs,
+                                   override_trailing_ones=override_trailing_ones,
+                                   debug_key=debug_key)
+
+        # Extract bits as list
+        bits = temp_writer.get_bits_as_list()
+
+        return bits
+
+
+# =============================================================================
+# BITSTREAM RECONSTRUCTOR  (formerly bitstream_reconstructor.py)
+# =============================================================================
+
 
 
 class BitstreamReconstructor:
@@ -65,19 +671,6 @@ class BitstreamReconstructor:
         Returns:
             nC context value (0-4 for Table 9-5, -1 for ChromaDC)
         """
-        # ==================================================================================
-        # CRITICAL FIX #4: Chroma AC blocks nC calculation
-        # ==================================================================================
-        # Chroma blocks (16-23) are AC coefficients in I_4x4 mode
-        # According to H.264 spec and parser implementation:
-        # - ChromaAC uses nC=0 (simplified, neighbors not well-defined due to subsampling)
-        # - ChromaDC would use nC=-1 but doesn't exist in I_4x4 mode
-        #
-        # OLD CODE (WRONG):
-        # if block_idx >= 16:
-        #     return -1  ← BUG! Causes VLC mismatch with parser!
-        #
-        # NEW CODE (CORRECT):
         if block_idx >= 16:
             return 0  # Chroma AC blocks use nC=0 (matches parser)
         
@@ -182,7 +775,6 @@ class BitstreamReconstructor:
         print(f"{'='*70}")
         
         # Parse original video
-        from .h264_parser import H264BitstreamParser
         parser = H264BitstreamParser(original_file)
         parser.parse()
         
@@ -330,29 +922,6 @@ class BitstreamReconstructor:
             'blocks_modified': len(modified_coefficients)
         }
     
-    def _estimate_mb_count_fast(self, nal: NALUnit, sps: SPSData, pps: PPSData) -> int:
-        """Quick estimate of MB count in slice"""
-        try:
-            reader = BitstreamReader(nal.rbsp_byte)
-            slice_parser = SliceHeaderParser(reader)
-            _ = slice_parser.parse_slice_header(sps, pps)
-            
-            mb_parser = MacroblockParser(reader, sps, pps)
-            count = 0
-            
-            while count < 500:  # Increase safety limit to handle full frames
-                try:
-                    _ = mb_parser.parse_macroblock_type_only()
-                    count += 1
-                except:
-                    break
-            
-            return max(count, 1)
-        except:
-            # CIF format default: 352x288 pixels = 22x18 MBs = 396 MBs/frame
-            # Return 396 as realistic default instead of 1
-            return 396
-    
     def _reconstruct_slice_with_cavlc(self,
                                       original_nal: NALUnit,
                                       coeff_map: Dict,
@@ -393,7 +962,6 @@ class BitstreamReconstructor:
             # SimpleCAVLCExtractor has a bug where it returns all-zero coefficients for P-slices
             # because it only parses CBP for I-slices (slice_type 2,7), not P-slices (slice_type 0,5).
             # This caused massive zero-preservation violations in Frames 1+.
-            from .traceable_cavlc_parser import TraceableCAVLCParser
             
             parser = TraceableCAVLCParser()
             parsed_result = parser.extract_with_offsets(
@@ -482,7 +1050,6 @@ class BitstreamReconstructor:
             # ========================================================================
 
             # Import BitstreamPatcher
-            from .bitstream_patcher import BitstreamPatcher
 
             # Convert coeff_map to modifications list for patcher
             # ⚠️ CRITICAL FIX: TraceableCAVLCParser uses ABSOLUTE MB addressing!
@@ -569,148 +1136,6 @@ class BitstreamReconstructor:
                 pass
             return (original_nal, fallback_mb_count)
     
-    def _reconstruct_with_header_copy(self,
-                                      original_nal: NALUnit,
-                                      blocks: Dict,
-                                      global_mb_idx: int,
-                                      mb_metadata: Dict = None,
-                                      sps = None,
-                                      pps = None) -> Optional[bytes]:
-        """
-        NEW APPROACH: Copy slice header from original, only re-encode MB data
-        """
-        try:
-            from ..decoder.cavlc_extractor_simple import SimpleCAVLCExtractor
-            from ..bitstream.nal_handler import SliceHeaderParser, SPSData, PPSData
-            
-            # Extract ALL coefficients from original slice
-            extractor = SimpleCAVLCExtractor()
-            result = extractor.extract_coefficients_from_nal(original_nal, global_mb_idx, sps, pps)
-            
-            original_blocks = result.get('blocks', {})
-            mb_metadata = result.get('mb_metadata', {})
-            
-            # Combine: original + modifications
-            combined_blocks = dict(original_blocks)
-            for key, modified_coeffs in blocks.items():
-                combined_blocks[key] = modified_coeffs
-            
-            print(f"        [HeaderCopy] Extracted {len(original_blocks)} blocks, applying {len(blocks)} modifications")
-            
-            # Parse slice header to get end position
-            reader = BitstreamReader(original_nal.rbsp_byte)
-            
-            if sps is None:
-                sps = SPSData()
-            if pps is None:
-                pps = PPSData()
-            
-            slice_parser = SliceHeaderParser(reader, original_nal, sps, pps)  # ← FIX: Pass nal object
-            slice_header = slice_parser.parse()
-            
-            # Get slice header bytes from original
-            slice_header_end_bit = reader.position
-            slice_header_end_byte = (slice_header_end_bit + 7) // 8
-            
-            # CRITICAL: If header doesn't end on byte boundary, fall back
-            if slice_header_end_bit % 8 != 0:
-                print(f"        [WARN] Slice header ends at bit {slice_header_end_bit} (not byte-aligned)")
-                print(f"        [WARN] Falling back to full reconstruction")
-                return self._reencode_slice_cavlc(original_nal, blocks, global_mb_idx, mb_metadata, sps, pps)
-            
-            # Copy slice header bytes
-            slice_header_bytes = original_nal.rbsp_byte[:slice_header_end_byte]
-            print(f"        [HeaderCopy] Copied {slice_header_end_byte} bytes of slice header")
-            
-            # Now encode MB data
-            mb_writer = BitstreamWriter()
-            
-            # Get total number of MBs
-            total_mbs_in_slice = len(mb_metadata) if mb_metadata else 286
-            
-            encoder = CAVLCEncoder(mb_writer)
-            
-            # Encode each MB (simplified - using original CBP)
-            for slice_mb_idx in range(total_mbs_in_slice):
-                mb_global_idx = global_mb_idx + slice_mb_idx
-                
-                mb_meta = mb_metadata.get(slice_mb_idx, {})
-                original_mb_type = mb_meta.get('mb_type', 0)
-                original_cbp = mb_meta.get('cbp', 0)
-                
-                # Collect blocks
-                mb_blocks = {}
-                for block_idx in range(24):
-                    key = (mb_global_idx, block_idx)
-                    if key in combined_blocks:
-                        mb_blocks[block_idx] = combined_blocks[key]
-                
-                if not mb_blocks:
-                    continue
-                
-                # Write MB type
-                mb_writer.write_ue(original_mb_type)
-                
-                # Write prediction modes
-                if original_mb_type == 0:  # I_4x4
-                    for _ in range(16):
-                        mb_writer.write_bits(1, 1)
-                    mb_writer.write_ue(0)
-                elif original_mb_type >= 1 and original_mb_type <= 24:
-                    mb_writer.write_ue(0)
-                
-                # Write CBP
-                is_intra = (original_mb_type >= 0 and original_mb_type <= 25)
-                mb_writer.write_me_cbp(original_cbp, is_intra=is_intra)
-                
-                # Write QP delta & coefficients
-                if original_cbp > 0:
-                    mb_writer.write_se(0)
-                    
-                    for block_idx in range(24):
-                        should_encode = False
-                        if block_idx < 16:
-                            should_encode = (original_cbp & (1 << (block_idx // 4))) != 0
-                        elif block_idx < 20:
-                            should_encode = (original_cbp & 0x10) != 0
-                        else:
-                            should_encode = (original_cbp & 0x20) != 0
-                        
-                        if should_encode:
-                            coeffs = mb_blocks.get(block_idx, [0] * 16)
-                            if len(coeffs) != 16:
-                                coeffs = (list(coeffs) + [0]*16)[:16]
-                            
-                            # Calculate nC from neighbors (H.264 Section 8.4.1.2.2)
-                            # CRITICAL: Use mb_global_idx (frame-absolute), NOT slice_mb_idx!
-                            nC = self._calculate_nC(mb_global_idx, block_idx, pic_width_in_mbs=22)
-                            
-                            # 🔵 TWIN LOGGING: Encoder side (log for first MB only)
-                            if mb_global_idx == 0 and block_idx < 16:
-                                non_zero = [c for c in coeffs if c != 0]
-                                total_coeffs = len(non_zero)
-                                print(f"[ENC] MB:{mb_global_idx} Blk:{block_idx} nC:{nC} TotalCoeff:{total_coeffs} Coeffs:{non_zero[:5] if non_zero else [0]}")
-                            
-                            encoder.encode_block_cavlc(coeffs, nC=nC, max_num_coeff=16)
-                            # Update total_coeffs cache for future nC calculations
-                            self._update_total_coeffs_cache(mb_global_idx, block_idx, coeffs)
-            
-            # Get MB data
-            mb_data_bytes = mb_writer.to_bytes()
-            print(f"        [HeaderCopy] Encoded {len(mb_data_bytes)} bytes of MB data")
-            
-            # Combine
-            reconstructed_rbsp = slice_header_bytes + mb_data_bytes
-            print(f"        [HeaderCopy] Total RBSP: {len(reconstructed_rbsp)} bytes")
-            
-            return reconstructed_rbsp
-            
-        except Exception as e:
-            print(f"        [HeaderCopy] Error: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
-    
     def _reencode_slice_cavlc(self,
                              original_nal: NALUnit,
                              blocks: Dict,
@@ -723,13 +1148,6 @@ class BitstreamReconstructor:
         Surgical approach: Copy original bytes, only re-encode modified coefficient blocks.
         """
         try:
-            # ==================================================================================
-            # CRITICAL FIX #2: DON'T clear cache - preserve neighbors from previous slices
-            # ==================================================================================
-            # OLD CODE (WRONG): self.mb_total_coeffs.clear()  ← Removes top neighbors!
-            # NEW CODE: Keep cache intact - top-row MBs need neighbors from previous slice
-            # Cache will be updated with current slice's blocks below
-            
             # If no modifications, return original
             if not blocks:
                 return original_nal.rbsp_byte
@@ -758,16 +1176,7 @@ class BitstreamReconstructor:
                     # Modification for block not in original - still add it
                     combined_blocks[key] = modified_coeffs
                     modifications_applied += 1
-            
-            # ==================================================================================
-            # CRITICAL FIX #1: Pre-populate total_coeffs cache for accurate nC calculation
-            # ==================================================================================
-            # Problem: Cache is cleared (line 712), but encoder needs neighbor context
-            # Solution: Rebuild cache from combined_blocks BEFORE encoding
-            # Note: combined_blocks uses SLICE-LOCAL indices (0, 1, 2...)
-            #       but _calculate_nC expects GLOBAL indices (global_mb_idx + local)
-            # → Convert to GLOBAL indices when populating cache
-            
+
             print(f"        [FIX] Pre-populating nC cache from {len(combined_blocks)} combined blocks...")
             cache_populated = 0
             for (mb_idx_local, block_idx), coeffs in combined_blocks.items():
@@ -788,8 +1197,6 @@ class BitstreamReconstructor:
             # DO NOT subtract global_mb_idx again!
             modified_mbs = set()
             for (mb_idx, block_idx) in blocks.keys():
-                # BUG CŨ: modified_mbs.add(mb_idx - global_mb_idx)  ← SAI! Subtract two times!
-                # FIX MỚI: mb_idx đã là local index rồi (0, 1, 2... trong slice)
                 modified_mbs.add(mb_idx)  # Already slice-relative, no conversion needed
             
             # If no MBs modified in this slice, return original
@@ -797,7 +1204,6 @@ class BitstreamReconstructor:
                 return original_nal.rbsp_byte
             
             # Strategy: Re-encode entire slice with mixed original + modified coefficients
-            from ..bitstream.nal_handler import SliceHeaderParser, SPSData, PPSData
             
             reader = BitstreamReader(original_nal.rbsp_byte)
             
@@ -995,8 +1401,6 @@ class BitstreamReconstructor:
                 mb_blocks = {}
                 blocks_found = 0
                 for block_idx in range(24):
-                    # BUG CŨ: key = (mb_global_idx, block_idx)  ← SAI! Tìm key 150 trong dict có key 0-21
-                    # FIX MỚI: Dùng slice_mb_idx (local index trong slice)
                     key = (slice_mb_idx, block_idx)  # ← FIXED: Use LOCAL index
                     
                     if key in combined_blocks:
@@ -1111,18 +1515,7 @@ class BitstreamReconstructor:
                             coeffs = mb_blocks.get(block_idx, [0] * 16)
                             if len(coeffs) != 16:
                                 coeffs = (list(coeffs) + [0]*16)[:16]
-                            
-                            # ==================================================================================
-                            # CRITICAL FIX #5: max_num_coeff depends on block type
-                            # ==================================================================================
-                            # Luma blocks (0-15): 16 coefficients (4x4 with DC)
-                            # Chroma AC blocks (16-23): 15 coefficients (4x4 minus DC)
-                            # (DC is handled separately in I_16x16 mode, but we use I_4x4)
-                            #
-                            # OLD CODE (WRONG):
-                            # max_num_coeff = 16  ← Bug! Chroma AC should be 15!
-                            #
-                            # NEW CODE (CORRECT):
+
                             if block_idx < 16:
                                 # Luma blocks: full 4x4 = 16 coeffs
                                 max_num_coeff = 16
@@ -1208,8 +1601,6 @@ class BitstreamReconstructor:
     
     def _parse_sps_from_nal(self, nal):
         """Parse SPS NAL unit to extract critical fields"""
-        from ..bitstream.nal_handler import SPSData
-        from .bitstream_io import BitstreamReader
         
         sps = SPSData()
         try:
@@ -1267,8 +1658,6 @@ class BitstreamReconstructor:
     
     def _parse_pps_from_nal(self, nal):
         """Parse PPS NAL unit to extract critical fields"""
-        from ..bitstream.nal_handler import PPSData
-        from .bitstream_io import BitstreamReader
         
         pps = PPSData()
         try:
@@ -1302,31 +1691,5 @@ class BitstreamReconstructor:
 
         except Exception as e:
             print(f"    [!] PPS parsing error: {e}, using defaults")
-        
+
         return pps
-
-
-def test_reconstruction():
-    """Test bitstream reconstruction with simple video"""
-    import numpy as np
-    
-    print("Testing Bitstream Reconstruction")
-    print("=" * 70)
-    
-    # This test requires a real H.264 file
-    # For now, we just verify the class can be instantiated
-    reconstructor = BitstreamReconstructor()
-    
-    print("[OK] BitstreamReconstructor initialized")
-    print("[OK] Ready for video reconstruction")
-    
-    print("\nTo test with real video:")
-    print("  reconstructor.reconstruct_video(")
-    print("      'input.h264',")
-    print("      modified_coefficients,")
-    print("      'output.h264'")
-    print("  )")
-
-
-if __name__ == '__main__':
-    test_reconstruction()

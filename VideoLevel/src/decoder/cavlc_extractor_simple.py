@@ -4,10 +4,11 @@ Uses IDENTICAL decoding logic as bitstream_reconstructor
 """
 
 from typing import List, Dict, Optional
-from ..bitstream.h264_parser import H264BitstreamParser, NALUnitType, BitstreamReader
-from ..bitstream.nal_handler import SliceHeaderParser, SPSData, PPSData
-from ..bitstream.macroblock_parser import MacroblockParser  
-from ..bitstream.cavlc_decoder import CAVLCDecoder
+from ..bitstream.h264 import H264BitstreamParser, NALUnitType
+from ..bitstream.bitstream_io import BitstreamReader
+from ..bitstream.h264 import SliceHeaderParser, SPSData, PPSData
+from ..bitstream.h264 import MacroblockParser  
+from ..bitstream.cavlc import CAVLCDecoder
 
 
 class SimpleCAVLCExtractor:
@@ -424,7 +425,7 @@ class SimpleCAVLCExtractor:
                              # Stop decoding remaining blocks to prevent cascade desync.
                              print(f"[ERROR] CAVLC decode failed for MB {mb_global_addr} block {b}: {cavlc_error}")
                              print(f"[RECOVERY] Aborting remaining blocks for this MB to prevent cascade desync")
-                             from ..bitstream.cavlc_decoder import CoefficientBlock
+                             from ..bitstream.cavlc import CoefficientBlock
                              block = CoefficientBlock(
                                  levels=[0] * 16,
                                  total_coeffs=0,
@@ -624,9 +625,3 @@ class SimpleCAVLCExtractor:
             print(f"[SimpleCAVLCExtractor] extract_coefficients_from_nal error: {e}")
             return None
     
-    def get_all_coefficients_flat(self, frames: List[Dict]) -> List[int]:
-        result = []
-        for frame in frames:
-            for mb in frame.get('macroblocks', []):
-                result.extend(mb.get('coefficients', []))
-        return result

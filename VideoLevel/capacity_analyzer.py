@@ -2,7 +2,7 @@ import sys
 import os
 
 from src.decoder.cavlc_extractor_simple import SimpleCAVLCExtractor
-from src.embedder.cavlc_safety_filter import CAVLCSafetyFilter
+from src.embedder.embedder import CAVLCSafetyFilter
 
 def analyze_video(video_path):
     print(f"\n{'='*50}")

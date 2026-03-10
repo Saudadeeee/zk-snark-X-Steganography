@@ -8,12 +8,12 @@ the test suite (no stdout redirection, suppress progress prints).
 from __future__ import annotations
 import os, sys
 
-from src.bitstream.h264_parser              import H264BitstreamParser
-from src.bitstream.traceable_cavlc_parser   import TraceableCAVLCParser
-from src.bitstream.bitstream_reconstructor  import BitstreamReconstructor
-from src.bitstream.bitstream_patcher        import BitstreamPatcher, BitArray
+from src.bitstream.h264              import H264BitstreamParser
+from src.bitstream.h264   import TraceableCAVLCParser
+from src.bitstream.bitstream_ops  import BitstreamReconstructor
+from src.bitstream.bitstream_ops        import BitstreamPatcher, BitArray
 from src.bitstream.bitstream_io             import BitstreamReader
-from src.bitstream.cavlc_decoder            import CAVLCDecoder
+from src.bitstream.cavlc            import CAVLCDecoder
 
 
 def extract_all_idr_blocks(video_path: str, reconstructor: BitstreamReconstructor,

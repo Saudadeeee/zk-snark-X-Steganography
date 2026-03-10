@@ -1,0 +1,11 @@
+Video Quality Results
+==================================================
+Original : data/encoded/akiyo_cif_g8.h264
+Stego    : data/output/akiyo_cif_stego.h264
+Frames   : 300  (292 identical)
+
+PSNR(Y)  mean=11.38 dB  min=11.37 dB
+SSIM(Y)  mean=0.986619  min=0.495508
+MAE(Y)   mean=1.6300  max=61.1401
+RMSE(Y)  mean=1.8351  max=68.8364
+dMean(Y) mean=1.089523  max=40.974067

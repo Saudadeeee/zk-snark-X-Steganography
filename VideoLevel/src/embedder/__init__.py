@@ -1,12 +1,6 @@
 """
-Video Steganography Embedder Module
-Embeds binary payloads into H.264 video DCT coefficients
+Embedder Module — CAVLC coefficient steganography pipeline.
 """
+from .embedder import CAVLCSafetyFilter, PayloadEmbedder
 
-from .encoding_length_checker import EncodingLengthChecker
-from .cavlc_safety_filter import CAVLCSafetyFilter
-
-__all__ = [
-    'EncodingLengthChecker',
-    'CAVLCSafetyFilter'
-]
+__all__ = ['CAVLCSafetyFilter', 'PayloadEmbedder']
