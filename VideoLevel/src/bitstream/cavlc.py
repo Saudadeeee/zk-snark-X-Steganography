@@ -1235,10 +1235,7 @@ class CAVLCDecoder:
             suffixLength = 1
         else:
             suffixLength = 0
-        
-        # DEBUG: Track position before level decode
-        pos_before_levels = self.reader.position
-        
+
         for i in range(count):
             # Decode level_prefix (unary code)
             level_prefix = 0
@@ -1406,26 +1403,6 @@ class CAVLCDecoder:
         # Coefficients are already in zigzag scan order (same as encoder input)
         # No need to apply reverse zigzag - that would convert to raster order
         return coeffs[:max_num_coeff]
-    
-    def _reverse_zigzag_4x4(self, coeffs: List[int]) -> List[int]:
-        """
-        Apply reverse zigzag scan for 4x4 block
-        H.264 uses specific zigzag order (Table 8-13)
-        """
-        # Zigzag scan order for 4x4
-        zigzag_order = [
-            0,  1,  4,  8,
-            5,  2,  3,  6,
-            9, 12, 13, 10,
-            7, 11, 14, 15
-        ]
-        
-        result = [0] * 16
-        for i, pos in enumerate(zigzag_order):
-            if i < len(coeffs):
-                result[pos] = coeffs[i]
-        
-        return result
 
 
 # =============================================================================
@@ -1433,15 +1410,6 @@ class CAVLCDecoder:
 # =============================================================================
 
 
-
-
-# Zigzag scan order for 4x4 block
-ZIGZAG_4X4 = [
-    0,  1,  4,  8,
-    5,  2,  3,  6,
-    9, 12, 13, 10,
-    7, 11, 14, 15
-]
 
 
 @dataclass
@@ -1497,9 +1465,6 @@ class CAVLCEncoder:
                   f"total_coeffs_for_suffix={analysis.total_coeffs_for_suffix}, "
                   f"trailing_ones={analysis.trailing_ones}, total_zeros={analysis.total_zeros}")
             print(f"  Override: {override_total_coeffs}, nC={nC}")
-        
-        # Track bit position before encoding
-        bits_before = len(self.writer.get_bits_as_list()) if hasattr(self.writer, 'get_bits_as_list') else 0
         
         # 1. Encode coeff_token
         coeff_token_code = find_coeff_token_code(

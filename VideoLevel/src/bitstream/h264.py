@@ -439,14 +439,6 @@ class H264BitstreamParser:
         self.nal_units = parser.parse()
         return self.nal_units
 
-    def get_statistics(self) -> dict:
-        return {
-            'total_nal_units': len(self.nal_units),
-            'sps_count':   sum(1 for n in self.nal_units if n.nal_unit_type == NALUnitType.SPS),
-            'pps_count':   sum(1 for n in self.nal_units if n.nal_unit_type == NALUnitType.PPS),
-            'slice_count': sum(1 for n in self.nal_units
-                               if n.nal_unit_type in [NALUnitType.SLICE_NON_IDR, NALUnitType.SLICE_IDR]),
-        }
 
 
 # =============================================================================
@@ -667,8 +659,6 @@ class MacroblockParser:
             # Unknown slice type
             print(f"[WARN] Unknown slice_type={self.slice_type}, mb_type={mb_type}")
             return MBType.I_4x4  # Safe fallback
-        
-        return MBType.I_4x4  # Default fallback
     
     def _is_i16x16(self, mb_type: Optional[MBType]) -> bool:
         """Check if macroblock is I_16x16 type"""

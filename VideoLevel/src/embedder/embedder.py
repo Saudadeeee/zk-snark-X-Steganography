@@ -133,28 +133,6 @@ from ..bitstream.cavlc import CAVLCEncoder
 from ..bitstream.bitstream_io import BitstreamWriter
 
 
-@dataclass
-class CoefficientInfo:
-    """Information about a coefficient for safety checking"""
-    block_idx: Tuple[int, int]  # (mb_idx, block_idx)
-    coeff_idx: int               # Position in zigzag (0-15)
-    value: int                   # Coefficient value
-    is_trailing_one: bool        # Part of trailing ±1 sequence
-    is_dc: bool                  # DC coefficient (position 0)
-    encoding_bits: int           # CAVLC encoding length
-
-
-@dataclass
-class SafetyCheckResult:
-    """Result of safety filter check"""
-    is_safe: bool
-    reason: str
-    original_value: int
-    modified_value: int
-    encoding_bits_original: int
-    encoding_bits_modified: int
-
-
 # Sort key: descending (mb_idx, block_idx) — embed/extract in late-frame blocks first
 # to minimise H.264 intra prediction cascade (modified MBs have no downstream dependents).
 _DESC_MB_BLK = lambda t: (-t[0], -t[1])  # noqa: E731
@@ -208,100 +186,6 @@ class CAVLCSafetyFilter:
         
         # Cache for trailing ones detection (performance optimization)
         self._trailing_ones_cache: Dict[Tuple[int, ...], Set[int]] = {}
-    
-    def check_coefficient_safety(
-        self,
-        block_coeffs: List[int],
-        coeff_idx: int,
-        new_value: int,
-        suffix_length: int = 1
-    ) -> SafetyCheckResult:
-        """
-        Check if modifying a coefficient is safe according to all enabled rules
-        
-        Args:
-            block_coeffs: All 16 coefficients in block (zigzag order)
-            coeff_idx: Index of coefficient to modify (0-15)
-            new_value: Proposed new value
-            suffix_length: CAVLC suffix_length context (typically 1)
-        
-        Returns:
-            SafetyCheckResult with detailed information
-        """
-        original_value = block_coeffs[coeff_idx]
-        
-        # RULE 1: Zero-Preservation
-        if self.enable_zero_preservation:
-            if original_value == 0 and new_value != 0:
-                return SafetyCheckResult(
-                    is_safe=False,
-                    reason="Rule 1: Cannot change zero to non-zero (breaks TotalCoeffs)",
-                    original_value=original_value,
-                    modified_value=new_value,
-                    encoding_bits_original=0,
-                    encoding_bits_modified=0
-                )
-            
-            if original_value != 0 and new_value == 0:
-                return SafetyCheckResult(
-                    is_safe=False,
-                    reason="Rule 1: Cannot change non-zero to zero (breaks TotalCoeffs)",
-                    original_value=original_value,
-                    modified_value=new_value,
-                    encoding_bits_original=0,
-                    encoding_bits_modified=0
-                )
-        
-        # RULE 2: Trailing Ones Preservation
-        if self.enable_trailing_ones:
-            trailing_positions = self._detect_trailing_ones(block_coeffs)
-            if coeff_idx in trailing_positions:
-                return SafetyCheckResult(
-                    is_safe=False,
-                    reason=f"Rule 2: Coefficient is trailing ±1 at position {coeff_idx} (CAVLC special encoding)",
-                    original_value=original_value,
-                    modified_value=new_value,
-                    encoding_bits_original=1,
-                    encoding_bits_modified=1
-                )
-        
-        # RULE 3: Bit-Length Invariance
-        if self.enable_bit_length and self.length_checker:
-            is_patchable, orig_bits, new_bits = self.length_checker.check_lsb_flip_patchability(
-                original_value, 
-                suffix_length
-            )
-            
-            if not is_patchable:
-                return SafetyCheckResult(
-                    is_safe=False,
-                    reason=f"Rule 3: Encoding length changes ({orig_bits}→{new_bits} bits)",
-                    original_value=original_value,
-                    modified_value=new_value,
-                    encoding_bits_original=orig_bits,
-                    encoding_bits_modified=new_bits
-                )
-        
-        # Additional heuristic: Magnitude threshold
-        if min(abs(original_value), abs(new_value)) < self.min_safe_magnitude:
-            return SafetyCheckResult(
-                is_safe=False,
-                reason=f"Heuristic: Magnitude |{original_value}| or |{new_value}| < {self.min_safe_magnitude} (unstable)",
-                original_value=original_value,
-                modified_value=new_value,
-                encoding_bits_original=0,
-                encoding_bits_modified=0
-            )
-        
-        # PASSED ALL CHECKS
-        return SafetyCheckResult(
-            is_safe=True,
-            reason="All safety checks passed",
-            original_value=original_value,
-            modified_value=new_value,
-            encoding_bits_original=0,
-            encoding_bits_modified=0
-        )
     
     def _detect_trailing_ones(self, coeffs: List[int]) -> Set[int]:
         """
@@ -714,8 +598,6 @@ class PayloadEmbedder:
             return self._embed_with_safety_filter(
                 coefficients, payload_bits, nC_map, nal_length_map,
                 t1_override_map, ffmpeg_validator, pre_validated_positions)
-        else:
-            return self._embed_legacy(coefficients, payload_bits)
     
     def _embed_with_safety_filter(
         self,
@@ -888,8 +770,6 @@ class PayloadEmbedder:
         # Use safety filter routing if enabled (MUST match embedding!)
         if self.use_safety_filter and self.safety_filter:
             return self._extract_with_safety_filter(coefficients, payload_length_bits, start_bit_offset, nC_map, nal_length_map, t1_override_map, precomputed_safe_positions)
-        else:
-            return self._extract_legacy(coefficients, payload_length_bits, start_bit_offset)
     
     def _extract_with_safety_filter(
         self,

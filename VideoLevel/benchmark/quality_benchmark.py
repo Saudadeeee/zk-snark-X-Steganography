@@ -90,7 +90,10 @@ psnr_all_plot = [v if np.isfinite(v) else float("nan") for v in psnr_all]
 finite_psnr   = [v for v in psnr_y if np.isfinite(v)]
 inf_count     = sum(1 for v in psnr_y if not np.isfinite(v))
 
-print(f"  PSNR(Y)  min={min(finite_psnr):.2f}  max={max(finite_psnr):.2f}  mean={np.mean(finite_psnr):.2f} dB  ({inf_count} identical frames)")
+if finite_psnr:
+    print(f"  PSNR(Y)  min={min(finite_psnr):.2f}  max={max(finite_psnr):.2f}  mean={np.mean(finite_psnr):.2f} dB  ({inf_count} identical frames)")
+else:
+    print(f"  PSNR(Y)  all {N} frames identical — no stego modifications detected")
 print(f"  SSIM(Y)  min={min(ssim_y):.5f}  max={max(ssim_y):.5f}  mean={np.mean(ssim_y):.5f}")
 print(f"  MAE(Y)   min={min(mae):.4f}  max={max(mae):.4f}  mean={np.mean(mae):.4f}")
 print(f"  RMSE(Y)  min={min(rmse):.4f}  max={max(rmse):.4f}  mean={np.mean(rmse):.4f}")
