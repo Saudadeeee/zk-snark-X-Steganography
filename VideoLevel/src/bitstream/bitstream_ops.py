@@ -1693,3 +1693,437 @@ class BitstreamReconstructor:
             print(f"    [!] PPS parsing error: {e}, using defaults")
 
         return pps
+
+    def make_ffmpeg_position_validator(self, original_file: str, coefficients, frame_verified_data=None):
+        """
+        Build an FFmpeg-backed position validator.
+
+        Parses the original file once, then returns a closure that tests each
+        candidate embedding position by applying the modification to a temp file
+        and running ``ffmpeg -v error``.
+
+        Returns
+        -------
+        (validator, cleanup)
+            validator(mb_idx, block_idx, coeff_idx) -> bool  (True = CLEAN)
+            cleanup()  removes the temp file
+        """
+        import io as _io, contextlib as _ctx, subprocess as _sp, os as _os
+
+        _parser = H264BitstreamParser(original_file)
+        with _ctx.redirect_stdout(_io.StringIO()):
+            _parser.parse()
+
+        _sps = _pps = None
+        for nal in _parser.nal_units:
+            t = int(nal.nal_unit_type)
+            if t == 7:
+                _sps = self._parse_sps_from_nal(nal)
+            elif t == 8:
+                _pps = self._parse_pps_from_nal(nal)
+
+        if not _sps:
+            return (lambda mb, blk, cidx: True), (lambda: None)
+
+        self.sps = _sps
+        self.pps = _pps
+        _mb_count = (_sps.pic_width_in_mbs_minus1 + 1) * (_sps.pic_height_in_map_units_minus1 + 1)
+
+        _idr_nals = []
+        _gmb = 0
+        for nal in _parser.nal_units:
+            t = int(nal.nal_unit_type)
+            if t == 5:
+                _idr_nals.append((_gmb, nal))
+                _gmb += _mb_count
+            elif t == 1:
+                _gmb += _mb_count
+
+        _coeff_lu = {(mb, blk): list(c) for mb, blk, c in coefficients}
+        _tmp = _os.path.join(
+            _os.path.dirname(_os.path.abspath(original_file)),
+            "_ffmpeg_pos_validate.h264"
+        )
+        # Stateful: track committed mods per IDR so each new candidate is
+        # tested CUMULATIVELY with all previously accepted modifications.
+        # This catches cascade failures where N combined mods cause errors
+        # even though each individual mod passes alone.
+        _committed: Dict[int, list] = {}  # idr_idx -> [(mb, blk, mod_coeffs)]
+        _fail_cache: set = set()          # (mb, blk, cidx) that are known-bad
+
+        def _apply_mod(coeffs, coeff_idx):
+            mod = list(coeffs)
+            if coeff_idx >= 0:
+                val = mod[coeff_idx]
+                sign = 1 if val > 0 else -1
+                ab = abs(val)
+                mod[coeff_idx] = sign * ((ab & ~1) | ((ab & 1) ^ 1))
+            else:
+                mod[~coeff_idx] = -mod[~coeff_idx]
+            return mod
+
+        def _get_pre(idr_off):
+            if not frame_verified_data or idr_off not in frame_verified_data:
+                return None, None
+            g_off, g_blk = frame_verified_data[idr_off]
+            pre_off = {(mb - idr_off, blk): v
+                       for (mb, blk), v in g_off.items() if mb >= idr_off}
+            pre_blk = {(mb - idr_off, blk): v
+                       for (mb, blk), v in g_blk.items() if mb >= idr_off}
+            return pre_off, pre_blk
+
+        def validator(mb_idx, block_idx, coeff_idx):
+            key = (mb_idx, block_idx, coeff_idx)
+            if key in _fail_cache:
+                return False
+
+            orig = _coeff_lu.get((mb_idx, block_idx))
+            if orig is None:
+                return True
+
+            mod_coeffs = _apply_mod(orig, coeff_idx)
+            if mod_coeffs == orig:
+                return True  # No actual change – trivially safe, nothing to commit
+
+            # Find which IDR NAL this macroblock belongs to
+            idr_idx = idr_off = None
+            for i, (off, _) in enumerate(_idr_nals):
+                if off <= mb_idx < off + _mb_count:
+                    idr_idx, idr_off = i, off
+                    break
+            if idr_idx is None:
+                return True
+
+            idr_nal = _idr_nals[idr_idx][1]
+            pre_off, pre_blk = _get_pre(idr_off)
+
+            # Cumulative test: all previously committed mods for this IDR + new candidate
+            committed_this = _committed.get(idr_idx, [])
+            all_mods = committed_this + [(mb_idx, block_idx, mod_coeffs)]
+
+            patcher = BitstreamPatcher()
+            _buf = _io.StringIO()
+            with _ctx.redirect_stdout(_buf):
+                modified_nal = patcher.patch_slice(
+                    idr_nal, all_mods,
+                    sps=_sps, pps=_pps, global_mb_offset=idr_off,
+                    pre_computed_offsets=pre_off, pre_computed_blocks=pre_blk)
+
+            if modified_nal is None or modified_nal.rbsp_byte == idr_nal.rbsp_byte:
+                _fail_cache.add(key)
+                return False
+
+            # Write test H.264 file with patched IDR
+            out_nals = []
+            idr_seen = 0
+            for nal in _parser.nal_units:
+                if int(nal.nal_unit_type) == 5:
+                    out_nals.append(modified_nal if idr_seen == idr_idx else nal)
+                    idr_seen += 1
+                else:
+                    out_nals.append(nal)
+            self._write_h264_file(out_nals, _tmp)
+
+            r = _sp.run(
+                ["ffmpeg", "-v", "error", "-i", _tmp, "-f", "null", "-"],
+                capture_output=True, text=True
+            )
+            # With -v error, any [h264 @...] line is a genuine decode error.
+            errors = [l for l in r.stderr.splitlines()
+                      if l.strip() and "[h264" in l]
+            is_clean = len(errors) == 0
+
+            if is_clean:
+                # Commit this modification so future candidates are tested against
+                # the cumulative set of modifications actually applied in this IDR.
+                if idr_idx not in _committed:
+                    _committed[idr_idx] = []
+                _committed[idr_idx].append((mb_idx, block_idx, mod_coeffs))
+            else:
+                _fail_cache.add(key)
+            return is_clean
+
+        def cleanup():
+            if _os.path.exists(_tmp):
+                _os.remove(_tmp)
+
+        return validator, cleanup
+
+    def batch_psnr_validate(
+        self,
+        original_file: str,
+        coefficients: list,
+        safe_positions: list,
+        frame_verified_data: dict = None,
+        psnr_threshold_db: float = 40.0,
+        max_bisect_iters: int = 12,
+        max_greedy_per_idr: int = 100,
+    ) -> list:
+        """
+        Batch PSNR-based position validator.
+
+        Tests all CAVLC-safe positions for each IDR in one shot, then
+        binary-searches to find the maximum prefix that keeps decoded
+        Y-PSNR >= psnr_threshold_db.
+
+        Unlike make_ffmpeg_position_validator (which catches HARD decode
+        errors per position), this catches SOFT pixel degradation from
+        intra-prediction cascade by measuring actual decoded PSNR.
+
+        Parameters
+        ----------
+        original_file      : path to the original (un-modified) H.264 file
+        coefficients       : list[(mb, blk, coeffs)] — same as embed_payload input
+        safe_positions     : output of get_safe_positions(), descending order
+        frame_verified_data: same fvd dict used for reconstruction
+        psnr_threshold_db  : minimum acceptable Y-PSNR on each modified IDR frame
+        max_bisect_iters   : upper bound on binary-search iterations per IDR
+        max_greedy_per_idr : after binary-search, try adding this many more
+                             positions one-by-one (greedy extension).  Each
+                             passing position is kept; conflicting ones are
+                             skipped.  Finds non-contiguous safe positions that
+                             the prefix-only binary search misses.
+
+        Returns
+        -------
+        Filtered list of positions (subset of safe_positions) whose combined
+        pixel impact keeps PSNR >= threshold.  Preserves descending order.
+        """
+        import io as _io, contextlib as _ctx, subprocess as _sp, os as _os
+        import numpy as _np
+
+        # ------------------------------------------------------------------ #
+        # A — Parse SPS/PPS and build IDR NAL list (same pattern as           #
+        #     make_ffmpeg_position_validator)                                  #
+        # ------------------------------------------------------------------ #
+        _parser = H264BitstreamParser(original_file)
+        with _ctx.redirect_stdout(_io.StringIO()):
+            _parser.parse()
+
+        _sps = _pps = None
+        _sps_nal = _pps_nal = None
+        for nal in _parser.nal_units:
+            t = int(nal.nal_unit_type)
+            if t == 7:
+                _sps = self._parse_sps_from_nal(nal)
+                _sps_nal = nal
+            elif t == 8:
+                _pps = self._parse_pps_from_nal(nal)
+                _pps_nal = nal
+
+        if not _sps:
+            return list(safe_positions)   # can't validate → accept all
+
+        _mb_count = (
+            (_sps.pic_width_in_mbs_minus1 + 1) *
+            (_sps.pic_height_in_map_units_minus1 + 1)
+        )
+        w_px = (_sps.pic_width_in_mbs_minus1 + 1) * 16
+        h_px = (_sps.pic_height_in_map_units_minus1 + 1) * 16
+        _frame_y_bytes    = w_px * h_px
+        _frame_yuv_bytes  = _frame_y_bytes * 3 // 2   # YUV420p
+
+        _idr_nals: List[Tuple[int, object]] = []
+        _gmb = 0
+        for nal in _parser.nal_units:
+            t = int(nal.nal_unit_type)
+            if t == 5:
+                _idr_nals.append((_gmb, nal))
+                _gmb += _mb_count
+            elif t == 1:
+                _gmb += _mb_count
+
+        _coeff_lu = {(mb, blk): list(c) for mb, blk, c in coefficients}
+        _bdir = _os.path.dirname(_os.path.abspath(original_file))
+        _f_orig_yuv  = _os.path.join(_bdir, "_batch_orig.yuv")
+        _f_test_h264 = _os.path.join(_bdir, "_batch_test.h264")
+        _f_stego_yuv = _os.path.join(_bdir, "_batch_stego.yuv")
+
+        # ------------------------------------------------------------------ #
+        # Helpers                                                              #
+        # ------------------------------------------------------------------ #
+        def _apply_mod(coeffs, coeff_idx):
+            mod = list(coeffs)
+            if coeff_idx >= 0:
+                val  = mod[coeff_idx]
+                sign = 1 if val > 0 else -1
+                ab   = abs(val)
+                mod[coeff_idx] = sign * ((ab & ~1) | ((ab & 1) ^ 1))
+            else:
+                mod[~coeff_idx] = -mod[~coeff_idx]
+            return mod
+
+        def _get_pre(idr_off):
+            if not frame_verified_data or idr_off not in frame_verified_data:
+                return None, None
+            g_off, g_blk = frame_verified_data[idr_off]
+            pre_off = {(mb - idr_off, blk): v
+                       for (mb, blk), v in g_off.items() if mb >= idr_off}
+            pre_blk = {(mb - idr_off, blk): v
+                       for (mb, blk), v in g_blk.items() if mb >= idr_off}
+            return pre_off, pre_blk
+
+        def _read_y_frame(yuv_path, frame_idx):
+            offset = frame_idx * _frame_yuv_bytes
+            try:
+                with open(yuv_path, 'rb') as fh:
+                    fh.seek(offset)
+                    data = fh.read(_frame_y_bytes)
+            except OSError:
+                return None
+            if len(data) < _frame_y_bytes:
+                return None
+            return _np.frombuffer(data, dtype=_np.uint8).astype(_np.float32)
+
+        def _psnr(a, b):
+            mse = float(_np.mean((a - b) ** 2))
+            return float('inf') if mse == 0 else 20.0 * float(_np.log10(255.0 / _np.sqrt(mse)))
+
+        def _test_positions(idr_idx, idr_off, idr_nal, positions, orig_y):
+            """Patch IDR with positions, decode, return Y-PSNR (float).
+
+            Writes a minimal single-IDR file (SPS + PPS + patched IDR) so
+            FFmpeg only decodes 1 frame — ~50x faster than decoding the
+            whole video.  An IDR frame is intra-only, so its decoded pixels
+            are identical to what a full-video decode would produce.
+            """
+            all_mods = []
+            for mb, blk, cidx in positions:
+                orig = _coeff_lu.get((mb, blk))
+                if orig is None:
+                    continue
+                mod = _apply_mod(orig, cidx)
+                if mod != orig:
+                    all_mods.append((mb, blk, mod))
+
+            if not all_mods:
+                return float('inf')   # no real changes → perfect
+
+            pre_off, pre_blk = _get_pre(idr_off)
+            patcher = BitstreamPatcher()
+            with _ctx.redirect_stdout(_io.StringIO()):
+                modified_nal = patcher.patch_slice(
+                    idr_nal, all_mods,
+                    sps=_sps, pps=_pps, global_mb_offset=idr_off,
+                    pre_computed_offsets=pre_off, pre_computed_blocks=pre_blk)
+
+            if modified_nal is None:
+                return 0.0   # patch failure → reject
+
+            # Write MINIMAL file: SPS + PPS + single patched IDR frame.
+            # IDR frames are intra-only and decode independently of all other
+            # frames, making this ~50x faster than encoding the full video.
+            minimal_nals = []
+            if _sps_nal is not None:
+                minimal_nals.append(_sps_nal)
+            if _pps_nal is not None:
+                minimal_nals.append(_pps_nal)
+            minimal_nals.append(modified_nal)
+            self._write_h264_file(minimal_nals, _f_test_h264)
+
+            r = _sp.run(
+                ["ffmpeg", "-y", "-v", "error",
+                 "-i", _f_test_h264,
+                 "-f", "rawvideo", "-pix_fmt", "yuv420p", _f_stego_yuv],
+                capture_output=True,
+            )
+            if r.returncode != 0:
+                return 0.0   # decode failure → reject
+
+            # Only 1 frame in the minimal file → always frame index 0
+            stego_y = _read_y_frame(_f_stego_yuv, 0)
+            if stego_y is None:
+                return 0.0
+            return _psnr(orig_y, stego_y)
+
+        # ------------------------------------------------------------------ #
+        # B — Decode original to raw YUV once                                 #
+        # ------------------------------------------------------------------ #
+        try:
+            _sp.run(
+                ["ffmpeg", "-y", "-v", "error",
+                 "-i", original_file,
+                 "-f", "rawvideo", "-pix_fmt", "yuv420p", _f_orig_yuv],
+                capture_output=True, check=True,
+            )
+        except (_sp.CalledProcessError, FileNotFoundError, OSError):
+            return list(safe_positions)   # FFmpeg unavailable → accept all
+
+        # ------------------------------------------------------------------ #
+        # C — Group positions by IDR index                                    #
+        # ------------------------------------------------------------------ #
+        groups: Dict[int, list] = {}
+        for pos in safe_positions:
+            mb = pos[0]
+            for i, (off, _) in enumerate(_idr_nals):
+                if off <= mb < off + _mb_count:
+                    groups.setdefault(i, []).append(pos)
+                    break
+
+        # ------------------------------------------------------------------ #
+        # D — Per-IDR: fast path → binary search → greedy extension          #
+        # ------------------------------------------------------------------ #
+        validated: list = []
+        ffmpeg_calls = 0
+        try:
+            for idr_idx, (idr_off, idr_nal) in enumerate(_idr_nals):
+                positions = groups.get(idr_idx, [])
+                if not positions:
+                    continue
+
+                frame_idx = idr_off // _mb_count
+                orig_y = _read_y_frame(_f_orig_yuv, frame_idx)
+                if orig_y is None:
+                    # Could not read this frame → accept all positions for safety
+                    validated.extend(positions)
+                    continue
+
+                # Fast path: test ALL positions for this IDR at once
+                psnr = _test_positions(idr_idx, idr_off, idr_nal, positions, orig_y)
+                ffmpeg_calls += 1
+
+                if psnr >= psnr_threshold_db:
+                    validated.extend(positions)
+                    continue
+
+                # Slow path: binary search for maximum safe prefix
+                # positions is in DESCENDING mb order; adding more = more cascade
+                lo, hi = 0, len(positions)
+                for _ in range(max_bisect_iters):
+                    if hi - lo <= 1:
+                        break
+                    mid = (lo + hi) // 2
+                    p = _test_positions(idr_idx, idr_off, idr_nal, positions[:mid], orig_y)
+                    ffmpeg_calls += 1
+                    if p >= psnr_threshold_db:
+                        lo = mid
+                    else:
+                        hi = mid
+
+                # Greedy extension: test remaining positions one-by-one and
+                # add each that keeps PSNR >= threshold when accumulated with
+                # the already-accepted set.  This finds non-contiguous safe
+                # positions that the prefix-only binary search would miss
+                # (e.g. two adj MBs conflict but each is fine with distant MBs).
+                accumulated = list(positions[:lo])
+                greedy_attempts = 0
+                for pos in positions[lo:]:
+                    if greedy_attempts >= max_greedy_per_idr:
+                        break
+                    p = _test_positions(idr_idx, idr_off, idr_nal,
+                                        accumulated + [pos], orig_y)
+                    ffmpeg_calls += 1
+                    greedy_attempts += 1
+                    if p >= psnr_threshold_db:
+                        accumulated.append(pos)
+                validated.extend(accumulated)
+
+        finally:
+            for f in (_f_orig_yuv, _f_test_h264, _f_stego_yuv):
+                try:
+                    if _os.path.exists(f):
+                        _os.remove(f)
+                except OSError:
+                    pass
+
+        return validated
