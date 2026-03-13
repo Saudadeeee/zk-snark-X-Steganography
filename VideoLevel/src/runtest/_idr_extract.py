@@ -157,9 +157,11 @@ def extract_bits_direct(stego_video_path: str,
         safe_map.setdefault((mb, blk), []).append(cidx)
 
     seen_blocks = []
-    for idr_off in sorted(frame_verified_data.keys()):
+    # Iterate in DESCENDING (idr_off, mb, blk) order to match the embedding order
+    # produced by get_safe_positions() (sorted by -mb_idx, -block_idx).
+    for idr_off in sorted(frame_verified_data.keys(), reverse=True):
         _, g_blk = frame_verified_data[idr_off]
-        for (mb, blk) in sorted(g_blk.keys()):
+        for (mb, blk) in sorted(g_blk.keys(), reverse=True):
             if blk >= 16:
                 continue
             if not any(c != 0 for c in g_blk[(mb, blk)]):

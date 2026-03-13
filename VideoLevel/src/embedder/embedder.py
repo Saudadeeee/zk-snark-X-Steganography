@@ -155,6 +155,11 @@ class SafetyCheckResult:
     encoding_bits_modified: int
 
 
+# Sort key: descending (mb_idx, block_idx) — embed/extract in late-frame blocks first
+# to minimise H.264 intra prediction cascade (modified MBs have no downstream dependents).
+_DESC_MB_BLK = lambda t: (-t[0], -t[1])  # noqa: E731
+
+
 class CAVLCSafetyFilter:
     """
     Comprehensive safety filter for CAVLC-based video steganography
@@ -317,38 +322,30 @@ class CAVLCSafetyFilter:
             Set of indices that are trailing ones (empty if none)
         """
         trailing_positions = set()
-        
+
         # Safety check: ensure coeffs is valid
         if not coeffs or len(coeffs) == 0:
             return trailing_positions
-        
+
         # Ensure we have enough coefficients
         if len(coeffs) < 16:
             # Pad with zeros if needed
             coeffs = list(coeffs) + [0] * (16 - len(coeffs))
-        
-        # Find first non-zero coefficient from the end
-        last_nonzero_idx = -1
-        for i in range(min(15, len(coeffs) - 1), -1, -1):
-            if coeffs[i] != 0:
-                last_nonzero_idx = i
-                break
-        
-        if last_nonzero_idx == -1:
-            # All zeros
-            return trailing_positions
-        
-        # Scan backward from last non-zero, looking for ±1
-        # CAVLC encodes MAXIMUM 3 trailing ones
+
+        # Coefficients are in FORWARD zigzag order (coeffs[0] = DC).
+        # CAVLC "trailing ones" are the last consecutive non-zero coefficients
+        # (i.e., highest-frequency) that are ±1, capped at 3.
+        # Walk non-zero positions from highest index downward.
+        nz_rev = [i for i in range(len(coeffs) - 1, -1, -1) if coeffs[i] != 0]
+
         count = 0
-        for i in range(last_nonzero_idx, -1, -1):
-            if coeffs[i] in [-1, 1] and count < 3:
-                trailing_positions.add(i)
+        for idx in nz_rev:
+            if coeffs[idx] in (-1, 1) and count < 3:
+                trailing_positions.add(idx)
                 count += 1
             else:
-                # Hit a non-±1 coefficient, stop
-                break
-        
+                break  # first non-±1 non-zero → stop
+
         return trailing_positions
     
     def _verify_block_bit_length_invariance(
@@ -605,6 +602,15 @@ class CAVLCSafetyFilter:
                 if is_safe:
                     safe_positions.append((mb_idx, block_idx, ~coeff_idx))
 
+        # Sort descending by (mb_idx, block_idx) so that embedding starts at
+        # late-frame macroblocks and works backwards.  In H.264 intra-predicted
+        # frames each decoded block is the prediction reference for all
+        # subsequent blocks in raster order; modifications to early blocks
+        # cascade through the entire frame causing large PSNR degradation.
+        # By embedding in the LAST macroblocks of the LAST IDR frame first,
+        # the intra prediction cascade is reduced to near-zero: the modified
+        # MBs have no (or very few) downstream dependents.
+        safe_positions.sort(key=_DESC_MB_BLK)
         return safe_positions
 
 
@@ -655,9 +661,9 @@ class PayloadEmbedder:
             use_safety_filter: Enable comprehensive CAVLC safety checks (RECOMMENDED)
             enable_trailing_ones_protection: Protect trailing ±1 coefficients (RECOMMENDED)
             enable_bit_length_check: Check CAVLC encoding length invariance (optional)
-            max_modifications_per_block: Maximum modifications per block (1-4, default: 3)
-                                        1 = safest but lowest capacity
-                                        3 = balanced (recommended)
+            max_modifications_per_block: Maximum modifications per block (1-4, default: 1)
+                                        1 = safest (default)
+                                        3 = balanced (higher capacity)
                                         4+ = higher capacity but may affect quality
         """
         self.skip_dc = skip_dc
@@ -681,24 +687,33 @@ class PayloadEmbedder:
     def embed_payload(self, coefficients: List[Tuple[int, int, List[int]]],
                      payload: bytes, nC_map: Optional[Dict[Tuple[int, int], int]] = None,
                      nal_length_map: Optional[Dict[Tuple[int, int], int]] = None,
-                     t1_override_map: Optional[Dict[Tuple[int, int], int]] = None) -> Tuple[List[Tuple[int, int, List[int]]], int]:
+                     t1_override_map: Optional[Dict[Tuple[int, int], int]] = None,
+                     ffmpeg_validator=None,
+                     pre_validated_positions=None) -> Tuple[List[Tuple[int, int, List[int]]], int]:
         """
         Embed payload into coefficient blocks with CAVLC safety checks
-        
+
         Args:
             coefficients: List of (mb_idx, block_idx, coeffs) tuples
             payload: Binary payload to embed
             nC_map: Mapping of block keys to nC values (Crucial for safety filter accuracy)
-        
+            ffmpeg_validator: Optional callable(mb_idx, block_idx, coeff_idx)->bool.
+                              If provided, each position is tested with FFmpeg before use.
+            pre_validated_positions: Optional pre-filtered position list from
+                              batch_psnr_validate().  When provided, CAVLC + FFmpeg
+                              filtering is skipped entirely (fast path).
+
         Returns:
             (modified_coefficients, bits_embedded)
         """
         # Convert payload to bits
         payload_bits = self._bytes_to_bits(payload)
-        
+
         # Use safety filter if enabled
         if self.use_safety_filter and self.safety_filter:
-            return self._embed_with_safety_filter(coefficients, payload_bits, nC_map, nal_length_map, t1_override_map)
+            return self._embed_with_safety_filter(
+                coefficients, payload_bits, nC_map, nal_length_map,
+                t1_override_map, ffmpeg_validator, pre_validated_positions)
         else:
             return self._embed_legacy(coefficients, payload_bits)
     
@@ -708,21 +723,32 @@ class PayloadEmbedder:
         payload_bits: List[int],
         nC_map: Optional[Dict[Tuple[int, int], int]] = None,
         nal_length_map: Optional[Dict[Tuple[int, int], int]] = None,
-        t1_override_map: Optional[Dict[Tuple[int, int], int]] = None
+        t1_override_map: Optional[Dict[Tuple[int, int], int]] = None,
+        ffmpeg_validator=None,
+        pre_validated_positions=None,
     ) -> Tuple[List[Tuple[int, int, List[int]]], int]:
         """
         Embed using CAVLC Safety Filter (RECOMMENDED)
 
         This method enforces all 5 CAVLC safety rules to prevent corruption.
+        When ffmpeg_validator is provided, each position is also tested empirically
+        with FFmpeg before use (lazy: only tested when a bit is about to be embedded).
+        When pre_validated_positions is provided, the CAVLC filter and FFmpeg validator
+        are both skipped (fast path for use with batch_psnr_validate output).
         """
         # Get all safe positions across all blocks
-        safe_positions = self.safety_filter.get_safe_positions(
-            coefficients,
-            skip_dc=self.skip_dc,
-            nC_map=nC_map,
-            nal_length_map=nal_length_map,
-            t1_override_map=t1_override_map
-        )
+        if pre_validated_positions is not None:
+            # Fast path: caller already filtered positions with batch_psnr_validate
+            safe_positions = pre_validated_positions
+            ffmpeg_validator = None   # nothing more to validate
+        else:
+            safe_positions = self.safety_filter.get_safe_positions(
+                coefficients,
+                skip_dc=self.skip_dc,
+                nC_map=nC_map,
+                nal_length_map=nal_length_map,
+                t1_override_map=t1_override_map
+            )
 
         # Build a map for fast lookup: (mb_idx, block_idx) -> safe_coeff_indices
         safe_map = {}
@@ -731,34 +757,44 @@ class PayloadEmbedder:
             if key not in safe_map:
                 safe_map[key] = []
             safe_map[key].append(coeff_idx)
-        
+
         # Embed payload
         modified = []
         bits_embedded = 0
-        
-        for mb_idx, block_idx, coeffs in coefficients:
+        self.last_used_safe_positions = []
+        ffmpeg_skipped = 0
+
+        # Iterate in DESCENDING mb/block order (matches safe_positions sort order)
+        # so that late-frame blocks are embedded first, minimising cascade.
+        for mb_idx, block_idx, coeffs in sorted(coefficients, key=_DESC_MB_BLK):
             new_coeffs = coeffs[:]  # Shallow copy
             block_key = (mb_idx, block_idx)
-            
+
             # Flag to track if this block was actually modified
             block_modified = False
-            
+
             # Get safe positions for this block
             if block_key in safe_map:
                 safe_indices = safe_map[block_key]
-                
+
                 # Modified approach: Allow multiple modifications per block (up to limit)
                 # Safety Filter validates each individual flip independently
                 # By limiting to max_modifications_per_block, we balance capacity vs safety
                 modifications_in_block = 0
-                
+
                 for coeff_idx in safe_indices:
                     if bits_embedded >= len(payload_bits):
                         break
-                    
+
                     if modifications_in_block >= self.max_modifications_per_block:
                         break  # Reached limit for this block
-                    
+
+                    # Lazy FFmpeg validation: test this position before embedding
+                    if ffmpeg_validator is not None:
+                        if not ffmpeg_validator(mb_idx, block_idx, coeff_idx):
+                            ffmpeg_skipped += 1
+                            continue  # skip unsafe position
+
                     payload_bit = payload_bits[bits_embedded]
 
                     if coeff_idx >= 0:
@@ -785,6 +821,7 @@ class PayloadEmbedder:
                     
                     # CRITICAL FIX: Always increment modifications counter regardless
                     # of whether value changed, otherwise extractor cannot stay in sync!
+                    self.last_used_safe_positions.append((mb_idx, block_idx, coeff_idx))
                     modifications_in_block += 1
                     bits_embedded += 1
 
@@ -798,7 +835,9 @@ class PayloadEmbedder:
                 break
 
         # DON'T copy remaining blocks - reconstructor will use original coefficients for them
-        
+        if ffmpeg_skipped:
+            print(f"[Embedder] FFmpeg validator skipped {ffmpeg_skipped} unsafe positions")
+
         return modified, bits_embedded
 
     def extract_payload(
@@ -808,6 +847,7 @@ class PayloadEmbedder:
         start_bit_offset: int = 0,
         nC_map: Optional[Dict[Tuple[int, int], int]] = None,
         nal_length_map: Optional[Dict[Tuple[int, int], int]] = None,
+        t1_override_map: Optional[Dict[Tuple[int, int], int]] = None,
         precomputed_safe_positions: Optional[List[Tuple[int, int, int]]] = None
     ) -> bytes:
         """
@@ -847,7 +887,7 @@ class PayloadEmbedder:
         
         # Use safety filter routing if enabled (MUST match embedding!)
         if self.use_safety_filter and self.safety_filter:
-            return self._extract_with_safety_filter(coefficients, payload_length_bits, start_bit_offset, nC_map, nal_length_map, precomputed_safe_positions)
+            return self._extract_with_safety_filter(coefficients, payload_length_bits, start_bit_offset, nC_map, nal_length_map, t1_override_map, precomputed_safe_positions)
         else:
             return self._extract_legacy(coefficients, payload_length_bits, start_bit_offset)
     
@@ -858,6 +898,7 @@ class PayloadEmbedder:
         start_bit_offset: int = 0,
         nC_map: Optional[Dict[Tuple[int, int], int]] = None,
         nal_length_map: Optional[Dict[Tuple[int, int], int]] = None,
+        t1_override_map: Optional[Dict[Tuple[int, int], int]] = None,
         precomputed_safe_positions: Optional[List[Tuple[int, int, int]]] = None
     ) -> bytes:
         """
@@ -879,7 +920,8 @@ class PayloadEmbedder:
                 coefficients,
                 skip_dc=self.skip_dc,
                 nC_map=nC_map,
-                nal_length_map=nal_length_map
+                nal_length_map=nal_length_map,
+                t1_override_map=t1_override_map
             )
         
         # Build coefficient lookup map for fast access
@@ -897,8 +939,9 @@ class PayloadEmbedder:
         
         extracted_bits = []
         bits_skipped = 0
-        
-        for mb_idx, block_idx, coeffs in coefficients:
+
+        # Iterate in DESCENDING mb/block order — mirrors _embed_with_safety_filter
+        for mb_idx, block_idx, coeffs in sorted(coefficients, key=_DESC_MB_BLK):
             block_key = (mb_idx, block_idx)
             if block_key not in safe_map:
                 continue
