@@ -1,0 +1,40 @@
+{
+  "n_runs": 5,
+  "with_proof": false,
+  "phases": {
+    "load_dicom": {
+      "mean_s": 0.0052,
+      "std_s": 0.00024
+    },
+    "roi_detect": {
+      "mean_s": 0.0017,
+      "std_s": 8e-05
+    },
+    "gzip_compress": {
+      "mean_s": 0.0003,
+      "std_s": 2e-05
+    },
+    "chaos_proof_positions": {
+      "mean_s": 0.0,
+      "std_s": 0.0
+    },
+    "chaos_meta_positions": {
+      "mean_s": 0.5829,
+      "std_s": 0.00977
+    },
+    "lsb_embed": {
+      "mean_s": 1.2273,
+      "std_s": 0.01637
+    },
+    "png_save": {
+      "mean_s": 0.0183,
+      "std_s": 0.0008
+    }
+  },
+  "total_no_zk_mean_s": 1.8356,
+  "total_with_zk_mean_s": 3.6713,
+  "platform": {
+    "os": "Windows",
+    "cpu": "Intel64 Family 6 Model 154 Stepping 3, GenuineIntel"
+  }
+}

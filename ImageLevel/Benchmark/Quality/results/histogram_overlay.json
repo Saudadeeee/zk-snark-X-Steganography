@@ -1,0 +1,11 @@
+{
+  "file": "1-01",
+  "n_bins": 256,
+  "fill_pct": 50,
+  "l1_diff": {
+    "Sequential LSB": 0.0,
+    "PRNG-LSB": 0.0,
+    "ACM-only": 0.0,
+    "This Work": 0.0
+  }
+}

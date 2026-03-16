@@ -1,0 +1,33 @@
+{
+  "file": "1-01",
+  "n_positions": 2000,
+  "reference_key": "Key A (correct)",
+  "position_overlap_pct": {
+    "Key B (wrong string)": 0.3764,
+    "Key C (similar prefix)": 0.5025,
+    "Key D (random)": 0.8065,
+    "Key E (empty-like)": 0.6543
+  },
+  "extraction_results": {
+    "Key A (correct)": {
+      "success": false,
+      "status": "unknown"
+    },
+    "Key B (wrong string)": {
+      "success": false,
+      "status": "unknown"
+    },
+    "Key C (similar prefix)": {
+      "success": false,
+      "status": "unknown"
+    },
+    "Key D (random)": {
+      "success": false,
+      "status": "unknown"
+    },
+    "Key E (empty-like)": {
+      "success": false,
+      "status": "unknown"
+    }
+  }
+}
