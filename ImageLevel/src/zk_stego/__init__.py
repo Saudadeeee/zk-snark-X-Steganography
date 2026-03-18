@@ -6,13 +6,15 @@ using chaos theory (Arnold Cat Map + Logistic Map) for position generation.
 
 Structure:
     - prover.py   : Embed message + generate ZK proof
-    - verifier.py : Extract message + verify ZK proof  
+    - poseidon.py : Circomlib-compatible BN254 Poseidon hash (via Node.js)
     - utils.py    : Helper functions (chaos, LSB, PNG chunks, snarkjs)
+
+Note: Verification is handled by the verifier_package (see verifier_package/).
 
 Quick Start:
     # Prover (embed message)
     from zk_stego import Prover
-    
+
     prover = Prover()
     result = prover.embed_and_prove(
         cover_image_path="cover.png",
@@ -20,37 +22,22 @@ Quick Start:
         message="Secret message",
         chaos_key="my_secret_key"
     )
-    
-    # Verifier (extract message)
-    from zk_stego import Verifier
-    
-    verifier = Verifier()
-    result = verifier.extract_and_verify(
-        stego_image_path="stego.png",
-        chaos_key="my_secret_key"
-    )
-    print(result["message"])
 
 Convenience Functions:
-    from zk_stego import embed, extract, verify
-    
+    from zk_stego import embed
+
     # Embed
     result = embed("cover.png", "stego.png", "Hello", "secret_key")
-    
-    # Extract
-    result = extract("stego.png", "secret_key")
-    
-    # Verify
-    is_valid = verify("stego.png", "secret_key")
 """
 
 # Main classes
 from .prover import Prover
-from .verifier import Verifier
+
+# DICOM steganography
+from .dicom_handler import DicomHandler, DicomStego
 
 # Convenience functions
 from .prover import embed
-from .verifier import extract, verify, get_info
 
 # Utility classes (for advanced usage)
 from .utils import (
@@ -70,16 +57,16 @@ from .utils import (
 
 __version__ = "2.0.0"
 __all__ = [
-    # Main classes
+    # Main class
     "Prover",
-    "Verifier",
-    
-    # Convenience functions
+
+    # DICOM steganography
+    "DicomHandler",
+    "DicomStego",
+
+    # Convenience function
     "embed",
-    "extract", 
-    "verify",
-    "get_info",
-    
+
     # Utility classes
     "ChaosGenerator",
     "LSBProcessor",

@@ -58,7 +58,7 @@ class ChaosGenerator:
     ) -> List[Tuple[int, int]]:
         """Generate chaos-based embedding positions (ensuring uniqueness)"""
         
-        r = 3.7 + (chaos_key % 1000) / 10000
+        r = 3.57 + (chaos_key % 4300) / 10000  # r ∈ [3.57, 4.0) - full chaotic regime
         logistic_x0 = (chaos_key % 10000) / 10000
         arnold_iterations = (chaos_key // 10000) % 10 + 1
         
@@ -333,9 +333,9 @@ class ChaosProofArtifact:
         return bytes(proof_bytes)
 
 def generate_chaos_key_from_secret(secret: str) -> int:
-    """Generate deterministic chaos key from secret string"""
+    """Generate deterministic chaos key from secret string (64-bit)"""
     hash_obj = hashlib.sha256(secret.encode())
-    return int(hash_obj.hexdigest()[:8], 16)
+    return int(hash_obj.hexdigest()[:16], 16)  # 64-bit key
 
 def validate_chaos_parameters(x0: int, y0: int, width: int, height: int) -> bool:
     """Validate initial position is within image bounds"""

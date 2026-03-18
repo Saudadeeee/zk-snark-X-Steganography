@@ -252,38 +252,25 @@ class HybridProofArtifact:
         try:
             metadata = self._extract_metadata_chunk(stego_image_path)
             if not metadata:
+                print("ERROR: No zkPF metadata chunk found in image.")
                 return None
-            
-            # Convert secret_key to chaos_key integer if provided
-            chaos_key = None
-            if secret_key is not None:
-                chaos_key = generate_chaos_key_from_secret(secret_key)
-                
-            stego_img = Image.open(stego_image_path)
-            stego_array = np.array(stego_img)
-            
-            proof_bytes = self.chaos_artifact.extract_proof_chaos(
-                stego_array, metadata["chaos"], chaos_key=chaos_key
-            )
-            
-            if "proof_byte_length" in metadata["chaos"]:
-                original_length = metadata["chaos"]["proof_byte_length"]
-                proof_bytes = proof_bytes[:original_length]
-            
-            try:
-                proof_json = json.loads(proof_bytes.decode('utf-8'))
-            except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                print(f"Error decoding proof JSON: {e}")
+
+            # In the v2 system the proof (pi_a/pi_b/pi_c) is stored directly
+            # inside the PNG chunk under the key "proof".  The LSB pixels hold
+            # the embedded *message*, not the proof bytes.
+            proof_json = metadata.get("proof")
+            if not proof_json:
+                print("ERROR: No proof found in PNG chunk metadata.")
                 return None
-            
+
             return {
-                "proof": proof_json,
-                "public": metadata["public"],
-                "meta": metadata["meta"],
-                "chaos": metadata["chaos"],
-                "timestamp": metadata["timestamp"]
+                "proof":     proof_json,
+                "public":    metadata.get("public", {}),
+                "meta":      metadata.get("meta", {}),
+                "chaos":     metadata.get("chaos", {}),
+                "timestamp": metadata.get("timestamp"),
             }
-            
+
         except Exception as e:
             print(f"Error in hybrid extraction: {e}")
             return None
@@ -419,32 +406,33 @@ def embed_chaos_proof(
     )
 
 def extract_chaos_proof(stego_image_path: str, secret_key: str = None) -> Optional[Dict[str, Any]]:
-    """High-level function to extract proof using hybrid chaos approach
-    
+    """Extract the ZK proof artifact from a v2 stego image.
+
+    In the v2 system the proof is stored inside the PNG chunk, so no
+    secret_key is needed for extraction.  The argument is kept for
+    backwards-compatibility but is no longer used.
+
     Args:
-        stego_image_path: Path to the steganographic image
-        secret_key: Secret key for chaos extraction (REQUIRED for version 2.0+)
-                   Must be transmitted via secure channel, NOT stored in image
-                   
+        stego_image_path: Path to the steganographic image.
+        secret_key: Ignored in v2 (proof lives in the PNG chunk).
+
     Returns:
-        Extracted proof artifact or None if extraction fails
+        Dict with 'proof', 'public', 'meta', 'chaos', 'timestamp', or None.
     """
     hybrid = HybridProofArtifact()
-    return hybrid.extract_hybrid_proof(stego_image_path, secret_key=secret_key)
+    return hybrid.extract_hybrid_proof(stego_image_path)
 
 def verify_chaos_stego(stego_image_path: str, secret_key: str = None) -> bool:
-    """Single-command verification for chaos-based steganography
-    
+    """Single-command check that a v2 stego image contains a valid proof structure.
+
     Args:
-        stego_image_path: Path to the steganographic image  
-        secret_key: Secret key for chaos extraction (REQUIRED for version 2.0+)
+        stego_image_path: Path to the steganographic image.
+        secret_key: Ignored in v2.
     """
-    artifact = extract_chaos_proof(stego_image_path, secret_key=secret_key)
+    artifact = extract_chaos_proof(stego_image_path)
     if not artifact:
         return False
-        
-    required_fields = ['proof', 'chaos']
-    return all(field in artifact for field in required_fields)
+    return all(field in artifact for field in ['proof', 'public'])
 
 if __name__ == "__main__":
     print("Hybrid ZK-SNARK Chaos Steganography")

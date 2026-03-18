@@ -64,7 +64,7 @@ npm install -g snarkjs
 # Python packages
 pip install pillow numpy
 
-# Circom compiler (should be in bin/circom)
+# Circom compiler (Windows: bin/circom.exe)
 ```
 
 ### Setup

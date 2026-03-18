@@ -40,6 +40,7 @@ Thumbs.db
 data/encoded/*.h264
 data/output/*.h264
 data/raw/*.h264
+data/raw/*.y4m
 *.zkey
 *.ptau
 *.r1cs

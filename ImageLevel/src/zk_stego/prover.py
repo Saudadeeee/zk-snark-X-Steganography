@@ -162,7 +162,7 @@ class Prover:
         chaos_metadata = self._create_chaos_metadata(
             x0, y0, chaos_key_int, len(message_bits)
         )
-        
+
         chunk_metadata = {
             "chaos": chaos_metadata,
             "public": {
@@ -173,13 +173,23 @@ class Prover:
             },
             "meta": {
                 "version": "2.0",
-                "algorithm": "chaos_lsb_zksnark",
+                "algorithm": "chaos_lsb_zksnark_v2",
             },
             "timestamp": result["timestamp"],
         }
-        
+
         if result["public_inputs"]:
-            chunk_metadata["public"]["public_inputs"] = result["public_inputs"]
+            # Store the three v2 public inputs by name for clarity
+            pi = result["public_inputs"]
+            chunk_metadata["public"]["public_inputs"] = pi
+            # v2 public order from circuit: [publicCommitment, publicImageHash[8]..., publicNullifier]
+            if len(pi) >= 10:
+                chunk_metadata["public"]["publicCommitment"] = pi[0]
+                chunk_metadata["public"]["publicImageHash"]  = pi[1:9]
+                chunk_metadata["public"]["publicNullifier"]  = pi[9]
+
+        if result["proof"]:
+            chunk_metadata["proof"] = result["proof"]
         
         success = PNGChunkHandler.embed_metadata(output_path, chunk_metadata)
         if success:
@@ -332,83 +342,97 @@ class Prover:
         x0: int,
         y0: int
     ) -> Dict[str, Any]:
-        """Extract parameters for witness generation"""
+        """
+        Compute all witness parameters for the v2 SecureChaosZKStego circuit.
+
+        Uses the real circomlib Poseidon hash (via poseidon_helper.js / circomlibjs)
+        so every value exactly matches what the Groth16 circuit verifier checks.
+
+        v2 public outputs:   publicCommitment, publicImageHash[8], publicNullifier
+        v2 private inputs:   messageBits[32], chaosKey, randomness, secret, nonce,
+                             x0, y0, positions[16][2], imageHashPrivate[8]
+        """
         import hashlib
-        
-        height, width = image_array.shape[:2]
-        
-        image_hash = compute_image_hash(image_array)
-        
-        # Convert message to bits
-        message_bytes = message.encode('utf-8')[:32]
-        proof_bits = []
+        from .poseidon import compute_all_zk_params
+
+        BN254_P = 21888242871839275222246405745257275088548364400416034343698204186575808495617
+
+        # chaos key as a BN254 field element
+        chaos_key_int = generate_chaos_key_from_secret(chaos_key)
+
+        # image hash: SHA-256 → 8 × 32-bit field elements
+        image_hash_hex      = compute_image_hash(image_array)
+        image_hash_elements = hash_to_field_elements(image_hash_hex, n_elements=8)
+
+        # message bits: first 4 bytes → 32 bits, zero-padded
+        message_bytes = message.encode('utf-8')[:4]
+        message_bits  = []
         for byte in message_bytes:
             for i in range(7, -1, -1):
-                proof_bits.append((byte >> i) & 1)
-        
-        # Generate positions using Arnold Cat Map
-        positions = []
-        curr_x, curr_y = x0, y0
-        for i in range(64):
-            new_x = (2 * curr_x + curr_y) % width
-            new_y = (curr_x + curr_y) % height
-            curr_x, curr_y = new_x, new_y
-            positions.append((curr_x, curr_y))
-        
-        position_data = json.dumps(positions, sort_keys=True)
-        commitment_root = hashlib.sha256(position_data.encode()).hexdigest()
-        
+                message_bits.append((byte >> i) & 1)
+        message_bits = (message_bits + [0] * 32)[:32]
+
+        # randomness / secret / nonce – deterministic from chaos_key
+        randomness = int(hashlib.sha256(f"randomness:{chaos_key}".encode()).hexdigest(), 16) % BN254_P
+        secret     = int(hashlib.sha256(f"secret:{chaos_key}".encode()).hexdigest(), 16)     % BN254_P
+        nonce      = int(hashlib.sha256(f"nonce:{chaos_key}".encode()).hexdigest(), 16)       % BN254_P
+
+        # all Poseidon-based values computed in one Node.js call
+        print("  Computing Poseidon hashes (circomlibjs)...")
+        zk_params = compute_all_zk_params(
+            x0, y0, chaos_key_int, randomness, secret, nonce, message_bits
+        )
+
         return {
             "x0": x0,
             "y0": y0,
             "chaos_key": chaos_key,
-            "image_hash": image_hash,
-            "commitment_root": commitment_root,
-            "proof_bits": proof_bits,
-            "positions": positions,
-            "proof_length": len(proof_bits),
-            "timestamp": int(time.time())
+            "chaos_key_int": chaos_key_int,
+            "image_hash_elements": image_hash_elements,
+            "message_bits": message_bits,
+            "positions": zk_params["positions"],
+            "randomness": randomness,
+            "secret": secret,
+            "nonce": nonce,
+            "public_commitment": zk_params["public_commitment"],
+            "public_nullifier": zk_params["public_nullifier"],
+            "proof_length": len(message),
+            "timestamp": int(time.time()),
         }
-    
+
     def _create_witness_input(self, chaos_params: Dict[str, Any]) -> Dict[str, Any]:
-        """Create witness input for circuit"""
-        proof_bits = chaos_params["proof_bits"]
-        positions = chaos_params["positions"]
-        
-        # Pad/truncate to circuit requirements
-        if len(proof_bits) > 256:
-            proof_bits = proof_bits[:256]
-        proof_bits_padded = proof_bits + [0] * (256 - len(proof_bits))
-        
-        if len(positions) > 64:
-            positions = positions[:64]
-        positions_padded = positions + [(0, 0)] * (64 - len(positions))
-        
-        # Adjust for actual circuit (based on compiled circuit)
-        proof_bits_adjusted = proof_bits_padded[:32]
-        positions_adjusted = positions_padded[:16]
-        
-        image_hash = chaos_params["image_hash"]
-        image_hash_single = int.from_bytes(bytes.fromhex(image_hash), 'big') % (2**254)
-        
-        chaos_key = chaos_params["chaos_key"]
-        if isinstance(chaos_key, str):
-            chaos_key_int = int(chaos_key, 16) if len(chaos_key) > 8 else generate_chaos_key_from_secret(chaos_key)
-        else:
-            chaos_key_int = chaos_key
-        
-        commitment_root = chaos_params["commitment_root"]
-        
+        """
+        Create witness input JSON for the v2 SecureChaosZKStego circuit.
+
+        Signal mapping (matches component main declaration):
+            PUBLIC  publicCommitment         → single integer
+            PUBLIC  publicImageHash[8]       → array of 8 integers
+            PUBLIC  publicNullifier          → single integer
+            PRIVATE messageBits[32]          → array of 32 bits (0/1)
+            PRIVATE chaosKey                 → single integer
+            PRIVATE randomness               → single integer
+            PRIVATE secret                   → single integer
+            PRIVATE nonce                    → single integer
+            PRIVATE x0                       → single integer
+            PRIVATE y0                       → single integer
+            PRIVATE positions[16][2]         → 16 pairs of integers
+            PRIVATE imageHashPrivate[8]      → array of 8 integers
+        """
         return {
-            "commitmentRoot": str(int(commitment_root, 16)),
-            "proofLength": str(chaos_params["proof_length"]),
-            "timestamp": str(chaos_params["timestamp"]),
-            "x0": str(chaos_params["x0"]),
-            "y0": str(chaos_params["y0"]),
-            "chaosKey": str(chaos_key_int),
-            "proofBits": [str(bit) for bit in proof_bits_adjusted],
-            "positions": [[str(pos[0]), str(pos[1])] for pos in positions_adjusted],
-            "imageHash": str(image_hash_single)
+            # Public inputs
+            "publicCommitment":  str(chaos_params["public_commitment"]),
+            "publicImageHash":   [str(e) for e in chaos_params["image_hash_elements"]],
+            "publicNullifier":   str(chaos_params["public_nullifier"]),
+            # Private inputs
+            "messageBits":       [str(b) for b in chaos_params["message_bits"]],
+            "chaosKey":          str(chaos_params["chaos_key_int"]),
+            "randomness":        str(chaos_params["randomness"]),
+            "secret":            str(chaos_params["secret"]),
+            "nonce":             str(chaos_params["nonce"]),
+            "x0":                str(chaos_params["x0"]),
+            "y0":                str(chaos_params["y0"]),
+            "positions":         [[str(p[0]), str(p[1])] for p in chaos_params["positions"]],
+            "imageHashPrivate":  [str(e) for e in chaos_params["image_hash_elements"]],
         }
 
 
@@ -444,63 +468,4 @@ def embed(
         chaos_key=chaos_key,
         generate_zk_proof=with_proof
     )
-
-
-if __name__ == "__main__":
-    import sys
-    import os
-    
-    # Check for demo mode
-    if len(sys.argv) >= 2 and sys.argv[1] == "demo":
-        print("=" * 60)
-        print("ZK-SNARK Steganography Prover - DEMO")
-        print("=" * 60)
-        
-        # Create demo cover image
-        demo_cover = "demo_cover.png"
-        demo_stego = "demo_stego.png"
-        demo_message = "Hello ZK-SNARK Steganography!"
-        demo_chaos_key = "demo_secret_key_12345"
-        
-        print(f"\n[1] Creating demo cover image: {demo_cover}")
-        img = Image.new("RGB", (512, 512), color=(128, 128, 128))
-        pixels = np.array(img)
-        np.random.seed(42)
-        pixels = (pixels + np.random.randint(-30, 30, pixels.shape)).astype(np.uint8)
-        Image.fromarray(pixels).save(demo_cover)
-        print(f"    Created 512x512 RGB image")
-        
-        print(f"\n[2] Embedding message: \"{demo_message}\"")
-        print(f"    Chaos key: {demo_chaos_key}")
-        
-        prover = Prover()
-        result = prover.embed_only(
-            cover_image_path=demo_cover,
-            output_path=demo_stego,
-            message=demo_message,
-            chaos_key=demo_chaos_key
-        )
-        
-        print(f"\n[3] Result:")
-        print(f"    Stego image saved: {demo_stego}")
-        print(f"    Starting position: ({result['x0']}, {result['y0']})")
-        print(f"    Message bits: {result['message_bits']}")
-        
-        # Cleanup cover
-        os.remove(demo_cover)
-        
-        print("\n" + "=" * 60)
-        print("Demo complete! Now run verifier to extract:")
-        print(f"  python -m src.zk_stego.verifier demo")
-        print("=" * 60)
-        
-    else:
-        print("ZK-SNARK Steganography Prover")
-        print("=" * 40)
-        print("Usage:")
-        print("  python -m src.zk_stego.prover demo")
-        print("  python -m src.zk_stego.prover embed <cover.png> <output.png> <message> [chaos_key]")
-        print("")
-        print("Example:")
-        print('  python -m src.zk_stego.prover embed cover.png stego.png "Hello World" my_key')
 
