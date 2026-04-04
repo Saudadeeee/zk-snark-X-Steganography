@@ -1,19 +1,21 @@
 """
-_idr_extract.py — Shared IDR extraction helpers reused by test_phase4 and test_phase5.
+pipeline.py — Core H.264 IDR extraction pipeline.
 
-These are stripped-down variants of the helpers in e2e_groth16_test.py adapted for
-the test suite (no stdout redirection, suppress progress prints).
+Parses an H.264 video, extracts all IDR frame coefficients and their
+exact bit offsets, and provides bit-level extraction from a stego video.
+
+Public API:
+    extract_all_idr_blocks(video_path, reconstructor)
+        → (coefficients, frame_verified_data, nC_map, nal_length_map, t1_override_map)
+
+    extract_bits_direct(stego_video_path, embed_safe_positions, ...)
+        → bytes
 """
 
-from __future__ import annotations
-import os, sys
-
-from src.bitstream.h264              import H264BitstreamParser
-from src.bitstream.h264   import TraceableCAVLCParser
-from src.bitstream.bitstream_ops  import BitstreamReconstructor
-from src.bitstream.bitstream_ops        import BitstreamPatcher, BitArray
-from src.bitstream.bitstream_io             import BitstreamReader
-from src.bitstream.cavlc            import CAVLCDecoder
+from ..bitstream.h264          import H264BitstreamParser, TraceableCAVLCParser
+from ..bitstream.bitstream_ops import BitstreamReconstructor, BitstreamPatcher, BitArray
+from ..bitstream.bitstream_io  import BitstreamReader
+from ..bitstream.cavlc         import CAVLCDecoder
 
 
 def extract_all_idr_blocks(video_path: str, reconstructor: BitstreamReconstructor,
@@ -157,8 +159,7 @@ def extract_bits_direct(stego_video_path: str,
         safe_map.setdefault((mb, blk), []).append(cidx)
 
     seen_blocks = []
-    # Iterate in DESCENDING (idr_off, mb, blk) order to match the embedding order
-    # produced by get_safe_positions() (sorted by -mb_idx, -block_idx).
+    # Descending order — must match embedding order from get_safe_positions()
     for idr_off in sorted(frame_verified_data.keys(), reverse=True):
         _, g_blk = frame_verified_data[idr_off]
         for (mb, blk) in sorted(g_blk.keys(), reverse=True):

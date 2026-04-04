@@ -1,18 +1,21 @@
 """
-Embedder: CAVLC Coefficient Embedding Pipeline
-===============================================
+stego.py — CAVLC Safety Filter and Payload Embedder.
 
-Merged module combining:
-  - EncodingLengthChecker: CAVLC VLC bit-length analysis for patchability
-  - CAVLCSafetyFilter:     5-rule safety gate (zero-preservation, T1, bit-length, magnitude)
-  - PayloadEmbedder:       LSB steganographic payload embedding/extraction
+Core steganography logic: identifies safe trailing-ones positions in
+H.264 CAVLC blocks and embeds/extracts payload bits via sign flips.
 
-Pipeline: EncodingLengthChecker ← CAVLCSafetyFilter ← PayloadEmbedder
+Public API:
+    CAVLCSafetyFilter  — Identifies safe T1 positions (5-rule gate)
+    PayloadEmbedder    — Embeds and extracts payload bits
+    EncodingLengthChecker — Verifies bit-length preservation
 """
 
+import logging
 from typing import Tuple
 
 from ..bitstream.cavlc import CAVLCEncoder
+
+logger = logging.getLogger(__name__)
 from ..bitstream.bitstream_io import BitstreamWriter
 
 
@@ -52,8 +55,7 @@ class EncodingLengthChecker:
             # Standard encoding
             # levelCode = 2*(abs_level - 1) + sign
             levelCode = (abs_level - 1) * 2 + sign
-        
-        # Determine levelPrefix and levelSuffixSize
+
         # CRITICAL FIX: When suffixLength=0, write levelCode directly as prefix (FFmpeg behavior)
         if suffix_length == 0:
             # No suffix, use prefix value directly as levelCode
@@ -61,20 +63,19 @@ class EncodingLengthChecker:
             levelPrefix = levelCode
             levelSuffixSize = 0
         else:
-            # Normal case: split into prefix and suffix
             levelPrefix = levelCode >> suffix_length
             levelSuffixSize = suffix_length
-            
+
             # Check for escape (prefix >= 14, only when suffixLength > 0)
             if levelPrefix >= 14:
                 levelPrefix = 14
                 levelSuffixSize = 4
-        
+
         # Calculate total bits
         # level_prefix is encoded as unary: prefix + 1 bits (prefix zeros + one '1')
         prefix_bits = levelPrefix + 1
         suffix_bits = levelSuffixSize
-        
+
         return prefix_bits + suffix_bits
 
     def check_lsb_flip_patchability(self, value: int, suffix_length: int = 0) -> Tuple[bool, int, int]:
@@ -108,14 +109,13 @@ class EncodingLengthChecker:
         # Don't allow flip that would create 0 or ±1
         if abs(new_value) <= 1:
             return False, 0, 0
-        
-        # Calculate actual encoding lengths
+
         original_bits = self.get_level_encoding_length(value, suffix_length, is_first_after_t1s=False)
         new_bits = self.get_level_encoding_length(new_value, suffix_length, is_first_after_t1s=False)
-        
+
         # Patchable only if encoding length is preserved
         is_patchable = (original_bits == new_bits) and (original_bits > 0)
-        
+
         return is_patchable, original_bits, new_bits
 
 
@@ -124,9 +124,6 @@ class EncodingLengthChecker:
 # =============================================================================
 
 from typing import List, Tuple, Optional, Set, Dict
-from dataclasses import dataclass
-from functools import lru_cache
-import numpy as np
 
 from ..exceptions import SafetyFilterError
 from ..bitstream.cavlc import CAVLCEncoder
@@ -504,7 +501,7 @@ class CAVLCSafetyFilter:
 
 from typing import List, Tuple, Optional, Dict
 
-from ..exceptions import EmbeddingError, InsufficientCapacityError
+from ..exceptions import EmbeddingError
 
 
 class PayloadEmbedder:
@@ -718,7 +715,7 @@ class PayloadEmbedder:
 
         # DON'T copy remaining blocks - reconstructor will use original coefficients for them
         if ffmpeg_skipped:
-            print(f"[Embedder] FFmpeg validator skipped {ffmpeg_skipped} unsafe positions")
+            logger.warning(f"[Embedder] FFmpeg validator skipped {ffmpeg_skipped} unsafe positions")
 
         return modified, bits_embedded
 

@@ -71,54 +71,25 @@ INPUT VIDEO (H.264)
 ```
 VideoLevel/
 |
-+-- src/                            # Main source code (flat layout)
++-- src/                            # Main source code
 |   +-- __init__.py
-|   +-- exceptions.py
-|   +-- zk_payload_format.py        # pack() / unpack() / blob_bit_length()
-|   +-- zk_snark_bridge.py          # Python <-> snarkjs/Node.js bridge
+|   +-- exceptions.py               # Custom exception hierarchy
+|   +-- zk_proof.py                 # ZK binary format + snarkjs bridge (PUBLIC)
+|   +-- embedder.py                 # embed() — PUBLIC API entry point
+|   +-- verifier.py                 # verify() — PUBLIC API entry point
 |   |
-|   +-- bitstream/                  # H.264 CAVLC codec
+|   +-- bitstream/                  # H.264 CAVLC codec (internal)
 |   |   +-- bitstream_io.py         # Bit-level reader/writer
-|   |   +-- bitstream_patcher.py    # Bit-exact patching of NAL bytes
-|   |   +-- bitstream_reconstructor.py  # Full video reconstruction
-|   |   +-- cavlc_decoder.py        # Decode DCT coefficients from RBSP
-|   |   +-- cavlc_encoder.py        # Encode DCT coefficients to RBSP
-|   |   +-- cavlc_tables.py         # VLC lookup tables
-|   |   +-- h264_parser.py          # NAL / SPS / PPS parser
-|   |   +-- nal_handler.py          # NAL unit assembly
-|   |   +-- macroblock_parser.py    # Macroblock-level parsing
-|   |   +-- traceable_cavlc_parser.py  # Offset-tracking CAVLC parser
+|   |   +-- bitstream_ops.py        # BitstreamPatcher + BitstreamReconstructor
+|   |   +-- cavlc.py                # CAVLCDecoder + CAVLCEncoder + VLC tables
+|   |   +-- h264.py                 # H264BitstreamParser + TraceableCAVLCParser
 |   |
-|   +-- embedder/                   # Steganography
-|   |   +-- cavlc_safety_filter.py  # 5-rule safety filter
-|   |   +-- encoding_length_checker.py
-|   |   +-- payload_embedder.py     # LSB + sign-bit embedding
-|   |
-|   +-- decoder/
-|   |   +-- cavlc_extractor_simple.py
-|   |
-|   +-- crypto/                     # ZK utilities
-|   |   +-- ldpc_codec.py
-|   |   +-- rc4_cipher.py
-|   |   +-- rs_codec.py
-|   |   +-- proof_generator.py
-|   |   +-- proof_serializer.py
-|   |   +-- proof_wrapper.py
-|   |   +-- data_interleaver.py
-|   |   +-- temporal_interleaver.py
-|   |
-|   +-- preprocessing/
-|   |   +-- context_analyzer.py
-|   |   +-- dwt_analyzer.py
-|   |   +-- hybrid_selector.py
-|   |   +-- yuv_converter.py
-|   |
-|   +-- utils/
-|   |   +-- quality_metrics.py
+|   +-- core/                       # Core pipeline logic (internal)
+|   |   +-- pipeline.py             # extract_all_idr_blocks(), extract_bits_direct()
+|   |   +-- stego.py                # CAVLCSafetyFilter, PayloadEmbedder
 |   |
 |   +-- runtest/                    # Per-phase test suite
 |       +-- _helpers.py
-|       +-- _idr_extract.py         # Shared IDR extraction helpers
 |       +-- test_phase1_zk_proof.py
 |       +-- test_phase2_h264_parser.py
 |       +-- test_phase3_safety_embed.py
@@ -146,12 +117,12 @@ VideoLevel/
 +-- docs/
 |   +-- theory.md
 |   +-- theory_detailed.md
+|   +-- H264_MODULE_EXPLAINED.md
+|   +-- CAVLC_MODULE_EXPLAINED.md
 |
-+-- e2e_groth16_test.py             # End-to-end pipeline script
-+-- e2e_extraction_test.py
-+-- capacity_analyzer.py
 +-- .gitignore
 +-- README.md
++-- CODEBASE_STRUCTURE.md
 ```
 
 ---
@@ -186,35 +157,41 @@ ffmpeg -i input.y4m -c:v libx264 -profile:v baseline -coder 0 -qp 10 -g 8 -y out
 
 The `-g` value controls the GOP size (IDR frame interval). A smaller value means more IDR frames and more embedding capacity. The test video uses `-g 8`.
 
-### Run end-to-end test
+### Embed a message
 
-```bash
-python e2e_groth16_test.py
+```python
+import os
+from src.embedder import embed
+
+secret_key = os.urandom(32)
+message    = b"Hello ZK-Stego"
+
+result = embed(
+    video_path   = "data/encoded/foreman_cif_g8.h264",
+    message      = message,
+    output_path  = "data/output/stego.h264",
+    circuits_dir = "circuits/",
+    secret_key   = secret_key,
+)
+print(f"Embedded {result.bits_embedded} bits into {result.output_path}")
 ```
 
-Expected output (abbreviated):
-```
-PHASE 1: GROTH16 ZK-SNARK PROOF GENERATION
-  Proof size   : 256 bytes  (Groth16 BN128)
-  Proof sanity : VALID
+### Verify and extract
 
-PHASE 2: PARSING BITSTREAM & EMBEDDING ACROSS ALL IDR FRAMES
-  Safe embedding positions : 2340  (292 bytes capacity)
-  Payload size             : 274 bytes  (2192 bits)
-  Embedded 2192/2192 bits into 1120 blocks
+```python
+from src.verifier import verify
 
-PHASE 3: RECONSTRUCTING STEGO VIDEO
-  Stego video : data/output/stego_groth16.h264
-
-PHASE 4: EXTRACTING BLOB FROM STEGO VIDEO
-  Extracted blob : 274 bytes
-
-PHASE 5: INTEGRITY CHECK & ZK PROOF VERIFICATION
-  [OK] Blob is bit-perfect
-  [OK] Message matches original
-  [OK] Groth16 proof VALID
-
-  [SUCCESS] End-to-end ZK-SNARK steganography verified!
+result = verify(
+    stego_video_path    = "data/output/stego.h264",
+    original_video_path = "data/encoded/foreman_cif_g8.h264",
+    circuits_dir        = "circuits/",
+    secret_key          = secret_key,
+    message_length      = len(message),
+)
+if result.valid:
+    print(f"Proof valid! Message: {result.message}")
+else:
+    print("Verification failed.")
 ```
 
 ### Run test suite
@@ -357,17 +334,37 @@ python e2e_groth16_test.py
 
 ## Version History
 
-### upgrade-v3 (current — March 2026)
+### upgrade-v3 (current — April 2026)
 
+**Refactoring (April 2026):**
+- Merged `zk_payload_format.py` + `zk_snark_bridge.py` → `src/zk_proof.py`
+- Merged `bitstream_patcher.py` + `bitstream_reconstructor.py` → `src/bitstream/bitstream_ops.py`
+- Merged all CAVLC files → `src/bitstream/cavlc.py`
+- Merged all H.264 parser files → `src/bitstream/h264.py`
+- Moved `src/runtest/_idr_extract.py` → `src/core/pipeline.py`
+- Moved `src/embedder/embedder.py` → `src/core/stego.py`
+- Added public API: `src/embedder.py` (`embed()`) and `src/verifier.py` (`verify()`)
+- Deleted dead code: `src/decoder/`, `src/crypto/`, `src/preprocessing/`, `src/utils/`
+- All 32/32 tests still pass after refactoring
+
+**Fixes (March 2026):**
+- Fix #7: Descending MB embedding order to avoid intra prediction cascade (PSNR 7→22 dB)
+- Fix #8: Single-IDR FFmpeg decode + greedy extension for PSNR validation (~50x speedup)
+- Fix #6: Removed over-conservative `first_resync` cut (capacity 24→1205 blocks/IDR)
+- Fix #5: High-capacity test setup with QP=30 video
+- Fix #4: `_detect_trailing_ones` direction bug
+- Fix #3: FFmpeg position validation for pixel-safe embeddings
+- Fix #2: Luma nC cross-MB boundary bug
+- Fix #1: Chroma AC nC computation bug
+
+**Core features:**
 - Migrated source layout from `src/zk_mv_stego/` to flat `src/`
 - Added `BitstreamPatcher` for bit-exact patching (no full CAVLC re-encoding)
 - Added `TraceableCAVLCParser` for block offset tracking
-- Extended safety filter: sign-bit positions for trailing +-1 coefficients with bit-length verification
+- Extended safety filter: sign-bit positions for trailing +-1 coefficients
 - Multi-IDR frame embedding spanning all IDR frames in video
 - T1-override support for bit-exact reproduction of edge-case blocks
 - Added `src/runtest/` per-phase test suite: 32/32 pass
-- Fixed `verify()` substring bug (`"valid" in "invalid"`)
-- Fixed `_extract_with_safety_filter` sign-bit position handling
 
 ### v3.1-CAVLC-Safety (February 2026)
 

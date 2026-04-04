@@ -11,6 +11,9 @@ Reference: ITU-T H.264 Specification Section 9.2
 """
 
 from typing import List, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass
 
 from .bitstream_io import BitstreamWriter
@@ -820,7 +823,7 @@ def decode_vlc(reader, vlc_table: dict, max_bits: int = 16, debug: bool = False)
     longest_match_len = 0
     
     if debug:
-        print(f"      [decode_vlc] Starting at position {start_pos}")
+        logger.debug(f"      [decode_vlc] Starting at position {start_pos}")
     
     # Read bits progressively and track longest match
     for i in range(max_bits):
@@ -834,7 +837,7 @@ def decode_vlc(reader, vlc_table: dict, max_bits: int = 16, debug: bool = False)
                 longest_match_len = len(code_str)
                 
                 if debug:
-                    print(f"      [decode_vlc] Found match: '{code_str}' -> {longest_match}")
+                    logger.debug(f"      [decode_vlc] Found match: '{code_str}' -> {longest_match}")
                 
                 # Optimization: Check if any longer codes exist with this prefix
                 # If not, we can stop early
@@ -843,12 +846,10 @@ def decode_vlc(reader, vlc_table: dict, max_bits: int = 16, debug: bool = False)
                 if not has_longer:
                     # This is definitely the longest match, stop here
                     if debug:
-                        print(f"      [decode_vlc] No longer codes, stopping at '{code_str}'")
+                        logger.debug(f"      [decode_vlc] No longer codes, stopping at '{code_str}'")
                     break
-        except:
+        except Exception:
             # End of stream reached
-            if debug:
-                print(f"      [decode_vlc] End of stream at {len(code_str)} bits")
             break
     
     # If we found at least one match, rewind to end of longest match and return
@@ -857,7 +858,7 @@ def decode_vlc(reader, vlc_table: dict, max_bits: int = 16, debug: bool = False)
         end_pos = start_pos + longest_match_len
         reader.seek(end_pos)
         if debug:
-            print(f"      [decode_vlc] Rewinding to position {end_pos} (consumed {longest_match_len} bits)")
+            logger.debug(f"      [decode_vlc] Rewinding to position {end_pos} (consumed {longest_match_len} bits)")
         return longest_match
     
     # No valid code found - CRITICAL: rewind reader to start_pos to prevent desync
@@ -1059,22 +1060,19 @@ class CAVLCDecoder:
         Returns:
             CoefficientBlock with decoded levels
         """
-        # 🔬 DEBUG: Log entry for first MB blocks
-        pos_start = self.reader.position  # Always save position
+        pos_start = self.reader.position
         if debug_key and debug_key[0] == 0 and debug_key[1] < 16:
-            print(f"    [CAVLC_DEC] Enter decode MB:{debug_key[0]} Blk:{debug_key[1]} nC:{nC} Pos:{pos_start}")
-        
+            logger.debug(f"    [CAVLC_DEC] Enter decode MB:{debug_key[0]} Blk:{debug_key[1]} nC:{nC} Pos:{pos_start}")
+
         total_coeffs, trailing_ones = self._decode_coeff_token(nC)
 
-        # Sanity check: coeff_token values > max_num_coeff indicate bitstream desync
         if total_coeffs > max_num_coeff:
             raise ValueError(f"Invalid total_coeffs={total_coeffs} > max_num_coeff={max_num_coeff} - bitstream desync")
 
-        # 🔬 DEBUG: Log coeff_token result
         if debug_key and debug_key[0] == 0 and debug_key[1] < 16:
             pos_after_token = self.reader.position
             bits_for_token = pos_after_token - pos_start
-            print(f"    [CAVLC_DEC] coeff_token -> TC:{total_coeffs} T1:{trailing_ones} (consumed {bits_for_token} bits)")
+            logger.debug(f"    [CAVLC_DEC] coeff_token -> TC:{total_coeffs} T1:{trailing_ones} (consumed {bits_for_token} bits)")
 
         if total_coeffs == 0:
             # Block is all zeros
@@ -1123,7 +1121,7 @@ class CAVLCDecoder:
         # Debug: log what we decoded
         if debug_key and debug_key[0] == 0 and debug_key[1] in [16, 17, 18, 19]:
             non_zero = [c for c in coeffs if c != 0]
-            print(f"      [CAVLC_DEC] Decoded MB{debug_key[0]} block{debug_key[1]}: {non_zero[:5]}...")
+            logger.debug(f"      [CAVLC_DEC] Decoded MB{debug_key[0]} block{debug_key[1]}: {non_zero[:5]}...")
         
         return CoefficientBlock(
             levels=coeffs,
@@ -1152,7 +1150,7 @@ class CAVLCDecoder:
                 total_coeffs = code >> 2            # Upper 4 bits = TC
                 trailing_ones = code & 0x3          # Lower 2 bits = T1
                 return (total_coeffs, min(trailing_ones, 3))
-            except:
+            except Exception:
                 # Bitstream error - return zero coefficients
                 return (0, 0)
 
@@ -1214,7 +1212,7 @@ class CAVLCDecoder:
                 total_coeffs = min(self.reader.read_ue() + 1, 16)
                 trailing_ones = min(self.reader.read_bits(2), total_coeffs)
                 return (total_coeffs, trailing_ones)
-            except:
+            except Exception:
                 return (0, 0)
     
     def _decode_levels(self, count: int, trailing_ones: int, total_coeffs: int) -> List[int]:
@@ -1455,44 +1453,40 @@ class CAVLCEncoder:
             override_trailing_ones: Override T1 count to match original decoder's T1 (prevents
                                     encoder from choosing a higher T1 than the original)
         """
-        # Analyze block
         analysis = self._analyze_block(coeffs, max_num_coeff, override_total_coeffs=override_total_coeffs,
                                        override_trailing_ones=override_trailing_ones)
-        
-        # DEBUG: Show encoding parameters for MB 0 and MB 309 (frame 0 and frame 1)
+
         if debug_key and (debug_key[0] == 0 or debug_key[0] == 309):
-            print(f"[ENC_DEBUG] Block {debug_key}: total_coeffs={analysis.total_coeffs}, "
-                  f"total_coeffs_for_suffix={analysis.total_coeffs_for_suffix}, "
-                  f"trailing_ones={analysis.trailing_ones}, total_zeros={analysis.total_zeros}")
-            print(f"  Override: {override_total_coeffs}, nC={nC}")
-        
+            logger.debug("[ENC_DEBUG] Block %s: total_coeffs=%d, total_coeffs_for_suffix=%d, "
+                         "trailing_ones=%d, total_zeros=%d",
+                         debug_key, analysis.total_coeffs, analysis.total_coeffs_for_suffix,
+                         analysis.trailing_ones, analysis.total_zeros)
+            logger.debug("  Override: %s, nC=%s", override_total_coeffs, nC)
+
         # 1. Encode coeff_token
         coeff_token_code = find_coeff_token_code(
-            analysis.total_coeffs, 
-            analysis.trailing_ones, 
+            analysis.total_coeffs,
+            analysis.trailing_ones,
             nC
         )
         self.writer.write_bit_string(coeff_token_code)
-        
-        # If all zeros, done
+
         if analysis.total_coeffs == 0:
             return
-        
+
         # 2. Encode trailing ones signs
         for sign in analysis.trailing_signs:
-            # 0 = positive, 1 = negative
             self.writer.write_bit(1 if sign < 0 else 0)
-        
+
         # 3. Encode levels (excluding trailing ones)
         self._encode_levels(analysis)
-        
+
         # 4. Encode total_zeros (if not all coefficients)
         if analysis.total_coeffs < max_num_coeff:
-            # DEBUG for first block
             if debug_key and debug_key[0] == 0 and debug_key[1] == 0:
-                print(f"      [CAVLC_ENC] total_zeros={analysis.total_zeros}, total_coeffs={analysis.total_coeffs}, max_num_coeff={max_num_coeff}")
-                print(f"      [CAVLC_ENC] Constraint: total_zeros <= {max_num_coeff - analysis.total_coeffs}")
-            
+                logger.debug(f"      [CAVLC_ENC] total_zeros={analysis.total_zeros}, total_coeffs={analysis.total_coeffs}, max_num_coeff={max_num_coeff}")
+                logger.debug(f"      [CAVLC_ENC] Constraint: total_zeros <= {max_num_coeff - analysis.total_coeffs}")
+
             # Validate total_zeros is within valid range for VLC tables
             # Correct formula: max total_zeros = max_num_coeff - TC
             # (there are TC non-zero coefficients, so at most max_num_coeff-TC zeros)
@@ -1500,10 +1494,10 @@ class CAVLCEncoder:
             if analysis.total_zeros > max_tz:
                 # This should not happen after our validation in _analyze_block,
                 # but add safety check anyway
-                print(f"      [WARN] total_zeros ({analysis.total_zeros}) > max ({max_tz}), clamping")
+                logger.warning(f"      [WARN] total_zeros ({analysis.total_zeros}) > max ({max_tz}), clamping")
                 analysis.total_zeros = max_tz
             elif analysis.total_zeros < 0:
-                print(f"      [WARN] total_zeros ({analysis.total_zeros}) < 0, setting to 0")
+                logger.warning(f"      [WARN] total_zeros ({analysis.total_zeros}) < 0, setting to 0")
                 analysis.total_zeros = 0
             
             total_zeros_code = find_total_zeros_code(
@@ -1634,9 +1628,9 @@ class CAVLCEncoder:
         # Sanity check: total_zeros should equal max by construction
         # (since active_coeffs has no trailing zeros)
         if total_zeros != max_total_zeros:
-            print(f"[WARN] total_zeros mismatch: calculated={total_zeros}, max={max_total_zeros}")
-            print(f"  active_coeffs length: {len(active_coeffs)}, actual_total_coeffs: {actual_total_coeffs}")
-            print(f"  runs: {runs}, sum: {sum(runs)}")
+            logger.warning(f"[WARN] total_zeros mismatch: calculated={total_zeros}, max={max_total_zeros}")
+            logger.debug(f"  active_coeffs length: {len(active_coeffs)}, actual_total_coeffs: {actual_total_coeffs}")
+            logger.debug(f"  runs: {runs}, sum: {sum(runs)}")
         
         # Validate and clamp total_zeros ONLY if it will be encoded
         # (i.e., when actual_total_coeffs < max_num_coeff)
@@ -1646,7 +1640,7 @@ class CAVLCEncoder:
             # VLC table constraint: max total_zeros = max_num_coeff - TC
             vlc_max = max_num_coeff - actual_total_coeffs
             if total_zeros > vlc_max:
-                print(f"[WARN] total_zeros ({total_zeros}) > VLC max ({vlc_max}) - clamping")
+                logger.warning(f"[WARN] total_zeros ({total_zeros}) > VLC max ({vlc_max}) - clamping")
                 # This should not happen after stripping trailing zeros
                 # But clamp just in case
                 excess = total_zeros - vlc_max

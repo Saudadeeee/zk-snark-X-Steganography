@@ -9,11 +9,13 @@ Merged module combining:
 H.264 steganography embedding via smart bitstream patching.
 """
 
-from typing import List, Tuple, Dict, Optional
-from dataclasses import dataclass
+import logging
+from typing import List, Tuple, Dict
+
+logger = logging.getLogger(__name__)
 
 from .h264 import (
-    NALUnit, NALUnitType, SliceHeaderParser, SPSData, PPSData,
+    NALUnit, SPSData, PPSData,
     H264BitstreamParser, TraceableCAVLCParser,
 )
 from .cavlc import CAVLCEncoder, CAVLCDecoder
@@ -46,22 +48,19 @@ class BitArray:
     
     def __setitem__(self, key, value):
         if isinstance(key, slice):
-            # Slice assignment
             start, stop, step = key.indices(len(self.bits))
             if step != 1:
                 raise ValueError("Only contiguous slices supported")
-            
-            # Replace bits
+
             if isinstance(value, list):
                 self.bits[start:stop] = value
             else:
                 raise ValueError("Value must be list of bits")
         else:
             self.bits[key] = value
-    
+
     def to_bytes(self) -> bytes:
         """Convert bit array back to bytes"""
-        # Pad to byte boundary if needed
         if len(self.bits) % 8 != 0:
             padding_needed = 8 - (len(self.bits) % 8)
             padded_bits = self.bits + [0] * padding_needed
@@ -122,7 +121,7 @@ class BitstreamPatcher:
             original_blocks = result['blocks']
         
         if not block_offsets:
-            print(f"[PATCHER] Warning: No offsets extracted!")
+            logger.warning(f"[PATCHER] Warning: No offsets extracted!")
             return original_nal
         
         global_block_offsets = {}
@@ -159,7 +158,7 @@ class BitstreamPatcher:
             key = (mb_idx, block_idx)  # Already global from embedder!
             
             if key not in global_block_offsets:  # Use global offsets!
-                print(f"[PATCHER] Warning: Block {key} not in global offset map (skip MB or not coded)")
+                logger.warning(f"[PATCHER] Warning: Block {key} not in global offset map (skip MB or not coded)")
                 skipped_count += 1
                 continue
             
@@ -177,7 +176,7 @@ class BitstreamPatcher:
             # This means the block wasn't actually coded in the NAL
             if original_coeffs is None:
                 if patched_count == 0:  # Show debug for first occurrence only
-                    print(f"[PATCHER] SKIP {key}: Block not found in extracted coeffs (wasn't coded in NAL)")
+                    logger.debug(f"[PATCHER] SKIP {key}: Block not found in extracted coeffs (wasn't coded in NAL)")
                 skipped_count += 1
                 continue
             
@@ -185,8 +184,8 @@ class BitstreamPatcher:
             parser_total = sum(1 for c in original_coeffs if c != 0)
             modified_total = sum(1 for c in new_coeffs if c != 0)
             if parser_total != modified_total and patched_count < 5:
-                print(f"[PATCHER_WARN] {key}: Parser extracted {parser_total} coeffs, embedder has {modified_total} coeffs")
-                print(f"  This indicates parser extraction inconsistency!")
+                logger.warning(f"[PATCHER_WARN] {key}: Parser extracted {parser_total} coeffs, embedder has {modified_total} coeffs")
+                logger.debug(f"  This indicates parser extraction inconsistency!")
             
             actual_nal_bits = list(rbsp_bits[start_bit:end_bit])
             # Use a 64-bit lookahead buffer to avoid padding-zero artifacts:
@@ -247,7 +246,8 @@ class BitstreamPatcher:
                         orig_bits = candidate_t1
                         matched_trailing_ones = t1_decoded
                         break
-                except Exception:
+                except Exception as e:
+                    logger.debug("nC candidate %d decode/encode failed for %s: %s", nC_try, key, e)
                     continue
 
             if matched_nC is None:
@@ -259,10 +259,11 @@ class BitstreamPatcher:
                             dec = CAVLCDecoder(reader)
                             dec.decode_block_cavlc(nC_try, max_num_coeff=16)
                             lens[nC_try] = reader.pos
-                        except Exception:
+                        except Exception as e:
+                            logger.debug("nC probe %d failed for %s: %s", nC_try, key, e)
                             lens[nC_try] = None
-                    print(f"[PATCHER] SKIP {key}: No nC round-trips exactly "
-                          f"(NAL={original_length}b). nC->consumed={lens}")
+                    logger.debug("[PATCHER] SKIP %s: No nC round-trips exactly "
+                               "(NAL=%db). nC->consumed=%s", key, original_length, lens)
                 skipped_count += 1
                 continue
 
@@ -340,9 +341,9 @@ class BitstreamPatcher:
             # Step 5: Verify bit length (Safety Filter guarantee)
             if len(new_bits) != original_length:
                 if patched_count < 2:
-                    print(f"[PATCHER] SKIP {key}: Modified coefficients encode to different length!")
-                    print(f"  Original NAL: {original_length} bits")
-                    print(f"  Re-encoded:   {len(new_bits)} bits")
+                    logger.debug(f"[PATCHER] SKIP {key}: Modified coefficients encode to different length!")
+                    logger.debug(f"  Original NAL: {original_length} bits")
+                    logger.debug(f"  Re-encoded:   {len(new_bits)} bits")
                 skipped_count += 1
                 continue
 
@@ -357,12 +358,12 @@ class BitstreamPatcher:
                 fwd_dec = CAVLCDecoder(fwd_reader)
                 fwd_dec.decode_block_cavlc(nC, max_num_coeff=16)
                 if fwd_reader.pos != original_length:
-                    if patched_count < 2:
-                        print(f"[PATCHER] SKIP {key}: new_bits decode consumes "
-                              f"{fwd_reader.pos}b != {original_length}b (incomplete encoding)")
+                    logger.debug("PATCHER SKIP %s: new_bits decode consumes %db != %db",
+                                 key, fwd_reader.pos, original_length)
                     skipped_count += 1
                     continue
-            except Exception:
+            except Exception as e:
+                logger.debug("PATCHER SKIP %s: forward decode failed: %s", key, e)
                 skipped_count += 1
                 continue
 
@@ -397,7 +398,8 @@ class BitstreamPatcher:
                     if retro_reader.pos != anc_len_p:
                         retro_skip = True
                         break
-                except Exception:
+                except Exception as e:
+                    logger.debug("Retro chain decode failed: %s", e)
                     retro_skip = True
                     break
                 chain_boundary_patch = anc_start_p
@@ -411,13 +413,13 @@ class BitstreamPatcher:
                 rbsp_bits[start_bit:end_bit] = new_bits
                 patched_count += 1
             except Exception as e:
-                print(f"[PATCHER] Error patching block {key}: {e}")
+                logger.error(f"[PATCHER] Error patching block {key}: {e}")
                 skipped_count += 1
                 continue
         
-        print(f"[PATCHER] Successfully patched: {patched_count}/{len(modifications)}")
+        logger.info(f"[PATCHER] Successfully patched: {patched_count}/{len(modifications)}")
         if skipped_count > 0:
-            print(f"[PATCHER] Skipped: {skipped_count} blocks (not coded or length mismatch)")
+            logger.warning(f"[PATCHER] Skipped: {skipped_count} blocks (not coded or length mismatch)")
 
         # Step 7: Convert BitArray back to bytes
         patched_rbsp = rbsp_bits.to_bytes()
@@ -527,7 +529,8 @@ class BitstreamPatcher:
                         found = True
                         matched_info[key] = (nC_try, nal_coeffs, t1_decoded)  # T1 override required
                         break
-                except Exception:
+                except Exception as e:
+                    logger.debug("nC candidate %d failed for %s: %s", nC_try, key, e)
                     continue
 
             if not found:
@@ -584,7 +587,8 @@ class BitstreamPatcher:
                         if rr.pos != anc_len:
                             retroactively_constrained = True
                             break
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("Retro constraint check failed: %s", e)
                         retroactively_constrained = True
                         break
 
@@ -770,9 +774,9 @@ class BitstreamReconstructor:
         Returns:
             Statistics dict with success status
         """
-        print(f"\n{'='*70}")
-        print("H.264 VIDEO RECONSTRUCTION WITH CAVLC RE-ENCODING")
-        print(f"{'='*70}")
+        logger.debug(f"\n{'='*70}")
+        logger.debug("H.264 VIDEO RECONSTRUCTION WITH CAVLC RE-ENCODING")
+        logger.debug(f"{'='*70}")
         
         # Parse original video
         parser = H264BitstreamParser(original_file)
@@ -790,26 +794,26 @@ class BitstreamReconstructor:
                     # SPS ID is parsed but we'll use 0 as default
                     all_sps[0] = parsed_sps
                 except Exception as e:
-                    print(f"[WARNING] Failed to parse SPS: {e}")
+                    logger.error(f"[WARNING] Failed to parse SPS: {e}")
             elif nal.nal_unit_type == 8:  # PPS
                 try:
                     parsed_pps = self._parse_pps_from_nal(nal)
                     # PPS ID is parsed but we'll use 0 as default
                     all_pps[0] = parsed_pps
                 except Exception as e:
-                    print(f"[WARNING] Failed to parse PPS: {e}")
+                    logger.error(f"[WARNING] Failed to parse PPS: {e}")
         
         # Use the most recent SPS/PPS (last parsed)
         self.sps = all_sps.get(0, None)
         self.pps = all_pps.get(0, None)
         
-        print(f"\n[1] Parsed original video:")
-        print(f"    NAL units: {len(parser.nal_units)}")
-        print(f"    Modified blocks: {len(modified_coefficients)}")
+        logger.debug(f"\n[1] Parsed original video:")
+        logger.debug(f"    NAL units: {len(parser.nal_units)}")
+        logger.debug(f"    Modified blocks: {len(modified_coefficients)}")
         if self.sps:
-            print(f"    SPS parsed: log2_max_frame_num={self.sps.log2_max_frame_num_minus4 + 4}")
+            logger.debug(f"    SPS parsed: log2_max_frame_num={self.sps.log2_max_frame_num_minus4 + 4}")
         if self.pps:
-            print(f"    PPS parsed: deblocking_filter_control={self.pps.deblocking_filter_control_present_flag}")
+            logger.debug(f"    PPS parsed: deblocking_filter_control={self.pps.deblocking_filter_control_present_flag}")
         
         # Build coefficient modification map
         coeff_map = {}
@@ -819,11 +823,11 @@ class BitstreamReconstructor:
         # Log statistics
         if coeff_map:
             mb_indices = [mb_idx for mb_idx, _, _ in modified_coefficients]
-            print(f"    MB range: {min(mb_indices)} - {max(mb_indices)}")
-            print(f"    Unique MBs modified: {len(set(mb_indices))}")
+            logger.debug(f"    MB range: {min(mb_indices)} - {max(mb_indices)}")
+            logger.debug(f"    Unique MBs modified: {len(set(mb_indices))}")
         
         # Reconstruct NAL units
-        print(f"\n[2] Reconstructing slices with CAVLC re-encoding...")
+        logger.debug(f"\n[2] Reconstructing slices with CAVLC re-encoding...")
         reconstructed_nals = []
         slices_reconstructed = 0
         slices_with_modifications = 0
@@ -839,14 +843,14 @@ class BitstreamReconstructor:
             )
         else:
             mb_count_per_slice = 264  # CIF default: 22x12
-        print(f"    [MB_COUNT] Per-slice MB count from SPS: {mb_count_per_slice}")
+        logger.debug(f"    [MB_COUNT] Per-slice MB count from SPS: {mb_count_per_slice}")
         
         for nal in parser.nal_units:
             # Copy non-slice NALs and P/B-Frame slices as-is (SPS, PPS, SEI, P-slices, B-slices)
             # ONLY process I-Frames (NAL type 5) for coefficient modification
             if nal.nal_unit_type != 5:
                 if nal.nal_unit_type == 1:
-                    print(f"    [BYPASS] Skipping P/B-Frame NAL intact (Binary Copy)")
+                    logger.debug(f"    [BYPASS] Skipping P/B-Frame NAL intact (Binary Copy)")
                     global_mb_idx += mb_count_per_slice  # advance counter for each P-frame slice
                 reconstructed_nals.append(nal)
                 continue
@@ -859,7 +863,7 @@ class BitstreamReconstructor:
             try:
                 # Use SPS-derived MB count (constant, matches TraceableCAVLCParser)
                 mb_count = mb_count_per_slice
-                print(f"    Slice {slices_reconstructed} (Type {nal.nal_unit_type}): {mb_count} MBs, checking for modifications...")
+                logger.debug(f"    Slice {slices_reconstructed} (Type {nal.nal_unit_type}): {mb_count} MBs, checking for modifications...")
                 
                 # Check if slice has modifications
                 slice_has_mods = any(
@@ -870,7 +874,7 @@ class BitstreamReconstructor:
                 if slice_has_mods:
                     # Re-encode slice with modified coefficients
                     mods_count = sum(1 for k in coeff_map if global_mb_idx <= k[0] < global_mb_idx + mb_count)
-                    print(f"    Slice {slices_reconstructed}: Re-encoding with {mods_count} modifications")
+                    logger.debug(f"    Slice {slices_reconstructed}: Re-encoding with {mods_count} modifications")
                     modified_nal, actual_mb_count = self._reconstruct_slice_with_cavlc(
                         nal, coeff_map, global_mb_idx,
                         frame_verified_data=frame_verified_data
@@ -878,7 +882,7 @@ class BitstreamReconstructor:
                     
                     # Use SPS count (not parsed actual) for consistency
                     if actual_mb_count is not None and actual_mb_count > 0 and actual_mb_count != mb_count:
-                        print(f"      [INFO] TraceableParser returned {actual_mb_count} MBs, using SPS count {mb_count}")
+                        logger.debug(f"      [INFO] TraceableParser returned {actual_mb_count} MBs, using SPS count {mb_count}")
                     
                     reconstructed_nals.append(modified_nal)
                     slices_with_modifications += 1
@@ -891,7 +895,7 @@ class BitstreamReconstructor:
                 
             except Exception as e:
                 # CRITICAL: Don't silently keep original - this means embedding failed!
-                print(f"    [!] CRITICAL ERROR: Slice {slices_reconstructed} reconstruction failed: {e}")
+                logger.error(f"    [!] CRITICAL ERROR: Slice {slices_reconstructed} reconstruction failed: {e}")
                 
                 # Log details for debugging
                 import traceback
@@ -905,13 +909,13 @@ class BitstreamReconstructor:
                 )
         
         # Write output
-        print(f"\n[3] Writing output video...")
+        logger.debug(f"\n[3] Writing output video...")
         self._write_h264_file(reconstructed_nals, output_file)
         
-        print(f"    Output: {output_file}")
-        print(f"    Slices processed: {slices_reconstructed}")
-        print(f"    Slices modified: {slices_with_modifications}")
-        print(f"    Total NAL units: {len(reconstructed_nals)}")
+        logger.debug(f"    Output: {output_file}")
+        logger.debug(f"    Slices processed: {slices_reconstructed}")
+        logger.debug(f"    Slices modified: {slices_with_modifications}")
+        logger.debug(f"    Total NAL units: {len(reconstructed_nals)}")
         
         return {
             'success': True,
@@ -962,7 +966,7 @@ class BitstreamReconstructor:
             )
             
             if 'blocks' not in parsed_result:
-                print(f"        [ERROR] No blocks extracted from slice")
+                logger.error(f"        [ERROR] No blocks extracted from slice")
                 return (original_nal, None)  # Return tuple
             
             blocks = parsed_result['blocks']
@@ -1001,11 +1005,11 @@ class BitstreamReconstructor:
                     
                     if orig_nz != mod_nz:
                         if modifications_applied < 3:
-                            print(f"        [RECONSTRUCTOR_WARN] Block {block_key} (global {mb_idx_global}): total_coeffs mismatch!")
-                            print(f"          Parser extracted: {orig_nz} non-zero coeffs")
-                            print(f"          Embedder modified: {mod_nz} non-zero coeffs")
-                            print(f"          Original: {[c for c in original_coeffs if c != 0][:8]}")
-                            print(f"          Modified: {[c for c in modified_coeffs if c != 0][:8]}")
+                            logger.warning(f"        [RECONSTRUCTOR_WARN] Block {block_key} (global {mb_idx_global}): total_coeffs mismatch!")
+                            logger.debug(f"          Parser extracted: {orig_nz} non-zero coeffs")
+                            logger.debug(f"          Embedder modified: {mod_nz} non-zero coeffs")
+                            logger.debug(f"          Original: {[c for c in original_coeffs if c != 0][:8]}")
+                            logger.debug(f"          Modified: {[c for c in modified_coeffs if c != 0][:8]}")
                     
                     # CRITICAL FIX: Only count as "modification" if coefficients actually DIFFER
                     # Don't count copying original → original as a "modification"!
@@ -1017,13 +1021,13 @@ class BitstreamReconstructor:
                         modifications_applied += 1
                     # else: coefficients are same, no need to modify
                 else:
-                    print(f"        [WARN] Key {block_key} NOT FOUND in blocks (mb_global={mb_idx_global}, local={mb_idx_local})")
+                    logger.warning(f"        [WARN] Key {block_key} NOT FOUND in blocks (mb_global={mb_idx_global}, local={mb_idx_local})")
             
-            print(f"        Applied {modifications_applied} modifications")
+            logger.debug(f"        Applied {modifications_applied} modifications")
             
             if modifications_applied == 0:
                 # This is OK - slice might not have any modifications
-                print(f"        [INFO] No modifications for this slice (range {global_mb_idx}-{global_mb_idx + num_mbs_in_slice})")
+                logger.debug(f"        [INFO] No modifications for this slice (range {global_mb_idx}-{global_mb_idx + num_mbs_in_slice})")
                 return (original_nal, num_mbs_in_slice)
 
             # ========================================================================
@@ -1091,18 +1095,18 @@ class BitstreamReconstructor:
             )
 
             if modified_nal is None:
-                print(f"        [ERROR] Patching returned None - BitstreamPatcher failed!")
+                logger.error(f"        [ERROR] Patching returned None - BitstreamPatcher failed!")
                 return (original_nal, num_mbs_in_slice)
             
             # CRITICAL: Verify patching actually modified the NAL
             if len(modified_nal.rbsp_byte) == len(original_nal.rbsp_byte):
                 if modified_nal.rbsp_byte == original_nal.rbsp_byte:
-                    print(f"        [WARN] Patched NAL is IDENTICAL to original!")
-                    print(f"        [WARN] This means NO blocks were successfully patched")
-                    print(f"        [WARN] Likely causes:")
-                    print(f"          1. All modifications skipped due to round-trip encoding failures")
-                    print(f"          2. All blocks had zero->non-zero or non-zero->zero violations")
-                    print(f"          3. Safety Filter rejected all modifications")
+                    logger.warning(f"        [WARN] Patched NAL is IDENTICAL to original!")
+                    logger.warning(f"        [WARN] This means NO blocks were successfully patched")
+                    logger.warning(f"        [WARN] Likely causes:")
+                    logger.warning(f"          1. All modifications skipped due to round-trip encoding failures")
+                    logger.debug(f"          2. All blocks had zero->non-zero or non-zero->zero violations")
+                    logger.debug(f"          3. Safety Filter rejected all modifications")
                     # Don't fail - return original NAL (no modifications applied)
                     return (original_nal, num_mbs_in_slice)
             
@@ -1110,15 +1114,11 @@ class BitstreamReconstructor:
             return (modified_nal, num_mbs_in_slice)
             
         except Exception as e:
-            print(f"        [Reconstructor] Error: {e}")
+            logger.error(f"        [Reconstructor] Error: {e}")
             import traceback
             traceback.print_exc()
             # Use fallback of 1 MB if num_mbs_in_slice not available
-            fallback_mb_count = 1
-            try:
-                fallback_mb_count = num_mbs_in_slice if 'num_mbs_in_slice' in locals() else 1
-            except:
-                pass
+            fallback_mb_count = num_mbs_in_slice if 'num_mbs_in_slice' in locals() else 1
             return (original_nal, fallback_mb_count)
     
     def _write_h264_file(self, nal_units: List[NALUnit], output_file: str):
@@ -1226,7 +1226,7 @@ class BitstreamReconstructor:
             sps.frame_mbs_only_flag = reader.read_bits(1) == 1
 
         except Exception as e:
-            print(f"    [!] SPS parsing error: {e}, using defaults")
+            logger.error(f"    [!] SPS parsing error: {e}, using defaults")
         
         return sps
     
@@ -1264,7 +1264,7 @@ class BitstreamReconstructor:
             pps.redundant_pic_cnt_present_flag = reader.read_bits(1) == 1
 
         except Exception as e:
-            print(f"    [!] PPS parsing error: {e}, using defaults")
+            logger.error(f"    [!] PPS parsing error: {e}, using defaults")
 
         return pps
 

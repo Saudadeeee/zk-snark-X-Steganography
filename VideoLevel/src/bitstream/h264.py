@@ -12,10 +12,13 @@ References:
   - ITU-T H.264 Sections 7, 8, 9
 """
 
+import logging
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import List, Optional, Tuple, Dict
 from .bitstream_io import BitstreamReader
+
+logger = logging.getLogger(__name__)
 
 class NALUnitType(IntEnum):
     """NAL unit types (H.264 Table 7-1)"""
@@ -89,7 +92,6 @@ class NALParser:
             start, sc_size = positions[i]
             end = positions[i + 1][0] if i + 1 < len(positions) else len(self.data)
 
-            # Extract NAL unit
             nal = self._extract_nal_unit(start, end, sc_size)
             if nal:
                 self.nal_units.append(nal)
@@ -214,10 +216,8 @@ class SliceHeader:
     slice_beta_offset_div2: int = 0
     
     def __post_init__(self):
-        # Convert slice_type > 4 to 0-4
         if self.slice_type > 4:
             self.slice_type -= 5
-        # Initialize None lists to empty lists
         if self.ref_pic_list_modification_l0_data is None:
             self.ref_pic_list_modification_l0_data = []
         if self.ref_pic_list_modification_l1_data is None:
@@ -236,9 +236,6 @@ class SliceHeaderParser:
         self.pps = pps or PPSData()
         
     def parse(self) -> SliceHeader:
-        # Parse slice header fields according to H.264 spec 7.3.3
-        # CRITICAL: Must parse EVERY field in exact order to maintain bitstream alignment!
-        # Step 1: Basic fields (always present)
         first_mb = self.reader.read_ue()
         slice_type = self.reader.read_ue()
         pps_id = self.reader.read_ue()
@@ -291,7 +288,6 @@ class SliceHeaderParser:
         ref_pic_list_modification_l1_bits = []
 
         if slice_type % 5 != 2:  # Not I-slice (P or B slice)
-            # ref_pic_list_modification_flag_l0
             pos_before_ref_mod = self.reader.position
             ref_pic_list_modification_flag_l0 = self.reader.read_bits(1)
             if ref_pic_list_modification_flag_l0:
@@ -304,10 +300,8 @@ class SliceHeaderParser:
                         abs_diff_pic_num_minus1 = self.reader.read_ue()
                     elif modification_of_pic_nums_idc == 2:
                         long_term_pic_num = self.reader.read_ue()
-            # Capture exact bit sequence
             pos_after_ref_mod_l0 = self.reader.position
             num_bits_l0 = pos_after_ref_mod_l0 - pos_before_ref_mod
-            # Extract bits from reader's data
             for bit_offset in range(num_bits_l0):
                 byte_pos = (pos_before_ref_mod + bit_offset) // 8
                 bit_pos = 7 - ((pos_before_ref_mod + bit_offset) % 8)
@@ -596,8 +590,8 @@ class MacroblockParser:
         # I_16x16 MBs can have CBP up to 63 (bits[5:4] = 0b11 for DC+AC chroma)
         if not self._is_i16x16(mb.mb_type_enum):
             if mb.coded_block_pattern < 0 or mb.coded_block_pattern > 47:
-                print(f"[WARN] Suspicious CBP={mb.coded_block_pattern} (valid: 0-47)")
-                print(f"[FIX] Clamping CBP to valid range")
+                logger.debug(f"[WARN] Suspicious CBP={mb.coded_block_pattern} (valid: 0-47)")
+                logger.debug(f"[FIX] Clamping CBP to valid range")
                 mb.coded_block_pattern = min(max(mb.coded_block_pattern, 0), 47)
         
         # 5. Parse QP delta
@@ -606,8 +600,8 @@ class MacroblockParser:
             
             # CRITICAL FIX: Validate and clamp QP delta
             if mb.mb_qp_delta < -26 or mb.mb_qp_delta > 25:
-                print(f"[WARN] Suspicious QP_delta={mb.mb_qp_delta} (valid: -26 to +25) - bitstream misalignment likely!")
-                print(f"[FIX] Clamping QP_delta to valid range")
+                logger.debug(f"[WARN] Suspicious QP_delta={mb.mb_qp_delta} (valid: -26 to +25) - bitstream misalignment likely!")
+                logger.debug(f"[FIX] Clamping QP_delta to valid range")
                 mb.mb_qp_delta = min(max(mb.mb_qp_delta, -26), 25)  # Clamp to [-26, 25]
             
             self.current_qp = (self.current_qp + mb.mb_qp_delta + 52) % 52
@@ -657,7 +651,7 @@ class MacroblockParser:
                 return None  # Invalid mb_type — parse_macroblock() will raise desync
         else:
             # Unknown slice type
-            print(f"[WARN] Unknown slice_type={self.slice_type}, mb_type={mb_type}")
+            logger.debug(f"[WARN] Unknown slice_type={self.slice_type}, mb_type={mb_type}")
             return MBType.I_4x4  # Safe fallback
     
     def _is_i16x16(self, mb_type: Optional[MBType]) -> bool:
@@ -1101,8 +1095,8 @@ def _scan_for_mb_start(reader, from_pos, max_scan=3000):
 
             reader.pos = saved
             return candidate
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("MB type candidate probe failed: %s", e)
 
     reader.pos = saved
     return None
@@ -1145,9 +1139,9 @@ class TraceableCAVLCParser:
         try:
             # CRITICAL: Check if video uses CABAC (not supported)
             if hasattr(pps, 'entropy_coding_mode_flag') and pps.entropy_coding_mode_flag:
-                print(f"[TraceableParser] ERROR: Video uses CABAC encoding, not CAVLC!")
-                print(f"[TraceableParser] This system only supports Baseline Profile with CAVLC.")
-                print(f"[TraceableParser] Please re-encode video with: ffmpeg -i input.mp4 -profile:v baseline -level 3.0 output.h264")
+                logger.error(f"[TraceableParser] ERROR: Video uses CABAC encoding, not CAVLC!")
+                logger.debug(f"[TraceableParser] This system only supports Baseline Profile with CAVLC.")
+                logger.debug(f"[TraceableParser] Please re-encode video with: ffmpeg -i input.mp4 -profile:v baseline -level 3.0 output.h264")
                 return {
                     'blocks': {},
                     'offsets': {},
@@ -1223,22 +1217,22 @@ class TraceableCAVLCParser:
                             scan_from = reader.pos + 100
                             resync_pos = _scan_for_mb_start(reader, scan_from, max_scan=3000)
                             if resync_pos is not None:
-                                print(f"[TraceableParser] Resync: skipped MB {mb_idx}, next MB at bit {resync_pos}")
+                                logger.debug(f"[TraceableParser] Resync: skipped MB {mb_idx}, next MB at bit {resync_pos}")
                                 reader.pos = resync_pos
                             else:
-                                print(f"[TraceableParser] Resync failed at MB {mb_idx} — stopping IDR parse")
+                                logger.error(f"[TraceableParser] Resync failed at MB {mb_idx} — stopping IDR parse")
                                 break
                             current_mb_addr += 1
                             slice_mb_idx_counter += 1
                             continue
                         if mb_idx < 10:
-                            print(f"    [MB_HDR_ERR] MB={mb_idx}: {header_err}")
+                            logger.debug(f"    [MB_HDR_ERR] MB={mb_idx}: {header_err}")
                         current_mb_addr += 1
                         slice_mb_idx_counter += 1
                         continue
                     except Exception as header_err:
                         if mb_idx < 10:
-                            print(f"    [MB_HDR_ERR] MB={mb_idx}: {header_err}")
+                            logger.debug(f"    [MB_HDR_ERR] MB={mb_idx}: {header_err}")
                         # Skip this MB and continue
                         current_mb_addr += 1
                         slice_mb_idx_counter += 1
@@ -1380,8 +1374,8 @@ class TraceableCAVLCParser:
                                 # nC for ChromaDC = -1 (Table 9-4)
                                 chroma_dc_block = cavlc_decoder.decode_block_cavlc(nC=-1, max_num_coeff=4)
                                 # Parse to advance bitstream
-                            except:
-                                pass  # Skip on error
+                            except Exception as e:
+                                logger.debug("ChromaDC decode skipped: %s", e)
 
                     if not cavlc_block_failed and chroma_ac_present:
                         # Parse 8 ChromaAC blocks (4 Cb + 4 Cr, each 4x4 minus DC)
@@ -1445,10 +1439,10 @@ class TraceableCAVLCParser:
                     slice_mb_idx_counter += 1
                     
                 except Exception as mb_err:
-                    print(f"[TraceableParser] MB {slice_mb_idx_counter} error: {mb_err}")
+                    logger.error(f"[TraceableParser] MB {slice_mb_idx_counter} error: {mb_err}")
                     break
             
-            print(f"[TraceableParser] Extracted {len(blocks)} blocks with {len(self.block_offsets)} offsets")
+            logger.info(f"[TraceableParser] Extracted {len(blocks)} blocks with {len(self.block_offsets)} offsets")
             
             return {
                 'blocks': blocks,
@@ -1458,7 +1452,7 @@ class TraceableCAVLCParser:
             }
             
         except Exception as e:
-            print(f"[TraceableParser] Extraction error: {e}")
+            logger.error(f"[TraceableParser] Extraction error: {e}")
             import traceback
             traceback.print_exc()
             return {
