@@ -112,6 +112,8 @@ def extract_all_idr_blocks(video_path: str, reconstructor: BitstreamReconstructo
 
     if idr_count == 0:
         raise RuntimeError(f"No IDR NAL found in {video_path}")
+    if len(coefficients) == 0:
+        raise RuntimeError(f"No coefficients extracted from {video_path}")
 
     return coefficients, frame_verified_data, nC_map, nal_length_map, t1_override_map
 
@@ -139,7 +141,7 @@ def extract_bits_direct(stego_video_path: str,
         raw = _bits_to_bytes(list(rbsp_bits[start_bit:end]))
         try:
             reader = BitstreamReader(raw)
-            block  = CAVLCDecoder(reader).decode_block_cavlc(nC, max_num_coeff=16)
+            block  = CAVLCDecoder(reader).decode_block_cavlc(nC, max_num_coeff=od.get('max_num_coeff', 16))
             return list(block.levels)
         except Exception:
             return None
@@ -158,17 +160,11 @@ def extract_bits_direct(stego_video_path: str,
     for mb, blk, cidx in embed_safe_positions:
         safe_map.setdefault((mb, blk), []).append(cidx)
 
-    seen_blocks = []
-    # Descending order — must match embedding order from get_safe_positions()
-    for idr_off in sorted(frame_verified_data.keys(), reverse=True):
-        _, g_blk = frame_verified_data[idr_off]
-        for (mb, blk) in sorted(g_blk.keys(), reverse=True):
-            if blk >= 16:
-                continue
-            if not any(c != 0 for c in g_blk[(mb, blk)]):
-                continue
-            if (mb, blk) in safe_map:
-                seen_blocks.append((mb, blk))
+    # Build seen_blocks in the SAME ORDER as embedding used (descending by mb, blk).
+    seen_blocks = sorted(
+        set((mb, blk) for mb, blk, _ in embed_safe_positions),
+        key=lambda t: (-t[0], -t[1])
+    )
 
     idr_desc   = sorted(frame_verified_data.keys(), reverse=True)
     ext_bits   = []

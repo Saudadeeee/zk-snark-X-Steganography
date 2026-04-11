@@ -13,10 +13,10 @@ Public API:
 import logging
 from typing import Tuple
 
-from ..bitstream.cavlc import CAVLCEncoder
+from ..bitstream.cavlc import CAVLCEncoder, CAVLCDecoder
 
 logger = logging.getLogger(__name__)
-from ..bitstream.bitstream_io import BitstreamWriter
+from ..bitstream.bitstream_io import BitstreamWriter, BitstreamReader
 
 
 
@@ -209,9 +209,7 @@ class CAVLCSafetyFilter:
             return trailing_positions
 
         # Ensure we have enough coefficients
-        if len(coeffs) < 16:
-            # Pad with zeros if needed
-            coeffs = list(coeffs) + [0] * (16 - len(coeffs))
+
 
         # Coefficients are in FORWARD zigzag order (coeffs[0] = DC).
         # CAVLC "trailing ones" are the last consecutive non-zero coefficients
@@ -235,7 +233,8 @@ class CAVLCSafetyFilter:
         modified_block: List[int],
         nC: int = 0,
         nal_bit_length: int = None,
-        t1_override: int = None
+        t1_override: int = None,
+        max_num_coeff: int = 16
     ) -> Tuple[bool, int, int]:
         """
         **CRITICAL FIX**: Verify block modification preserves bit length via ACTUAL CAVLC encoding
@@ -285,7 +284,7 @@ class CAVLCSafetyFilter:
             # Encode original block
             writer_orig = BitstreamWriter()
             encoder_orig = CAVLCEncoder(writer_orig)
-            encoder_orig.encode_block_cavlc(original_block, nC=nC, max_num_coeff=16,
+            encoder_orig.encode_block_cavlc(original_block, nC=nC, max_num_coeff=len(original_block),
                                             override_trailing_ones=t1_override)
             original_bits = writer_orig.get_bit_position()
 
@@ -307,16 +306,32 @@ class CAVLCSafetyFilter:
             encoder_mod.encode_block_cavlc(
                 modified_block,
                 nC=nC,
-                max_num_coeff=16,
+                max_num_coeff=len(original_block),
                 override_total_coeffs=original_nonzeros,
                 override_trailing_ones=t1_override
             )
             modified_bits = writer_mod.get_bit_position()
-            
+
             # Compare lengths (must match exactly for patchable modifications)
-            is_safe = (original_bits == modified_bits)
-            
-            return is_safe, original_bits, modified_bits
+            if original_bits != modified_bits:
+                return False, original_bits, modified_bits
+
+            # Forward decode check (mirrors patcher Step 6a):
+            # Verify that decoding the modified encoding consumes EXACTLY modified_bits.
+            # If the modified VLC is malformed, the decoder overruns into padding zeros
+            # and consumes more bits — the patcher would skip this block at patch time,
+            # causing a bit-offset desync in the extracted payload.
+            try:
+                fwd_bytes = writer_mod.get_bytes(align=False) + bytes(8)
+                fwd_reader = BitstreamReader(fwd_bytes)
+                fwd_dec = CAVLCDecoder(fwd_reader)
+                fwd_dec.decode_block_cavlc(nC, max_num_coeff=len(original_block))
+                if fwd_reader.pos != modified_bits:
+                    return False, original_bits, modified_bits
+            except Exception:
+                return False, original_bits, modified_bits
+
+            return True, original_bits, modified_bits
             
         except Exception as e:
             # If encoding fails, it's definitely not safe
@@ -383,7 +398,15 @@ class CAVLCSafetyFilter:
             # disabled.  Without this, the patcher would silently skip the block and
             # create a bit-shift in the embedded bit-stream.
             block_key = (mb_idx, block_idx)
-            if nal_length_map.get(block_key) == -1:
+            nal_len_entry = nal_length_map.get(block_key)
+            # Skip explicitly unpatchable blocks (-1).
+            # Also skip blocks with no NAL bit-length record when nal_length_map is
+            # non-empty: a missing key means the parser failed for that block (e.g.
+            # resync failure at MB 393-395), so we can't guarantee patcher success.
+            # When nal_length_map is empty (not provided) we allow all blocks.
+            if nal_len_entry == -1:
+                continue
+            if nal_length_map and nal_len_entry is None:
                 continue
 
             # Detect trailing ones for this block

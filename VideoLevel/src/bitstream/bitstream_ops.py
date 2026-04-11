@@ -219,14 +219,14 @@ class BitstreamPatcher:
                 try:
                     reader = BitstreamReader(raw_nal_bytes)
                     dec = CAVLCDecoder(reader)
-                    block = dec.decode_block_cavlc(nC_try, max_num_coeff=16)
+                    block = dec.decode_block_cavlc(nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16))
                     consumed = reader.pos
                     if consumed != original_length:
                         continue  # Wrong nC: decoder consumed wrong number of bits
                     # Verify round-trip: encode(decode(bits)) == bits
                     nal_coeffs = list(block.levels)
                     # First try without T1 override (encoder chooses max T1)
-                    candidate = self._encode_coefficients_to_bits(nal_coeffs, nC_try, max_num_coeff=16)
+                    candidate = self._encode_coefficients_to_bits(nal_coeffs, nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16))
                     if len(candidate) == original_length and list(candidate) == actual_nal_bits:
                         matched_nC = nC_try
                         matched_nal_coeffs = nal_coeffs
@@ -237,7 +237,7 @@ class BitstreamPatcher:
                     # Some original encoders choose a smaller T1 than the maximum possible.
                     t1_decoded = block.trailing_ones
                     candidate_t1 = self._encode_coefficients_to_bits(
-                        nal_coeffs, nC_try, max_num_coeff=16,
+                        nal_coeffs, nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16),
                         override_trailing_ones=t1_decoded
                     )
                     if len(candidate_t1) == original_length and list(candidate_t1) == actual_nal_bits:
@@ -257,7 +257,7 @@ class BitstreamPatcher:
                         try:
                             reader = BitstreamReader(raw_nal_bytes)
                             dec = CAVLCDecoder(reader)
-                            dec.decode_block_cavlc(nC_try, max_num_coeff=16)
+                            dec.decode_block_cavlc(nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16))
                             lens[nC_try] = reader.pos
                         except Exception as e:
                             logger.debug("nC probe %d failed for %s: %s", nC_try, key, e)
@@ -333,7 +333,7 @@ class BitstreamPatcher:
 
             # Re-encode modified coefficients with trailing_ones override only.
             new_bits = self._encode_coefficients_to_bits(
-                modified_nal_coeffs, nC, max_num_coeff=16,
+                modified_nal_coeffs, nC, max_num_coeff=offset_data.get('max_num_coeff', 16),
                 override_trailing_ones=matched_trailing_ones)
 
             # Bit-exact match already confirmed for original in nC scanning above.
@@ -356,7 +356,7 @@ class BitstreamPatcher:
                 fwd_raw = self._bits_to_bytes(new_bits + [0] * 64)
                 fwd_reader = BitstreamReader(fwd_raw)
                 fwd_dec = CAVLCDecoder(fwd_reader)
-                fwd_dec.decode_block_cavlc(nC, max_num_coeff=16)
+                fwd_dec.decode_block_cavlc(nC, max_num_coeff=offset_data.get('max_num_coeff', 16))
                 if fwd_reader.pos != original_length:
                     logger.debug("PATCHER SKIP %s: new_bits decode consumes %db != %db",
                                  key, fwd_reader.pos, original_length)
@@ -394,7 +394,7 @@ class BitstreamPatcher:
                 try:
                     retro_reader = BitstreamReader(combined)
                     retro_dec = CAVLCDecoder(retro_reader)
-                    retro_dec.decode_block_cavlc(anc_nC_p, max_num_coeff=16)
+                    retro_dec.decode_block_cavlc(anc_nC_p, max_num_coeff=anc_offset_p.get('max_num_coeff', 16))
                     if retro_reader.pos != anc_len_p:
                         retro_skip = True
                         break
@@ -508,14 +508,14 @@ class BitstreamPatcher:
                 try:
                     reader = BitstreamReader(raw_nal_bytes)
                     dec = CAVLCDecoder(reader)
-                    block = dec.decode_block_cavlc(nC_try, max_num_coeff=16)
+                    block = dec.decode_block_cavlc(nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16))
                     consumed = reader.pos
                     if consumed != original_length:
                         continue
                     nal_coeffs = list(block.levels)
                     # Standard encode (encoder picks max trailing-ones)
                     candidate = self._encode_coefficients_to_bits(
-                        nal_coeffs, nC_try, max_num_coeff=16)
+                        nal_coeffs, nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16))
                     if len(candidate) == original_length and list(candidate) == actual_nal_bits:
                         found = True
                         matched_info[key] = (nC_try, nal_coeffs, None)  # no T1 override needed
@@ -523,7 +523,7 @@ class BitstreamPatcher:
                     # Retry with the decoded trailing_ones override
                     t1_decoded = block.trailing_ones
                     candidate_t1 = self._encode_coefficients_to_bits(
-                        nal_coeffs, nC_try, max_num_coeff=16,
+                        nal_coeffs, nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16),
                         override_trailing_ones=t1_decoded)
                     if len(candidate_t1) == original_length and list(candidate_t1) == actual_nal_bits:
                         found = True
@@ -583,7 +583,7 @@ class BitstreamPatcher:
                     try:
                         rr = BitstreamReader(combined)
                         rd = CAVLCDecoder(rr)
-                        rd.decode_block_cavlc(anc_nC, max_num_coeff=16)
+                        rd.decode_block_cavlc(anc_nC, max_num_coeff=anc_offset.get('max_num_coeff', 16))
                         if rr.pos != anc_len:
                             retroactively_constrained = True
                             break

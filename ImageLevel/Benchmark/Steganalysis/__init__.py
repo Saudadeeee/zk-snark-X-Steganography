@@ -1,1 +1,0 @@
-# Steganalysis benchmark package

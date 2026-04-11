@@ -1349,7 +1349,7 @@ class TraceableCAVLCParser:
 
                                 # No offset stored for failed blocks
                                 cavlc_block_failed = True
-                                break  # Stop decoding remaining blocks - reader position is unreliable
+                                continue  # CRITICAL: Keep looping to zero out remaining blocks in neighbor_coeffs
                         else:
                             # Block not coded - all zeros
                             cache_key = (mb_idx, block_idx)
@@ -1377,15 +1377,14 @@ class TraceableCAVLCParser:
                             except Exception as e:
                                 logger.debug("ChromaDC decode skipped: %s", e)
 
-                    if not cavlc_block_failed and chroma_ac_present:
-                        # Parse 8 ChromaAC blocks (4 Cb + 4 Cr, each 4x4 minus DC)
-                        # nC derived from chroma-plane neighbors (same component only)
-                        _CHROMA_BXY     = [(0,0),(1,0),(0,1),(1,1)]
-                        _CHROMA_BXY_INV = {v: i for i, v in enumerate(_CHROMA_BXY)}
-                        _mb_x = mb_idx % mb_width
-                        _mb_y = mb_idx // mb_width
+                    # Parse 8 ChromaAC blocks (4 Cb + 4 Cr, each 4x4 minus DC)
+                    # nC derived from chroma-plane neighbors (same component only)
+                    _CHROMA_BXY     = [(0,0),(1,0),(0,1),(1,1)]
+                    _CHROMA_BXY_INV = {v: i for i, v in enumerate(_CHROMA_BXY)}
+                    _mb_x = mb_idx % mb_width
+                    _mb_y = mb_idx // mb_width
 
-                        for chroma_block_idx in range(8):  # blocks 16-23
+                    for chroma_block_idx in range(8):  # blocks 16-23
                             comp       = chroma_block_idx // 4   # 0=Cb, 1=Cr
                             local_idx  = chroma_block_idx %  4
                             bx, by     = _CHROMA_BXY[local_idx]
@@ -1425,14 +1424,17 @@ class TraceableCAVLCParser:
                             else:
                                 nC_chroma = 0
 
-                            try:
-                                pos_blk_start = reader.position
-                                chroma_ac_block = cavlc_decoder.decode_block_cavlc(
-                                    nC=nC_chroma, max_num_coeff=15)
-                                self.neighbor_coeffs[(mb_idx, abs_blk)] = min(
-                                    max(chroma_ac_block.total_coeffs, 0), 15)
-                            except Exception as cac_err:
-                                reader.seek(pos_blk_start)  # reset on decode failure
+                            if not cavlc_block_failed and chroma_ac_present:
+                                try:
+                                    pos_blk_start = reader.position
+                                    chroma_ac_block = cavlc_decoder.decode_block_cavlc(
+                                        nC=nC_chroma, max_num_coeff=15)
+                                    self.neighbor_coeffs[(mb_idx, abs_blk)] = min(
+                                        max(chroma_ac_block.total_coeffs, 0), 15)
+                                except Exception as cac_err:
+                                    reader.seek(pos_blk_start)  # reset on decode failure
+                                    self.neighbor_coeffs[(mb_idx, abs_blk)] = 0
+                            else:
                                 self.neighbor_coeffs[(mb_idx, abs_blk)] = 0
 
                     current_mb_addr += 1
