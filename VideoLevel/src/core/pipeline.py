@@ -16,7 +16,7 @@ from ..bitstream.h264          import H264BitstreamParser, TraceableCAVLCParser
 from ..bitstream.bitstream_ops import BitstreamReconstructor, BitstreamPatcher, BitArray
 from ..bitstream.bitstream_io  import BitstreamReader
 from ..bitstream.cavlc         import CAVLCDecoder
-
+from .stego                    import sort_blocks_interleaved, _CIF_MB_COUNT
 
 def extract_all_idr_blocks(video_path: str, reconstructor: BitstreamReconstructor,
                             verbose: bool = False):
@@ -160,11 +160,18 @@ def extract_bits_direct(stego_video_path: str,
     for mb, blk, cidx in embed_safe_positions:
         safe_map.setdefault((mb, blk), []).append(cidx)
 
-    # Build seen_blocks in the SAME ORDER as embedding used (descending by mb, blk).
-    seen_blocks = sorted(
-        set((mb, blk) for mb, blk, _ in embed_safe_positions),
-        key=lambda t: (-t[0], -t[1])
-    )
+    # Build seen_blocks in the EXACT SAME ORDER as the embedder uses.
+    # PayloadEmbedder._embed_with_safety_filter now iterates safe_positions
+    # directly (already sorted by sort_blocks_interleaved inside get_safe_positions).
+    # The block visit order is the first-occurrence order of each (mb, blk) in
+    # embed_safe_positions — preserve that here by deduplicating while keeping order.
+    seen_block_set: set = set()
+    seen_blocks = []
+    for mb, blk, _ in embed_safe_positions:
+        k = (mb, blk)
+        if k not in seen_block_set:
+            seen_block_set.add(k)
+            seen_blocks.append(k)
 
     idr_desc   = sorted(frame_verified_data.keys(), reverse=True)
     ext_bits   = []

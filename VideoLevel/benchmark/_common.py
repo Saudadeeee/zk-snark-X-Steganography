@@ -6,6 +6,7 @@ Provides: path constants, matplotlib style, video decode/PSNR/SSIM helpers,
 """
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -180,10 +181,30 @@ def embed_lsb_pixel(frames: np.ndarray, n_bits: int, seed: int = 42) -> np.ndarr
 # ---------------------------------------------------------------------------
 # JSON cache
 # ---------------------------------------------------------------------------
+def _json_safe(value):
+    """Recursively convert runtime values to strict-JSON-safe values."""
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+
+    # Normalize numpy scalar types first
+    if isinstance(value, (np.integer, np.floating, np.bool_)):
+        value = value.item()
+
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        return value
+
+    return value
+
+
 def cache_save(name: str, data: dict) -> None:
     path = RESULTS_DIR / f"{name}.json"
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+    safe = _json_safe(data)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(safe, f, indent=2, ensure_ascii=False, allow_nan=False)
 
 def cache_load(name: str) -> Optional[dict]:
     path = RESULTS_DIR / f"{name}.json"

@@ -1431,18 +1431,24 @@ class BitstreamReconstructor:
         frame_verified_data: dict = None,
         psnr_threshold_db: float = 40.0,
         max_bisect_iters: int = 12,
-        max_greedy_per_idr: int = 100,
+        max_greedy_per_idr: int = 256,
+        min_local_mb: int = None,
+        gop_span_frames: int = 8,
+        gop_psnr_quantile: float = 0.2,
+        target_positions: int = None,
     ) -> list:
         """
         Batch PSNR-based position validator.
 
         Tests all CAVLC-safe positions for each IDR in one shot, then
         binary-searches to find the maximum prefix that keeps decoded
-        Y-PSNR >= psnr_threshold_db.
+        Y-PSNR >= psnr_threshold_db for the WHOLE local GOP span
+        (modified IDR + dependent following P-frames).
 
         Unlike make_ffmpeg_position_validator (which catches HARD decode
         errors per position), this catches SOFT pixel degradation from
-        intra-prediction cascade by measuring actual decoded PSNR.
+        both intra-prediction and temporal-reference cascade by measuring
+        decoded PSNR on the modified GOP span.
 
         Parameters
         ----------
@@ -1457,6 +1463,19 @@ class BitstreamReconstructor:
                              passing position is kept; conflicting ones are
                              skipped.  Finds non-contiguous safe positions that
                              the prefix-only binary search misses.
+        min_local_mb       : restrict greedy extension to positions where
+                             local_mb >= this value (within-frame MB index).
+                     When None, it is set to the start of the last MB
+                     row for the current SPS resolution.
+                             Set to 0 to disable this restriction.
+        gop_span_frames    : number of frames to validate per IDR clip
+                     (default 8, matching GOP=8 in this project).
+        gop_psnr_quantile  : robust GOP score quantile in [0, 1].
+                 Final score = min(IDR_PSNR, quantile(GOP_PSNR)).
+                 This reduces false rejects from single-frame outliers
+                 while still enforcing a conservative floor.
+        target_positions   : optional cap for how many validated positions are
+                     needed. When reached, validation stops early.
 
         Returns
         -------
@@ -1492,17 +1511,20 @@ class BitstreamReconstructor:
             (_sps.pic_width_in_mbs_minus1 + 1) *
             (_sps.pic_height_in_map_units_minus1 + 1)
         )
+        if min_local_mb is None:
+            mb_width = _sps.pic_width_in_mbs_minus1 + 1
+            min_local_mb = max(0, _mb_count - mb_width)
         w_px = (_sps.pic_width_in_mbs_minus1 + 1) * 16
         h_px = (_sps.pic_height_in_map_units_minus1 + 1) * 16
         _frame_y_bytes    = w_px * h_px
         _frame_yuv_bytes  = _frame_y_bytes * 3 // 2   # YUV420p
 
-        _idr_nals: List[Tuple[int, object]] = []
+        _idr_nals: List[Tuple[int, object, int]] = []
         _gmb = 0
-        for nal in _parser.nal_units:
+        for nal_idx, nal in enumerate(_parser.nal_units):
             t = int(nal.nal_unit_type)
             if t == 5:
-                _idr_nals.append((_gmb, nal))
+                _idr_nals.append((_gmb, nal, nal_idx))
                 _gmb += _mb_count
             elif t == 1:
                 _gmb += _mb_count
@@ -1549,17 +1571,53 @@ class BitstreamReconstructor:
                 return None
             return _np.frombuffer(data, dtype=_np.uint8).astype(_np.float32)
 
+        def _read_y_frames(yuv_path, max_frames):
+            try:
+                with open(yuv_path, 'rb') as fh:
+                    raw = fh.read()
+            except OSError:
+                return []
+            available = len(raw) // _frame_yuv_bytes
+            n = min(available, max_frames)
+            frames = []
+            for i in range(n):
+                start = i * _frame_yuv_bytes
+                y = raw[start:start + _frame_y_bytes]
+                if len(y) < _frame_y_bytes:
+                    break
+                frames.append(_np.frombuffer(y, dtype=_np.uint8).astype(_np.float32))
+            return frames
+
         def _psnr(a, b):
             mse = float(_np.mean((a - b) ** 2))
             return float('inf') if mse == 0 else 20.0 * float(_np.log10(255.0 / _np.sqrt(mse)))
 
-        def _test_positions(idr_idx, idr_off, idr_nal, positions, orig_y):
-            """Patch IDR with positions, decode, return Y-PSNR (float).
+        def _has_critical_decode_error(stderr_bytes: bytes) -> bool:
+            """Return True only for critical H.264 decode errors.
 
-            Writes a minimal single-IDR file (SPS + PPS + patched IDR) so
-            FFmpeg only decodes 1 frame — ~50x faster than decoding the
-            whole video.  An IDR frame is intra-only, so its decoded pixels
-            are identical to what a full-video decode would produce.
+            Some ffmpeg builds emit benign [h264] warnings in corner cases;
+            rejecting any stderr line containing "[h264" is overly strict and
+            destroys usable embedding capacity.
+            """
+            if not stderr_bytes:
+                return False
+            text = stderr_bytes.decode("utf-8", errors="ignore").lower()
+            critical_tokens = (
+                "error while decoding",
+                "corrupted macroblock",
+                "invalid",
+                "out of range",
+                "left block unavailable",
+                "cabac",
+            )
+            return any(tok in text for tok in critical_tokens)
+
+        def _test_positions(idr_idx, idr_off, idr_nal, idr_nal_idx, positions):
+            """Patch an IDR, decode its local GOP clip, return min Y-PSNR.
+
+            The clip contains: [patched IDR + following original VCL NALs]
+            until the next IDR (exclusive). This captures temporal cascade
+            effects on dependent P-frames.
             """
             all_mods = []
             for mb, blk, cidx in positions:
@@ -1584,16 +1642,20 @@ class BitstreamReconstructor:
             if modified_nal is None:
                 return 0.0   # patch failure → reject
 
-            # Write MINIMAL file: SPS + PPS + single patched IDR frame.
-            # IDR frames are intra-only and decode independently of all other
-            # frames, making this ~50x faster than encoding the full video.
-            minimal_nals = []
+            next_idr_nal_idx = len(_parser.nal_units)
+            if idr_idx + 1 < len(_idr_nals):
+                next_idr_nal_idx = _idr_nals[idr_idx + 1][2]
+
+            clip_nals = []
             if _sps_nal is not None:
-                minimal_nals.append(_sps_nal)
+                clip_nals.append(_sps_nal)
             if _pps_nal is not None:
-                minimal_nals.append(_pps_nal)
-            minimal_nals.append(modified_nal)
-            self._write_h264_file(minimal_nals, _f_test_h264)
+                clip_nals.append(_pps_nal)
+
+            for k in range(idr_nal_idx, next_idr_nal_idx):
+                clip_nals.append(modified_nal if k == idr_nal_idx else _parser.nal_units[k])
+
+            self._write_h264_file(clip_nals, _f_test_h264)
 
             r = _sp.run(
                 ["ffmpeg", "-y", "-v", "error",
@@ -1603,12 +1665,33 @@ class BitstreamReconstructor:
             )
             if r.returncode != 0:
                 return 0.0   # decode failure → reject
+            if _has_critical_decode_error(r.stderr or b""):
+                return 0.0   # decoder reported bitstream errors
 
-            # Only 1 frame in the minimal file → always frame index 0
-            stego_y = _read_y_frame(_f_stego_yuv, 0)
-            if stego_y is None:
+            frame_idx = idr_off // _mb_count
+            stego_ys = _read_y_frames(_f_stego_yuv, max_frames=max(gop_span_frames, 1))
+            if not stego_ys:
                 return 0.0
-            return _psnr(orig_y, stego_y)
+
+            psnr_values = []
+            for local_idx, stego_y in enumerate(stego_ys[:max(gop_span_frames, 1)]):
+                orig_y = _read_y_frame(_f_orig_yuv, frame_idx + local_idx)
+                if orig_y is None:
+                    break
+                psnr_values.append(_psnr(orig_y, stego_y))
+
+            if not psnr_values:
+                return 0.0
+            q = float(gop_psnr_quantile)
+            if q < 0.0:
+                q = 0.0
+            elif q > 1.0:
+                q = 1.0
+
+            capped_values = [min(float(v), 60.0) for v in psnr_values]
+            idr_psnr = float(capped_values[0])
+            robust_gop = float(_np.quantile(_np.array(capped_values, dtype=_np.float32), q))
+            return min(idr_psnr, robust_gop)
 
         # ------------------------------------------------------------------ #
         # B — Decode original to raw YUV once                                 #
@@ -1629,7 +1712,7 @@ class BitstreamReconstructor:
         groups: Dict[int, list] = {}
         for pos in safe_positions:
             mb = pos[0]
-            for i, (off, _) in enumerate(_idr_nals):
+            for i, (off, _, _) in enumerate(_idr_nals):
                 if off <= mb < off + _mb_count:
                     groups.setdefault(i, []).append(pos)
                     break
@@ -1637,27 +1720,39 @@ class BitstreamReconstructor:
         # ------------------------------------------------------------------ #
         # D — Per-IDR: fast path → binary search → greedy extension          #
         # ------------------------------------------------------------------ #
-        validated: list = []
+        validated_set = set()
         ffmpeg_calls = 0
         try:
-            for idr_idx, (idr_off, idr_nal) in enumerate(_idr_nals):
+            for idr_idx, (idr_off, idr_nal, idr_nal_idx) in enumerate(_idr_nals):
+                if target_positions is not None and len(validated_set) >= target_positions:
+                    break
                 positions = groups.get(idr_idx, [])
                 if not positions:
                     continue
 
-                frame_idx = idr_off // _mb_count
-                orig_y = _read_y_frame(_f_orig_yuv, frame_idx)
-                if orig_y is None:
-                    # Could not read this frame → accept all positions for safety
-                    validated.extend(positions)
+                # Pre-filter: keep only last-row MBs (local_mb >= min_local_mb).
+                # Last-row MBs have NO downstream intra-prediction references,
+                # so any SUBSET of them is guaranteed safe — the greedy
+                # "cumulative PSNR" test is sound only for subsets of positions
+                # that don't cascade into each other. Early-MB positions can
+                # individually pass cumulative PSNR while a payload-determined
+                # subset causes catastrophic cascade (5–15 dB).
+                if min_local_mb > 0:
+                    positions = [p for p in positions if p[0] % _mb_count >= min_local_mb]
+                if not positions:
                     continue
 
                 # Fast path: test ALL positions for this IDR at once
-                psnr = _test_positions(idr_idx, idr_off, idr_nal, positions, orig_y)
+                psnr = _test_positions(idr_idx, idr_off, idr_nal, idr_nal_idx, positions)
                 ffmpeg_calls += 1
 
                 if psnr >= psnr_threshold_db:
-                    validated.extend(positions)
+                    if target_positions is None:
+                        validated_set.update(positions)
+                    else:
+                        need = max(0, target_positions - len(validated_set))
+                        if need > 0:
+                            validated_set.update(positions[:need])
                     continue
 
                 # Slow path: binary search for maximum safe prefix
@@ -1667,7 +1762,7 @@ class BitstreamReconstructor:
                     if hi - lo <= 1:
                         break
                     mid = (lo + hi) // 2
-                    p = _test_positions(idr_idx, idr_off, idr_nal, positions[:mid], orig_y)
+                    p = _test_positions(idr_idx, idr_off, idr_nal, idr_nal_idx, positions[:mid])
                     ffmpeg_calls += 1
                     if p >= psnr_threshold_db:
                         lo = mid
@@ -1679,18 +1774,28 @@ class BitstreamReconstructor:
                 # the already-accepted set.  This finds non-contiguous safe
                 # positions that the prefix-only binary search would miss
                 # (e.g. two adj MBs conflict but each is fine with distant MBs).
+                # Note: all positions here are already pre-filtered to last-row
+                # only, so any passing subset is safe on its own as well.
                 accumulated = list(positions[:lo])
                 greedy_attempts = 0
                 for pos in positions[lo:]:
-                    if greedy_attempts >= max_greedy_per_idr:
+                    if (max_greedy_per_idr is not None and
+                            greedy_attempts >= max_greedy_per_idr):
                         break
-                    p = _test_positions(idr_idx, idr_off, idr_nal,
-                                        accumulated + [pos], orig_y)
+                    if target_positions is not None and len(validated_set) + len(accumulated) >= target_positions:
+                        break
+                    p = _test_positions(idr_idx, idr_off, idr_nal, idr_nal_idx,
+                                        accumulated + [pos])
                     ffmpeg_calls += 1
                     greedy_attempts += 1
                     if p >= psnr_threshold_db:
                         accumulated.append(pos)
-                validated.extend(accumulated)
+                if target_positions is None:
+                    validated_set.update(accumulated)
+                else:
+                    need = max(0, target_positions - len(validated_set))
+                    if need > 0:
+                        validated_set.update(accumulated[:need])
 
         finally:
             for f in (_f_orig_yuv, _f_test_h264, _f_stego_yuv):
@@ -1700,4 +1805,7 @@ class BitstreamReconstructor:
                 except OSError:
                     pass
 
-        return validated
+        if target_positions is None:
+            return [pos for pos in safe_positions if pos in validated_set]
+        ordered = [pos for pos in safe_positions if pos in validated_set]
+        return ordered[:target_positions]

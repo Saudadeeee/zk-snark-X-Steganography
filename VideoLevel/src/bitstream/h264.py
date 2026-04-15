@@ -90,7 +90,15 @@ class NALParser:
 
         for i in range(len(positions)):
             start, sc_size = positions[i]
-            end = positions[i + 1][0] if i + 1 < len(positions) else len(self.data)
+            # end = start of NEXT start code (not position-after-sc), so that the
+            # current NAL's payload does not accidentally include the next start code
+            # bytes.  Including them causes _add_emulation_prevention to insert
+            # spurious EPBs on write-back (e.g. "00 00 00 01" → "00 00 03 00 01").
+            if i + 1 < len(positions):
+                next_start, next_sc = positions[i + 1]
+                end = next_start - next_sc  # start of next start code
+            else:
+                end = len(self.data)
 
             nal = self._extract_nal_unit(start, end, sc_size)
             if nal:

@@ -20,6 +20,7 @@ Produces:
 """
 
 import sys
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +40,7 @@ from benchmark._common import (
 )
 
 CACHE_KEY = "sec3_methods_data"
+PSNR_VALIDATION_THRESHOLD_DB = 38.0
 
 # Fixed payload for fair comparison (= ZK blob size)
 PAYLOAD_BYTES = 274
@@ -105,7 +107,7 @@ def _measure_lsb_psnr(seq_name: str, video_path: Path, n_bytes: int) -> float:
 # -------------------------------------------------------------------------
 # Data collection
 # -------------------------------------------------------------------------
-def collect_data(force: bool = False) -> dict:
+def collect_data(force: bool = False, include_sequences: set[str] | None = None) -> dict:
     cached = cache_load(CACHE_KEY)
     if cached and not force:
         print("  [cache hit] sec3 — skipping measurements")
@@ -113,6 +115,7 @@ def collect_data(force: bool = False) -> dict:
 
     data: dict = {
         "payload_bytes": PAYLOAD_BYTES,
+        "validation_threshold_db": float(PSNR_VALIDATION_THRESHOLD_DB),
         "methods": {},
     }
 
@@ -129,23 +132,68 @@ def collect_data(force: bool = False) -> dict:
 
     # Skip deadline: 274 bytes = 1.2% fill → almost all frames unmodified → PSNR trivially 60 dB.
     # Include literature deadline values (from published papers) for reference.
-    MEASURE_SEQUENCES = {k: v for k, v in SEQUENCES.items() if k != "deadline"}
+    measure_sequences = {k: v for k, v in SEQUENCES.items() if k != "deadline"}
+    if include_sequences:
+        measure_sequences = {k: v for k, v in measure_sequences.items() if k in include_sequences}
+    if not measure_sequences:
+        raise ValueError("No valid sequences selected for sec3 measurement")
 
-    for seq_name, video_path in MEASURE_SEQUENCES.items():
+    for seq_name, video_path in measure_sequences.items():
         print(f"  [this work / {seq_name}] embedding {PAYLOAD_BYTES} bytes …")
         out_path = OUTPUT_DIR / f"_sec3_this_work_{seq_name}.h264"
-        if not out_path.exists():
-            rec = BitstreamReconstructor()
-            coeffs, fvd, nC_map, nal_len, t1_over = extract_all_idr_blocks(str(video_path), rec)
-            embedder = PayloadEmbedder(max_modifications_per_block=1)
+        if out_path.exists():
+            out_path.unlink()
+
+        rec = BitstreamReconstructor()
+        coeffs, fvd, nC_map, nal_len, t1_over = extract_all_idr_blocks(str(video_path), rec)
+
+        # Get CAVLC-safe positions then batch-validate with PSNR filter
+        from src.core.stego import CAVLCSafetyFilter
+        sf = CAVLCSafetyFilter()
+        safe_pos = sf.get_safe_positions(
+            coeffs, nC_map=nC_map, nal_length_map=nal_len, t1_override_map=t1_over
+        )
+        validated = rec.batch_psnr_validate(
+            str(video_path), coeffs, safe_pos,
+            frame_verified_data=fvd,
+            psnr_threshold_db=PSNR_VALIDATION_THRESHOLD_DB,
+            min_local_mb=0,
+            max_greedy_per_idr=1024,
+            gop_psnr_quantile=0.2,
+            target_positions=len(payload274) * 8,
+        )
+        print(
+            f"  [this work / {seq_name}] {len(validated)}/{len(safe_pos)} positions passed "
+            f"PSNR>={PSNR_VALIDATION_THRESHOLD_DB:.1f} dB"
+        )
+
+        target_bits = len(payload274) * 8
+        usable_bits = min(len(validated), target_bits)
+        if usable_bits < target_bits:
+            print(f"  [this work / {seq_name}] warning: adaptive payload {usable_bits}/{target_bits} bits")
+        # PayloadEmbedder is byte-oriented, so only full bytes are embeddable.
+        usable_bytes = usable_bits // 8
+        payload_now = payload274[:usable_bytes] if usable_bytes > 0 else b""
+
+        embedder = PayloadEmbedder(max_modifications_per_block=2)
+        if usable_bytes > 0:
             modified, bits_emb = embedder.embed_payload(
-                coeffs, payload274, nC_map=nC_map,
+                coeffs, payload_now, nC_map=nC_map,
                 nal_length_map=nal_len, t1_override_map=t1_over,
-                ffmpeg_validator=None,
+                pre_validated_positions=validated,
             )
-            rec2 = BitstreamReconstructor()
-            rec2.reconstruct_video(str(video_path), modified, str(out_path),
-                                   frame_verified_data=fvd)
+        else:
+            modified, bits_emb = [], 0
+
+        required_bits = len(payload_now) * 8
+        if bits_emb < required_bits:
+            print(
+                f"  [this work / {seq_name}] warning: embedded "
+                f"{bits_emb}/{required_bits} adaptive bits"
+            )
+        rec2 = BitstreamReconstructor()
+        rec2.reconstruct_video(str(video_path), modified, str(out_path),
+                               frame_verified_data=fvd)
 
         orig  = decode_luma_frames(video_path)
         stego = decode_luma_frames(out_path)
@@ -162,8 +210,11 @@ def collect_data(force: bool = False) -> dict:
         from benchmark._common import psnr as _psnr
         psnr_full = float(min(_psnr(orig[:n], stego[:n]), 60.0))
         GOP = 8
-        idr_finite = [min(per_frame[i], 60.0) for i in range(0, n, GOP)
-                      if i < len(per_frame) and per_frame[i] < 100]
+        idr_finite = [
+            min(per_frame[i], 60.0)
+            for i in range(0, n, GOP)
+            if i < len(per_frame) and np.isfinite(per_frame[i])
+        ]
         psnr_idr = float(np.mean(idr_finite)) if idr_finite else 60.0
 
         this_work_psnr[seq_name] = psnr_val
@@ -177,7 +228,7 @@ def collect_data(force: bool = False) -> dict:
 
     # --- LSB pixel domain: real measurement ---
     lsb_psnr: dict[str, float] = {}
-    for seq_name, video_path in MEASURE_SEQUENCES.items():
+    for seq_name, video_path in measure_sequences.items():
         print(f"  [LSB / {seq_name}] measuring …")
         lsb_psnr[seq_name] = _measure_lsb_psnr(seq_name, video_path, PAYLOAD_BYTES)
         print(f"  [LSB / {seq_name}] PSNR={lsb_psnr[seq_name]:.2f} dB")
@@ -404,9 +455,9 @@ def plot_radar_chart(data: dict) -> None:
 # -------------------------------------------------------------------------
 # Main
 # -------------------------------------------------------------------------
-def run(force: bool = False) -> dict:
+def run(force: bool = False, include_sequences: set[str] | None = None) -> dict:
     print("\n=== §3  Method Comparison ===")
-    data = collect_data(force=force)
+    data = collect_data(force=force, include_sequences=include_sequences)
     plot_psnr_comparison(data)
     plot_overhead_comparison(data)
     plot_radar_chart(data)
@@ -414,4 +465,14 @@ def run(force: bool = False) -> dict:
 
 
 if __name__ == "__main__":
-    run(force="--force" in sys.argv)
+    parser = argparse.ArgumentParser(description="Run sec3 method comparison benchmark")
+    parser.add_argument("--force", action="store_true", help="Ignore cache and recompute")
+    parser.add_argument(
+        "--sequences",
+        type=str,
+        default="",
+        help="Comma-separated sequence names to run (e.g. foreman,coastguard)",
+    )
+    args = parser.parse_args()
+    selected = {s.strip() for s in args.sequences.split(",") if s.strip()} or None
+    run(force=args.force, include_sequences=selected)
