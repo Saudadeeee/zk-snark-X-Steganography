@@ -87,8 +87,13 @@ def _measure_pipeline(seq_name: str, video_path: Path) -> dict:
     # --- Stage 5: Bitstream reconstruction ---
     t0 = time.perf_counter()
     rec2 = BitstreamReconstructor()
-    rec2.reconstruct_video(str(video_path), modified, str(stego_out),
-                           frame_verified_data=fvd)
+    rec2.reconstruct_video(
+        str(video_path),
+        modified,
+        str(stego_out),
+        max_slices=None,
+        frame_verified_data=fvd,
+    )
     timings["5_reconstruct"] = time.perf_counter() - t0
 
     # --- Stage 6: Extract bits (decode stego using original safe positions) ---
@@ -121,16 +126,21 @@ def _measure_pipeline(seq_name: str, video_path: Path) -> dict:
     }
 
 
-def collect_data(force: bool = False) -> dict:
+def collect_data(force: bool = False,
+                 include_sequences: set[str] | None = None) -> dict:
     cached = cache_load(CACHE_KEY)
     if cached and not force:
         print("  [cache hit] sec6 — skipping pipeline timing")
         return cached
 
     data: dict = {}
-    # Skip deadline (1374 frames): reconstruction and extract dominate timing
-    # and make the benchmark too slow. Show scalability via extrapolation chart.
-    PERF_SEQUENCES = {k: v for k, v in SEQUENCES.items() if k != "deadline"}
+    # Default: all-intra q22_g1 sequences (fast, representative)
+    DEFAULT_PERF = {"foreman_q22_g1", "coastguard_q22_g1"}
+    active = include_sequences if include_sequences else DEFAULT_PERF
+    PERF_SEQUENCES = {k: v for k, v in SEQUENCES.items()
+                      if k in active}
+    if not PERF_SEQUENCES:
+        PERF_SEQUENCES = {k: v for k, v in SEQUENCES.items() if k != "deadline"}
     for seq_name, video_path in PERF_SEQUENCES.items():
         print(f"  [{seq_name}] measuring pipeline …")
         result = _measure_pipeline(seq_name, video_path)
@@ -274,11 +284,11 @@ def plot_scalability(data: dict) -> None:
     setup_style()
     fig, ax = plt.subplots(figsize=(9, 5))
 
-    # Use foreman as baseline (50 frames — full clip)
+    # Use foreman_q22_g1 as baseline (300-frame all-intra clip)
     from benchmark._common import SEQ_FRAMES
-    seq = "foreman"
+    seq = next((k for k in data if "foreman" in k), list(data.keys())[0])
     d   = data[seq]
-    n_frames_base = SEQ_FRAMES.get(seq, 50)
+    n_frames_base = SEQ_FRAMES.get(seq, 300)
 
     fixed_cost  = d["timings"]["3_zk_prove"] + d["timings"]["7_zk_verify"]
     linear_cost = (d["total_s"] - fixed_cost)  # per 50 frames
@@ -319,9 +329,10 @@ def plot_scalability(data: dict) -> None:
 # -------------------------------------------------------------------------
 # Main
 # -------------------------------------------------------------------------
-def run(force: bool = False) -> dict:
+def run(force: bool = False,
+        include_sequences: set[str] | None = None) -> dict:
     print("\n=== §6  Pipeline Performance ===")
-    data = collect_data(force=force)
+    data = collect_data(force=force, include_sequences=include_sequences)
     plot_stacked_bar(data)
     plot_timing_pie(data)
     plot_scalability(data)
@@ -329,4 +340,10 @@ def run(force: bool = False) -> dict:
 
 
 if __name__ == "__main__":
-    run(force="--force" in sys.argv)
+    import argparse as _ap
+    _parser = _ap.ArgumentParser()
+    _parser.add_argument("--force", action="store_true")
+    _parser.add_argument("--sequences", type=str, default=None)
+    _args = _parser.parse_args()
+    _seqs = set(_args.sequences.split(",")) if _args.sequences else None
+    run(force=_args.force, include_sequences=_seqs)

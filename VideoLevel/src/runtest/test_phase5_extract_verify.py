@@ -53,7 +53,13 @@ def _roundtrip(payload: bytes, stego_out: str, video: str = None) -> bytes:
     assert bits_emb == len(payload) * 8, \
         f"Embed incomplete: {bits_emb}/{len(payload)*8} bits"
 
-    rec.reconstruct_video(src, modified, stego_out, frame_verified_data=fvd)
+    rec.reconstruct_video(
+        src,
+        modified,
+        stego_out,
+        max_slices=None,
+        frame_verified_data=fvd,
+    )
 
     # Recompute safe positions the same way (needed for extraction)
     from src.core.stego import CAVLCSafetyFilter

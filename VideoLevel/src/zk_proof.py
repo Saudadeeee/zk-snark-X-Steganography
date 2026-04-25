@@ -50,21 +50,19 @@ _SHELL = sys.platform == "win32"
 # Binary format  (formerly zk_payload_format.py)
 # =============================================================================
 
-# Groth16 BN128: 8 field elements × 32 bytes = 256 bytes
-PROOF_SIZE_BYTES = 256
+# Groth16 BN128 Point Compression
+# 4 field elements (X coords) × 32 bytes + 1 byte for 3 signs = 129 bytes
+PROOF_SIZE_BYTES = 129
+
+_P = 21888242871839275222246405745257275088696311157297823662689037894645226208583
+
+def _fq2_add(a, b): return (a[0]+b[0])%_P, (a[1]+b[1])%_P
+def _fq2_mul(a, b): return (a[0]*b[0] - a[1]*b[1])%_P, (a[0]*b[1] + a[1]*b[0])%_P
 
 
 def proof_to_bytes(proof_dict: dict) -> bytes:
     """
-    Serialize a snarkjs Groth16 proof dict → 256-byte binary.
-
-    proof_dict format (from snarkjs groth16 prove):
-        {
-          "pi_a": ["<int_str>", "<int_str>", "1"],
-          "pi_b": [["<int_str>", "<int_str>"], ["<int_str>", "<int_str>"], ["1","0"]],
-          "pi_c": ["<int_str>", "<int_str>", "1"],
-          "protocol": "groth16", "curve": "bn128"
-        }
+    Serialize a snarkjs Groth16 proof dict → 129-byte point compressed binary.
     """
     def _to32(val_str: str) -> bytes:
         return int(val_str).to_bytes(32, "big")
@@ -73,36 +71,81 @@ def proof_to_bytes(proof_dict: dict) -> bytes:
     pi_b = proof_dict["pi_b"]
     pi_c = proof_dict["pi_c"]
 
+    # Signs for Y coordinates (0 if even, 1 if odd)
+    y_a_sign = int(pi_a[1]) & 1
+    y_b0, y_b1 = int(pi_b[1][0]), int(pi_b[1][1])
+    y_b_sign = (y_b0 & 1) if y_b0 != 0 else (y_b1 & 1)
+    y_c_sign = int(pi_c[1]) & 1
+
+    flags = (y_a_sign << 2) | (y_b_sign << 1) | y_c_sign
+
     blob = b"".join([
         _to32(pi_a[0]),     # pi_a.x
-        _to32(pi_a[1]),     # pi_a.y
         _to32(pi_b[0][0]),  # pi_b.x[0]
         _to32(pi_b[0][1]),  # pi_b.x[1]
-        _to32(pi_b[1][0]),  # pi_b.y[0]
-        _to32(pi_b[1][1]),  # pi_b.y[1]
         _to32(pi_c[0]),     # pi_c.x
-        _to32(pi_c[1]),     # pi_c.y
+        flags.to_bytes(1, "big")
     ])
     assert len(blob) == PROOF_SIZE_BYTES
     return blob
 
 
 def bytes_to_proof(data: bytes) -> dict:
-    """Deserialize 256-byte binary → snarkjs Groth16 proof dict."""
+    """Deserialize 129-byte binary → snarkjs Groth16 proof dict via Decompression."""
     assert len(data) == PROOF_SIZE_BYTES
 
-    def _from32(chunk: bytes) -> str:
-        return str(int.from_bytes(chunk, "big"))
+    parts = [data[i * 32:(i + 1) * 32] for i in range(4)]
+    flags = int.from_bytes(data[128:129], "big")
+    y_a_sign = (flags >> 2) & 1
+    y_b_sign = (flags >> 1) & 1
+    y_c_sign = flags & 1
 
-    parts = [data[i * 32:(i + 1) * 32] for i in range(8)]
+    def recover_g1(x_bytes, sign):
+        x = int.from_bytes(x_bytes, "big")
+        y = pow((pow(x, 3, _P) + 3) % _P, (_P + 1) // 4, _P)
+        if (y & 1) != sign:
+            y = _P - y
+        return str(x), str(y)
+
+    x_a, y_a = recover_g1(parts[0], y_a_sign)
+    x_c, y_c = recover_g1(parts[3], y_c_sign)
+
+    inv82 = pow(82, _P - 2, _P)
+    b0, b1 = (27 * inv82) % _P, (-3 * inv82) % _P
+    x0, x1 = int.from_bytes(parts[1], "big"), int.from_bytes(parts[2], "big")
+    
+    X2 = _fq2_mul((x0, x1), (x0, x1))
+    X3 = _fq2_mul(X2, (x0, x1))
+    A, B = _fq2_add(X3, (b0, b1))
+
+    R = pow((A*A + B*B) % _P, (_P + 1) // 4, _P)
+    inv2 = pow(2, _P - 2, _P)
+    
+    cand_c2 = ((R + A) * inv2) % _P
+    c = pow(cand_c2, (_P + 1) // 4, _P)
+    if pow(c, 2, _P) != cand_c2:
+        R = _P - R
+        cand_c2 = ((R + A) * inv2) % _P
+        c = pow(cand_c2, (_P + 1) // 4, _P)
+
+    cand_d2 = ((R - A) * inv2) % _P
+    d = pow(cand_d2, (_P + 1) // 4, _P)
+
+    if (2 * c * d) % _P != B:
+        d = _P - d
+
+    my_sign = (c & 1) if c != 0 else (d & 1)
+    if my_sign != y_b_sign:
+        c, d = (_P - c) % _P, (_P - d) % _P
+
     return {
-        "pi_a": [_from32(parts[0]), _from32(parts[1]), "1"],
+        "pi_a": [x_a, y_a, "1"],
         "pi_b": [
-            [_from32(parts[2]), _from32(parts[3])],
-            [_from32(parts[4]), _from32(parts[5])],
+            [str(x0), str(x1)],
+            [str(c), str(d)],
             ["1", "0"],
         ],
-        "pi_c": [_from32(parts[6]), _from32(parts[7]), "1"],
+        "pi_c": [x_c, y_c, "1"],
         "protocol": "groth16",
         "curve": "bn128",
     }
@@ -111,7 +154,7 @@ def bytes_to_proof(data: bytes) -> dict:
 def pack(message_bytes: bytes, proof_bytes: bytes) -> bytes:
     """
     Pack message + proof → single blob:
-      [4 bytes big-endian: len(message)][message][proof (256 bytes)]
+      [4 bytes big-endian: len(message)][message][proof (129 bytes)]
     """
     assert len(proof_bytes) == PROOF_SIZE_BYTES
     return struct.pack(">I", len(message_bytes)) + message_bytes + proof_bytes

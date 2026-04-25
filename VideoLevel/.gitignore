@@ -61,6 +61,9 @@ node_modules/
 
 benchmark_*/
 
+# Benchmark cache artifacts
+benchmark/results/_idr_cache_*.pkl
+
 # Debug & scratch scripts
 debug_*.py
 tmp*.py

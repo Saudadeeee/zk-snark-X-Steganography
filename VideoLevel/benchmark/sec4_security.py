@@ -34,7 +34,7 @@ from benchmark._common import (
     PALETTE, SEQUENCES, SEQ_LABELS, MARKERS, LINESTYLES,
     setup_style, save_fig, cache_save, cache_load,
     decode_luma_frames, embed_lsb_pixel,
-    ROOT, OUTPUT_DIR, annotate_literature,
+    ROOT, OUTPUT_DIR, annotate_literature, load_or_extract_idr_blocks,
 )
 
 CACHE_KEY = "sec4_security_data"
@@ -146,14 +146,14 @@ def rs_analysis(pixels: np.ndarray, mask: list = None) -> dict:
 # -------------------------------------------------------------------------
 # Extract T1 signs from a video
 # -------------------------------------------------------------------------
-def _get_t1_signs(video_path: Path, capacity_frac: float = 0.0) -> list[int]:
+def _get_t1_signs(video_path: Path, capacity_frac: float = 0.0, force: bool = False) -> list[int]:
     """Extract all T1 sign bits from IDR blocks, optionally after embedding."""
     from src.core.pipeline import extract_all_idr_blocks
     from src.core.stego import PayloadEmbedder, CAVLCSafetyFilter
     from src.bitstream.bitstream_ops import BitstreamReconstructor
 
     rec = BitstreamReconstructor()
-    coeffs, _, nC_map, nal_len, t1_over = extract_all_idr_blocks(str(video_path), rec)
+    coeffs, _, nC_map, nal_len, t1_over = load_or_extract_idr_blocks(video_path, rec, force=force)
 
     if capacity_frac > 0:
         sf = CAVLCSafetyFilter()
@@ -201,16 +201,15 @@ def collect_data(force: bool = False) -> dict:
         return cached
 
     data: dict = {}
-    seq_name = "foreman"
+    seq_name = "foreman_q22_g1"
     video_path = SEQUENCES[seq_name]
 
     # Measure capacity once
-    from src.core.pipeline import extract_all_idr_blocks
     from src.core.stego import CAVLCSafetyFilter
     from src.bitstream.bitstream_ops import BitstreamReconstructor
 
     rec = BitstreamReconstructor()
-    coeffs, _, nC_map, nal_len, t1_over = extract_all_idr_blocks(str(video_path), rec)
+    coeffs, _, nC_map, nal_len, t1_over = load_or_extract_idr_blocks(video_path, rec, force=force)
     sf  = CAVLCSafetyFilter()
     capacity = len(sf.get_safe_positions(coeffs, nC_map=nC_map,
                                           nal_length_map=nal_len,
@@ -228,7 +227,7 @@ def collect_data(force: bool = False) -> dict:
 
     # Extract cover T1 signs once (rate=0) for 2-sample chi-square test
     print("  extracting cover T1 signs ...")
-    cover_signs = _get_t1_signs(video_path, capacity_frac=0.0)
+    cover_signs = _get_t1_signs(video_path, capacity_frac=0.0, force=force)
     print(f"  cover T1 signs: {len(cover_signs)} total, "
           f"{sum(cover_signs)}/{len(cover_signs)} positive ({100*sum(cover_signs)/max(1,len(cover_signs)):.1f}%)")
 
@@ -237,7 +236,7 @@ def collect_data(force: bool = False) -> dict:
         frac = rate / 100.0
 
         # --- This work: chi-square on T1 signs (2-sample: stego vs cover) ---
-        t1s = _get_t1_signs(video_path, capacity_frac=frac)
+        t1s = _get_t1_signs(video_path, capacity_frac=frac, force=force)
         _, p = chi_square_t1_signs(t1s, cover_signs=cover_signs)
         chi_p_this_work.append(p)
 

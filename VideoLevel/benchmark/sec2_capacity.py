@@ -1,11 +1,12 @@
 """
 Section 2 — Embedding Capacity & PSNR vs Payload Rate
 ======================================================
-Answers: "How does image quality degrade as we embed more data?"
+Answers: "How does full-video quality degrade as we embed more data?"
 
 Methodology:
   - Vary payload from 5 % to 100 % of T1 capacity
-  - Measure PSNR at each level for foreman and coastguard
+    - Use round-robin selection over full-frame CAVLC-safe positions
+    - Measure full-video PSNR (MSE over all frames) at each level
   - Capacity bar chart includes all three sequences (deadline capacity only, no sweep)
 
 Produces:
@@ -27,12 +28,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from benchmark._common import (
     PALETTE, SEQUENCES, SEQ_LABELS, MARKERS, LINESTYLES,
     setup_style, save_fig, cache_save, cache_load,
-    decode_luma_frames, psnr_per_frame,
-    ROOT, OUTPUT_DIR,
+    decode_luma_frames,
+    OUTPUT_DIR, load_or_extract_idr_blocks, sort_positions_round_robin_idrs,
 )
 
 CACHE_KEY = "sec2_capacity_data"
-PSNR_VALIDATION_THRESHOLD_DB = 38.0
+CIF_MB_COUNT = 396
 
 # Payload rates to test (% of T1 capacity)
 RATES = [5, 10, 20, 35, 50, 70, 85, 100]
@@ -45,14 +46,13 @@ SWEEP_SEQUENCES = {k: v for k, v in SEQUENCES.items() if k != "deadline"}
 # -------------------------------------------------------------------------
 # Data collection
 # -------------------------------------------------------------------------
-def _measure_capacity_only(video_path: Path) -> dict:
+def _measure_capacity_only(video_path: Path, force: bool = False) -> dict:
     """Return T1 capacity info (fast, no embed)."""
-    from src.core.pipeline import extract_all_idr_blocks
     from src.bitstream.bitstream_ops import BitstreamReconstructor
     from src.core.stego import CAVLCSafetyFilter
 
     rec = BitstreamReconstructor()
-    coeffs, _, nC_map, nal_len, t1_over = extract_all_idr_blocks(str(video_path), rec)
+    coeffs, _, nC_map, nal_len, t1_over = load_or_extract_idr_blocks(video_path, rec, force=force)
     sf = CAVLCSafetyFilter()
     safe_pos = sf.get_safe_positions(coeffs, nC_map=nC_map, nal_length_map=nal_len,
                                      t1_override_map=t1_over)
@@ -62,19 +62,19 @@ def _measure_capacity_only(video_path: Path) -> dict:
     }
 
 
-def _sweep_psnr(seq_name: str, video_path: Path, rates: list[int]) -> dict:
+def _sweep_psnr(seq_name: str, video_path: Path, rates: list[int], force: bool = False) -> dict:
     """
     Extract IDR data ONCE, then embed at multiple rates and measure PSNR.
     Original frames decoded ONCE and reused across all rates.
     """
-    from src.core.pipeline import extract_all_idr_blocks
     from src.core.stego import PayloadEmbedder, CAVLCSafetyFilter
     from src.bitstream.bitstream_ops import BitstreamReconstructor
+    from benchmark._common import psnr as _psnr
 
     print(f"  [{seq_name}] extracting IDR blocks (once) …")
     t0 = time.perf_counter()
     rec = BitstreamReconstructor()
-    coeffs, fvd, nC_map, nal_len, t1_over = extract_all_idr_blocks(str(video_path), rec)
+    coeffs, fvd, nC_map, nal_len, t1_over = load_or_extract_idr_blocks(video_path, rec, force=force)
     print(f"  [{seq_name}] IDR extract: {time.perf_counter()-t0:.1f}s")
 
     # Measure capacity
@@ -88,73 +88,64 @@ def _sweep_psnr(seq_name: str, video_path: Path, rates: list[int]) -> dict:
     print(f"  [{seq_name}] decoding original frames …")
     orig_frames = decode_luma_frames(video_path)
 
-    # Validate all safe positions ONCE with batch PSNR filter (O(log N) FFmpeg calls)
-    print(f"  [{seq_name}] batch PSNR validation ...")
-    validated_positions = rec.batch_psnr_validate(
-        str(video_path), coeffs, safe_pos,
-        frame_verified_data=fvd,
-        psnr_threshold_db=PSNR_VALIDATION_THRESHOLD_DB,
-        min_local_mb=0,
-        max_greedy_per_idr=1024,
-        gop_psnr_quantile=0.2,
-    )
-    validated_capacity = len(validated_positions)
-    print(
-        f"  [{seq_name}] {validated_capacity}/{capacity} positions passed "
-        f"PSNR>={PSNR_VALIDATION_THRESHOLD_DB:.1f} dB"
-    )
+    sorted_positions = sort_positions_round_robin_idrs(safe_pos, CIF_MB_COUNT)
+    selection_mode = "round_robin_full_frame_unvalidated"
 
     psnr_by_rate: list[float] = []
     embedded_bits_by_rate: list[int] = []
     effective_rate_t1_pct: list[float] = []
     effective_rate_validated_pct: list[float] = []
     for rate in rates:
-        if validated_capacity > 0:
-            n_bits = max(8, int(validated_capacity * rate / 100))
-        else:
-            n_bits = 0
+        n_bits = max(8, int(capacity * rate / 100)) if capacity > 0 else 0
         n_bytes = (n_bits + 7) // 8
         payload = bytes([i % 256 for i in range(max(1, n_bytes))]) if n_bits > 0 else b""
+        selected_positions = sorted_positions[:n_bits] if n_bits > 0 else []
+        requested_bits = min(n_bits, len(selected_positions))
+        requested_bytes = requested_bits // 8
+        payload = payload[:requested_bytes] if requested_bytes > 0 else b""
 
         out_path = OUTPUT_DIR / f"_sec2_{seq_name}_r{rate}.h264"
-        print(f"  [{seq_name}] r={rate}% ({n_bits} bits / {n_bytes} B) …", end=" ", flush=True)
+        print(f"  [{seq_name}] r={rate}% ({requested_bits} bits / {requested_bytes} B) …", end=" ", flush=True)
         t1 = time.perf_counter()
 
         embedder = PayloadEmbedder(max_modifications_per_block=2)
-        if n_bits > 0:
+        if requested_bytes > 0:
             modified, bits_emb = embedder.embed_payload(
                 coeffs, payload, nC_map=nC_map,
                 nal_length_map=nal_len, t1_override_map=t1_over,
-                pre_validated_positions=validated_positions,
+                pre_validated_positions=selected_positions,
             )
         else:
             modified, bits_emb = [], 0
 
         rec2 = BitstreamReconstructor()
-        rec2.reconstruct_video(str(video_path), modified, str(out_path),
-                               frame_verified_data=fvd)
+        rec2.reconstruct_video(
+            str(video_path),
+            modified,
+            str(out_path),
+            max_slices=None,
+            frame_verified_data=fvd,
+        )
 
         stego_frames = decode_luma_frames(out_path)
         n = min(len(orig_frames), len(stego_frames))
-        psnr_vals = psnr_per_frame(orig_frames[:n], stego_frames[:n])
-        capped = [min(p, 60.0) for p in psnr_vals]
-        avg_psnr = float(np.mean(capped)) if capped else 0.0
-        psnr_by_rate.append(avg_psnr)
+        full_video_psnr = float(_psnr(orig_frames[:n], stego_frames[:n])) if n > 0 else 0.0
+        psnr_by_rate.append(full_video_psnr)
         embedded_bits_by_rate.append(bits_emb)
         effective_rate_t1_pct.append((100.0 * bits_emb / capacity) if capacity > 0 else 0.0)
-        effective_rate_validated_pct.append(
-            (100.0 * bits_emb / validated_capacity) if validated_capacity > 0 else 0.0
-        )
-        print(f"PSNR={avg_psnr:.2f} dB  ({time.perf_counter()-t1:.1f}s)")
+        effective_rate_validated_pct.append(0.0)
+        print(f"PSNR(full-video)={full_video_psnr:.2f} dB  ({time.perf_counter()-t1:.1f}s)")
 
     return {
         "capacity_bits":   capacity,
         "capacity_bytes":  capacity // 8,
-        "validated_capacity_bits": validated_capacity,
-        "validated_capacity_bytes": validated_capacity // 8,
-        "validated_capacity_bits_effective": validated_capacity,
-        "validation_applied": True,
-        "validation_threshold_db": float(PSNR_VALIDATION_THRESHOLD_DB),
+        "validated_capacity_bits": None,
+        "validated_capacity_bytes": None,
+        "validated_capacity_bits_effective": capacity,
+        "validation_applied": False,
+        "validation_mode": selection_mode,
+        "fallback_used": False,
+        "validation_threshold_db": None,
         "rates_pct":       rates,
         "psnr_by_rate":    psnr_by_rate,
         "embedded_bits_by_rate": embedded_bits_by_rate,
@@ -188,11 +179,11 @@ def collect_data(
     for seq_name, video_path in active_sequences.items():
         if seq_name in SWEEP_SEQUENCES:
             # Full sweep (capacity + PSNR) — extract_all_idr_blocks called once internally
-            data[seq_name] = _sweep_psnr(seq_name, video_path, active_rates)
+            data[seq_name] = _sweep_psnr(seq_name, video_path, active_rates, force=force)
         else:
             # Capacity-only for deadline (too large for full sweep)
             print(f"  [{seq_name}] measuring capacity only (large video) …")
-            cap = _measure_capacity_only(video_path)
+            cap = _measure_capacity_only(video_path, force=force)
             print(f"  [{seq_name}] T1 capacity = {cap['total_t1_bits']} bits")
             data[seq_name] = {
                 "capacity_bits":   cap["total_t1_bits"],
@@ -227,7 +218,7 @@ def plot_psnr_vs_rate(data: dict) -> None:
             continue  # skip capacity-only sequences
         ax.plot(d["rates_pct"], d["psnr_by_rate"],
                 color=list(PALETTE.values())[i],
-                marker=MARKERS[i], linestyle=LINESTYLES[i],
+                marker=MARKERS[i % len(MARKERS)], linestyle=LINESTYLES[i % len(LINESTYLES)],
                 label=label, alpha=0.9)
 
     ax.axhline(40.0, color="#888888", linestyle="--", linewidth=1.2,
@@ -235,15 +226,15 @@ def plot_psnr_vs_rate(data: dict) -> None:
     ax.axhline(35.0, color="#BBBBBB", linestyle=":", linewidth=1.0,
                label="35 dB (acceptable quality)")
 
-    ax.set_xlabel("Requested payload rate (% of PSNR-validated capacity)")
-    ax.set_ylabel("Average PSNR (dB, unmod. frames capped at 60)")
-    ax.set_title("§2  PSNR vs Embedding Rate  (CAVLC T1, requested on validated capacity)")
+    ax.set_xlabel("Requested payload rate (% of total CAVLC-safe capacity)")
+    ax.set_ylabel("Full-video PSNR (dB, MSE over all frames)")
+    ax.set_title("§2  Full-Video PSNR vs Embedding Rate  (Round-robin, full-frame CAVLC T1)")
     ax.legend(loc="lower left")
     ax.set_xlim(0, 105)
     ax.xaxis.set_major_locator(ticker.MultipleLocator(10))
 
     fig.text(0.5, -0.03,
-             "Requested rate is based on PSNR-validated capacity; effective T1 rate is saved in JSON",
+             "Selection uses strict IDR round-robin over full-frame CAVLC-safe positions (no batch PSNR validation)",
              ha="center", fontsize=9, color="#555555", style="italic")
 
     save_fig(fig, "sec2_psnr_vs_payload_rate")

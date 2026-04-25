@@ -65,6 +65,7 @@ def _build_fixture():
     try:
         stats = rec.reconstruct_video(
             VIDEO, modified, STEGO_OUT,
+            max_slices=None,
             frame_verified_data=fvd,
         )
     finally:

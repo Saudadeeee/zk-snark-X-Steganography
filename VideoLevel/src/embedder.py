@@ -19,11 +19,13 @@ import logging
 import os
 import shutil
 from dataclasses import dataclass
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 from .core.pipeline        import extract_all_idr_blocks
-from .core.stego           import PayloadEmbedder
+from .core.stego           import PayloadEmbedder, CAVLCSafetyFilter
+from .core.chaos           import ChaosTransformer
 from .bitstream.bitstream_ops import BitstreamReconstructor
 from .exceptions           import InsufficientCapacityError
 from .zk_proof             import ZKSnarkBridge, pack
@@ -32,11 +34,12 @@ from .zk_proof             import ZKSnarkBridge, pack
 @dataclass
 class EmbedResult:
     """Result returned by embed()."""
-    bits_embedded:  int    # Number of payload bits embedded
-    capacity_bits:  int    # Total T1 bits available (before FFmpeg filter)
-    output_path:    str    # Path to the output stego video
-    proof_dict:     dict   # Raw snarkjs proof dict
-    public_dict:    dict   # Public signals dict (for verification)
+    bits_embedded:       int           # Number of payload bits embedded
+    capacity_bits:       int           # Total T1 bits available (before FFmpeg filter)
+    output_path:         str           # Path to the output stego video
+    proof_dict:          dict          # Raw snarkjs proof dict
+    public_dict:         dict          # Public signals dict (for verification)
+    chaos_original_bits: Optional[int] = None  # Set when chaos_key used (orig bit count)
 
 
 def embed(
@@ -47,16 +50,19 @@ def embed(
     secret_key:   bytes,
     max_modifications_per_block: int = 1,
     ffmpeg_validate: bool = False,
+    chaos_key: Optional[bytes] = None,
 ) -> EmbedResult:
     """
     Embed a Groth16 ZK proof for `message` into an H.264 video.
 
     Pipeline:
         1. Generate ZK proof  (snarkjs Groth16, via Node.js)
-        2. Pack payload blob  [4B len][message][256B proof]
+        2. Pack payload blob  [4B len][message][129B proof]
+       2b. [Chaos] Arnold Cat Map scrambles payload bits  (if chaos_key)
         3. Parse H.264 video  extract IDR coefficients + bit offsets
         4. Safety filter      find safe trailing-ones positions
-        5. Embed payload      flip T1 sign bits (descending order)
+       4b. [Chaos] Logistic Map shuffles embedding positions (if chaos_key)
+        5. Embed payload      flip T1 sign bits
         6. Reconstruct video  patch bitstream at tracked offsets
 
     Args:
@@ -68,6 +74,11 @@ def embed(
         max_modifications_per_block: T1 flips per 4×4 block (default 1).
         ffmpeg_validate: Enable per-position FFmpeg pixel validation.
                          Slower but guarantees no visible artefacts.
+        chaos_key:    Optional bytes key to enable chaos math transforms.
+                      When set, Arnold Cat Map scrambles payload bits and
+                      Logistic Map shuffles the embedding position order,
+                      making the hidden data resist steganalysis.
+                      Pass the same key to verify() for correct extraction.
 
     Returns:
         EmbedResult
@@ -98,33 +109,78 @@ def embed(
     proof_dict, public_dict = bridge.generate_proof_for_payload(message, secret_key)
     proof_bytes = bridge.proof_to_bytes(proof_dict)
 
-    # 2. Pack payload blob
+    # 2. Pack payload blob  [4B len][message][129B compressed proof]
     payload_blob = pack(message, proof_bytes)
+    original_bit_count = len(payload_blob) * 8
+
+    # 2b. Chaos: Arnold Cat Map — scramble payload bits
+    chaos: Optional[ChaosTransformer] = None
+    if chaos_key is not None:
+        chaos = ChaosTransformer(chaos_key)
+        payload_blob, _orig_bits = chaos.scramble(payload_blob)
+        logger.info(
+            "[Chaos] Arnold Cat Map applied: %d bits → %d bits (k=%d)",
+            original_bit_count, len(payload_blob) * 8, chaos.arnold_k,
+        )
 
     # 3. Parse H.264 — extract IDR coefficients + metadata
     rec = BitstreamReconstructor()
     coefficients, frame_verified_data, nC_map, nal_length_map, t1_override_map = \
         extract_all_idr_blocks(video_path, rec)
 
-    # 4. Optional FFmpeg validator
-    validator = cleanup = None
-    if ffmpeg_validate:
-        validator, cleanup = rec.make_ffmpeg_position_validator(
-            video_path, coefficients, frame_verified_data
+    # 4. Get safe embedding positions (CAVLC safety filter)
+    safety = CAVLCSafetyFilter()
+    safe_positions = safety.get_safe_positions(
+        coefficients,
+        nC_map=nC_map,
+        nal_length_map=nal_length_map,
+        t1_override_map=t1_override_map,
+    )
+
+    # 4b. Chaos: Logistic Map — shuffle position order
+    if chaos is not None:
+        safe_positions = chaos.shuffle_positions(safe_positions)
+        logger.info(
+            "[Chaos] Logistic Map shuffle applied to %d positions (seed=%.6f)",
+            len(safe_positions), chaos.logistic_seed,
         )
 
-    # 5. Embed payload
+    # 4c. Optional FFmpeg validator — pre-filter positions BEFORE passing as
+    # pre_validated_positions.  stego.py sets ffmpeg_validator=None whenever
+    # pre_validated_positions is provided, so we must validate here instead.
+    # Cap at 5× required bits to prevent hour-long loops on large position pools.
+    if ffmpeg_validate:
+        _vfn, _cleanup = rec.make_ffmpeg_position_validator(
+            video_path, coefficients, frame_verified_data
+        )
+        _required = len(payload_blob) * 8
+        _max_tries = max(_required * 5, 2000)
+        _total_candidates = len(safe_positions)
+        _validated: list = []
+        _tried = 0
+        for p in safe_positions:
+            if len(_validated) >= _required or _tried >= _max_tries:
+                break
+            _tried += 1
+            if _vfn(p[0], p[1], p[2]):
+                _validated.append(p)
+        _cleanup()
+        logger.info(
+            "[FFmpeg] %d/%d passed (tried %d/%d candidates, needed %d)",
+            len(_validated), _tried, _tried, _total_candidates, _required,
+        )
+        safe_positions = _validated
+
+    # 5. Embed payload using pre-validated (and optionally chaos-shuffled) positions
     embedder = PayloadEmbedder(max_modifications_per_block=max_modifications_per_block)
     modified, bits_embedded = embedder.embed_payload(
         coefficients, payload_blob,
         nC_map=nC_map,
         nal_length_map=nal_length_map,
         t1_override_map=t1_override_map,
-        ffmpeg_validator=validator,
+        ffmpeg_validator=None,          # already pre-validated above
+        pre_validated_positions=safe_positions,
     )
-
-    if cleanup:
-        cleanup()
 
     required_bits = len(payload_blob) * 8
     if bits_embedded < required_bits:
@@ -138,6 +194,7 @@ def embed(
     rec2 = BitstreamReconstructor()
     rec2.reconstruct_video(
         video_path, modified, output_path,
+        max_slices=None,
         frame_verified_data=frame_verified_data,
     )
 
@@ -151,4 +208,5 @@ def embed(
         output_path=output_path,
         proof_dict=proof_dict,
         public_dict=public_dict,
+        chaos_original_bits=original_bit_count if chaos is not None else None,
     )

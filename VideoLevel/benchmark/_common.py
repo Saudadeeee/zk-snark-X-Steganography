@@ -8,6 +8,8 @@ Provides: path constants, matplotlib style, video decode/PSNR/SSIM helpers,
 import json
 import math
 import os
+import pickle
+import hashlib
 import subprocess
 import sys
 from pathlib import Path
@@ -32,20 +34,36 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # CIF resolution used by all test sequences
 WIDTH, HEIGHT = 352, 288
+CIF_MB_COUNT = 396  # 22x18
 
-# Test sequences: full-length encodes from .y4m source
-# foreman=300f (6x loop of 50f source, matching standard CIF full-length)
-# coastguard=300f, deadline=1374f
+# Test sequences: full-length + additional CIF variants from encoded assets.
+# foreman=300f (6x loop of 50f source), coastguard=300f, deadline=1374f.
+# Added short/variant clips to broaden benchmark coverage.
 SEQUENCES = {
     "foreman":    DATA_DIR / "foreman_cif_300_g8.h264",
     "coastguard": DATA_DIR / "coastguard_cif_full_g8.h264",
     "deadline":   DATA_DIR / "deadline_cif_full_g8.h264",
+    "foreman_long": DATA_DIR / "foreman_cif_1200_g8.h264",
+    "coastguard_long": DATA_DIR / "coastguard_cif_1200_g8.h264",
+    "akiyo": DATA_DIR / "akiyo_cif_g8.h264",
+    "foreman_hq": DATA_DIR / "foreman_cif_hq.h264",
+    "coastguard_short": DATA_DIR / "coastguard_cif_g8.h264",
+    # All-intra (GOP=1) QP=22 — eliminates P-frame cascade for high-quality stego
+    "foreman_q22_g1": DATA_DIR / "foreman_cif_q22_g1.h264",
+    "coastguard_q22_g1": DATA_DIR / "coastguard_cif_q22_g1.h264",
 }
 
 SEQ_FRAMES = {
     "foreman":    300,
     "coastguard": 300,
     "deadline":   1374,
+    "foreman_long": 1200,
+    "coastguard_long": 1200,
+    "akiyo": 50,
+    "foreman_hq": 50,
+    "coastguard_short": 50,
+    "foreman_q22_g1": 300,
+    "coastguard_q22_g1": 300,
 }
 
 # ---------------------------------------------------------------------------
@@ -71,6 +89,13 @@ SEQ_LABELS = {
     "foreman":    "Foreman (low motion)",
     "coastguard": "Coastguard (high motion)",
     "deadline":   "Deadline (mixed)",
+    "foreman_long": "Foreman long (1200f)",
+    "coastguard_long": "Coastguard long (1200f)",
+    "akiyo": "Akiyo (very low motion)",
+    "foreman_hq": "Foreman HQ (short)",
+    "coastguard_short": "Coastguard short (50f)",
+    "foreman_q22_g1": "Foreman all-intra QP22",
+    "coastguard_q22_g1": "Coastguard all-intra QP22",
 }
 
 # ---------------------------------------------------------------------------
@@ -229,3 +254,149 @@ def annotate_literature(ax: plt.Axes, text: str = "Simulated / literature values
         xy=(0.01, 0.01), xycoords="axes fraction",
         fontsize=8, color="#888888", style="italic",
     )
+
+
+def sort_positions_round_robin_idrs(
+    positions: list[tuple[int, int, int]],
+    cif_mb_count: int = CIF_MB_COUNT,
+) -> list[tuple[int, int, int]]:
+    """Sort positions in strict IDR round-robin with in-frame row interleaving."""
+    if not positions:
+        return []
+
+    mb_width = 22
+    mb_height = max(1, cif_mb_count // mb_width)
+    preferred_rows = [r for r in (mb_height - 1, mb_height - 2, mb_height - 3, mb_height - 4) if r >= 0]
+    remaining_rows = [r for r in range(mb_height - 1, -1, -1) if r not in preferred_rows]
+
+    by_frame: dict[int, list[tuple[int, int, int]]] = {}
+    for pos in positions:
+        frame_idx = pos[0] // cif_mb_count
+        by_frame.setdefault(frame_idx, []).append(pos)
+
+    for frm in by_frame:
+        row_buckets: dict[int, list[tuple[int, int, int]]] = {r: [] for r in range(mb_height)}
+        for item in by_frame[frm]:
+            local_mb = item[0] % cif_mb_count
+            row = local_mb // mb_width
+            row_buckets[row].append(item)
+
+        for row in row_buckets:
+            row_buckets[row].sort(key=lambda t: (-((t[0] % cif_mb_count) % mb_width), -t[1]))
+
+        def _consume_round_robin(rows: list[int], out: list[tuple[int, int, int]]) -> None:
+            if not rows:
+                return
+            offsets = {r: 0 for r in rows}
+            while True:
+                progressed = False
+                for row in rows:
+                    idx = offsets[row]
+                    bucket = row_buckets[row]
+                    if idx < len(bucket):
+                        out.append(bucket[idx])
+                        offsets[row] += 1
+                        progressed = True
+                if not progressed:
+                    break
+
+        interleaved_rows: list[tuple[int, int, int]] = []
+        # First spread over bottom-4 rows to keep cascade bounded and avoid single-row hotspots.
+        _consume_round_robin(preferred_rows, interleaved_rows)
+        # Then include the rest of the frame when needed for larger payloads.
+        _consume_round_robin(remaining_rows, interleaved_rows)
+
+        by_frame[frm] = interleaved_rows
+
+    frames_asc = sorted(by_frame.keys())
+    max_len = max(len(lst) for lst in by_frame.values())
+    result: list[tuple[int, int, int]] = []
+    for k in range(max_len):
+        for frm in frames_asc:
+            lst = by_frame[frm]
+            if k < len(lst):
+                result.append(lst[k])
+    return result
+
+
+# ---------------------------------------------------------------------------
+# IDR extraction cache (sec1/sec2/sec3/sec4 runtime accelerator)
+# ---------------------------------------------------------------------------
+IDR_CACHE_SCHEMA_VERSION = "v2-2026-04-16"
+ENABLE_TRUSTED_IDR_PICKLE_CACHE = (
+    os.environ.get("BENCHMARK_TRUSTED_PICKLE_CACHE", "0") == "1"
+    or os.environ.get("BENCHMARK_TRUSTED_IDR_PICKLE_CACHE", "0") == "1"
+)
+
+
+def _idr_cache_path(video_path: str | Path) -> Path:
+    p = Path(video_path)
+    try:
+        resolved = str(p.resolve()).encode("utf-8")
+    except OSError:
+        resolved = str(p).encode("utf-8")
+    path_hash = hashlib.sha1(resolved).hexdigest()[:10]
+    return RESULTS_DIR / f"_idr_cache_{p.stem}_{path_hash}.pkl"
+
+
+def _idr_code_fingerprint() -> dict[str, int | str]:
+    """Track extractor-dependent source mtimes so cache auto-invalidates on code changes."""
+    files = [
+        ROOT / "src" / "core" / "pipeline.py",
+        ROOT / "src" / "core" / "stego.py",
+    ]
+    fp: dict[str, int | str] = {"schema": IDR_CACHE_SCHEMA_VERSION}
+    for f in files:
+        key = f.relative_to(ROOT).as_posix()
+        try:
+            fp[key] = int(f.stat().st_mtime_ns)
+        except OSError:
+            fp[key] = "missing"
+    return fp
+
+
+def load_or_extract_idr_blocks(
+    video_path: str | Path,
+    reconstructor,
+    force: bool = False,
+) -> tuple:
+    """
+    Load cached output of extract_all_idr_blocks() when source video is unchanged.
+
+    Cache payload:
+      - video_path / size / mtime fingerprint
+      - extracted tuple:
+        (coeffs, frame_verified_data, nC_map, nal_length_map, t1_override_map)
+    """
+    from src.core.pipeline import extract_all_idr_blocks
+
+    vp = Path(video_path)
+    cp = _idr_cache_path(vp)
+    try:
+        stat = vp.stat()
+        fingerprint = {
+            "path": str(vp.resolve()),
+            "size": int(stat.st_size),
+            "mtime_ns": int(stat.st_mtime_ns),
+            "code": _idr_code_fingerprint(),
+        }
+    except OSError:
+        return extract_all_idr_blocks(str(vp), reconstructor)
+
+    if ENABLE_TRUSTED_IDR_PICKLE_CACHE and not force and cp.exists():
+        try:
+            with open(cp, "rb") as f:
+                payload = pickle.load(f)
+            if payload.get("fingerprint") == fingerprint and "data" in payload:
+                return payload["data"]
+        except (OSError, pickle.PickleError, EOFError, AttributeError, ValueError):
+            pass
+
+    data = extract_all_idr_blocks(str(vp), reconstructor)
+    if ENABLE_TRUSTED_IDR_PICKLE_CACHE:
+        try:
+            with open(cp, "wb") as f:
+                pickle.dump({"fingerprint": fingerprint, "data": data}, f, protocol=pickle.HIGHEST_PROTOCOL)
+        except OSError:
+            pass
+    return data

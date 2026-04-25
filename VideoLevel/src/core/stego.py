@@ -11,37 +11,28 @@ Public API:
 """
 
 import logging
-from typing import Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from ..bitstream.cavlc import CAVLCEncoder, CAVLCDecoder
+from ..bitstream.bitstream_io import BitstreamWriter, BitstreamReader
+from ..exceptions import SafetyFilterError, EmbeddingError
 
 logger = logging.getLogger(__name__)
-from ..bitstream.bitstream_io import BitstreamWriter, BitstreamReader
-
-
-
 # =============================================================================
 # CAVLC SAFETY FILTER  (formerly cavlc_safety_filter.py)
 # =============================================================================
 
-from typing import List, Tuple, Optional, Set, Dict
-
-from ..exceptions import SafetyFilterError
-from ..bitstream.cavlc import CAVLCEncoder
-from ..bitstream.bitstream_io import BitstreamWriter
-
 
 # MBs per CIF frame (22×18).  Used by the sort key to compute the position
 # of a macroblock WITHIN its IDR frame (0–395), which drives the interleaved
-# embedding strategy: for each MB position (descending), visit the same
-# position across ALL IDR frames before moving to the next position.
+# embedding strategy: for each MB position (within-frame order: balanced row permutation),
+# visit the same position across ALL IDR frames before moving to the next.
 # This distributes the payload evenly across every IDR frame instead of
 # saturating the last few IDRs — ~57 bits per IDR (for a 274-byte payload
 # over 38 IDR frames) instead of ~1200 bits, giving dramatically better
 # per-IDR PSNR (~42–47 dB vs ~14–17 dB) with no downstream cascade.
 _CIF_MB_COUNT = 396
-
-_CIF_MB_COUNT = 396
+_CIF_MB_WIDTH = 22
 
 def sort_blocks_interleaved(block_tuples, cif_mb_count=396):
     """
@@ -61,12 +52,48 @@ def sort_blocks_interleaved(block_tuples, cif_mb_count=396):
             by_frame[frame_idx] = []
         by_frame[frame_idx].append(item)
     
-    # Sort within each frame: late-macroblocks first, then high-block-index first
+    mb_width = _CIF_MB_WIDTH
+    mb_height = max(1, cif_mb_count // mb_width)
+    preferred_rows = [r for r in (mb_height - 1, mb_height - 2, mb_height - 3, mb_height - 4) if r >= 0]
+    remaining_rows = [r for r in range(mb_height - 1, -1, -1) if r not in preferred_rows]
+
+    # Sort within each frame: row-interleaved coverage to prevent early-prefix clustering.
     for frm in by_frame:
-        by_frame[frm].sort(key=lambda t: (-(t[0] % cif_mb_count), -t[1]))
+        row_buckets = {r: [] for r in range(mb_height)}
+        for item in by_frame[frm]:
+            local_mb = item[0] % cif_mb_count
+            row = local_mb // mb_width
+            row_buckets[row].append(item)
+
+        for row in row_buckets:
+            row_buckets[row].sort(key=lambda t: (-((t[0] % cif_mb_count) % mb_width), -t[1]))
+
+        def _consume_round_robin(rows, out):
+            if not rows:
+                return
+            offsets = {r: 0 for r in rows}
+            while True:
+                progressed = False
+                for row in rows:
+                    idx = offsets[row]
+                    bucket = row_buckets[row]
+                    if idx < len(bucket):
+                        out.append(bucket[idx])
+                        offsets[row] += 1
+                        progressed = True
+                if not progressed:
+                    break
+
+        interleaved_rows = []
+        _consume_round_robin(preferred_rows, interleaved_rows)
+        _consume_round_robin(remaining_rows, interleaved_rows)
+
+        by_frame[frm] = interleaved_rows
     
-    # Interleave (Strict Round Robin) starting from the latest frame (largest frame_idx)
-    frames_desc = sorted(list(by_frame.keys()), reverse=True)
+    # Interleave (Strict Round Robin) starting from the earliest frame.
+    # This keeps payload spread across the full video timeline instead of
+    # concentrating the first validated positions at the end of the sequence.
+    frames_desc = sorted(list(by_frame.keys()))
     interleaved = []
     max_len = max([len(lst) for lst in by_frame.values()])
     
@@ -449,24 +476,16 @@ class CAVLCSafetyFilter:
                 if is_safe:
                     safe_positions.append((mb_idx, block_idx, ~coeff_idx))
 
-        # Sort descending by (mb_idx, block_idx) so that embedding starts at
-        # late-frame macroblocks and works backwards.  In H.264 intra-predicted
-        # frames each decoded block is the prediction reference for all
-        # subsequent blocks in raster order; modifications to early blocks
-        # cascade through the entire frame causing large PSNR degradation.
-        # By embedding in the LAST macroblocks of the LAST IDR frame first,
-        # the intra prediction cascade is reduced to near-zero: the modified
-        # MBs have no (or very few) downstream dependents.
+        # Return positions in interleaved order from sort_blocks_interleaved:
+        # within each frame, late macroblocks first; across frames, chronological
+        # round-robin. This keeps embed/extract ordering deterministic while
+        # distributing payload across the full timeline.
         return sort_blocks_interleaved(safe_positions, _CIF_MB_COUNT)
 
 
 # =============================================================================
 # PAYLOAD EMBEDDER  (formerly payload_embedder.py)
 # =============================================================================
-
-from typing import List, Tuple, Optional, Dict
-
-from ..exceptions import EmbeddingError
 
 
 class PayloadEmbedder:
@@ -560,6 +579,7 @@ class PayloadEmbedder:
             return self._embed_with_safety_filter(
                 coefficients, payload_bits, nC_map, nal_length_map,
                 t1_override_map, ffmpeg_validator, pre_validated_positions)
+        raise EmbeddingError("use_safety_filter=False embedding path is not implemented")
     
     def _embed_with_safety_filter(
         self,
@@ -718,6 +738,7 @@ class PayloadEmbedder:
         # Use safety filter routing if enabled (MUST match embedding!)
         if self.use_safety_filter and self.safety_filter:
             return self._extract_with_safety_filter(coefficients, payload_length_bits, start_bit_offset, nC_map, nal_length_map, t1_override_map, precomputed_safe_positions)
+        raise EmbeddingError("use_safety_filter=False extraction path is not implemented")
     
     def _extract_with_safety_filter(
         self,
@@ -764,16 +785,27 @@ class PayloadEmbedder:
             if key not in safe_map:
                 safe_map[key] = []
             safe_map[key].append(coeff_idx)
+
+        # Mirror embedding block order exactly: first occurrence order of each
+        # (mb, blk) in safe_positions.
+        seen_block_set: Set[Tuple[int, int]] = set()
+        seen_blocks: List[Tuple[int, int]] = []
+        for mb_idx, block_idx, _ in safe_positions:
+            key = (mb_idx, block_idx)
+            if key not in seen_block_set:
+                seen_block_set.add(key)
+                seen_blocks.append(key)
         
         extracted_bits = []
         bits_skipped = 0
 
-        # Iterate in DESCENDING mb/block order — mirrors _embed_with_safety_filter
-        for mb_idx, block_idx, coeffs in sort_blocks_interleaved(coefficients, _CIF_MB_COUNT):
+        # Iterate in the same block order used by _embed_with_safety_filter.
+        for mb_idx, block_idx in seen_blocks:
             block_key = (mb_idx, block_idx)
-            if block_key not in safe_map:
+            coeffs = coeff_map.get(block_key)
+            if coeffs is None:
                 continue
-                
+
             safe_indices = safe_map[block_key]
             extractions_in_block = 0
             
