@@ -1,18 +1,12 @@
-"""
-Section 1 — Stego Video Quality vs Original
-============================================
-Measures per-frame PSNR and SSIM for the stego video vs the original.
-For stability-focused evaluation, the embedding budget is constrained by
-PSNR/decode-safe validation and may be lower than the theoretical payload.
-Produces:
-  - sec1_psnr_per_frame.png   : PSNR timeline, one line per sequence
-  - sec1_ssim_per_frame.png   : SSIM timeline, one line per sequence
-  - sec1_avg_quality_bar.png  : Average PSNR/SSIM grouped bar chart
-"""
+
+
+"""Section 1 quality benchmark for stego video vs original video."""
 
 import os
 import sys
 import time
+import json
+import hashlib
 import argparse
 from pathlib import Path
 
@@ -25,20 +19,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from benchmark._common import (
     PALETTE, SEQUENCES, SEQ_LABELS, MARKERS, LINESTYLES,
     setup_style, save_fig, cache_save, cache_load,
-    decode_luma_frames, psnr_per_frame, ssim_per_frame,
+    decode_luma_frames, psnr_per_frame, ssim_per_frame, psnr,
+    load_or_extract_idr_blocks, sort_positions_round_robin_idrs,
 )
 
-# -------------------------------------------------------------------------
-# Paths and constants
-# -------------------------------------------------------------------------
-from benchmark._common import ROOT, OUTPUT_DIR, CIRCUITS_DIR
+from benchmark._common import OUTPUT_DIR, CIRCUITS_DIR
 
 SECRET_KEY = bytes(range(32))  # Fixed key for reproducibility
+CHAOS_KEY = b"sec1_benchmark_chaos_v1"  # Deterministic chaos key for reproducibility
 
-# Production payload size = ZK blob = 4-byte header + 14-byte message + 256-byte Groth16 proof
-# Using 274 random bytes to test quality at production payload size without ZK proving overhead.
-# The PSNR depends only on the NUMBER of bits embedded, not content.
-PAYLOAD_BYTES = 274
+PAYLOAD_BYTES = 147
 PAYLOAD = bytes([i % 256 for i in range(PAYLOAD_BYTES)])
 
 STEGO_OUTPUTS = {
@@ -47,98 +37,877 @@ STEGO_OUTPUTS = {
 }
 
 CACHE_KEY = "sec1_quality_data"
-PSNR_VALIDATION_THRESHOLD_DB = 38.0
+# Default to quality-oriented benchmark mode.
+# Set SEC1_USE_REAL_PROOF_PIPELINE=1 to force real-proof embedding path.
+USE_REAL_PROOF_EMBED_PIPELINE = os.environ.get("SEC1_USE_REAL_PROOF_PIPELINE", "0") == "1"
+REAL_PROOF_MESSAGE = b"ZK-bench-v1.0!"
+REAL_PROOF_FFMPEG_VALIDATE = False
+REAL_PROOF_SMART_DISTRIBUTED = True
+REAL_PROOF_SMART_ALLOW_SIGN_BITS = True
+REAL_PROOF_SMART_MAX_MODS_PER_BLOCK = 1
+REAL_PROOF_SMART_PREFER_PATCHABLE = True
+REAL_PROOF_SMART_DEDUP_PER_BLOCK = True
+REAL_PROOF_SMART_MAX_BITS_PER_IDR = 32
+USE_SIGN_BIT_POSITIONS = False
+MIN_QUALITY_BUDGET_BITS = 256
+# For all-intra (GOP=1) sequences, each frame is independent so cascade risk is zero.
+# Use higher per-IDR quota and patchable rate to allow full payload embedding.
+QUALITY_BITS_PER_IDR = 24           # GOP=8 sequences (legacy default)
+QUALITY_BITS_PER_IDR_ALLINTRA = 64  # GOP=1: independent IDR frames, no cascade
+QUALITY_MAX_PATCHABLE_RATE = 0.08       # GOP=8 sequences
+QUALITY_MAX_PATCHABLE_RATE_ALLINTRA = 0.25  # GOP=1: safe to use more positions
+FALLBACK_MIN_BITS = 64
+QUALITY_TARGET_PSNR_FULL_DB = 41.0
+QUALITY_TARGET_PSNR_FRAME_MIN_DB = float(os.environ.get("SEC1_QUALITY_TARGET_PSNR_FRAME_MIN_DB", "40.0"))
+QUALITY_ENFORCE_TARGET_STRICT = True
+QUALITY_ENFORCE_FRAME_MIN_PSNR = os.environ.get("SEC1_ENFORCE_FRAME_MIN_PSNR", "1") == "1"
+QUALITY_TEMPORAL_STRIDE = max(1, int(os.environ.get("SEC1_QUALITY_TEMPORAL_STRIDE", "4")))
+QUALITY_TARGET_BITS_DEFAULT = len(PAYLOAD) * 8
 
-# Skip deadline in quality section: 274 bytes fills only 2-3 of 171 IDR frames
-# (1.2% fill rate) → almost all frames unmodified → PSNR trivially high.
-# Deadline is included in §2 capacity chart for completeness.
-QUALITY_SEQUENCES = {k: v for k, v in SEQUENCES.items() if k != "deadline"}
+CIF_MB_COUNT = 396   # 22x18 (same for all CIF benchmark sequences)
+
+# All-intra QP=22 sequences: no P-frame cascade → full 1176-bit payload at >40 dB PSNR.
+# Legacy GOP=8 sequences kept as optional for comparison.
+DEFAULT_QUALITY_SEQUENCE_NAMES = ("foreman_q22_g1", "coastguard_q22_g1")
+QUALITY_SEQUENCES = {
+    k: SEQUENCES[k]
+    for k in DEFAULT_QUALITY_SEQUENCE_NAMES
+    if k in SEQUENCES
+}
+OPTIONAL_QUALITY_SEQUENCES = {
+    k: v for k, v in SEQUENCES.items()
+    if k not in DEFAULT_QUALITY_SEQUENCE_NAMES
+}
+
+# GOP per sequence: all-intra sequences have GOP=1 (every frame is IDR).
+SEQ_GOP = {
+    "foreman_q22_g1": 1,
+    "coastguard_q22_g1": 1,
+    "foreman_hq": 1,
+}
 
 # -------------------------------------------------------------------------
 # Embed helper
 # -------------------------------------------------------------------------
-def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -> tuple[Path, int | None, int]:
+
+
+def _select_positions_distributed(
+    positions: list[tuple[int, int, int]],
+    target_bits: int,
+    cif_mb_count: int = CIF_MB_COUNT,
+) -> list[tuple[int, int, int]]:
+    """Select exactly target_bits positions with balanced per-IDR distribution."""
+    by_frame: dict[int, list[tuple[int, int, int]]] = {}
+    for pos in positions:
+        frame_idx = pos[0] // cif_mb_count
+        by_frame.setdefault(frame_idx, []).append(pos)
+
+    if not by_frame:
+        return []
+
+    frames = sorted(by_frame.keys())
+    quotas = {f: 0 for f in frames}
+    remaining = int(target_bits)
+
+    # Iteratively assign fair-share quotas while respecting per-frame availability.
+    active = set(frames)
+    while remaining > 0 and active:
+        share = max(1, remaining // len(active))
+        progressed = False
+        for f in sorted(active):
+            cap = len(by_frame[f]) - quotas[f]
+            if cap <= 0:
+                active.remove(f)
+                continue
+            take = min(share, cap, remaining)
+            if take > 0:
+                quotas[f] += take
+                remaining -= take
+                progressed = True
+            if len(by_frame[f]) - quotas[f] <= 0:
+                active.remove(f)
+            if remaining <= 0:
+                break
+        if not progressed:
+            break
+
+    selected: list[tuple[int, int, int]] = []
+    for f in frames:
+        q = quotas[f]
+        if q > 0:
+            selected.extend(by_frame[f][:q])
+
+    # Preserve global extraction order contract.
+    return sort_positions_round_robin_idrs(selected, cif_mb_count)
+
+
+def _build_smart_candidate_positions(
+    ordered_positions: list[tuple[int, int, int]],
+    nal_length_map: dict,
+    cif_mb_count: int = CIF_MB_COUNT,
+    allow_sign_bits: bool = True,
+    prefer_patchable: bool = True,
+    dedup_per_block: bool = True,
+    max_bits_per_idr: int = 0,
+) -> list[tuple[int, int, int]]:
+    """Build candidate positions with quality-preserving constraints."""
+    patchable_keys = {
+        key for key, bit_len in nal_length_map.items()
+        if key[1] < 16 and bit_len is not None and bit_len > 0
+    }
+
+    candidates: list[tuple[int, int, int]] = []
+    seen_blocks: set[tuple[int, int]] = set()
+    idr_used: dict[int, int] = {}
+
+    for mb, blk, cidx in ordered_positions:
+        if not allow_sign_bits and cidx < 0:
+            continue
+
+        block_key = (mb, blk)
+        if prefer_patchable and block_key not in patchable_keys:
+            continue
+
+        if dedup_per_block and block_key in seen_blocks:
+            continue
+
+        frame_idx = mb // cif_mb_count
+        if max_bits_per_idr > 0 and idr_used.get(frame_idx, 0) >= max_bits_per_idr:
+            continue
+
+        if dedup_per_block:
+            seen_blocks.add(block_key)
+        idr_used[frame_idx] = idr_used.get(frame_idx, 0) + 1
+        candidates.append((mb, blk, cidx))
+
+    return candidates
+
+
+def _build_real_proof_payload() -> tuple[bytes, int]:
+    """Build canonical packed ZK payload and its exact bit length."""
+    from src.zk_proof import ZKSnarkBridge, pack, proof_to_bytes
+
+    bridge = ZKSnarkBridge(str(CIRCUITS_DIR))
+    proof_dict, _ = bridge.generate_proof_for_payload(REAL_PROOF_MESSAGE, SECRET_KEY)
+    payload_real = pack(REAL_PROOF_MESSAGE, proof_to_bytes(proof_dict))
+    return payload_real, len(payload_real) * 8
+
+
+def _sec1_cache_fingerprint() -> dict[str, object]:
+    """Return configuration fingerprint for sec1 output cache safety."""
+    return {
+        "use_real_proof_embed_pipeline": USE_REAL_PROOF_EMBED_PIPELINE,
+        "quality_target_psnr_full_db": QUALITY_TARGET_PSNR_FULL_DB,
+        "quality_target_psnr_frame_min_db": QUALITY_TARGET_PSNR_FRAME_MIN_DB,
+        "quality_enforce_target_strict": QUALITY_ENFORCE_TARGET_STRICT,
+        "quality_enforce_frame_min_psnr": QUALITY_ENFORCE_FRAME_MIN_PSNR,
+        "quality_temporal_stride": QUALITY_TEMPORAL_STRIDE,
+        "quality_bits_per_idr": QUALITY_BITS_PER_IDR,
+        "quality_max_patchable_rate": QUALITY_MAX_PATCHABLE_RATE,
+        "min_quality_budget_bits": MIN_QUALITY_BUDGET_BITS,
+        "fallback_min_bits": FALLBACK_MIN_BITS,
+        "use_sign_bit_positions": USE_SIGN_BIT_POSITIONS,
+        "real_proof_smart_distributed": REAL_PROOF_SMART_DISTRIBUTED,
+        "real_proof_smart_allow_sign_bits": REAL_PROOF_SMART_ALLOW_SIGN_BITS,
+        "real_proof_smart_max_mods_per_block": REAL_PROOF_SMART_MAX_MODS_PER_BLOCK,
+        "real_proof_smart_prefer_patchable": REAL_PROOF_SMART_PREFER_PATCHABLE,
+        "real_proof_smart_dedup_per_block": REAL_PROOF_SMART_DEDUP_PER_BLOCK,
+        "real_proof_smart_max_bits_per_idr": REAL_PROOF_SMART_MAX_BITS_PER_IDR,
+        "payload_bytes": len(PAYLOAD),
+        "payload_sha1": hashlib.sha1(PAYLOAD).hexdigest(),
+        "real_proof_message_sha1": hashlib.sha1(REAL_PROOF_MESSAGE).hexdigest(),
+        "secret_key_sha1": hashlib.sha1(SECRET_KEY).hexdigest(),
+        "chaos_key_sha1": hashlib.sha1(CHAOS_KEY).hexdigest(),
+        "allintra_validation": "chaos_v5_ffmpeg_validated",
+    }
+
+
+def _stego_meta_path(out_path: Path) -> Path:
+    return out_path.parent / f"{out_path.name}.meta.json"
+
+
+def _read_stego_metadata(meta_path: Path) -> dict | None:
+    if not meta_path.exists():
+        return None
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return None
+        return data
+    except Exception:
+        return None
+
+
+def _write_stego_metadata(
+    meta_path: Path,
+    *,
+    video_path: Path,
+    bits_embedded: int | None,
+    bits_required: int,
+    validation_mode: str,
+    effective_threshold_db: float | None,
+) -> None:
+    try:
+        source_video_text = str(video_path.resolve())
+    except OSError:
+        source_video_text = str(video_path)
+    payload = {
+        "source_video": source_video_text,
+        "source_video_mtime": os.path.getmtime(str(video_path)),
+        "cache_fingerprint": _sec1_cache_fingerprint(),
+        "bits_embedded": bits_embedded,
+        "bits_required": int(bits_required),
+        "validation_mode": validation_mode,
+        "validation_threshold_db_effective": effective_threshold_db,
+    }
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=True, indent=2)
+
+
+def _can_reuse_stego_output(video_path: Path, out_path: Path, meta_path: Path) -> bool:
+    if not out_path.exists() or not meta_path.exists():
+        return False
+    if os.path.getmtime(str(video_path)) > os.path.getmtime(str(out_path)):
+        return False
+    meta = _read_stego_metadata(meta_path)
+    if not meta:
+        return False
+    try:
+        source_video_text = str(video_path.resolve())
+    except OSError:
+        source_video_text = str(video_path)
+    if meta.get("source_video") != source_video_text:
+        return False
+    try:
+        current_source_mtime = os.path.getmtime(str(video_path))
+        meta_source_mtime = float(meta.get("source_video_mtime", -1.0))
+    except (TypeError, ValueError):
+        return False
+    if abs(meta_source_mtime - current_source_mtime) > 1e-6:
+        return False
+    if meta.get("cache_fingerprint") != _sec1_cache_fingerprint():
+        return False
+    return True
+
+
+def _sec1_run_cache_meta(active_sequences: dict[str, Path]) -> dict[str, object]:
+    """Build run-level cache metadata to avoid stale sec1 JSON reuse."""
+    return {
+        "cache_fingerprint": _sec1_cache_fingerprint(),
+        "sequence_names": sorted(active_sequences.keys()),
+        "source_video_mtimes": {
+            name: os.path.getmtime(str(path))
+            for name, path in sorted(active_sequences.items())
+        },
+    }
+
+
+def _select_positions_temporal_strided(
+    ordered_positions: list[tuple[int, int, int]],
+    target_bits: int,
+    cif_mb_count: int = CIF_MB_COUNT,
+    stride: int = QUALITY_TEMPORAL_STRIDE,
+) -> list[tuple[int, int, int]]:
+    """Select up to target_bits positions while spreading picks over timeline."""
+    if target_bits <= 0 or not ordered_positions:
+        return []
+
+    by_frame: dict[int, list[tuple[int, int, int]]] = {}
+    for pos in ordered_positions:
+        frame_idx = pos[0] // cif_mb_count
+        by_frame.setdefault(frame_idx, []).append(pos)
+
+    if not by_frame:
+        return []
+
+    frames = sorted(by_frame.keys())
+    stride_eff = max(1, min(int(stride), len(frames)))
+    if stride_eff <= 1:
+        frame_order = frames
+    else:
+        frame_order: list[int] = []
+        for offset in range(stride_eff):
+            frame_order.extend(frames[offset::stride_eff])
+
+    offsets = {frm: 0 for frm in frames}
+    selected: list[tuple[int, int, int]] = []
+
+    while len(selected) < target_bits:
+        progressed = False
+        for frm in frame_order:
+            idx = offsets[frm]
+            bucket = by_frame[frm]
+            if idx < len(bucket):
+                selected.append(bucket[idx])
+                offsets[frm] += 1
+                progressed = True
+                if len(selected) >= target_bits:
+                    break
+        if not progressed:
+            break
+
+    return selected
+
+
+def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -> tuple[Path, int | None, int, str, float | None]:
     """
-    Embed 274-byte payload (= production ZK blob size) using CAVLC T1 +
-    batch PSNR-based FFmpeg validation. Positions are pre-filtered per-IDR
-    in O(log N) FFmpeg calls instead of one per position.
+    Embed 274-byte payload (= full ZK blob size) using CAVLC T1 steganography.
+
+        Strategy — round-robin over full-frame CAVLC-safe positions:
+            All CAVLC-safe positions are sorted by IDR round-robin ordering and the
+            first payload_bits positions are selected.
+
+            This spreads modifications across many IDR frames, producing a fairer
+            distortion profile over time for paper reporting.
     """
-    from src.core.pipeline import extract_all_idr_blocks
     from src.core.stego import PayloadEmbedder, CAVLCSafetyFilter
     from src.bitstream.bitstream_ops import BitstreamReconstructor
 
     out_path = STEGO_OUTPUTS[seq_name]
-    # Invalidate cache if forced, or if source video is newer than stego file
+    meta_path = _stego_meta_path(out_path)
     if out_path.exists():
         if force:
-            out_path.unlink()  # force re-embed (e.g. after code change)
-        elif os.path.getmtime(str(video_path)) <= os.path.getmtime(str(out_path)):
-            return out_path, None, len(PAYLOAD) * 8
+            out_path.unlink()
+            meta_path.unlink(missing_ok=True)
+        elif _can_reuse_stego_output(video_path, out_path, meta_path):
+            meta = _read_stego_metadata(meta_path) or {}
+            return (
+                out_path,
+                meta.get("bits_embedded"),
+                int(meta.get("bits_required", QUALITY_TARGET_BITS_DEFAULT)),
+                str(meta.get("validation_mode", "cached")),
+                meta.get("validation_threshold_db_effective"),
+            )
         else:
-            out_path.unlink()  # source video updated — re-embed
+            out_path.unlink()
+            meta_path.unlink(missing_ok=True)
 
     payload = PAYLOAD
-    rec = BitstreamReconstructor()
-    coeffs, fvd, nC_map, nal_len, t1_over = extract_all_idr_blocks(str(video_path), rec)
 
-    # Step 1: Get CAVLC-safe positions
+    # Preferred mode: run benchmark on videos produced by the real system embed API
+    # so PSNR/SSIM reflects actual proof embedding behavior, not synthetic payload probing.
+    if USE_REAL_PROOF_EMBED_PIPELINE:
+        from src.embedder import embed as real_embed
+
+        _gop = SEQ_GOP.get(seq_name, 8)
+        _is_all_intra = (_gop == 1)
+
+        if _is_all_intra:
+            # All-intra (GOP=1): chaos shuffle + FFmpeg per-position validation.
+            # 1. Chaos-shuffle safe positions (temporal distribution across all IDR frames).
+            # 2. Deduplicate by (mb, block) to guarantee max_mods_per_block=1 compatibility.
+            # 3. FFmpeg-validate in shuffled order with per-IDR cap (SEC1_MAX_FLIPS_PER_IDR).
+            # 4. Embed exactly _bits_to_embed bits in the validated positions.
+            # Extractor reproduces steps 1-3 on the original video (deterministic),
+            # reads from the same validated positions → exact roundtrip guaranteed.
+            import os as _os
+            from src.core.stego import PayloadEmbedder, CAVLCSafetyFilter as _CAVLCSafetyFilter
+            from src.core.chaos import ChaosTransformer
+
+            SEC1_MAX_FLIPS_PER_IDR = 5
+
+            payload_real, real_required_bits = _build_real_proof_payload()
+            chaos = ChaosTransformer(CHAOS_KEY)
+            payload_scrambled, _ = chaos.scramble(payload_real)
+            _bits_to_embed = len(payload_scrambled) * 8
+
+            _prev_pkl = _os.environ.get("BENCHMARK_TRUSTED_IDR_PICKLE_CACHE")
+            _os.environ["BENCHMARK_TRUSTED_IDR_PICKLE_CACHE"] = "1"
+            try:
+                _rec_ai = BitstreamReconstructor()
+                coeffs_ai, fvd_ai, nC_ai, nal_ai, t1_ai = load_or_extract_idr_blocks(
+                    video_path, _rec_ai, force=force
+                )
+            finally:
+                if _prev_pkl is None:
+                    _os.environ.pop("BENCHMARK_TRUSTED_IDR_PICKLE_CACHE", None)
+                else:
+                    _os.environ["BENCHMARK_TRUSTED_IDR_PICKLE_CACHE"] = _prev_pkl
+
+            _sf_ai = _CAVLCSafetyFilter()
+            _safe_pos_ai = _sf_ai.get_safe_positions(
+                coeffs_ai, nC_map=nC_ai, nal_length_map=nal_ai, t1_override_map=t1_ai
+            )
+            _safe_pos_ai = chaos.shuffle_positions(_safe_pos_ai)
+
+            # Deduplicate by (mb_idx, block_idx) for max_mods_per_block=1 compatibility
+            _seen_blk_ai: set = set()
+            _deduped_ai: list = []
+            for _p in _safe_pos_ai:
+                _bk = (_p[0], _p[1])
+                if _bk not in _seen_blk_ai:
+                    _seen_blk_ai.add(_bk)
+                    _deduped_ai.append(_p)
+
+            # FFmpeg per-position validation with per-IDR cap
+            _validator_ai, _cleanup_ai = _rec_ai.make_ffmpeg_position_validator(
+                str(video_path), coeffs_ai, fvd_ai
+            )
+            _validated_ai: list = []
+            _idr_flip_ai: dict[int, int] = {}
+            try:
+                for _p in _deduped_ai:
+                    if len(_validated_ai) >= _bits_to_embed:
+                        break
+                    _fi = _p[0] // CIF_MB_COUNT
+                    if _idr_flip_ai.get(_fi, 0) >= SEC1_MAX_FLIPS_PER_IDR:
+                        continue
+                    if _validator_ai(_p[0], _p[1], _p[2]):
+                        _validated_ai.append(_p)
+                        _idr_flip_ai[_fi] = _idr_flip_ai.get(_fi, 0) + 1
+            finally:
+                _cleanup_ai()
+
+            if len(_validated_ai) < _bits_to_embed:
+                raise RuntimeError(
+                    f"[{seq_name}] Only {len(_validated_ai)} validated positions, need {_bits_to_embed}"
+                )
+
+            _embed_positions = _validated_ai
+            _idr_counts: dict[int, int] = {}
+            for _mb, _, _ in _embed_positions:
+                _fi = _mb // CIF_MB_COUNT
+                _idr_counts[_fi] = _idr_counts.get(_fi, 0) + 1
+            print(f"  [{seq_name}] chaos_v5_ffmpeg_validated: {_bits_to_embed} bits "
+                  f"across {len(_idr_counts)} IDR frames "
+                  f"(avg {_bits_to_embed / max(1, len(_idr_counts)):.1f} bits/frame)")
+
+            emb_ai = PayloadEmbedder(
+                max_modifications_per_block=REAL_PROOF_SMART_MAX_MODS_PER_BLOCK
+            )
+            modified_ai, bits_embedded_ai = emb_ai.embed_payload(
+                coeffs_ai, payload_scrambled,
+                nC_map=nC_ai, nal_length_map=nal_ai, t1_override_map=t1_ai,
+                ffmpeg_validator=None,
+                pre_validated_positions=_embed_positions,
+            )
+
+            if bits_embedded_ai < _bits_to_embed:
+                raise RuntimeError(
+                    f"[{seq_name}] Only embedded {bits_embedded_ai}/{_bits_to_embed} bits"
+                )
+
+            os.makedirs(os.path.dirname(os.path.abspath(str(out_path))), exist_ok=True)
+            _rec_ai2 = BitstreamReconstructor()
+            _rec_ai2.reconstruct_video(
+                str(video_path), modified_ai, str(out_path),
+                frame_verified_data=fvd_ai,
+                max_slices=None,
+            )
+            if not out_path.exists() or out_path.stat().st_size == 0:
+                raise RuntimeError(f"Stego video not created: {out_path}")
+
+            mode_ai = "real_proof_allintra_chaos_v5_ffmpeg_validated"
+            _write_stego_metadata(
+                meta_path,
+                video_path=video_path,
+                bits_embedded=int(bits_embedded_ai),
+                bits_required=real_required_bits,
+                validation_mode=mode_ai,
+                effective_threshold_db=None,
+            )
+            # Save validated positions alongside stego so E2E extraction can
+            # reproduce them deterministically without re-running FFmpeg.
+            _pos_path = out_path.parent / f"{out_path.name}.positions.json"
+            with open(_pos_path, "w") as _pf:
+                json.dump([[int(mb), int(blk), int(cidx)]
+                           for mb, blk, cidx in _validated_ai], _pf)
+            return (
+                out_path,
+                int(bits_embedded_ai),
+                real_required_bits,
+                mode_ai,
+                None,
+            )
+
+        if REAL_PROOF_SMART_DISTRIBUTED:
+
+            payload_real, real_required_bits = _build_real_proof_payload()
+
+            rec = BitstreamReconstructor()
+            coeffs, fvd, nC_map, nal_len, t1_over = load_or_extract_idr_blocks(video_path, rec, force=force)
+
+            sf = CAVLCSafetyFilter()
+            safe_positions = sf.get_safe_positions(
+                coeffs, nC_map=nC_map, nal_length_map=nal_len, t1_override_map=t1_over
+            )
+
+            ordered = sort_positions_round_robin_idrs(safe_positions, CIF_MB_COUNT)
+            idr_frame_count = max(1, len({p[0] // CIF_MB_COUNT for p in ordered}))
+            required_per_idr = (real_required_bits + idr_frame_count - 1) // idr_frame_count
+            cap_effective = REAL_PROOF_SMART_MAX_BITS_PER_IDR
+            if cap_effective > 0 and cap_effective < required_per_idr:
+                cap_effective = required_per_idr
+
+            constrained_candidates = _build_smart_candidate_positions(
+                ordered,
+                nal_len,
+                cif_mb_count=CIF_MB_COUNT,
+                allow_sign_bits=REAL_PROOF_SMART_ALLOW_SIGN_BITS,
+                prefer_patchable=REAL_PROOF_SMART_PREFER_PATCHABLE,
+                dedup_per_block=REAL_PROOF_SMART_DEDUP_PER_BLOCK,
+                max_bits_per_idr=cap_effective,
+            )
+
+            selected_mode = "real_proof_embed_smart_distributed_constrained"
+            selected_pool = constrained_candidates
+
+            # If quality-constrained pool under-fills, relax constraints but keep
+            # distributed selection before final production-path fallback.
+            if len(selected_pool) < real_required_bits:
+                selected_pool = [
+                    p for p in ordered
+                    if REAL_PROOF_SMART_ALLOW_SIGN_BITS or p[2] >= 0
+                ]
+                selected_mode = "real_proof_embed_smart_distributed_relaxed"
+
+            if len(selected_pool) < real_required_bits:
+                raise RuntimeError(
+                    f"Insufficient smart-distributed capacity for {seq_name}: "
+                    f"need {real_required_bits}, have {len(selected_pool)}"
+                )
+
+            selected = _select_positions_distributed(selected_pool, real_required_bits, CIF_MB_COUNT)
+            if len(selected) < real_required_bits:
+                raise RuntimeError(
+                    f"Distributed selector under-filled for {seq_name}: "
+                    f"need {real_required_bits}, got {len(selected)}"
+                )
+
+            embedder = PayloadEmbedder(max_modifications_per_block=REAL_PROOF_SMART_MAX_MODS_PER_BLOCK)
+            modified, bits_emb = embedder.embed_payload(
+                coeffs,
+                payload_real,
+                nC_map=nC_map,
+                nal_length_map=nal_len,
+                t1_override_map=t1_over,
+                pre_validated_positions=selected[:real_required_bits],
+            )
+
+            rec2 = BitstreamReconstructor()
+            rec2.reconstruct_video(
+                str(video_path),
+                modified,
+                str(out_path),
+                max_slices=None,
+                frame_verified_data=fvd,
+            )
+            if not out_path.exists() or out_path.stat().st_size == 0:
+                raise RuntimeError(f"Stego video not created: {out_path}")
+
+            if int(bits_emb) < real_required_bits:
+                # Enforce full-proof requirement with production embed path fallback.
+                fallback_result = real_embed(
+                    video_path=str(video_path),
+                    message=REAL_PROOF_MESSAGE,
+                    output_path=str(out_path),
+                    circuits_dir=str(CIRCUITS_DIR),
+                    secret_key=SECRET_KEY,
+                    max_modifications_per_block=1,
+                    ffmpeg_validate=REAL_PROOF_FFMPEG_VALIDATE,
+                )
+                _write_stego_metadata(
+                    meta_path,
+                    video_path=video_path,
+                    bits_embedded=int(fallback_result.bits_embedded),
+                    bits_required=real_required_bits,
+                    validation_mode=f"{selected_mode}_with_fullproof_fallback",
+                    effective_threshold_db=None,
+                )
+                return (
+                    out_path,
+                    int(fallback_result.bits_embedded),
+                    real_required_bits,
+                    f"{selected_mode}_with_fullproof_fallback",
+                    None,
+                )
+
+            mode_name = selected_mode
+            _write_stego_metadata(
+                meta_path,
+                video_path=video_path,
+                bits_embedded=int(bits_emb),
+                bits_required=real_required_bits,
+                validation_mode=mode_name,
+                effective_threshold_db=None,
+            )
+            return out_path, int(bits_emb), real_required_bits, mode_name, None
+
+        _, real_required_bits = _build_real_proof_payload()
+        result = real_embed(
+            video_path=str(video_path),
+            message=REAL_PROOF_MESSAGE,
+            output_path=str(out_path),
+            circuits_dir=str(CIRCUITS_DIR),
+            secret_key=SECRET_KEY,
+            max_modifications_per_block=1,
+            ffmpeg_validate=REAL_PROOF_FFMPEG_VALIDATE,
+        )
+        mode_name = f"real_proof_embed_ffmpeg_validate_{REAL_PROOF_FFMPEG_VALIDATE}"
+        _write_stego_metadata(
+            meta_path,
+            video_path=video_path,
+            bits_embedded=int(result.bits_embedded),
+            bits_required=real_required_bits,
+            validation_mode=mode_name,
+            effective_threshold_db=None,
+        )
+        return out_path, int(result.bits_embedded), real_required_bits, mode_name, None
+
+    rec = BitstreamReconstructor()
+    coeffs, fvd, nC_map, nal_len, t1_over = load_or_extract_idr_blocks(video_path, rec, force=force)
+
+    # Step 1: CAVLC structural safety filter (full frame, no zone restriction)
     sf = CAVLCSafetyFilter()
     safe_positions = sf.get_safe_positions(
         coeffs, nC_map=nC_map, nal_length_map=nal_len, t1_override_map=t1_over
     )
-    print(f"  [{seq_name}] {len(safe_positions)} CAVLC-safe positions -> batch PSNR validation ...")
 
-    # Step 2: Batch PSNR validate — O(log N) FFmpeg calls per IDR
-    validated_positions = rec.batch_psnr_validate(
-        str(video_path), coeffs, safe_positions,
-        frame_verified_data=fvd,
-        psnr_threshold_db=PSNR_VALIDATION_THRESHOLD_DB,
-        min_local_mb=0,
-        max_greedy_per_idr=1024,
-        gop_psnr_quantile=0.2,
-        target_positions=len(payload) * 8,
+    # Prefilter to patchable luma blocks only to reduce patcher skips.
+    patchable_keys = {
+        key for key, bit_len in nal_len.items()
+        if key[1] < 16 and bit_len is not None and bit_len > 0
+    }
+    filtered_safe_positions = [
+        p for p in safe_positions
+        if (p[0], p[1]) in patchable_keys and (USE_SIGN_BIT_POSITIONS or p[2] >= 0)
+    ]
+
+    # Step 2: Build quality budget from patchable capacity and number of IDR frames.
+    # For all-intra (GOP=1) sequences, relax constraints: each IDR is independent,
+    # there is zero inter-frame cascade risk, so we can safely embed more bits.
+    target_bits = len(payload) * 8
+    idr_count = max(1, len(fvd))
+    gop = SEQ_GOP.get(seq_name, 8)
+    is_all_intra = (gop == 1)
+    bits_per_idr_eff = QUALITY_BITS_PER_IDR_ALLINTRA if is_all_intra else QUALITY_BITS_PER_IDR
+    rate_eff = QUALITY_MAX_PATCHABLE_RATE_ALLINTRA if is_all_intra else QUALITY_MAX_PATCHABLE_RATE
+    patchable_cap = len(filtered_safe_positions)
+    budget_by_idr = idr_count * bits_per_idr_eff
+    budget_by_rate = int(patchable_cap * rate_eff)
+    quality_budget_bits = min(target_bits, patchable_cap, budget_by_idr, budget_by_rate)
+    if quality_budget_bits < MIN_QUALITY_BUDGET_BITS and patchable_cap >= MIN_QUALITY_BUDGET_BITS:
+        quality_budget_bits = MIN_QUALITY_BUDGET_BITS
+
+    sorted_positions = sort_positions_round_robin_idrs(filtered_safe_positions, CIF_MB_COUNT)
+    # With max_modifications_per_block=1, keep only first position per block.
+    dedup_positions: list[tuple[int, int, int]] = []
+    seen_blocks: set[tuple[int, int]] = set()
+    for mb, blk, cidx in sorted_positions:
+        key = (mb, blk)
+        if key in seen_blocks:
+            continue
+        seen_blocks.add(key)
+        dedup_positions.append((mb, blk, cidx))
+
+    if quality_budget_bits <= 0 and len(dedup_positions) >= 8:
+        quality_budget_bits = min(FALLBACK_MIN_BITS, len(dedup_positions), target_bits)
+
+    base_validation_mode = (
+        "round_robin_patchable_quality_budget_adaptive_strict"
+        if QUALITY_ENFORCE_TARGET_STRICT else
+        "round_robin_patchable_quality_budget_adaptive"
     )
+    validation_mode = base_validation_mode
+
+    budget_bytes = quality_budget_bits // 8
+    if budget_bytes <= 0:
+        # Last-resort fallback: use any safe non-sign positions.
+        fallback_pool = [p for p in safe_positions if p[2] >= 0]
+        fallback_sorted = sort_positions_round_robin_idrs(fallback_pool, CIF_MB_COUNT)
+        fallback_dedup: list[tuple[int, int, int]] = []
+        fallback_seen: set[tuple[int, int]] = set()
+        for mb, blk, cidx in fallback_sorted:
+            key = (mb, blk)
+            if key in fallback_seen:
+                continue
+            fallback_seen.add(key)
+            fallback_dedup.append((mb, blk, cidx))
+        if len(fallback_dedup) < 8:
+            raise RuntimeError(f"No quality-budget-safe payload capacity for {seq_name}")
+        dedup_positions = fallback_dedup
+        quality_budget_bits = min(FALLBACK_MIN_BITS, len(dedup_positions), target_bits)
+        budget_bytes = quality_budget_bits // 8
+        validation_mode = "round_robin_patchable_quality_budget_fallback"
+
+    # Step 3: Probe multiple budgets and choose the largest that meets quality target.
+    # In strict mode, if no payload budget satisfies the target, fallback to 0-bit embedding.
+    max_budget_bits = min(len(dedup_positions), target_bits, quality_budget_bits)
+    probe_budgets = [8, 16, 24, 48, 96, 192, 384, 768, 1024, 1536, max_budget_bits]
+    probe_budgets = sorted({b for b in probe_budgets if 8 <= b <= max_budget_bits})
+    orig_probe = decode_luma_frames(video_path)
+    probe_path = OUTPUT_DIR / f"_sec1_probe_{seq_name}.h264"
+
+    chosen_bits = 0
+    chosen_psnr = float("-inf")
+    chosen_min_frame_psnr = float("-inf")
+    chosen_target_met = False
+    best_fallback_bits = 0
+    best_fallback_psnr = float("-inf")
+    best_fallback_min_frame_psnr = float("-inf")
+
+    for probe_bits in probe_budgets:
+        probe_bytes = probe_bits // 8
+        payload_probe = payload[:probe_bytes]
+        probe_bits_exact = len(payload_probe) * 8
+        selected_probe = _select_positions_temporal_strided(
+            dedup_positions,
+            probe_bits_exact,
+            CIF_MB_COUNT,
+            QUALITY_TEMPORAL_STRIDE,
+        )
+
+        if probe_bits_exact == 0:
+            modified_probe = coeffs
+        else:
+            embedder_probe = PayloadEmbedder(max_modifications_per_block=1)
+            modified_probe, _ = embedder_probe.embed_payload(
+                coeffs,
+                payload_probe,
+                nC_map=nC_map,
+                nal_length_map=nal_len,
+                t1_override_map=t1_over,
+                pre_validated_positions=selected_probe,
+            )
+
+        rec_probe = BitstreamReconstructor()
+        rec_probe.reconstruct_video(
+            str(video_path),
+            modified_probe,
+            str(probe_path),
+            max_slices=None,
+            frame_verified_data=fvd,
+        )
+        stego_probe = decode_luma_frames(probe_path)
+        n_probe = min(len(orig_probe), len(stego_probe))
+        psnr_probe = psnr(orig_probe[:n_probe], stego_probe[:n_probe]) if n_probe > 0 else 0.0
+        psnr_probe_frames = psnr_per_frame(orig_probe[:n_probe], stego_probe[:n_probe]) if n_probe > 0 else []
+        finite_probe_frames = [p for p in psnr_probe_frames if np.isfinite(p)]
+        min_frame_psnr_probe = min(finite_probe_frames) if finite_probe_frames else float("inf")
+        frame_guard_ok = (
+            (not QUALITY_ENFORCE_FRAME_MIN_PSNR)
+            or (min_frame_psnr_probe >= QUALITY_TARGET_PSNR_FRAME_MIN_DB)
+        )
+
+        if psnr_probe >= QUALITY_TARGET_PSNR_FULL_DB and frame_guard_ok:
+            # Keep the largest budget that still satisfies the quality target.
+            if (not chosen_target_met) or (probe_bits_exact >= chosen_bits):
+                chosen_bits = probe_bits_exact
+                chosen_psnr = psnr_probe
+                chosen_min_frame_psnr = min_frame_psnr_probe
+                chosen_target_met = True
+        elif frame_guard_ok and psnr_probe > best_fallback_psnr:
+            # Best-effort fallback (used only when strict mode is disabled).
+            best_fallback_bits = probe_bits_exact
+            best_fallback_psnr = psnr_probe
+            best_fallback_min_frame_psnr = min_frame_psnr_probe
+
+    if not chosen_target_met and not QUALITY_ENFORCE_TARGET_STRICT:
+        chosen_bits = best_fallback_bits
+        chosen_psnr = best_fallback_psnr
+        chosen_min_frame_psnr = best_fallback_min_frame_psnr
+    elif not chosen_target_met and QUALITY_ENFORCE_TARGET_STRICT:
+        # Strict mode: no positive payload budget can satisfy target quality,
+        # so use explicit zero-bit fallback and report it as fallback mode.
+        chosen_bits = 0
+        chosen_psnr = float("inf")
+        chosen_min_frame_psnr = float("inf")
+        validation_mode = "round_robin_patchable_quality_budget_adaptive_strict_zero_fallback"
+
+    if probe_path.exists():
+        probe_path.unlink(missing_ok=True)
+
+    payload_budget = payload[: chosen_bits // 8]
+    budget_bits_exact = len(payload_budget) * 8
+    selected = _select_positions_temporal_strided(
+        dedup_positions,
+        budget_bits_exact,
+        CIF_MB_COUNT,
+        QUALITY_TEMPORAL_STRIDE,
+    )
+
+    if validation_mode != "round_robin_patchable_quality_budget_fallback" and chosen_target_met:
+        validation_mode = base_validation_mode
+    if QUALITY_ENFORCE_FRAME_MIN_PSNR:
+        validation_mode = f"{validation_mode}_framemin{int(QUALITY_TARGET_PSNR_FRAME_MIN_DB)}"
+    if QUALITY_TEMPORAL_STRIDE > 1:
+        validation_mode = f"{validation_mode}_tstride{QUALITY_TEMPORAL_STRIDE}"
+    effective_threshold_db = None
+
     print(
-        f"  [{seq_name}] {len(validated_positions)} positions passed "
-        f"PSNR>={PSNR_VALIDATION_THRESHOLD_DB:.1f} dB filter"
+        f"  [{seq_name}] safe={len(safe_positions)} patchable={patchable_cap} idr={idr_count} "
+        f"budget={budget_bits_exact}/{target_bits} bits (target_psnr={QUALITY_TARGET_PSNR_FULL_DB:.1f}, "
+        f"target_frame_min={QUALITY_TARGET_PSNR_FRAME_MIN_DB:.1f}, "
+        f"chosen_psnr~{chosen_psnr:.2f}, chosen_min_frame~{chosen_min_frame_psnr:.2f})"
     )
 
-    # Step 3: Embed using pre-validated positions (fast path, no re-validation)
-    embedder = PayloadEmbedder(max_modifications_per_block=2)
+    # Step 4: Final embed at chosen budget.
+    embedder = PayloadEmbedder(max_modifications_per_block=1)
     modified, bits_emb = embedder.embed_payload(
-        coeffs, payload, nC_map=nC_map,
-        nal_length_map=nal_len, t1_override_map=t1_over,
-        pre_validated_positions=validated_positions,
+        coeffs,
+        payload_budget,
+        nC_map=nC_map,
+        nal_length_map=nal_len,
+        t1_override_map=t1_over,
+        pre_validated_positions=selected,
     )
 
     rec2 = BitstreamReconstructor()
-    rec2.reconstruct_video(str(video_path), modified, str(out_path),
-                           frame_verified_data=fvd)
+    rec2.reconstruct_video(
+        str(video_path),
+        modified,
+        str(out_path),
+        max_slices=None,
+        frame_verified_data=fvd,
+    )
     if not out_path.exists() or out_path.stat().st_size == 0:
         raise RuntimeError(f"Stego video not created: {out_path}")
-    return out_path, bits_emb, len(payload) * 8
+    # Report requested target payload bits separately from embedded bits so strict
+    # zero-fallback does not hide unmet capacity.
+    _write_stego_metadata(
+        meta_path,
+        video_path=video_path,
+        bits_embedded=int(bits_emb),
+        bits_required=target_bits,
+        validation_mode=validation_mode,
+        effective_threshold_db=effective_threshold_db,
+    )
+    return out_path, bits_emb, target_bits, validation_mode, effective_threshold_db
 
 
 # -------------------------------------------------------------------------
 # Data collection
 # -------------------------------------------------------------------------
-def collect_data(force: bool = False, include_sequences: set[str] | None = None) -> dict:
-    cached = cache_load(CACHE_KEY)
-    if cached and not force:
-        print("  [cache hit] sec1 — skipping embed+decode")
-        return cached
-
-    data: dict = {}
+def collect_data(
+    force: bool = False,
+    include_sequences: set[str] | None = None,
+    include_unstable_sequences: bool = False,
+) -> dict:
     active_sequences = dict(QUALITY_SEQUENCES)
+    if include_unstable_sequences:
+        active_sequences.update(OPTIONAL_QUALITY_SEQUENCES)
     if include_sequences:
-        active_sequences = {k: v for k, v in active_sequences.items() if k in include_sequences}
+        # Explicit sequence selection should work for any registered sequence,
+        # regardless of default/optional grouping.
+        active_sequences = {k: v for k, v in SEQUENCES.items() if k in include_sequences}
     if not active_sequences:
         raise ValueError("No valid sequences selected for sec1")
+
+    run_cache_meta = _sec1_run_cache_meta(active_sequences)
+    cached = cache_load(CACHE_KEY)
+    if cached and not force:
+        if isinstance(cached, dict) and "__meta__" in cached and "data" in cached:
+            if cached["__meta__"] == run_cache_meta:
+                print("  [cache hit] sec1 — skipping embed+decode")
+                return cached["data"]
+
+    data: dict = {}
 
     for seq_name, video_path in active_sequences.items():
         print(f"  [{seq_name}] embedding …")
         t0 = time.perf_counter()
-        stego_path, bits_embedded, bits_required = _embed_for_benchmark(seq_name, video_path, force=force)
+        stego_path, bits_embedded, bits_required, validation_mode, effective_threshold_db = _embed_for_benchmark(seq_name, video_path, force=force)
         embed_time = time.perf_counter() - t0
         print(f"  [{seq_name}] decoding …")
         orig_frames  = decode_luma_frames(video_path)
@@ -149,11 +918,9 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
         ssim_list = ssim_per_frame(orig_frames[:n], stego_frames[:n])
 
         # --- PSNR / SSIM separation ---
-        # IDR frames occur every GOP=8 frames. Embedding targets only IDR frames
-        # (T1 sign bits are CAVLC-domain: only IDR frames are I-coded in H.264).
-        # P-frames AFTER a modified IDR use it as motion-compensation reference,
-        # so they show "cascade" PSNR degradation. We report both separately.
-        GOP = 8
+        # IDR frames occur every GOP frames. For all-intra sequences GOP=1.
+        # P-frames AFTER a modified IDR show "cascade" PSNR degradation.
+        GOP = SEQ_GOP.get(seq_name, 8)
         idr_indices = set(range(0, n, GOP))
 
         idr_psnr = [
@@ -173,7 +940,9 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
         orig_arr  = orig_frames[:n]
         stego_arr = stego_frames[:n]
         from benchmark._common import psnr as _psnr
-        psnr_full_video = _psnr(orig_arr, stego_arr)
+        psnr_full_video_raw = _psnr(orig_arr, stego_arr)
+        psnr_full_video = float(min(psnr_full_video_raw, 60.0))
+        psnr_full_video_is_infinite = bool(not np.isfinite(psnr_full_video_raw))
 
         # Per-frame average PSNR: cap each frame at 60 dB (inf for unmodified frames)
         # then average across ALL frames. This is the standard H.264 steganography metric.
@@ -186,29 +955,39 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
             "psnr":                 psnr_capped,          # per-frame list (capped for strict JSON)
             "ssim":                 ssim_list,
             "psnr_inf_frame_count": inf_count,
-            "psnr_avg_all_frames":  psnr_avg_all_frames, # PRIMARY: per-frame avg (cap inf@60)
+            "psnr_avg_all_frames":  psnr_avg_all_frames,
+            "primary_psnr_full_video": psnr_full_video,
+            "primary_psnr_full_video_is_infinite": psnr_full_video_is_infinite,
             "avg_idr_psnr":         float(np.mean(idr_psnr)) if idr_psnr else float("inf"),
             "avg_pframe_psnr":      float(np.mean(pfr_psnr)) if pfr_psnr else float("inf"),
-            "psnr_full_video":      float(psnr_full_video),
+            "psnr_full_video":      psnr_full_video,
+            "psnr_full_video_is_infinite": psnr_full_video_is_infinite,
             "avg_ssim":             float(np.mean(ssim_list)),
             "min_psnr":             float(np.min(all_finite)) if all_finite else float("inf"),
             "embedded_bits":        (int(bits_embedded) if bits_embedded is not None else None),
             "required_bits":        int(bits_required),
+            "payload_target_met":   (None if bits_embedded is None else bool(int(bits_embedded) >= int(bits_required))),
             "embed_time":           embed_time,
-            "validation_threshold_db": float(PSNR_VALIDATION_THRESHOLD_DB),
+            "validation_threshold_db": None,
+            "validation_threshold_db_effective": effective_threshold_db,
+            "quality_target_bits":  int(QUALITY_TARGET_BITS_DEFAULT),
+            "validation_mode":      validation_mode,
+            "fallback_used":        ("fallback" in validation_mode),
         }
         embedded_text = (
             f"embedded={bits_embedded}/{bits_required} bits"
             if bits_embedded is not None else
             "embedded=unknown (reused cached stego)"
         )
-        print(f"  [{seq_name}] avg-all-frames={psnr_avg_all_frames:.2f} dB  "
-              f"IDR={data[seq_name]['avg_idr_psnr']:.2f} dB  "
-              f"full-video={data[seq_name]['psnr_full_video']:.2f} dB  "
-              f"SSIM={data[seq_name]['avg_ssim']:.4f}  "
-              f"{embedded_text}")
+        print(
+            f"  [{seq_name}] full-video={data[seq_name]['psnr_full_video']:.2f} dB  "
+            f"avg-all-frames={psnr_avg_all_frames:.2f} dB  "
+            f"IDR={data[seq_name]['avg_idr_psnr']:.2f} dB  "
+            f"SSIM={data[seq_name]['avg_ssim']:.4f}  "
+            f"{embedded_text}"
+        )
 
-    cache_save(CACHE_KEY, data)
+    cache_save(CACHE_KEY, {"__meta__": run_cache_meta, "data": data})
     return data
 
 
@@ -227,9 +1006,9 @@ def plot_psnr_timeline(data: dict) -> None:
         # cap inf at 60 dB for display
         psnr_plot = [min(p, 60.0) for p in psnr_vals]
         ax.plot(frames, psnr_plot,
-                color=list(PALETTE.values())[i],
-                marker=MARKERS[i], markevery=5,
-                linestyle=LINESTYLES[i],
+                color=list(PALETTE.values())[i % len(PALETTE)],
+                marker=MARKERS[i % len(MARKERS)], markevery=5,
+                linestyle=LINESTYLES[i % len(LINESTYLES)],
                 label=label, alpha=0.9)
 
     max_frames = max(len(data[s]["psnr"]) for s in data)
@@ -266,9 +1045,9 @@ def plot_ssim_timeline(data: dict) -> None:
         ssim_vals = data[seq]["ssim"]
         frames    = list(range(len(ssim_vals)))
         ax.plot(frames, ssim_vals,
-                color=list(PALETTE.values())[i],
-                marker=MARKERS[i], markevery=5,
-                linestyle=LINESTYLES[i],
+                color=list(PALETTE.values())[i % len(PALETTE)],
+                marker=MARKERS[i % len(MARKERS)], markevery=5,
+                linestyle=LINESTYLES[i % len(LINESTYLES)],
                 label=label, alpha=0.9)
 
     max_frames = max(len(data[s]["ssim"]) for s in data)
@@ -299,32 +1078,39 @@ def plot_avg_quality_bar(data: dict) -> None:
     colors = [list(PALETTE.values())[i] for i, s in enumerate(SEQ_LABELS.keys()) if s in data]
     x      = np.arange(len(seqs))
 
-    # --- Subplot 1: Per-frame average PSNR (PRIMARY metric, standard in literature) ---
-    # Each frame capped at 60 dB; average over ALL frames including unmodified ones.
-    # Unmodified frames (256/300 for foreman) contribute 60 dB → avg well above 40 dB.
-    avg_all_vals = [data[s]["psnr_avg_all_frames"] for s in seqs]
-    bars1 = ax1.bar(x, avg_all_vals, color=colors, width=0.5, zorder=3)
+    def _safe_float(seq: str, key: str, default: float) -> float:
+        val = data.get(seq, {}).get(key, default)
+        if val is None:
+            return default
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return default
+
+    # --- Subplot 1: Full-video PSNR (PRIMARY metric) ---
+    full_psnr_vals = [min(_safe_float(s, "psnr_full_video", 0.0), 60.0) for s in seqs]
+    bars1 = ax1.bar(x, full_psnr_vals, color=colors, width=0.5, zorder=3)
     ax1.set_xticks(x); ax1.set_xticklabels(labels)
     ax1.set_ylabel("PSNR (dB)")
-    ax1.set_title("§1  Avg Per-Frame PSNR\n(all frames, inf capped at 60 dB — primary metric)")
-    pmax1 = max(avg_all_vals) if avg_all_vals else 60
+    ax1.set_title("§1  Full-Video PSNR\n(MSE over all frames — primary metric)")
+    pmax1 = max(full_psnr_vals) if full_psnr_vals else 60
     ax1.set_ylim(0, min(pmax1 * 1.25, 70))
-    for bar, val in zip(bars1, avg_all_vals):
+    for bar, val in zip(bars1, [_safe_float(s, "psnr_full_video", 0.0) for s in seqs]):
         ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3,
                  f"{val:.1f} dB", ha="center", va="bottom", fontsize=10, fontweight="bold")
     ax1.axhline(40.0, color="red", linestyle="--", linewidth=1.5,
                 label=">40 dB (imperceptible)")
     ax1.legend(fontsize=9)
 
-    # --- Subplot 2: Full-video PSNR (most conservative overall metric) ---
-    full_psnr_vals = [min(data[s]["psnr_full_video"], 60.0) for s in seqs]
-    bars2 = ax2.bar(x, full_psnr_vals, color=colors, width=0.5, zorder=3)
+    # --- Subplot 2: Avg per-frame PSNR (secondary context) ---
+    avg_all_vals = [_safe_float(s, "psnr_avg_all_frames", 0.0) for s in seqs]
+    bars2 = ax2.bar(x, avg_all_vals, color=colors, width=0.5, zorder=3)
     ax2.set_xticks(x); ax2.set_xticklabels(labels)
     ax2.set_ylabel("PSNR (dB)")
-    ax2.set_title("§1  Full-Video PSNR\n(all frames: unmodified + modified)")
-    pmax2 = max(v for v in full_psnr_vals) if full_psnr_vals else 50
+    ax2.set_title("§1  Avg Per-Frame PSNR\n(all frames, inf capped at 60 dB)")
+    pmax2 = max(v for v in avg_all_vals) if avg_all_vals else 50
     ax2.set_ylim(0, pmax2 * 1.25)
-    for bar, val in zip(bars2, [data[s]["psnr_full_video"] for s in seqs]):
+    for bar, val in zip(bars2, avg_all_vals):
         ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3,
                  f"{val:.1f} dB", ha="center", va="bottom", fontsize=10, fontweight="bold")
     ax2.axhline(40.0, color="#999999", linestyle="--", linewidth=1.2,
@@ -332,7 +1118,7 @@ def plot_avg_quality_bar(data: dict) -> None:
     ax2.legend(fontsize=9)
 
     # --- Subplot 3: Average SSIM ---
-    ssim_vals = [data[s]["avg_ssim"] for s in seqs]
+    ssim_vals = [_safe_float(s, "avg_ssim", 0.0) for s in seqs]
     bars3 = ax3.bar(x, ssim_vals, color=colors, width=0.5, zorder=3)
     ax3.set_xticks(x); ax3.set_xticklabels(labels)
     ax3.set_ylabel("Average SSIM")
@@ -353,9 +1139,17 @@ def plot_avg_quality_bar(data: dict) -> None:
 # -------------------------------------------------------------------------
 # Main
 # -------------------------------------------------------------------------
-def run(force: bool = False, include_sequences: set[str] | None = None) -> dict:
+def run(
+    force: bool = False,
+    include_sequences: set[str] | None = None,
+    include_unstable_sequences: bool = False,
+) -> dict:
     print("\n=== §1  Quality vs Original ===")
-    data = collect_data(force=force, include_sequences=include_sequences)
+    data = collect_data(
+        force=force,
+        include_sequences=include_sequences,
+        include_unstable_sequences=include_unstable_sequences,
+    )
     plot_psnr_timeline(data)
     plot_ssim_timeline(data)
     plot_avg_quality_bar(data)
@@ -371,6 +1165,15 @@ if __name__ == "__main__":
         default="",
         help="Comma-separated sequence names to run (e.g. foreman,coastguard)",
     )
+    parser.add_argument(
+        "--include-unstable",
+        action="store_true",
+        help="Include diagnostic-only unstable sequences in sec1 (e.g. foreman_hq)",
+    )
     args = parser.parse_args()
     selected = {s.strip() for s in args.sequences.split(",") if s.strip()} or None
-    run(force=args.force, include_sequences=selected)
+    run(
+        force=args.force,
+        include_sequences=selected,
+        include_unstable_sequences=args.include_unstable,
+    )

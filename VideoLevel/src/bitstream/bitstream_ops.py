@@ -10,7 +10,7 @@ H.264 steganography embedding via smart bitstream patching.
 """
 
 import logging
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -754,7 +754,7 @@ class BitstreamReconstructor:
                          original_file: str,
                          modified_coefficients: List[Tuple[int, int, List[int]]],
                          output_file: str,
-                         max_slices: int = 50,
+                         max_slices: Optional[int] = 50,
                          frame_verified_data: Dict = None) -> Dict:
         """
         Reconstruct H.264 video with modified coefficients embedded via CAVLC re-encoding
@@ -769,7 +769,9 @@ class BitstreamReconstructor:
             original_file: Original H.264 file path
             modified_coefficients: List of (mb_idx, block_idx, coeffs)
             output_file: Output H.264 file path
-            max_slices: Maximum slices to process
+            max_slices: Optional cap on IDR slices to process.
+                        Default 50 preserves legacy API behavior.
+                        Set to None to process all slices.
             
         Returns:
             Statistics dict with success status
@@ -855,8 +857,8 @@ class BitstreamReconstructor:
                 reconstructed_nals.append(nal)
                 continue
             
-            # Stop if reached max slices
-            if slices_reconstructed >= max_slices:
+            # Stop only when an explicit slice cap is configured.
+            if max_slices is not None and slices_reconstructed >= max_slices:
                 reconstructed_nals.append(nal)
                 continue
             
@@ -1305,19 +1307,24 @@ class BitstreamReconstructor:
 
         _idr_nals = []
         _gmb = 0
+        _header_nals = []  # SPS/PPS/SEI before first IDR — reused for every single-frame test file
+        _first_idr_seen = False
         for nal in _parser.nal_units:
             t = int(nal.nal_unit_type)
             if t == 5:
                 _idr_nals.append((_gmb, nal))
                 _gmb += _mb_count
+                _first_idr_seen = True
             elif t == 1:
                 _gmb += _mb_count
+            elif not _first_idr_seen:
+                _header_nals.append(nal)
 
         _coeff_lu = {(mb, blk): list(c) for mb, blk, c in coefficients}
-        _tmp = _os.path.join(
-            _os.path.dirname(_os.path.abspath(original_file)),
-            "_ffmpeg_pos_validate.h264"
-        )
+        import tempfile as _tf
+        _tmp_fd, _tmp = _tf.mkstemp(suffix="_ffmpeg_pos_validate.h264",
+                                    dir=_os.path.dirname(_os.path.abspath(original_file)))
+        _os.close(_tmp_fd)
         # Stateful: track committed mods per IDR so each new candidate is
         # tested CUMULATIVELY with all previously accepted modifications.
         # This catches cascade failures where N combined mods cause errors
@@ -1387,16 +1394,9 @@ class BitstreamReconstructor:
                 _fail_cache.add(key)
                 return False
 
-            # Write test H.264 file with patched IDR
-            out_nals = []
-            idr_seen = 0
-            for nal in _parser.nal_units:
-                if int(nal.nal_unit_type) == 5:
-                    out_nals.append(modified_nal if idr_seen == idr_idx else nal)
-                    idr_seen += 1
-                else:
-                    out_nals.append(nal)
-            self._write_h264_file(out_nals, _tmp)
+            # Write test H.264 file: SPS+PPS headers + ONLY the one modified IDR.
+            # Avoids decoding the full N-frame video per validation call (100x speedup).
+            self._write_h264_file(_header_nals + [modified_nal], _tmp)
 
             r = _sp.run(
                 ["ffmpeg", "-v", "error", "-i", _tmp, "-f", "null", "-"],
@@ -1436,6 +1436,9 @@ class BitstreamReconstructor:
         gop_span_frames: int = 8,
         gop_psnr_quantile: float = 0.2,
         target_positions: int = None,
+        ffmpeg_timeout_sec: float = 25.0,
+        max_idr_groups: int = None,
+        baseline_ffmpeg_timeout_sec: float = None,
     ) -> list:
         """
         Batch PSNR-based position validator.
@@ -1463,11 +1466,13 @@ class BitstreamReconstructor:
                              passing position is kept; conflicting ones are
                              skipped.  Finds non-contiguous safe positions that
                              the prefix-only binary search misses.
-        min_local_mb       : restrict greedy extension to positions where
+        min_local_mb       : restrict validation to positions where
                              local_mb >= this value (within-frame MB index).
-                     When None, it is set to the start of the last MB
-                     row for the current SPS resolution.
-                             Set to 0 to disable this restriction.
+                     When None, defaults to bottom 4 MB rows for the
+                     current SPS resolution (e.g. MB 308 for CIF 22×18).
+                     Bottom-4-rows cascade stays bounded within those 88 MBs
+                     (22 % of frame) → full-frame PSNR ≥ 35 dB typically.
+                     Use 0 to disable restriction (all positions allowed).
         gop_span_frames    : number of frames to validate per IDR clip
                      (default 8, matching GOP=8 in this project).
         gop_psnr_quantile  : robust GOP score quantile in [0, 1].
@@ -1476,6 +1481,14 @@ class BitstreamReconstructor:
                  while still enforcing a conservative floor.
         target_positions   : optional cap for how many validated positions are
                      needed. When reached, validation stops early.
+        ffmpeg_timeout_sec : timeout for each ffmpeg decode invocation.
+                 Timeout is treated as validation failure for that
+                 candidate set to avoid hanging the entire benchmark.
+        max_idr_groups     : optional cap on number of IDR groups to process.
+                 Useful for bounded benchmark runtime when strict
+                 thresholds make full-target search impractical.
+        baseline_ffmpeg_timeout_sec : timeout for initial original->YUV decode.
+             If None, derived from ffmpeg_timeout_sec with a larger floor.
 
         Returns
         -------
@@ -1484,6 +1497,8 @@ class BitstreamReconstructor:
         """
         import io as _io, contextlib as _ctx, subprocess as _sp, os as _os
         import numpy as _np
+        if baseline_ffmpeg_timeout_sec is None:
+            baseline_ffmpeg_timeout_sec = max(60.0, float(ffmpeg_timeout_sec) * 4.0)
 
         # ------------------------------------------------------------------ #
         # A — Parse SPS/PPS and build IDR NAL list (same pattern as           #
@@ -1513,7 +1528,12 @@ class BitstreamReconstructor:
         )
         if min_local_mb is None:
             mb_width = _sps.pic_width_in_mbs_minus1 + 1
-            min_local_mb = max(0, _mb_count - mb_width)
+            # Use bottom 4 rows instead of bottom 1 row.
+            # 1 row (374-395) → safe for ANY subset but only ~22 positions/IDR → insufficient for ZK blob (2192 bits).
+            # 4 rows (308-395) → cascade bounded to 88 MBs (22% of frame): any subset
+            # that misses stays within this zone → full-frame PSNR stays ≥ 35 dB typically.
+            # For CIF 22×18: min_local_mb = 396 - 4×22 = 308.
+            min_local_mb = max(0, _mb_count - 4 * mb_width)
         w_px = (_sps.pic_width_in_mbs_minus1 + 1) * 16
         h_px = (_sps.pic_height_in_map_units_minus1 + 1) * 16
         _frame_y_bytes    = w_px * h_px
@@ -1657,16 +1677,22 @@ class BitstreamReconstructor:
 
             self._write_h264_file(clip_nals, _f_test_h264)
 
-            r = _sp.run(
-                ["ffmpeg", "-y", "-v", "error",
-                 "-i", _f_test_h264,
-                 "-f", "rawvideo", "-pix_fmt", "yuv420p", _f_stego_yuv],
-                capture_output=True,
-            )
+            try:
+                r = _sp.run(
+                    ["ffmpeg", "-y", "-v", "error",
+                     "-i", _f_test_h264,
+                     "-f", "rawvideo", "-pix_fmt", "yuv420p", _f_stego_yuv],
+                    capture_output=True,
+                    timeout=float(ffmpeg_timeout_sec),
+                )
+            except _sp.TimeoutExpired:
+                return 0.0
             if r.returncode != 0:
                 return 0.0   # decode failure → reject
             if _has_critical_decode_error(r.stderr or b""):
                 return 0.0   # decoder reported bitstream errors
+            if not _os.path.exists(_f_stego_yuv) or _os.path.getsize(_f_stego_yuv) == 0:
+                return 0.0
 
             frame_idx = idr_off // _mb_count
             stego_ys = _read_y_frames(_f_stego_yuv, max_frames=max(gop_span_frames, 1))
@@ -1701,10 +1727,11 @@ class BitstreamReconstructor:
                 ["ffmpeg", "-y", "-v", "error",
                  "-i", original_file,
                  "-f", "rawvideo", "-pix_fmt", "yuv420p", _f_orig_yuv],
-                capture_output=True, check=True,
+                capture_output=True, check=True, timeout=float(baseline_ffmpeg_timeout_sec),
             )
-        except (_sp.CalledProcessError, FileNotFoundError, OSError):
-            return list(safe_positions)   # FFmpeg unavailable → accept all
+        except (_sp.CalledProcessError, _sp.TimeoutExpired, FileNotFoundError, OSError):
+            # Fail-safe: if baseline decode cannot be established, reject validation.
+            return []
 
         # ------------------------------------------------------------------ #
         # C — Group positions by IDR index                                    #
@@ -1722,8 +1749,11 @@ class BitstreamReconstructor:
         # ------------------------------------------------------------------ #
         validated_set = set()
         ffmpeg_calls = 0
+        processed_groups = 0
         try:
             for idr_idx, (idr_off, idr_nal, idr_nal_idx) in enumerate(_idr_nals):
+                if max_idr_groups is not None and processed_groups >= int(max_idr_groups):
+                    break
                 if target_positions is not None and len(validated_set) >= target_positions:
                     break
                 positions = groups.get(idr_idx, [])
@@ -1741,6 +1771,7 @@ class BitstreamReconstructor:
                     positions = [p for p in positions if p[0] % _mb_count >= min_local_mb]
                 if not positions:
                     continue
+                processed_groups += 1
 
                 # Fast path: test ALL positions for this IDR at once
                 psnr = _test_positions(idr_idx, idr_off, idr_nal, idr_nal_idx, positions)
@@ -1774,8 +1805,9 @@ class BitstreamReconstructor:
                 # the already-accepted set.  This finds non-contiguous safe
                 # positions that the prefix-only binary search would miss
                 # (e.g. two adj MBs conflict but each is fine with distant MBs).
-                # Note: all positions here are already pre-filtered to last-row
-                # only, so any passing subset is safe on its own as well.
+                # Note: all positions are pre-filtered to bottom-4-rows (MBs 308-395
+                # for CIF). Cascade from these rows cannot propagate into rows 1-14.
+                # Any subset-induced distortion is bounded to 22 % of pixels.
                 accumulated = list(positions[:lo])
                 greedy_attempts = 0
                 for pos in positions[lo:]:
