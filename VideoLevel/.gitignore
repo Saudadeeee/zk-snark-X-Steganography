@@ -54,6 +54,7 @@ node_modules/
 *.json
 !circuits/package.json
 !circuits/build/verification_key.json
+!benchmark/results/sec*.json
 
 # Temporary files
 *.tmp

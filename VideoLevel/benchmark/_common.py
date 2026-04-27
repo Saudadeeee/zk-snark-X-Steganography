@@ -408,10 +408,18 @@ def sort_positions_round_robin_idrs(
 # IDR extraction cache (sec1/sec2/sec3/sec4 runtime accelerator)
 # ---------------------------------------------------------------------------
 IDR_CACHE_SCHEMA_VERSION = "v2-2026-04-16"
-ENABLE_TRUSTED_IDR_PICKLE_CACHE = (
-    os.environ.get("BENCHMARK_TRUSTED_PICKLE_CACHE", "0") == "1"
-    or os.environ.get("BENCHMARK_TRUSTED_IDR_PICKLE_CACHE", "0") == "1"
-)
+
+
+def _idr_cache_enabled() -> bool:
+    return (
+        os.environ.get("BENCHMARK_TRUSTED_PICKLE_CACHE", "0") == "1"
+        or os.environ.get("BENCHMARK_TRUSTED_IDR_PICKLE_CACHE", "0") == "1"
+    )
+
+
+# Backwards-compat alias evaluated at import time (for callers that set env
+# before importing _common).  New code should call _idr_cache_enabled().
+ENABLE_TRUSTED_IDR_PICKLE_CACHE = _idr_cache_enabled()
 
 
 def _idr_cache_path(video_path: str | Path) -> Path:
@@ -468,7 +476,7 @@ def load_or_extract_idr_blocks(
     except OSError:
         return extract_all_idr_blocks(str(vp), reconstructor)
 
-    if ENABLE_TRUSTED_IDR_PICKLE_CACHE and not force and cp.exists():
+    if _idr_cache_enabled() and not force and cp.exists():
         try:
             with open(cp, "rb") as f:
                 payload = pickle.load(f)
@@ -478,7 +486,7 @@ def load_or_extract_idr_blocks(
             pass
 
     data = extract_all_idr_blocks(str(vp), reconstructor)
-    if ENABLE_TRUSTED_IDR_PICKLE_CACHE:
+    if _idr_cache_enabled():
         try:
             with open(cp, "wb") as f:
                 pickle.dump({"fingerprint": fingerprint, "data": data}, f, protocol=pickle.HIGHEST_PROTOCOL)

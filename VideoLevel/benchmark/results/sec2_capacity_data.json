@@ -1,0 +1,54 @@
+{
+  "foreman_q22_g1": {
+    "raw_t1_bits": 286745,
+    "raw_t1_bytes": 35843,
+    "validated_bits": 1200,
+    "zk_blob_bits": 1232,
+    "zk_payload_bits": 1176,
+    "utilization_pct": 0.43,
+    "fractions_pct": [
+      25,
+      50,
+      75,
+      100
+    ],
+    "bits_at_fraction": [
+      296,
+      600,
+      896,
+      1200
+    ],
+    "psnr_at_fraction": [
+      60.85415267944336,
+      57.93701171875,
+      56.039283752441406,
+      54.88325500488281
+    ]
+  },
+  "coastguard_q22_g1": {
+    "raw_t1_bits": 427883,
+    "raw_t1_bytes": 53485,
+    "validated_bits": 1191,
+    "zk_blob_bits": 1232,
+    "zk_payload_bits": 1176,
+    "utilization_pct": 0.288,
+    "fractions_pct": [
+      25,
+      50,
+      75,
+      100
+    ],
+    "bits_at_fraction": [
+      296,
+      592,
+      888,
+      1184
+    ],
+    "psnr_at_fraction": [
+      56.812828063964844,
+      53.789615631103516,
+      52.29859161376953,
+      51.43157958984375
+    ]
+  }
+}
