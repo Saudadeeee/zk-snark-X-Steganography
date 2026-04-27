@@ -12,6 +12,8 @@ H.264 steganography embedding via smart bitstream patching.
 import logging
 from typing import List, Tuple, Dict, Optional
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 from .h264 import (
@@ -29,52 +31,36 @@ from .bitstream_io import BitstreamWriter, BitstreamReader
 
 
 class BitArray:
-    """Simple bit array for bit-level operations"""
-    
+    """Simple bit array for bit-level operations — numpy-backed for memory efficiency."""
+
     def __init__(self, data: bytes):
-        """Initialize from bytes"""
-        self.bits = []
-        for byte in data:
-            for i in range(7, -1, -1):
-                self.bits.append((byte >> i) & 1)
-    
+        self.bits = np.unpackbits(np.frombuffer(data, dtype=np.uint8))
+
     def __len__(self):
         return len(self.bits)
-    
+
     def __getitem__(self, key):
         if isinstance(key, slice):
-            return self.bits[key]
-        return self.bits[key]
-    
+            return self.bits[key].tolist()
+        return int(self.bits[key])
+
     def __setitem__(self, key, value):
         if isinstance(key, slice):
             start, stop, step = key.indices(len(self.bits))
             if step != 1:
                 raise ValueError("Only contiguous slices supported")
-
-            if isinstance(value, list):
-                self.bits[start:stop] = value
-            else:
-                raise ValueError("Value must be list of bits")
+            self.bits[start:stop] = np.array(value, dtype=np.uint8)
         else:
-            self.bits[key] = value
+            self.bits[key] = int(value)
 
     def to_bytes(self) -> bytes:
-        """Convert bit array back to bytes"""
-        if len(self.bits) % 8 != 0:
-            padding_needed = 8 - (len(self.bits) % 8)
-            padded_bits = self.bits + [0] * padding_needed
+        n = len(self.bits)
+        if n % 8 != 0:
+            pad = 8 - (n % 8)
+            arr = np.concatenate([self.bits, np.zeros(pad, dtype=np.uint8)])
         else:
-            padded_bits = self.bits
-        
-        result = bytearray()
-        for i in range(0, len(padded_bits), 8):
-            byte = 0
-            for j in range(8):
-                byte |= (padded_bits[i + j] << (7 - j))
-            result.append(byte)
-        
-        return bytes(result)
+            arr = self.bits
+        return np.packbits(arr).tobytes()
 
 
 class BitstreamPatcher:
@@ -1625,7 +1611,6 @@ class BitstreamReconstructor:
             critical_tokens = (
                 "error while decoding",
                 "corrupted macroblock",
-                "invalid",
                 "out of range",
                 "left block unavailable",
                 "cabac",

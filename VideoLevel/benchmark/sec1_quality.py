@@ -20,10 +20,11 @@ from benchmark._common import (
     PALETTE, SEQUENCES, SEQ_LABELS, MARKERS, LINESTYLES,
     setup_style, save_fig, cache_save, cache_load,
     decode_luma_frames, psnr_per_frame, ssim_per_frame, psnr,
+    compute_quality_streaming,
     load_or_extract_idr_blocks, sort_positions_round_robin_idrs,
 )
 
-from benchmark._common import OUTPUT_DIR, CIRCUITS_DIR
+from benchmark._common import OUTPUT_DIR, CIRCUITS_DIR, RESULTS_DIR
 
 SECRET_KEY = bytes(range(32))  # Fixed key for reproducibility
 CHAOS_KEY = b"sec1_benchmark_chaos_v1"  # Deterministic chaos key for reproducibility
@@ -84,6 +85,17 @@ SEQ_GOP = {
     "foreman_q22_g1": 1,
     "coastguard_q22_g1": 1,
     "foreman_hq": 1,
+    "foreman_q22_g1_1000": 1,
+    "coastguard_q22_g1_1000": 1,
+}
+
+# Max T1 flips per IDR frame — lower = less intra cascade per frame.
+# 300f sequences: need 5 (300×5=1500 ≥ 1232). 1000f sequences: 2 (1000×2=2000 ≥ 1232).
+SEQ_MAX_FLIPS_PER_IDR = {
+    "foreman_q22_g1": 5,
+    "coastguard_q22_g1": 5,
+    "foreman_q22_g1_1000": 2,
+    "coastguard_q22_g1_1000": 2,
 }
 
 # -------------------------------------------------------------------------
@@ -183,13 +195,37 @@ def _build_smart_candidate_positions(
     return candidates
 
 
+_PROOF_PAYLOAD_CACHE_PATH = RESULTS_DIR / "_proof_payload_cache.bin"
+
+
+def _proof_cache_fingerprint() -> bytes:
+    """20-byte SHA1 of (message || secret_key) — cache invalidates if either changes."""
+    import hashlib as _hl
+    return _hl.sha1(REAL_PROOF_MESSAGE + SECRET_KEY).digest()  # 20 bytes
+
+
 def _build_real_proof_payload() -> tuple[bytes, int]:
-    """Build canonical packed ZK payload and its exact bit length."""
+    """Build canonical packed ZK payload and its exact bit length.
+
+    Caches the result to disk so snarkJS runs only once per session — avoids
+    OOM when running multiple sequences back-to-back.
+
+    Cache format: 20-byte fingerprint (SHA1 of message+key) + raw payload bytes.
+    Cache is invalidated automatically when REAL_PROOF_MESSAGE or SECRET_KEY changes.
+    """
+    fp = _proof_cache_fingerprint()
+    if _PROOF_PAYLOAD_CACHE_PATH.exists():
+        raw = _PROOF_PAYLOAD_CACHE_PATH.read_bytes()
+        if len(raw) > 20 and raw[:20] == fp:
+            payload_real = raw[20:]
+            return payload_real, len(payload_real) * 8
+
     from src.zk_proof import ZKSnarkBridge, pack, proof_to_bytes
 
     bridge = ZKSnarkBridge(str(CIRCUITS_DIR))
     proof_dict, _ = bridge.generate_proof_for_payload(REAL_PROOF_MESSAGE, SECRET_KEY)
     payload_real = pack(REAL_PROOF_MESSAGE, proof_to_bytes(proof_dict))
+    _PROOF_PAYLOAD_CACHE_PATH.write_bytes(fp + payload_real)
     return payload_real, len(payload_real) * 8
 
 
@@ -218,7 +254,7 @@ def _sec1_cache_fingerprint() -> dict[str, object]:
         "real_proof_message_sha1": hashlib.sha1(REAL_PROOF_MESSAGE).hexdigest(),
         "secret_key_sha1": hashlib.sha1(SECRET_KEY).hexdigest(),
         "chaos_key_sha1": hashlib.sha1(CHAOS_KEY).hexdigest(),
-        "allintra_validation": "chaos_v5_ffmpeg_validated",
+        "allintra_validation": "chaos_v5_psnr_revalidated_40db_v3",
     }
 
 
@@ -405,7 +441,7 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
             from src.core.stego import PayloadEmbedder, CAVLCSafetyFilter as _CAVLCSafetyFilter
             from src.core.chaos import ChaosTransformer
 
-            SEC1_MAX_FLIPS_PER_IDR = 5
+            SEC1_MAX_FLIPS_PER_IDR = SEQ_MAX_FLIPS_PER_IDR.get(seq_name, 5)
 
             payload_real, real_required_bits = _build_real_proof_payload()
             chaos = ChaosTransformer(CHAOS_KEY)
@@ -464,6 +500,34 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
                     f"[{seq_name}] Only {len(_validated_ai)} validated positions, need {_bits_to_embed}"
                 )
 
+            # PSNR re-validation: make_ffmpeg_position_validator catches cumulative
+            # hard H.264 decode errors but NOT soft pixel cascade from combined T1
+            # flips within the same IDR frame.  batch_psnr_validate measures actual
+            # decoded Y-PSNR and greedily removes positions whose combined effect
+            # drops per-frame PSNR below 40 dB.  gop_span_frames=1 because this is
+            # an all-intra sequence — no P-frame temporal cascade to worry about.
+            print(f"  [{seq_name}] PSNR re-validating {len(_validated_ai)} positions ...")
+            _psnr_rec_ai = BitstreamReconstructor()
+            _psnr_validated: list = _psnr_rec_ai.batch_psnr_validate(
+                str(video_path), coeffs_ai, _validated_ai, fvd_ai,
+                psnr_threshold_db=40.0,
+                max_bisect_iters=8,
+                max_greedy_per_idr=SEC1_MAX_FLIPS_PER_IDR,
+                min_local_mb=0,
+                gop_span_frames=1,
+                gop_psnr_quantile=0.0,
+                target_positions=_bits_to_embed,
+            )
+            _n_psnr_removed = len(_validated_ai) - len(_psnr_validated)
+            if _n_psnr_removed:
+                print(f"  [{seq_name}] PSNR filter: {len(_psnr_validated)}/{len(_validated_ai)} "
+                      f"kept ({_n_psnr_removed} removed for PSNR < 40 dB)")
+            if len(_psnr_validated) < _bits_to_embed:
+                print(f"  [{seq_name}] PSNR capacity {len(_psnr_validated)} < {_bits_to_embed}; "
+                      "embedding available positions only")
+                _bits_to_embed = len(_psnr_validated)
+            _validated_ai = _psnr_validated
+
             _embed_positions = _validated_ai
             _idr_counts: dict[int, int] = {}
             for _mb, _, _ in _embed_positions:
@@ -497,6 +561,50 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
             )
             if not out_path.exists() or out_path.stat().st_size == 0:
                 raise RuntimeError(f"Stego video not created: {out_path}")
+
+            # Post-embed PSNR check: _apply_mod in batch_psnr_validate tests
+            # unconditional sign flips, but embed_payload applies conditional
+            # flips (payload bit vs. existing sign).  When only 1 of N positions
+            # for an IDR is actually flipped, the isolated cascade can drop PSNR
+            # far below what the combined-N-flip test measured.  Verify actual
+            # stego PSNR and remove any IDR whose frame < 40 dB.
+            for _psnr_retry in range(3):
+                _qv = compute_quality_streaming(str(video_path), str(out_path))
+                _bad_idr_frames = [
+                    i for i, _p in enumerate(_qv["psnr_per_frame"]) if _p < 40.0
+                ]
+                if not _bad_idr_frames:
+                    break
+                _bad_idr_set = set(_bad_idr_frames)
+                print(
+                    f"  [{seq_name}] post-embed PSNR (iter {_psnr_retry + 1}): "
+                    f"frames {_bad_idr_frames} below 40 dB — removing {len(_bad_idr_frames)} IDR(s)"
+                )
+                _embed_positions = [
+                    _ep for _ep in _embed_positions
+                    if (_ep[0] // CIF_MB_COUNT) not in _bad_idr_set
+                ]
+                _validated_ai = _embed_positions
+                if len(_embed_positions) < real_required_bits:
+                    raise RuntimeError(
+                        f"[{seq_name}] Post-embed: only {len(_embed_positions)} "
+                        f"positions after removing bad IDRs, need {real_required_bits}"
+                    )
+                _bits_to_embed = len(_embed_positions)
+                _emb_r = PayloadEmbedder(
+                    max_modifications_per_block=REAL_PROOF_SMART_MAX_MODS_PER_BLOCK
+                )
+                modified_ai, bits_embedded_ai = _emb_r.embed_payload(
+                    coeffs_ai, payload_scrambled,
+                    nC_map=nC_ai, nal_length_map=nal_ai, t1_override_map=t1_ai,
+                    ffmpeg_validator=None,
+                    pre_validated_positions=_embed_positions,
+                )
+                _rec_r = BitstreamReconstructor()
+                _rec_r.reconstruct_video(
+                    str(video_path), modified_ai, str(out_path),
+                    frame_verified_data=fvd_ai, max_slices=None,
+                )
 
             mode_ai = "real_proof_allintra_chaos_v5_ffmpeg_validated"
             _write_stego_metadata(
@@ -736,7 +844,7 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
     max_budget_bits = min(len(dedup_positions), target_bits, quality_budget_bits)
     probe_budgets = [8, 16, 24, 48, 96, 192, 384, 768, 1024, 1536, max_budget_bits]
     probe_budgets = sorted({b for b in probe_budgets if 8 <= b <= max_budget_bits})
-    orig_probe = decode_luma_frames(video_path)
+    orig_probe = decode_luma_frames(video_path, max_frames=200)
     probe_path = OUTPUT_DIR / f"_sec1_probe_{seq_name}.h264"
 
     chosen_bits = 0
@@ -779,7 +887,7 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
             max_slices=None,
             frame_verified_data=fvd,
         )
-        stego_probe = decode_luma_frames(probe_path)
+        stego_probe = decode_luma_frames(probe_path, max_frames=200)
         n_probe = min(len(orig_probe), len(stego_probe))
         psnr_probe = psnr(orig_probe[:n_probe], stego_probe[:n_probe]) if n_probe > 0 else 0.0
         psnr_probe_frames = psnr_per_frame(orig_probe[:n_probe], stego_probe[:n_probe]) if n_probe > 0 else []
@@ -904,18 +1012,23 @@ def collect_data(
 
     data: dict = {}
 
+    # Pre-warm ZK proof cache before loading any IDR data so snarkJS runs
+    # with low memory pressure (avoids Node.js worker OOM on 2nd+ sequence).
+    if USE_REAL_PROOF_EMBED_PIPELINE and not _PROOF_PAYLOAD_CACHE_PATH.exists():
+        print("  [pre-caching ZK proof payload]")
+        _build_real_proof_payload()
+
     for seq_name, video_path in active_sequences.items():
         print(f"  [{seq_name}] embedding …")
         t0 = time.perf_counter()
         stego_path, bits_embedded, bits_required, validation_mode, effective_threshold_db = _embed_for_benchmark(seq_name, video_path, force=force)
         embed_time = time.perf_counter() - t0
         print(f"  [{seq_name}] decoding …")
-        orig_frames  = decode_luma_frames(video_path)
-        stego_frames = decode_luma_frames(stego_path)
-        n = min(len(orig_frames), len(stego_frames))
+        _qm = compute_quality_streaming(video_path, stego_path)
+        n = _qm["n"]
         assert n > 0, f"No frames decoded for {seq_name}"
-        psnr_list_raw = psnr_per_frame(orig_frames[:n], stego_frames[:n])
-        ssim_list = ssim_per_frame(orig_frames[:n], stego_frames[:n])
+        psnr_list_raw = _qm["psnr_per_frame"]
+        ssim_list = _qm["ssim_per_frame"]
 
         # --- PSNR / SSIM separation ---
         # IDR frames occur every GOP frames. For all-intra sequences GOP=1.
@@ -936,11 +1049,7 @@ def collect_data(
         all_finite = [p for p in psnr_list_raw if np.isfinite(p)]
         inf_count = int(sum(1 for p in psnr_list_raw if not np.isfinite(p)))
 
-        # Full-video PSNR (single number: MSE over ALL pixels, most conservative)
-        orig_arr  = orig_frames[:n]
-        stego_arr = stego_frames[:n]
-        from benchmark._common import psnr as _psnr
-        psnr_full_video_raw = _psnr(orig_arr, stego_arr)
+        psnr_full_video_raw = _qm["psnr_full_video"]
         psnr_full_video = float(min(psnr_full_video_raw, 60.0))
         psnr_full_video_is_infinite = bool(not np.isfinite(psnr_full_video_raw))
 
