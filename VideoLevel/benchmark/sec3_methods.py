@@ -360,9 +360,11 @@ def plot_psnr_comparison(data: dict) -> None:
     ax.set_ylim(20, max(all_vals) + 10 if all_vals else 70)
 
     annotate_literature(ax,
-        "* literature values  ** LSB pixel measured in decoded domain (no re-encode).\n"
-        "This Work may run adaptive/fallback payload; check JSON embedded_bits/requested_bits.\n"
-        "PSNR shown using full-video MSE metric for measured methods.")
+        "Disclosure: F5-H264, MV-based, IPM-based PSNR values are taken directly from\n"
+        "published literature and not re-measured here (marked * in legend).\n"
+        "LSB pixel and This Work are measured on identical test sequences.\n"
+        "Comparison is approximate — different source sequences and QP settings\n"
+        "may affect absolute PSNR; relative ordering is the key finding.")
     save_fig(fig, "sec3_psnr_comparison")
 
 
