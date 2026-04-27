@@ -95,7 +95,7 @@ def _measure_lsb_psnr(seq_name: str, video_path: Path, n_bytes: int) -> float:
     H.264 bitstream methods which suffer from intra prediction cascade.
     This value is shown for reference only with an explicit disclaimer.
     """
-    frames = decode_luma_frames(video_path)
+    frames = decode_luma_frames(video_path, max_frames=300)
     n_bits = n_bytes * 8
     stego  = embed_lsb_pixel(frames, n_bits)
     from benchmark._common import psnr as _psnr
@@ -149,8 +149,8 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
         if sec1_stego.exists():
             # Use sec1 stego: chaos + FFmpeg-validated embedding at actual proof payload.
             print(f"  [this work / {seq_name}] using sec1 stego (chaos_v5_ffmpeg_validated)…")
-            orig  = decode_luma_frames(video_path)
-            stego = decode_luma_frames(sec1_stego)
+            orig  = decode_luma_frames(video_path, max_frames=300)
+            stego = decode_luma_frames(sec1_stego, max_frames=300)
             n     = min(len(orig), len(stego))
             psnr_val = float(min(_psnr(orig[:n], stego[:n]), 60.0)) if n > 0 else 0.0
             validation_mode = "chaos_v5_ffmpeg_validated_sec1_stego"
@@ -196,8 +196,8 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
             rec2.reconstruct_video(str(video_path), modified, str(out_path),
                                    max_slices=None, frame_verified_data=fvd)
 
-            orig  = decode_luma_frames(video_path)
-            stego_frames = decode_luma_frames(out_path)
+            orig  = decode_luma_frames(video_path, max_frames=300)
+            stego_frames = decode_luma_frames(out_path, max_frames=300)
             n     = min(len(orig), len(stego_frames))
             psnr_val = float(min(_psnr(orig[:n], stego_frames[:n]), 60.0)) if n > 0 else 0.0
 

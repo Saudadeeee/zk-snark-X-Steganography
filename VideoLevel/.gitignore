@@ -63,6 +63,7 @@ benchmark_*/
 
 # Benchmark cache artifacts
 benchmark/results/_idr_cache_*.pkl
+benchmark/results/_proof_payload_cache.bin
 
 # Debug & scratch scripts
 debug_*.py

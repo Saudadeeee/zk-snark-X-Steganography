@@ -51,6 +51,9 @@ SEQUENCES = {
     # All-intra (GOP=1) QP=22 — eliminates P-frame cascade for high-quality stego
     "foreman_q22_g1": DATA_DIR / "foreman_cif_q22_g1.h264",
     "coastguard_q22_g1": DATA_DIR / "coastguard_cif_q22_g1.h264",
+    # 1000-frame all-intra QP=22 — lower flips/IDR → better per-frame min PSNR
+    "foreman_q22_g1_1000": DATA_DIR / "foreman_cif_q22_g1_1000.h264",
+    "coastguard_q22_g1_1000": DATA_DIR / "coastguard_cif_q22_g1_1000.h264",
 }
 
 SEQ_FRAMES = {
@@ -64,6 +67,8 @@ SEQ_FRAMES = {
     "coastguard_short": 50,
     "foreman_q22_g1": 300,
     "coastguard_q22_g1": 300,
+    "foreman_q22_g1_1000": 1000,
+    "coastguard_q22_g1_1000": 1000,
 }
 
 # ---------------------------------------------------------------------------
@@ -96,6 +101,8 @@ SEQ_LABELS = {
     "coastguard_short": "Coastguard short (50f)",
     "foreman_q22_g1": "Foreman all-intra QP22",
     "coastguard_q22_g1": "Coastguard all-intra QP22",
+    "foreman_q22_g1_1000": "Foreman all-intra QP22 (1000f)",
+    "coastguard_q22_g1_1000": "Coastguard all-intra QP22 (1000f)",
 }
 
 # ---------------------------------------------------------------------------
@@ -135,8 +142,8 @@ def setup_style() -> None:
 # ---------------------------------------------------------------------------
 def decode_luma_frames(h264_path: str | Path, max_frames: int = 9999) -> np.ndarray:
     """
-    Decode H.264 -> array of Y (luma) frames, shape (N, H, W), dtype float64.
-    Uses ffmpeg subprocess.
+    Decode H.264 -> array of Y (luma) frames, shape (N, H, W), dtype float32.
+    Uses ffmpeg subprocess. float32 halves memory vs float64 (sufficient for PSNR/SSIM).
     """
     h264_path = str(h264_path)
     cmd = [
@@ -151,19 +158,20 @@ def decode_luma_frames(h264_path: str | Path, max_frames: int = 9999) -> np.ndar
     frame_size_420 = WIDTH * HEIGHT * 3 // 2
     raw = result.stdout
     n_frames = min(len(raw) // frame_size_420, max_frames)
-    frames = []
+    out = np.empty((n_frames, HEIGHT, WIDTH), dtype=np.float32)
     for i in range(n_frames):
         start = i * frame_size_420
-        y = np.frombuffer(raw[start: start + WIDTH * HEIGHT], dtype=np.uint8)
-        frames.append(y.reshape(HEIGHT, WIDTH).astype(np.float64))
-    return np.array(frames)
+        out[i] = np.frombuffer(raw[start: start + WIDTH * HEIGHT], dtype=np.uint8).reshape(HEIGHT, WIDTH)
+    return out
 
 # ---------------------------------------------------------------------------
 # Quality metrics
 # ---------------------------------------------------------------------------
 def psnr(orig: np.ndarray, stego: np.ndarray) -> float:
     """PSNR in dB between two same-shape arrays (luma frames or full video)."""
-    mse = np.mean((orig - stego) ** 2)
+    o = orig.astype(np.float32) if orig.dtype != np.float32 else orig
+    s = stego.astype(np.float32) if stego.dtype != np.float32 else stego
+    mse = np.mean((o - s) ** 2)
     if mse < 1e-12:
         return float("inf")
     return 20.0 * np.log10(255.0 / np.sqrt(mse))
@@ -183,13 +191,90 @@ def ssim_per_frame(orig_frames: np.ndarray, stego_frames: np.ndarray) -> list[fl
     n = min(len(orig_frames), len(stego_frames))
     return [ssim_frame(orig_frames[i], stego_frames[i]) for i in range(n)]
 
+
+def _decode_raw_bytes(h264_path: str | Path) -> bytes:
+    """Run ffmpeg and return raw yuv420p bytes (no frame array allocation)."""
+    cmd = [
+        "ffmpeg", "-i", str(h264_path),
+        "-f", "rawvideo", "-pix_fmt", "yuv420p",
+        "-vf", f"scale={WIDTH}:{HEIGHT}",
+        "pipe:1", "-loglevel", "quiet",
+    ]
+    result = subprocess.run(cmd, capture_output=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed: {result.stderr.decode()}")
+    return result.stdout
+
+
+def compute_quality_streaming(
+    orig_path: str | Path,
+    stego_path: str | Path,
+    max_frames: int = 9999,
+) -> dict:
+    """
+    Compute per-frame and full-video PSNR/SSIM without holding large frame arrays.
+
+    Decodes both videos to raw bytes (~145 MB each), then processes one frame
+    pair at a time.  Peak memory ~290 MB vs ~774 MB for float32 full arrays.
+
+    Returns dict with keys:
+      psnr_per_frame, ssim_per_frame, psnr_full_video, n
+    """
+    from skimage.metrics import structural_similarity
+
+    orig_raw = _decode_raw_bytes(orig_path)
+    stego_raw = _decode_raw_bytes(stego_path)
+
+    frame_size_420 = WIDTH * HEIGHT * 3 // 2
+    luma_size = WIDTH * HEIGHT
+    n = min(
+        len(orig_raw) // frame_size_420,
+        len(stego_raw) // frame_size_420,
+        max_frames,
+    )
+
+    psnr_list: list[float] = []
+    ssim_list: list[float] = []
+    total_ssd = 0.0
+    total_pixels = 0
+
+    for i in range(n):
+        base = i * frame_size_420
+        o = np.frombuffer(orig_raw[base: base + luma_size], dtype=np.uint8).reshape(HEIGHT, WIDTH)
+        s = np.frombuffer(stego_raw[base: base + luma_size], dtype=np.uint8).reshape(HEIGHT, WIDTH)
+
+        diff = o.astype(np.float32) - s.astype(np.float32)
+        ssd = float(np.dot(diff.ravel(), diff.ravel()))
+        total_ssd += ssd
+        total_pixels += luma_size
+
+        frame_mse = ssd / luma_size
+        psnr_list.append(
+            float("inf") if frame_mse < 1e-12
+            else 20.0 * math.log10(255.0 / math.sqrt(frame_mse))
+        )
+        ssim_list.append(structural_similarity(o, s, data_range=255))
+
+    full_mse = total_ssd / total_pixels if total_pixels > 0 else 0.0
+    full_psnr = (
+        float("inf") if full_mse < 1e-12
+        else 20.0 * math.log10(255.0 / math.sqrt(full_mse))
+    )
+
+    return {
+        "psnr_per_frame": psnr_list,
+        "ssim_per_frame": ssim_list,
+        "psnr_full_video": full_psnr,
+        "n": n,
+    }
+
 # ---------------------------------------------------------------------------
 # LSB pixel-domain baseline
 # ---------------------------------------------------------------------------
 def embed_lsb_pixel(frames: np.ndarray, n_bits: int, seed: int = 42) -> np.ndarray:
     """
     Embed n_bits random payload into LSB of Y channel.
-    Returns modified frames (float64, same shape).
+    Returns modified frames (float32, same shape).
     Simulates 'naive LSB substitution in decoded pixel domain'.
     """
     rng = np.random.default_rng(seed)
@@ -200,7 +285,7 @@ def embed_lsb_pixel(frames: np.ndarray, n_bits: int, seed: int = 42) -> np.ndarr
     indices.sort()
     for idx, bit in zip(indices, payload):
         flat[idx] = (int(flat[idx]) & ~1) | int(bit)
-    result = np.clip(flat, 0, 255).reshape(frames.shape).astype(np.float64)
+    result = np.clip(flat, 0, 255).reshape(frames.shape).astype(np.float32)
     return result
 
 # ---------------------------------------------------------------------------
