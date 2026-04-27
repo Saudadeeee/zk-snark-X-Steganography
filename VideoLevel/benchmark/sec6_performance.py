@@ -153,31 +153,112 @@ def collect_data(force: bool = False,
 
 
 # -------------------------------------------------------------------------
-# Stage labels (human-readable, matches keys in timings dict)
+# Stage classification: one-time pre-processing vs per-embed operational
 # -------------------------------------------------------------------------
+PREPROCESS_STAGES = {"1_extract_idr", "2_safety_filter"}
+OPERATIONAL_STAGES = {"3_zk_prove", "4_embed", "5_reconstruct", "6_extract_bits", "7_zk_verify"}
+
 STAGE_LABELS = {
-    "1_extract_idr":   "IDR Extraction",
-    "2_safety_filter": "Safety Filter",
+    "1_extract_idr":   "IDR Extraction (one-time)",
+    "2_safety_filter": "Safety Filter (one-time)",
     "3_zk_prove":      "ZK Prove (Groth16)",
     "4_embed":         "CAVLC T1 Embed",
-    "5_reconstruct":   "Bitstream Recon.",
-    "6_extract_bits":  "Extract Bits",
+    "5_reconstruct":   "Bitstream Reconstruct",
+    "6_extract_bits":  "Extract & Verify",
     "7_zk_verify":     "ZK Verify",
 }
 
-STAGE_COLORS = [
-    "#1565C0",  # IDR
-    "#1976D2",  # safety
-    "#FF6F00",  # ZK prove (expensive -> orange)
-    "#2E7D32",  # embed
-    "#4CAF50",  # reconstruct
-    "#0288D1",  # extract
-    "#FF8F00",  # verify
-]
+PREPROCESS_COLORS = {"1_extract_idr": "#78909C", "2_safety_filter": "#90A4AE"}
+OPERATIONAL_COLORS = {
+    "3_zk_prove":     "#FF6F00",
+    "4_embed":        "#2E7D32",
+    "5_reconstruct":  "#4CAF50",
+    "6_extract_bits": "#0288D1",
+    "7_zk_verify":    "#FF8F00",
+}
+STAGE_COLORS_MAP = {**PREPROCESS_COLORS, **OPERATIONAL_COLORS}
 
 
 # -------------------------------------------------------------------------
-# Plot 1: Stacked bar — timing breakdown per sequence
+# Plot 1a: Two-phase timing breakdown — pre-processing vs operational
+# -------------------------------------------------------------------------
+def plot_two_phase(data: dict) -> None:
+    """Side-by-side: one-time pre-processing cost vs per-embed operational cost."""
+    setup_style()
+    seqs   = list(data.keys())
+    labels = [SEQ_LABELS.get(s, s).split(" (")[0] for s in seqs]
+    n      = len(seqs)
+
+    pre_stages = ["1_extract_idr", "2_safety_filter"]
+    op_stages  = ["3_zk_prove", "4_embed", "5_reconstruct", "6_extract_bits", "7_zk_verify"]
+
+    fig, (ax_pre, ax_op) = plt.subplots(1, 2, figsize=(13, 6),
+                                         gridspec_kw={"width_ratios": [1.4, 1]})
+
+    # --- Left: pre-processing (one-time) ---
+    x_pre   = np.arange(n)
+    bot_pre = np.zeros(n)
+    for stage in pre_stages:
+        vals = [data[s]["timings"].get(stage, 0.0) for s in seqs]
+        bars = ax_pre.bar(x_pre, vals, bottom=bot_pre,
+                          color=STAGE_COLORS_MAP[stage],
+                          label=STAGE_LABELS[stage], width=0.5, zorder=3)
+        for b, v, bot in zip(bars, vals, bot_pre):
+            if v > 5:
+                ax_pre.text(b.get_x() + b.get_width() / 2, bot + v / 2,
+                            f"{v:.0f}s", ha="center", va="center",
+                            fontsize=9, color="white", fontweight="bold")
+        bot_pre += np.array(vals)
+
+    for xi, seq in zip(x_pre, seqs):
+        total_pre = sum(data[seq]["timings"].get(s, 0) for s in pre_stages)
+        ax_pre.text(xi, total_pre + 8, f"{total_pre:.0f} s",
+                    ha="center", va="bottom", fontsize=10, fontweight="bold")
+
+    ax_pre.set_xticks(x_pre)
+    ax_pre.set_xticklabels(labels, fontsize=10)
+    ax_pre.set_ylabel("Time (seconds)")
+    ax_pre.set_title("Pre-processing\n(one-time per video)", fontweight="bold")
+    ax_pre.legend(fontsize=8, loc="upper right")
+    ax_pre.text(0.02, 0.02,
+                "Run once; results cached\nfor all subsequent embeddings.",
+                transform=ax_pre.transAxes, fontsize=8, color="#555",
+                verticalalignment="bottom")
+
+    # --- Right: operational (per-embed) ---
+    x_op   = np.arange(n)
+    bot_op = np.zeros(n)
+    for stage in op_stages:
+        vals = [data[s]["timings"].get(stage, 0.0) for s in seqs]
+        bars = ax_op.bar(x_op, vals, bottom=bot_op,
+                         color=STAGE_COLORS_MAP[stage],
+                         label=STAGE_LABELS[stage], width=0.5, zorder=3)
+        for b, v, bot in zip(bars, vals, bot_op):
+            if v > 0.5:
+                ax_op.text(b.get_x() + b.get_width() / 2, bot + v / 2,
+                           f"{v:.1f}s", ha="center", va="center",
+                           fontsize=8.5, color="white", fontweight="bold")
+        bot_op += np.array(vals)
+
+    for xi, seq in zip(x_op, seqs):
+        total_op = sum(data[seq]["timings"].get(s, 0) for s in op_stages)
+        ax_op.text(xi, total_op + 0.5, f"{total_op:.1f} s",
+                   ha="center", va="bottom", fontsize=10, fontweight="bold")
+
+    ax_op.set_xticks(x_op)
+    ax_op.set_xticklabels(labels, fontsize=10)
+    ax_op.set_ylabel("Time (seconds)")
+    ax_op.set_title("Operational\n(per-embed)", fontweight="bold")
+    ax_op.legend(fontsize=8, loc="upper right")
+
+    fig.suptitle("§6  Pipeline Timing: Pre-processing vs Operational Cost",
+                 fontweight="bold", fontsize=13)
+    plt.tight_layout()
+    save_fig(fig, "sec6_timing_two_phase")
+
+
+# -------------------------------------------------------------------------
+# Plot 1b: Stacked bar — full pipeline per sequence (log scale for honesty)
 # -------------------------------------------------------------------------
 def plot_stacked_bar(data: dict) -> None:
     setup_style()
@@ -185,47 +266,43 @@ def plot_stacked_bar(data: dict) -> None:
 
     seqs   = list(data.keys())
     stages = list(STAGE_LABELS.keys())
-    labels = [SEQ_LABELS.get(s, s).split(" ")[0] for s in seqs]
+    labels = [SEQ_LABELS.get(s, s).split(" (")[0] for s in seqs]
 
     x      = np.arange(len(seqs))
     bottom = np.zeros(len(seqs))
 
-    for s_idx, stage in enumerate(stages):
+    for stage in stages:
         vals = [data[seq]["timings"].get(stage, 0.0) for seq in seqs]
         bars = ax.bar(x, vals, bottom=bottom,
-                      color=STAGE_COLORS[s_idx],
+                      color=STAGE_COLORS_MAP[stage],
                       label=STAGE_LABELS[stage],
                       width=0.5, zorder=3)
-        # Label if segment is big enough
         for b, v, bot in zip(bars, vals, bottom):
-            if v > 1.0:
-                ax.text(b.get_x() + b.get_width() / 2,
-                        bot + v / 2,
-                        f"{v:.1f}s", ha="center", va="center",
+            if v > 5:
+                ax.text(b.get_x() + b.get_width() / 2, bot + v / 2,
+                        f"{v:.0f}s", ha="center", va="center",
                         fontsize=8.5, color="white", fontweight="bold")
         bottom += np.array(vals)
 
-    # Annotate total and "algorithm core" (ZK+embed+reconstruct+verify)
-    CORE_STAGES = {"3_zk_prove", "4_embed", "5_reconstruct", "7_zk_verify"}
+    op_stages = list(OPERATIONAL_STAGES)
     for b_x, seq in zip(x, seqs):
         total   = data[seq]["total_s"]
-        core    = sum(data[seq]["timings"].get(s, 0) for s in CORE_STAGES)
-        ax.text(b_x, total + 0.5, f"Total\n{total:.1f} s",
+        op_cost = sum(data[seq]["timings"].get(s, 0) for s in op_stages)
+        ax.text(b_x, total + 5, f"Total {total:.0f}s",
                 ha="center", va="bottom", fontsize=9, fontweight="bold")
-        ax.annotate(f"Core*\n{core:.1f}s", xy=(b_x, core), xytext=(b_x + 0.32, core),
-                    fontsize=8, color="#C62828", ha="left", va="center",
-                    arrowprops=dict(arrowstyle="-", color="#C62828", lw=1.2))
+        ax.annotate(f"Operational\n{op_cost:.1f}s", xy=(b_x, op_cost),
+                    xytext=(b_x + 0.35, op_cost + 30),
+                    fontsize=8, color="#C62828", ha="left",
+                    arrowprops=dict(arrowstyle="->", color="#C62828", lw=1.0))
 
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=11)
     ax.set_ylabel("Time (seconds)")
-    ax.set_title("§6  End-to-End Pipeline Timing  (Embed + ZK Prove + Verify)",
-                 fontweight="bold")
-    ax.legend(loc="upper right", fontsize=9, ncol=2)
+    ax.set_title("§6  Full Pipeline Timing (all stages)", fontweight="bold")
+    ax.legend(loc="upper right", fontsize=8.5, ncol=2)
     ax.text(0.01, 0.01,
-            "* Core = ZK prove + embed + reconstruct + verify (stages 3,4,5,7)\n"
-            "  Stages 1 & 6 (IDR extraction, bit extraction) are Python parser overhead —\n"
-            "  estimated 100× faster with a native C++ H.264 parser.",
+            "Grey bars = one-time pre-processing (IDR extraction + safety filter).\n"
+            "Coloured bars = operational cost repeated per embedding run.",
             transform=ax.transAxes, fontsize=8, color="#555555",
             verticalalignment="bottom")
 
@@ -236,24 +313,25 @@ def plot_stacked_bar(data: dict) -> None:
 # Plot 2: Pie chart — time breakdown (average across sequences)
 # -------------------------------------------------------------------------
 def plot_timing_pie(data: dict) -> None:
+    """Pie chart of operational (per-embed) stages only — excludes one-time pre-processing."""
     setup_style()
     fig, ax = plt.subplots(figsize=(8, 7))
 
-    stages = list(STAGE_LABELS.keys())
-    seqs   = list(data.keys())
+    op_stage_keys = ["3_zk_prove", "4_embed", "5_reconstruct", "6_extract_bits", "7_zk_verify"]
+    seqs = list(data.keys())
 
     avg_timings = {
         stage: float(np.mean([data[seq]["timings"].get(stage, 0.0) for seq in seqs]))
-        for stage in stages
+        for stage in op_stage_keys
     }
 
-    vals   = [avg_timings[s] for s in stages]
-    labels = [f"{STAGE_LABELS[s]}\n({avg_timings[s]:.2f} s)"
-              for s in stages]
-    explode = [0.05 if "zk_prove" in s else 0.0 for s in stages]
+    vals    = [avg_timings[s] for s in op_stage_keys]
+    labels  = [f"{STAGE_LABELS[s]}\n({avg_timings[s]:.1f} s)" for s in op_stage_keys]
+    colors  = [OPERATIONAL_COLORS[s] for s in op_stage_keys]
+    explode = [0.05 if "zk_prove" in s else 0.0 for s in op_stage_keys]
 
     wedges, texts, autotexts = ax.pie(
-        vals, labels=labels, colors=STAGE_COLORS,
+        vals, labels=labels, colors=colors,
         autopct="%1.1f%%", pctdistance=0.78,
         startangle=140, explode=explode,
         textprops={"fontsize": 9},
@@ -263,8 +341,9 @@ def plot_timing_pie(data: dict) -> None:
         at.set_color("white")
         at.set_fontweight("bold")
 
-    ax.set_title("§6  Average Pipeline Time Breakdown\n"
-                 f"(avg total ~ {np.mean([d['total_s'] for d in data.values()]):.1f} s)",
+    op_total = sum(vals)
+    ax.set_title(f"§6  Operational Pipeline Breakdown\n"
+                 f"(per-embed cost ~ {op_total:.1f} s avg; excludes one-time pre-processing)",
                  fontweight="bold")
 
     save_fig(fig, "sec6_timing_pie")
@@ -333,6 +412,7 @@ def run(force: bool = False,
         include_sequences: set[str] | None = None) -> dict:
     print("\n=== §6  Pipeline Performance ===")
     data = collect_data(force=force, include_sequences=include_sequences)
+    plot_two_phase(data)
     plot_stacked_bar(data)
     plot_timing_pie(data)
     plot_scalability(data)

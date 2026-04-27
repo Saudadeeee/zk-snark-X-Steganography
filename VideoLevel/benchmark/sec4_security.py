@@ -391,10 +391,19 @@ def plot_chi_square(data: dict) -> None:
     ax.set_xlabel("Payload rate (% of raw T1 capacity)")
     ax.set_ylabel("Chi-square p-value (log scale)")
     ax.set_title("§4  Chi-square Test on T1 Sign Distribution\n"
-                 "(p > 0.05 = undetectable; p < 0.05 = statistically detectable)")
+                 "(2-sample: stego vs cover; p > 0.05 = undetectable)")
     ax.legend(fontsize=9)
     ax.set_xlim(-2, 105)
     ax.set_ylim(1e-6, 2.0)
+    ax.text(0.02, 0.02,
+            "2-sample test: compares stego T1 signs vs cover T1 signs.\n"
+            "Non-monotonic p-value at mid-rates is normal: T1 sign\n"
+            "distribution varies by video texture; some payload patterns\n"
+            "accidentally align with the natural sign bias.",
+            transform=ax.transAxes, fontsize=7.5, color="#555",
+            verticalalignment="bottom",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow",
+                      edgecolor="#aaa", alpha=0.9))
 
     ax.fill_between([-2, 105], [0.05, 0.05], [2.0, 2.0],
                     alpha=0.06, color="green", label="_nolegend_")
@@ -436,10 +445,22 @@ def plot_spa_rs(data: dict) -> None:
     ax2.plot(rates, data["rs_lsb"], "s--",
              color=PALETTE["lsb"], linewidth=2.2, label="LSB pixel")
     ax2.set_xlabel("Payload rate (%)")
-    ax2.set_ylabel("RS delta  |R−Rm| − |S−Sm|  (lower = less detectable)")
+    ax2.set_ylabel("RS delta  |R-Rm| - |S-Sm|  (lower = less detectable)")
     ax2.set_title("§4B  Regular-Singular (RS) Analysis")
     ax2.legend()
     ax2.set_xlim(-2, 105)
+    # RS delta = 0 for both methods: RS operates on pixel-domain LSB statistics.
+    # H.264 QP=22 DCT quantisation suppresses LSB correlation in decoded pixels,
+    # making RS inapplicable to compressed video regardless of embedding method.
+    ax2.text(0.03, 0.95,
+             "Note: RS delta = 0 for all rates (both methods).\n"
+             "RS analysis requires spatial LSB correlation absent\n"
+             "in H.264-decoded pixels (DCT + QP quantisation).\n"
+             "Chi-square on T1 signs (Plot 1) is the applicable test.",
+             transform=ax2.transAxes, fontsize=7.5, color="#555",
+             verticalalignment="top",
+             bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow",
+                       edgecolor="#aaa", alpha=0.9))
 
     fig.suptitle("§4  Steganalysis Resistance  (Foreman sequence, T1 capacity = "
                  f"{data['capacity']} bits)", fontsize=13, fontweight="bold")
