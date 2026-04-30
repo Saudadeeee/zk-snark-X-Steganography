@@ -51,6 +51,14 @@ SEQUENCES = {
     # All-intra (GOP=1) QP=22 — eliminates P-frame cascade for high-quality stego
     "foreman_q22_g1": DATA_DIR / "foreman_cif_q22_g1.h264",
     "coastguard_q22_g1": DATA_DIR / "coastguard_cif_q22_g1.h264",
+    "deadline_q22_g1": DATA_DIR / "deadline_cif_q22_g1.h264",
+    # Additional all-intra QP sweep assets
+    "foreman_q18_g1": DATA_DIR / "foreman_cif_q18_g1.h264",
+    "foreman_q28_g1": DATA_DIR / "foreman_cif_q28_g1.h264",
+    "foreman_q32_g1": DATA_DIR / "foreman_cif_q32_g1.h264",
+    "coastguard_q18_g1": DATA_DIR / "coastguard_cif_q18_g1.h264",
+    "coastguard_q28_g1": DATA_DIR / "coastguard_cif_q28_g1.h264",
+    "coastguard_q32_g1": DATA_DIR / "coastguard_cif_q32_g1.h264",
     # 1000-frame all-intra QP=22 — lower flips/IDR → better per-frame min PSNR
     "foreman_q22_g1_1000": DATA_DIR / "foreman_cif_q22_g1_1000.h264",
     "coastguard_q22_g1_1000": DATA_DIR / "coastguard_cif_q22_g1_1000.h264",
@@ -65,6 +73,13 @@ SEQ_FRAMES = {
     "akiyo": 50,
     "foreman_hq": 50,
     "coastguard_short": 50,
+    "deadline_q22_g1": 1374,
+    "foreman_q18_g1": 50,
+    "foreman_q28_g1": 50,
+    "foreman_q32_g1": 50,
+    "coastguard_q18_g1": 300,
+    "coastguard_q28_g1": 300,
+    "coastguard_q32_g1": 300,
     "foreman_q22_g1": 300,
     "coastguard_q22_g1": 300,
     "foreman_q22_g1_1000": 1000,
@@ -87,7 +102,6 @@ PALETTE = {
     "bulletproof":"#00838F",
 }
 
-MARKERS = ["o", "s", "^", "D", "v", "P"]
 LINESTYLES = ["-", "--", "-.", ":", (0,(3,1,1,1)), (0,(5,1))]
 
 SEQ_LABELS = {
@@ -99,6 +113,13 @@ SEQ_LABELS = {
     "akiyo": "Akiyo (very low motion)",
     "foreman_hq": "Foreman HQ (short)",
     "coastguard_short": "Coastguard short (50f)",
+    "deadline_q22_g1": "Deadline all-intra QP22",
+    "foreman_q18_g1": "Foreman all-intra QP18",
+    "foreman_q28_g1": "Foreman all-intra QP28",
+    "foreman_q32_g1": "Foreman all-intra QP32",
+    "coastguard_q18_g1": "Coastguard all-intra QP18",
+    "coastguard_q28_g1": "Coastguard all-intra QP28",
+    "coastguard_q32_g1": "Coastguard all-intra QP32",
     "foreman_q22_g1": "Foreman all-intra QP22",
     "coastguard_q22_g1": "Coastguard all-intra QP22",
     "foreman_q22_g1_1000": "Foreman all-intra QP22 (1000f)",
@@ -128,7 +149,6 @@ def setup_style() -> None:
         "grid.linestyle":           "--",
         "grid.color":               "#CCCCCC",
         "lines.linewidth":          2.2,
-        "lines.markersize":         7,
         "legend.framealpha":        0.92,
         "legend.fontsize":          10,
         "legend.edgecolor":         "#BBBBBB",

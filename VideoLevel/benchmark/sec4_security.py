@@ -31,7 +31,7 @@ from scipy import stats
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from benchmark._common import (
-    PALETTE, SEQUENCES, SEQ_LABELS, MARKERS, LINESTYLES,
+    PALETTE, SEQUENCES, SEQ_LABELS,
     setup_style, save_fig, cache_save, cache_load,
     decode_luma_frames, embed_lsb_pixel,
     ROOT, OUTPUT_DIR, annotate_literature, load_or_extract_idr_blocks,
@@ -361,10 +361,10 @@ def plot_chi_square(data: dict) -> None:
 
     rates = data["rates"]
     ax.semilogy(rates, [max(p, 1e-6) for p in data["chi_p_this_work"]],
-                "o-", color=PALETTE["this_work"], linewidth=2.2,
+                "-", color=PALETTE["this_work"], linewidth=2.2,
                 label="This Work (CAVLC T1)")
     ax.semilogy(rates, [max(p, 1e-6) for p in data["chi_p_lsb"]],
-                "s--", color=PALETTE["lsb"], linewidth=2.2,
+                "--", color=PALETTE["lsb"], linewidth=2.2,
                 label="LSB pixel (T1 signs unaffected -> p~0.5)")
 
     # Detection threshold: p < 0.05 = statistically detectable
@@ -377,11 +377,8 @@ def plot_chi_square(data: dict) -> None:
     op_rate = data.get("op_rate_pct", None)
     op_p    = data.get("op_chi_p",    None)
     if op_rate is not None and op_p is not None:
-        ax.scatter([op_rate], [max(op_p, 1e-6)],
-                   color=PALETTE["this_work"], s=160, zorder=6,
-                   marker="*", label=f"ZK operating point ({op_rate:.2f}%, p={op_p:.3f})")
         ax.annotate(
-            f"ZK op. point\n({op_rate:.2f}%)",
+            f"ZK op. point\n({op_rate:.2f}%, p={op_p:.3f})",
             xy=(op_rate, max(op_p, 1e-6)),
             xytext=(op_rate + 4, max(op_p, 1e-6) * 3),
             fontsize=8.5, color=PALETTE["this_work"], fontweight="bold",
@@ -427,10 +424,10 @@ def plot_spa_rs(data: dict) -> None:
     rates = data["rates"]
 
     # SPA
-    ax1.plot(rates, data["spa_this_work"], "o-",
+    ax1.plot(rates, data["spa_this_work"], "-",
              color=PALETTE["this_work"], linewidth=2.2,
              label="This Work (CAVLC T1)")
-    ax1.plot(rates, data["spa_lsb"], "s--",
+    ax1.plot(rates, data["spa_lsb"], "--",
              color=PALETTE["lsb"], linewidth=2.2, label="LSB pixel")
     ax1.set_xlabel("Payload rate (%)")
     ax1.set_ylabel("SPA detection score (lower = less detectable)")
@@ -439,10 +436,10 @@ def plot_spa_rs(data: dict) -> None:
     ax1.set_xlim(-2, 105)
 
     # RS
-    ax2.plot(rates, data["rs_this_work"], "o-",
+    ax2.plot(rates, data["rs_this_work"], "-",
              color=PALETTE["this_work"], linewidth=2.2,
              label="This Work (CAVLC T1)")
-    ax2.plot(rates, data["rs_lsb"], "s--",
+    ax2.plot(rates, data["rs_lsb"], "--",
              color=PALETTE["lsb"], linewidth=2.2, label="LSB pixel")
     ax2.set_xlabel("Payload rate (%)")
     ax2.set_ylabel("RS delta  |R-Rm| - |S-Sm|  (lower = less detectable)")
@@ -485,10 +482,10 @@ def plot_detection_rate(data: dict) -> None:
     det_this_work = [max(0.0, 1.0 - p) for p in data["chi_p_this_work"]]
     det_lsb_rs    = [min(1.0, v * 8) for v in data["rs_lsb"]]  # RS-based for LSB
 
-    ax.plot(rates, det_this_work, "o-",
+    ax.plot(rates, det_this_work, "-",
             color=PALETTE["this_work"], linewidth=2.5,
             label="This Work (CAVLC T1) — chi2 on T1 signs")
-    ax.plot(rates, det_lsb_rs, "s--",
+    ax.plot(rates, det_lsb_rs, "--",
             color=PALETTE["lsb"], linewidth=2.5,
             label="LSB pixel — RS analysis")
 

@@ -4,20 +4,20 @@
   "methods": {
     "This Work (CAVLC T1)": {
       "psnr": {
-        "foreman_q22_g1": 54.83943176269531,
-        "coastguard_q22_g1": 52.536468505859375
+        "foreman_q22_g1": 54.79110336303711,
+        "coastguard_q22_g1": 52.45718002319336
       },
       "validation_mode": {
         "foreman_q22_g1": "real_proof_allintra_chaos_v5_ffmpeg_validated",
         "coastguard_q22_g1": "real_proof_allintra_chaos_v5_ffmpeg_validated"
       },
       "embedded_bits": {
-        "foreman_q22_g1": 1200,
-        "coastguard_q22_g1": 1191
+        "foreman_q22_g1": 1232,
+        "coastguard_q22_g1": 1232
       },
       "requested_bits": {
-        "foreman_q22_g1": 1176,
-        "coastguard_q22_g1": 1176
+        "foreman_q22_g1": 1232,
+        "coastguard_q22_g1": 1232
       },
       "simulated": false
     },

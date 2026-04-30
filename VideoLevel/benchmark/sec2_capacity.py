@@ -46,7 +46,17 @@ VALIDATED_FRACTIONS = [25, 50, 75, 100]
 # ZK payload size embedded in SEC1
 ZK_PAYLOAD_BYTES    = 147
 ZK_PAYLOAD_BITS     = ZK_PAYLOAD_BYTES * 8   # 1176 bits
-ZK_BLOB_BITS        = 1232                    # chaos-expanded size (154 bytes × 8)
+
+
+def _sec2_cache_meta(sweep_seqs: list[str]) -> dict[str, object]:
+    return {
+        "sequence_names": list(sweep_seqs),
+        "positions_mtimes": {
+            seq: (OUTPUT_DIR / f"sec1_stego_{seq}.h264.positions.json").stat().st_mtime
+            if (OUTPUT_DIR / f"sec1_stego_{seq}.h264.positions.json").exists() else None
+            for seq in sweep_seqs
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -139,25 +149,36 @@ def _raw_t1_capacity(video_path: Path) -> int:
 # ---------------------------------------------------------------------------
 # Data collection
 # ---------------------------------------------------------------------------
-def collect_data(force: bool = False) -> dict:
+def collect_data(force: bool = False, include_sequences: set[str] | None = None) -> dict:
+    default_sweep = ["foreman_q22_g1", "coastguard_q22_g1", "deadline_q22_g1"]
+    sweep_seqs = default_sweep
+    if include_sequences:
+        sweep_seqs = [seq for seq in default_sweep if seq in include_sequences]
+        extras = [seq for seq in include_sequences if seq not in sweep_seqs]
+        sweep_seqs.extend(extras)
+
+    cache_meta = _sec2_cache_meta(sweep_seqs)
     cached = cache_load(CACHE_KEY)
     if cached and not force:
-        print("  [cache hit] sec2 — skipping capacity sweep")
-        return cached
+        if isinstance(cached, dict) and "__meta__" in cached and "data" in cached:
+            if cached["__meta__"] == cache_meta:
+                print("  [cache hit] sec2 — skipping capacity sweep")
+                return cached["data"]
 
-    # Build a synthetic scrambled payload (same chaos key as SEC1)
+    # Reuse the exact SEC1 operating payload: real proof blob + same chaos key.
+    from benchmark.sec1_quality import _build_real_proof_payload, CHAOS_KEY
     from src.core.chaos import ChaosTransformer
-    _chaos = ChaosTransformer(b"\x00" * 32)    # deterministic placeholder
-    _dummy_payload = bytes(ZK_PAYLOAD_BYTES)
-    payload_scrambled, _ = _chaos.scramble(_dummy_payload)
 
-    SWEEP_SEQS = ["foreman_q22_g1", "coastguard_q22_g1"]
+    payload_real, _ = _build_real_proof_payload()
+    payload_scrambled, _ = ChaosTransformer(CHAOS_KEY).scramble(payload_real)
+    zk_blob_bits = len(payload_scrambled) * 8
+
     data: dict = {}
 
     import os as _os
     _os.environ["BENCHMARK_TRUSTED_IDR_PICKLE_CACHE"] = "1"
 
-    for seq_name in SWEEP_SEQS:
+    for seq_name in sweep_seqs:
         video_path = SEQUENCES.get(seq_name)
         if not video_path or not video_path.exists():
             print(f"  [{seq_name}] video not found — skip")
@@ -184,15 +205,15 @@ def collect_data(force: bool = False) -> dict:
             "raw_t1_bits":          raw_capacity,
             "raw_t1_bytes":         raw_capacity // 8,
             "validated_bits":       validated_cap,
-            "zk_blob_bits":         ZK_BLOB_BITS,
+            "zk_blob_bits":         zk_blob_bits,
             "zk_payload_bits":      ZK_PAYLOAD_BITS,
-            "utilization_pct":      round(100.0 * ZK_BLOB_BITS / raw_capacity, 3),
+            "utilization_pct":      round(100.0 * zk_blob_bits / raw_capacity, 3),
             "fractions_pct":        sweep["fractions_pct"],
             "bits_at_fraction":     sweep["bits_at_fraction"],
             "psnr_at_fraction":     sweep["psnr_at_fraction"],
         }
 
-    cache_save(CACHE_KEY, data)
+    cache_save(CACHE_KEY, {"__meta__": cache_meta, "data": data})
     return data
 
 
@@ -204,16 +225,14 @@ def plot_psnr_vs_bits(data: dict) -> None:
     fig, ax = plt.subplots(figsize=(9, 5))
 
     colors = list(PALETTE.values())
-    markers = ["o", "s", "^", "D"]
-
     for i, (seq, d) in enumerate(data.items()):
         if not d.get("bits_at_fraction"):
             continue
         label = SEQ_LABELS.get(seq, seq).split(" (")[0]
         ax.plot(
             d["bits_at_fraction"], d["psnr_at_fraction"],
-            color=colors[i], marker=markers[i % len(markers)],
-            linewidth=2.2, markersize=8, label=label,
+            color=colors[i],
+            linewidth=2.2, label=label,
         )
         # Annotate 100% point (actual operating point)
         x100 = d["bits_at_fraction"][-1]
@@ -258,14 +277,15 @@ def plot_capacity_budget(data: dict) -> None:
 
     raw_bits       = [data[s]["raw_t1_bits"]    for s in seqs]
     validated_bits = [data[s]["validated_bits"] for s in seqs]
-    zk_bits        = [ZK_BLOB_BITS] * n
+    zk_blob_bits = data[seqs[0]]["zk_blob_bits"] if seqs else 0
+    zk_bits        = [zk_blob_bits] * n
 
     ax.bar(x - w,     raw_bits,       width=w, color=PALETTE["this_work"],
            alpha=0.80, label="Raw T1 capacity (unvalidated)", zorder=3)
     ax.bar(x,         validated_bits, width=w, color=PALETTE["f5"],
            alpha=0.85, label="Quality-constrained capacity (PSNR ≥ 40 dB)", zorder=3)
     ax.bar(x + w,     zk_bits,        width=w, color=PALETTE["lsb"],
-           alpha=0.85, label=f"ZK blob payload ({ZK_BLOB_BITS} bits)", zorder=3)
+           alpha=0.85, label=f"ZK blob payload ({zk_blob_bits} bits)", zorder=3)
 
     ax.set_yscale("log")
     ax.set_xticks(x)
@@ -335,9 +355,9 @@ def plot_capacity_bar(data: dict) -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-def run(force: bool = False) -> dict:
+def run(force: bool = False, include_sequences: set[str] | None = None) -> dict:
     print("\n=== §2  Capacity & PSNR vs Payload Size ===")
-    data = collect_data(force=force)
+    data = collect_data(force=force, include_sequences=include_sequences)
     plot_psnr_vs_bits(data)
     plot_capacity_budget(data)
     plot_capacity_bar(data)
@@ -347,5 +367,12 @@ def run(force: bool = False) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run sec2 capacity benchmark")
     parser.add_argument("--force", action="store_true", help="Ignore cache and recompute")
+    parser.add_argument(
+        "--sequences",
+        type=str,
+        default="",
+        help="Comma-separated sequence names to run (e.g. foreman_q22_g1,deadline_q22_g1)",
+    )
     args = parser.parse_args()
-    run(force=args.force)
+    selected = {s.strip() for s in args.sequences.split(",") if s.strip()} or None
+    run(force=args.force, include_sequences=selected)

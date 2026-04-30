@@ -2,13 +2,13 @@
 zk_proof.py — ZK-SNARK proof generation, verification and binary format.
 
 Combines:
-  - Groth16 proof binary serialization (BN128, 256 bytes)
-  - Payload blob packing: [4B length][message][256B proof]
+  - Groth16 proof binary serialization (BN128, 129-byte compressed form)
+  - Payload blob packing: [4B length][message][129B proof]
   - Python bridge to snarkjs / Node.js for proof generation and verification
 
 Public API:
     # Binary format
-    PROOF_SIZE_BYTES          — 256
+    PROOF_SIZE_BYTES          — 129
     proof_to_bytes(proof_dict)  → bytes
     bytes_to_proof(data)        → dict
     pack(message, proof_bytes)  → bytes
@@ -229,11 +229,11 @@ class ZKSnarkBridge:
         return self._snarkjs_verify(proof_dict, public_dict)
 
     def proof_to_bytes(self, proof_dict: dict) -> bytes:
-        """Serialize proof dict → 256 bytes."""
+        """Serialize proof dict → 129-byte compressed form."""
         return proof_to_bytes(proof_dict)
 
     def bytes_to_proof(self, data: bytes) -> dict:
-        """Deserialize 256 bytes → proof dict."""
+        """Deserialize 129-byte compressed form → proof dict."""
         return bytes_to_proof(data)
 
     # ------------------------------------------------------------------ #

@@ -8,6 +8,7 @@ import time
 import json
 import hashlib
 import argparse
+import re
 from pathlib import Path
 
 import numpy as np
@@ -17,7 +18,7 @@ import matplotlib.ticker as ticker
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from benchmark._common import (
-    PALETTE, SEQUENCES, SEQ_LABELS, MARKERS, LINESTYLES,
+    PALETTE, SEQUENCES, SEQ_LABELS, LINESTYLES,
     setup_style, save_fig, cache_save, cache_load,
     decode_luma_frames, psnr_per_frame, ssim_per_frame, psnr,
     compute_quality_streaming,
@@ -49,6 +50,8 @@ REAL_PROOF_SMART_MAX_MODS_PER_BLOCK = 1
 REAL_PROOF_SMART_PREFER_PATCHABLE = True
 REAL_PROOF_SMART_DEDUP_PER_BLOCK = True
 REAL_PROOF_SMART_MAX_BITS_PER_IDR = 32
+REAL_PROOF_VALIDATION_HEADROOM_BITS = 128
+REAL_PROOF_VALIDATION_HEADROOM_BITS_QP32 = 192
 USE_SIGN_BIT_POSITIONS = False
 MIN_QUALITY_BUDGET_BITS = 256
 # For all-intra (GOP=1) sequences, each frame is independent so cascade risk is zero.
@@ -82,8 +85,15 @@ OPTIONAL_QUALITY_SEQUENCES = {
 
 # GOP per sequence: all-intra sequences have GOP=1 (every frame is IDR).
 SEQ_GOP = {
+    "foreman_q18_g1": 1,
     "foreman_q22_g1": 1,
+    "foreman_q28_g1": 1,
+    "foreman_q32_g1": 1,
+    "coastguard_q18_g1": 1,
     "coastguard_q22_g1": 1,
+    "coastguard_q28_g1": 1,
+    "coastguard_q32_g1": 1,
+    "deadline_q22_g1": 1,
     "foreman_hq": 1,
     "foreman_q22_g1_1000": 1,
     "coastguard_q22_g1_1000": 1,
@@ -92,11 +102,20 @@ SEQ_GOP = {
 # Max T1 flips per IDR frame — lower = less intra cascade per frame.
 # 300f sequences: need 5 (300×5=1500 ≥ 1232). 1000f sequences: 2 (1000×2=2000 ≥ 1232).
 SEQ_MAX_FLIPS_PER_IDR = {
+    "foreman_q18_g1": 32,
     "foreman_q22_g1": 5,
+    "foreman_q28_g1": 32,
+    "foreman_q32_g1": 32,
+    "coastguard_q18_g1": 5,
     "coastguard_q22_g1": 5,
+    "coastguard_q28_g1": 5,
+    "coastguard_q32_g1": 5,
+    "deadline_q22_g1": 2,
     "foreman_q22_g1_1000": 2,
     "coastguard_q22_g1_1000": 2,
 }
+
+_QP_SEQ_RE = re.compile(r"^(?P<base>[a-z0-9]+)_q(?P<qp>\d+)_g1$")
 
 # -------------------------------------------------------------------------
 # Embed helper
@@ -249,6 +268,8 @@ def _sec1_cache_fingerprint() -> dict[str, object]:
         "real_proof_smart_prefer_patchable": REAL_PROOF_SMART_PREFER_PATCHABLE,
         "real_proof_smart_dedup_per_block": REAL_PROOF_SMART_DEDUP_PER_BLOCK,
         "real_proof_smart_max_bits_per_idr": REAL_PROOF_SMART_MAX_BITS_PER_IDR,
+        "real_proof_validation_headroom_bits": REAL_PROOF_VALIDATION_HEADROOM_BITS,
+        "real_proof_validation_headroom_bits_qp32": REAL_PROOF_VALIDATION_HEADROOM_BITS_QP32,
         "payload_bytes": len(PAYLOAD),
         "payload_sha1": hashlib.sha1(PAYLOAD).hexdigest(),
         "real_proof_message_sha1": hashlib.sha1(REAL_PROOF_MESSAGE).hexdigest(),
@@ -386,6 +407,23 @@ def _select_positions_temporal_strided(
     return selected
 
 
+def _take_positions_excluding_idrs(
+    positions: list[tuple[int, int, int]],
+    blocked_idrs: set[int],
+    required_bits: int,
+    cif_mb_count: int = CIF_MB_COUNT,
+) -> list[tuple[int, int, int]]:
+    """Take the first required_bits positions while skipping blocked IDR frames."""
+    selected: list[tuple[int, int, int]] = []
+    for pos in positions:
+        if (pos[0] // cif_mb_count) in blocked_idrs:
+            continue
+        selected.append(pos)
+        if len(selected) >= required_bits:
+            break
+    return selected
+
+
 def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -> tuple[Path, int | None, int, str, float | None]:
     """
     Embed 274-byte payload (= full ZK blob size) using CAVLC T1 steganography.
@@ -446,7 +484,8 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
             payload_real, real_required_bits = _build_real_proof_payload()
             chaos = ChaosTransformer(CHAOS_KEY)
             payload_scrambled, _ = chaos.scramble(payload_real)
-            _bits_to_embed = len(payload_scrambled) * 8
+            scrambled_required_bits = len(payload_scrambled) * 8
+            _bits_to_embed = scrambled_required_bits
 
             _prev_pkl = _os.environ.get("BENCHMARK_TRUSTED_IDR_PICKLE_CACHE")
             _os.environ["BENCHMARK_TRUSTED_IDR_PICKLE_CACHE"] = "1"
@@ -476,6 +515,16 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
                     _seen_blk_ai.add(_bk)
                     _deduped_ai.append(_p)
 
+            _headroom_bits = (
+                REAL_PROOF_VALIDATION_HEADROOM_BITS_QP32
+                if "_q32_g1" in seq_name
+                else REAL_PROOF_VALIDATION_HEADROOM_BITS
+            )
+            _validation_target_bits = min(
+                len(_deduped_ai),
+                scrambled_required_bits + _headroom_bits,
+            )
+
             # FFmpeg per-position validation with per-IDR cap
             _validator_ai, _cleanup_ai = _rec_ai.make_ffmpeg_position_validator(
                 str(video_path), coeffs_ai, fvd_ai
@@ -484,7 +533,7 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
             _idr_flip_ai: dict[int, int] = {}
             try:
                 for _p in _deduped_ai:
-                    if len(_validated_ai) >= _bits_to_embed:
+                    if len(_validated_ai) >= _validation_target_bits:
                         break
                     _fi = _p[0] // CIF_MB_COUNT
                     if _idr_flip_ai.get(_fi, 0) >= SEC1_MAX_FLIPS_PER_IDR:
@@ -495,9 +544,10 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
             finally:
                 _cleanup_ai()
 
-            if len(_validated_ai) < _bits_to_embed:
+            if len(_validated_ai) < _validation_target_bits:
                 raise RuntimeError(
-                    f"[{seq_name}] Only {len(_validated_ai)} validated positions, need {_bits_to_embed}"
+                    f"[{seq_name}] Only {len(_validated_ai)} validated positions, "
+                    f"need {_validation_target_bits}"
                 )
 
             # PSNR re-validation: make_ffmpeg_position_validator catches cumulative
@@ -516,26 +566,30 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
                 min_local_mb=0,
                 gop_span_frames=1,
                 gop_psnr_quantile=0.0,
-                target_positions=_bits_to_embed,
+                target_positions=_validation_target_bits,
             )
             _n_psnr_removed = len(_validated_ai) - len(_psnr_validated)
             if _n_psnr_removed:
                 print(f"  [{seq_name}] PSNR filter: {len(_psnr_validated)}/{len(_validated_ai)} "
                       f"kept ({_n_psnr_removed} removed for PSNR < 40 dB)")
-            if len(_psnr_validated) < _bits_to_embed:
-                print(f"  [{seq_name}] PSNR capacity {len(_psnr_validated)} < {_bits_to_embed}; "
-                      "embedding available positions only")
-                _bits_to_embed = len(_psnr_validated)
+            if len(_psnr_validated) < scrambled_required_bits:
+                raise RuntimeError(
+                    f"[{seq_name}] PSNR-validated capacity {len(_psnr_validated)} "
+                    f"< required scrambled payload {scrambled_required_bits}"
+                )
             _validated_ai = _psnr_validated
 
-            _embed_positions = _validated_ai
+            _bad_idr_set: set[int] = set()
+            _embed_positions = _take_positions_excluding_idrs(
+                _validated_ai, _bad_idr_set, scrambled_required_bits, CIF_MB_COUNT
+            )
             _idr_counts: dict[int, int] = {}
             for _mb, _, _ in _embed_positions:
                 _fi = _mb // CIF_MB_COUNT
                 _idr_counts[_fi] = _idr_counts.get(_fi, 0) + 1
-            print(f"  [{seq_name}] chaos_v5_ffmpeg_validated: {_bits_to_embed} bits "
+            print(f"  [{seq_name}] chaos_v5_ffmpeg_validated: {len(_embed_positions)} bits "
                   f"across {len(_idr_counts)} IDR frames "
-                  f"(avg {_bits_to_embed / max(1, len(_idr_counts)):.1f} bits/frame)")
+                  f"(avg {len(_embed_positions) / max(1, len(_idr_counts)):.1f} bits/frame)")
 
             emb_ai = PayloadEmbedder(
                 max_modifications_per_block=REAL_PROOF_SMART_MAX_MODS_PER_BLOCK
@@ -575,20 +629,18 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
                 ]
                 if not _bad_idr_frames:
                     break
-                _bad_idr_set = set(_bad_idr_frames)
+                _bad_idr_set.update(_bad_idr_frames)
                 print(
                     f"  [{seq_name}] post-embed PSNR (iter {_psnr_retry + 1}): "
                     f"frames {_bad_idr_frames} below 40 dB — removing {len(_bad_idr_frames)} IDR(s)"
                 )
-                _embed_positions = [
-                    _ep for _ep in _embed_positions
-                    if (_ep[0] // CIF_MB_COUNT) not in _bad_idr_set
-                ]
-                _validated_ai = _embed_positions
-                if len(_embed_positions) < real_required_bits:
+                _embed_positions = _take_positions_excluding_idrs(
+                    _validated_ai, _bad_idr_set, scrambled_required_bits, CIF_MB_COUNT
+                )
+                if len(_embed_positions) < scrambled_required_bits:
                     raise RuntimeError(
                         f"[{seq_name}] Post-embed: only {len(_embed_positions)} "
-                        f"positions after removing bad IDRs, need {real_required_bits}"
+                        f"positions after removing bad IDRs, need {scrambled_required_bits}"
                     )
                 _bits_to_embed = len(_embed_positions)
                 _emb_r = PayloadEmbedder(
@@ -611,7 +663,7 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
                 meta_path,
                 video_path=video_path,
                 bits_embedded=int(bits_embedded_ai),
-                bits_required=real_required_bits,
+                bits_required=scrambled_required_bits,
                 validation_mode=mode_ai,
                 effective_threshold_db=None,
             )
@@ -624,7 +676,7 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
             return (
                 out_path,
                 int(bits_embedded_ai),
-                real_required_bits,
+                scrambled_required_bits,
                 mode_ai,
                 None,
             )
@@ -1021,7 +1073,11 @@ def collect_data(
     for seq_name, video_path in active_sequences.items():
         print(f"  [{seq_name}] embedding …")
         t0 = time.perf_counter()
-        stego_path, bits_embedded, bits_required, validation_mode, effective_threshold_db = _embed_for_benchmark(seq_name, video_path, force=force)
+        try:
+            stego_path, bits_embedded, bits_required, validation_mode, effective_threshold_db = _embed_for_benchmark(seq_name, video_path, force=force)
+        except RuntimeError as exc:
+            print(f"  [{seq_name}] skipped: {exc}")
+            continue
         embed_time = time.perf_counter() - t0
         print(f"  [{seq_name}] decoding …")
         _qm = compute_quality_streaming(video_path, stego_path)
@@ -1079,7 +1135,7 @@ def collect_data(
             "embed_time":           embed_time,
             "validation_threshold_db": None,
             "validation_threshold_db_effective": effective_threshold_db,
-            "quality_target_bits":  int(QUALITY_TARGET_BITS_DEFAULT),
+            "quality_target_bits":  int(bits_required),
             "validation_mode":      validation_mode,
             "fallback_used":        ("fallback" in validation_mode),
         }
@@ -1095,6 +1151,9 @@ def collect_data(
             f"SSIM={data[seq_name]['avg_ssim']:.4f}  "
             f"{embedded_text}"
         )
+
+    if not data:
+        raise RuntimeError("SEC1 produced no successful sequence results")
 
     cache_save(CACHE_KEY, {"__meta__": run_cache_meta, "data": data})
     return data
@@ -1116,7 +1175,6 @@ def plot_psnr_timeline(data: dict) -> None:
         psnr_plot = [min(p, 60.0) for p in psnr_vals]
         ax.plot(frames, psnr_plot,
                 color=list(PALETTE.values())[i % len(PALETTE)],
-                marker=MARKERS[i % len(MARKERS)], markevery=5,
                 linestyle=LINESTYLES[i % len(LINESTYLES)],
                 label=label, alpha=0.9)
 
@@ -1155,7 +1213,6 @@ def plot_ssim_timeline(data: dict) -> None:
         frames    = list(range(len(ssim_vals)))
         ax.plot(frames, ssim_vals,
                 color=list(PALETTE.values())[i % len(PALETTE)],
-                marker=MARKERS[i % len(MARKERS)], markevery=5,
                 linestyle=LINESTYLES[i % len(LINESTYLES)],
                 label=label, alpha=0.9)
 
@@ -1184,7 +1241,8 @@ def plot_avg_quality_bar(data: dict) -> None:
 
     seqs   = [s for s in SEQ_LABELS.keys() if s in data]  # only sequences we measured
     labels = [SEQ_LABELS[s].split(" ")[0] for s in seqs]
-    colors = [list(PALETTE.values())[i] for i, s in enumerate(SEQ_LABELS.keys()) if s in data]
+    palette_values = list(PALETTE.values())
+    colors = [palette_values[i % len(palette_values)] for i, s in enumerate(SEQ_LABELS.keys()) if s in data]
     x      = np.arange(len(seqs))
 
     def _safe_float(seq: str, key: str, default: float) -> float:
@@ -1245,6 +1303,48 @@ def plot_avg_quality_bar(data: dict) -> None:
     save_fig(fig, "sec1_avg_quality_bar")
 
 
+def plot_psnr_vs_qp(data: dict) -> None:
+    """Plot full-video PSNR vs QP for any base sequence with >=2 all-intra QP points."""
+    qp_groups: dict[str, list[tuple[int, str]]] = {}
+    for seq in data:
+        match = _QP_SEQ_RE.match(seq)
+        if not match or seq.endswith("_1000"):
+            continue
+        base = match.group("base")
+        qp = int(match.group("qp"))
+        qp_groups.setdefault(base, []).append((qp, seq))
+
+    qp_groups = {base: sorted(items) for base, items in qp_groups.items() if len(items) >= 2}
+    if not qp_groups:
+        return
+
+    setup_style()
+    fig, ax = plt.subplots(figsize=(8.5, 5))
+    colors = list(PALETTE.values())
+
+    for i, (base, items) in enumerate(sorted(qp_groups.items())):
+        qps = [qp for qp, _ in items]
+        psnr_vals = [float(data[seq]["psnr_full_video"]) for _, seq in items]
+        label = base.capitalize()
+        ax.plot(
+            qps, psnr_vals,
+            color=colors[i % len(colors)],
+            linestyle=LINESTYLES[i % len(LINESTYLES)],
+            linewidth=2.2,
+            label=label,
+        )
+        for qp, psnr_val in zip(qps, psnr_vals):
+            ax.text(qp, psnr_val + 0.15, f"{psnr_val:.1f}", ha="center", va="bottom", fontsize=9)
+
+    ax.axhline(40.0, color="#C62828", linestyle="--", linewidth=1.3, label="40 dB threshold")
+    ax.set_xlabel("QP (all-intra, GOP=1)")
+    ax.set_ylabel("Full-video PSNR (dB)")
+    ax.set_title("§1  Full-Video PSNR vs QP")
+    ax.set_xticks(sorted({qp for items in qp_groups.values() for qp, _ in items}))
+    ax.legend(fontsize=9)
+    save_fig(fig, "sec1_psnr_vs_qp")
+
+
 # -------------------------------------------------------------------------
 # Main
 # -------------------------------------------------------------------------
@@ -1262,6 +1362,7 @@ def run(
     plot_psnr_timeline(data)
     plot_ssim_timeline(data)
     plot_avg_quality_bar(data)
+    plot_psnr_vs_qp(data)
     return data
 
 

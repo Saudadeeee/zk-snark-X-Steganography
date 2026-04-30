@@ -4,8 +4,8 @@ test_phase1_zk_proof.py — Phase 1: ZK-SNARK Proof Generation, Serialization, V
 Tests:
   1. pack_unpack_roundtrip        — pack/unpack preserves message and proof bytes
   2. proof_bytes_roundtrip        — proof_to_bytes / bytes_to_proof is lossless
-  3. proof_size_256               — serialized proof is exactly 256 bytes
-  4. blob_bit_length_formula      — blob_bit_length = (4 + len(msg) + 256) * 8
+  3. proof_size_129               — serialized proof is exactly 129 bytes
+  4. blob_bit_length_formula      — blob_bit_length = (4 + len(msg) + 129) * 8
   5. zk_generate_and_verify       — real Groth16 proof generation + verification (needs node)
   6. zk_tampered_message_fails    — verification with wrong payload returns False (needs node)
 
@@ -36,7 +36,7 @@ TEST_MSG   = b"Hello ZK-Stego"
 
 # Minimal structurally-valid fake proof dict (snarkjs JSON format)
 def _fake_proof() -> dict:
-    """Build a deterministic fake 256-byte serialisable proof dict.
+    """Build a deterministic fake 129-byte serialisable proof dict.
     Values must be decimal strings (snarkjs proof format uses base-10 integers).
     """
     return {
@@ -72,7 +72,7 @@ def t_proof_bytes_roundtrip():
     # pi_c Y is recomputed from curve; skip comparison for off-curve fake value
 
 
-def t_proof_size_256():
+def t_proof_size_129():
     raw = proof_to_bytes(_fake_proof())
     assert len(raw) == PROOF_SIZE_BYTES, \
         f"proof size {len(raw)} != {PROOF_SIZE_BYTES}"
@@ -135,7 +135,7 @@ def main():
     results = [
         run_test("pack_unpack_roundtrip",     t_pack_unpack_roundtrip),
         run_test("proof_bytes_roundtrip",     t_proof_bytes_roundtrip),
-        run_test("proof_size_256",            t_proof_size_256),
+        run_test("proof_size_129",            t_proof_size_129),
         run_test("blob_bit_length_formula",   t_blob_bit_length_formula),
         run_test("blob_structure",            t_blob_structure),
         run_test("zk_generate_and_verify",    t_zk_generate_and_verify),

@@ -386,7 +386,7 @@ def plot_scalability(data: dict) -> None:
     ax.fill_between(frame_counts, zk_only, total_times,
                     alpha=0.3, color=PALETTE["f5"],
                     label="Extract/embed/reconstruct (linear)")
-    ax.plot(frame_counts, total_times, "o-",
+    ax.plot(frame_counts, total_times, "-",
             color=PALETTE["this_work"], linewidth=2.5, label="Total time")
     ax.plot(frame_counts, zk_only, "--",
             color="#888888", linewidth=1.5, label="ZK time only (constant)")

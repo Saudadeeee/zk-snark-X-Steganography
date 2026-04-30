@@ -1,8 +1,8 @@
 # ZK-Stego VideoLevel — IEEE Journal Readiness Plan
 
-Last updated: 2026-04-28  
+Last updated: 2026-04-30  
 Branch: `main`  
-All tests: **32/32 passed**
+All tests: **32/32 passed** (`py -3.12 src/runtest/run_all.py`)
 
 ---
 
@@ -27,17 +27,36 @@ All tests: **32/32 passed**
 - Pipeline: chaos_v5 with real ZK proof payload (147 bytes)
 - `batch_psnr_validate` false-positive fix: removed `"invalid"` from `critical_tokens`
 - Post-embed PSNR guard: retry loop removes bad IDR frames, re-embeds
-- **Results**: foreman 54.84 dB, coastguard 52.54 dB (both >> 40 dB threshold)
+- 2026-04-29 fix: `bits_required` now tracks the true chaos-expanded payload (`1232` bits), not the pre-chaos blob (`1176` bits)
+- 2026-04-29 fix: all-intra validation now uses headroom + refill after bad-IDR removal, so the benchmark reaches the real operating point instead of under-filling
+- 2026-04-30 extension: multi-QP sweep and third-sequence run added to SEC1
+- **Results at 1232/1232 bits embedded**:
+  - Foreman QP18 = 49.45 dB
+  - Foreman QP22 = 54.79 dB
+  - Foreman QP28 = 47.61 dB
+  - Coastguard QP18 = 52.92 dB
+  - Coastguard QP22 = 52.46 dB
+  - Coastguard QP28 = 49.00 dB
+  - Coastguard QP32 = 48.48 dB
+  - Deadline QP22 = 59.03 dB
+- `foreman_q32_g1` is currently **not** sustainable at the same operating point on the available 50-frame asset: after bad-IDR removal only 1165 safe positions remain (<1232)
 - Positions saved to `data/output/sec1_stego_*.h264.positions.json`
 
 #### SEC2 — Capacity (commit `4de999b`)
 - Completely rewritten: now uses pre-validated positions from SEC1 positions.json
+- 2026-04-29 fix: sweep payload now reuses the exact SEC1 real-proof + chaos operating payload, not a placeholder chaos key
+- 2026-04-30 extension: third-sequence capacity run added (`deadline_q22_g1`)
 - 3 new plots: `sec2_psnr_vs_bits.png`, `sec2_capacity_budget.png`, `sec2_capacity_bar.png`
-- **Results**: foreman 0.43% utilization PSNR 54.88 dB; coastguard 0.29% PSNR 51.43 dB
+- **Results**:
+  - Operating point utilization: foreman 0.43%, coastguard 0.29%
+  - Validated pools: foreman 1332 bits, coastguard 1316 bits
+  - Deadline validated pool: 1321 bits, utilization 0.071%
+  - 100% validated-pool sweep: foreman 50.00 dB at 1328 bits, coastguard 52.28 dB at 1312 bits
+  - Deadline 100% validated-pool sweep: 58.76 dB at 1320 bits
 
 #### SEC3 — Methods comparison (commit `8d1167b`, updated `55bf23e`)
 - Cache bust to pick up new SEC1 stego files
-- Corrected PSNR: foreman 44.82→54.84 dB, coastguard 37.60→52.54 dB
+- Corrected PSNR: foreman 44.82→54.79 dB, coastguard 37.60→52.46 dB
 - Added literature disclosure annotation on PSNR comparison plot
 
 #### SEC4 — Security (commit `4de999b`, plot fixes `54bf00f`)
@@ -45,12 +64,13 @@ All tests: **32/32 passed**
 - Replaced `embed_payload` with direct T1-flip simulation (O(n_pos) not O(all_blocks))
 - Vectorized `rs_analysis`: numpy batch ops replace 7.6M-iteration Python loop
 - Operating point uses `positions.json` simulation (avoids stego IDR re-extraction)
-- **Results**: chi_p = 0.991 at ZK operating point (0.43%) → completely undetectable
+- **Results**: chi_p = 0.962 at ZK operating point (0.43%) → still comfortably undetectable at α=0.05
 - Added RS=0 explanation annotation (RS inapplicable to H.264 compressed video)
 - Added chi-square non-monotonic explanation annotation
 
 #### SEC5 — ZK proof properties (pre-existing, stable)
 - 147B payload, 2.4s Groth16 prove, 1.0s verify, 18,680 constraints
+- Design assumption locked: Groth16 proof size is treated as fixed for this system configuration, so payload budgeting should assume a stable proof footprint and only the message/packing/chaos expansion changes total embedded bits
 
 #### SEC6 — Timing (commit `4de999b`, redesign `54bf00f`)
 - New `plot_two_phase()`: side-by-side pre-processing vs operational cost
@@ -69,18 +89,38 @@ All tests: **32/32 passed**
 
 ## Remaining Gaps for IEEE Journal
 
+## Locked Design Assumptions
+
+### Payload sizing
+
+- [x] **Groth16 proof size treated as fixed**
+  - For this repository and circuit setup, Groth16 proof size is assumed stable and should not be treated as a sweep variable
+  - Capacity planning should therefore budget around a fixed proof footprint, with total payload variation coming from:
+    - message length
+    - 4-byte packing header
+    - chaos padding / bit-expansion
+  - Current benchmark operating point remains the chaos-expanded `1232`-bit payload
+
+### Quality floor
+
+- [x] **Primary quality constraint**
+  - Preferred paper constraint: `frame-min PSNR > 35–40 dB`
+  - Current strict benchmark guard remains the stronger setting: `frame-min PSNR >= 40 dB`
+  - Interpretation for future tuning:
+    - `>= 40 dB`: target operating point / strongest claim
+    - `35–40 dB`: acceptable lower band for exploratory GOP/QP tradeoff studies if bitrate savings are needed
+
+---
+
 ### Critical
 
-- [ ] **Multi-QP sweep** — Need to evaluate QP=18, 28, 32 (currently only QP=22)
-  - Encode: `ffmpeg -i data/raw/foreman_cif.y4m -c:v libx264 -profile:v baseline -coder 0 -g 1 -qp 18 -y data/encoded/foreman_cif_q18_g1.h264` (repeat for q28, q32, coastguard)
-  - Run SEC1 for each: measures PSNR vs QP (quality tradeoff curve)
-  - Add to SEC1 plot: PSNR vs QP line chart
-  - Shows: system works across quality range, not just one operating point
+- [ ] **Symmetric QP sweep dataset** — QP sweep is now implemented, but `foreman_q18/q28/q32` assets are only 50 frames while `coastguard` is 300 frames
+  - Preferred next step: prepare longer foreman all-intra QP sweep assets for apples-to-apples comparison
+  - `foreman_q32_g1` currently fails the full 1232-bit operating point under the 40 dB frame guard
 
-- [ ] **Third test sequence** — Currently only foreman + coastguard
-  - Encode akiyo_cif or bus_cif at QP=22 GOP=1
-  - Run SEC1 + SEC2 on it
-  - Shows: generalizability across video content
+- [x] **Third test sequence** — `deadline_q22_g1` is now integrated into SEC1 and SEC2
+  - Result: 59.03 dB at the 1232-bit operating point
+  - Capacity: 1,735,622 raw T1 bits, 1321 validated bits
 
 ### Important
 
@@ -90,6 +130,18 @@ All tests: **32/32 passed**
 
 - [ ] **SEC6 timing split in text** — Paper should quote operational cost separately
   - State clearly: "pre-processing 1496s (one-time, cacheable); per-embed 57s"
+
+- [x] **Environment reproducibility note** — `requirements.txt` added and validated runtime pinned to `py -3.12`
+  - Repo now documents the minimum Python dependencies (`numpy`, `matplotlib`)
+  - Paper/runtime claims should still reference the validated environment: `py -3.12`
+
+- [~] **GOP/QP tradeoff study under fixed payload assumption**
+  - QP recommendation layer is now implemented in `benchmark/sec7_tradeoff.py`
+  - Current fixed-payload recommendations under the strict `frame-min PSNR >= 40 dB` guard:
+    - Foreman: best tested QP = 28
+    - Coastguard: best tested QP = 32
+    - Deadline: best tested QP = 22
+  - Remaining work: add an explicit GOP sweep if the paper must claim bitrate-efficient operating points beyond all-intra
 
 ### Minor
 
@@ -101,10 +153,10 @@ All tests: **32/32 passed**
 
 ## Key Paper Claims (verified by benchmark)
 
-1. **Imperceptibility**: Full-video PSNR > 52 dB at operating point (>> 40 dB threshold)
-2. **Undetectability**: Chi-square p = 0.991 (α=0.05) — indistinguishable from cover
+1. **Imperceptibility**: Full-video PSNR = 54.79 dB (Foreman), 52.46 dB (Coastguard) at the true 1232-bit operating point
+2. **Undetectability**: Chi-square p = 0.962 at operating point (α=0.05) — indistinguishable from cover
 3. **ZK correctness**: Groth16 proof verifies payload authenticity cryptographically
-4. **Capacity**: 286K–427K T1 bits available; we use 0.43% — massive safety margin
+4. **Capacity**: 286K–427K T1 bits available; we use 0.43% / 0.29% — massive safety margin
 5. **PSNR advantage**: +10–17 dB over pixel-domain LSB at same payload size
 6. **RS inapplicability**: RS analysis gives delta=0 for H.264 (paper-reportable finding)
 
@@ -120,11 +172,14 @@ All tests: **32/32 passed**
 | `foreman_cif_q22_g1_1000.h264` | Foreman CIF | 22 | 1 | 1000 | Extended |
 | `coastguard_cif_q22_g1_1000.h264` | Coastguard CIF | 22 | 1 | 1000 | Extended |
 
-**TODO encode:**
-- `foreman_cif_q18_g1.h264` — QP=18
-- `foreman_cif_q28_g1.h264` — QP=28
-- `foreman_cif_q32_g1.h264` — QP=32
-- Same for coastguard
+**Additional encoded assets already present:**
+- `foreman_cif_q18_g1.h264`
+- `foreman_cif_q28_g1.h264`
+- `foreman_cif_q32_g1.h264`
+- `coastguard_cif_q18_g1.h264`
+- `coastguard_cif_q28_g1.h264`
+- `coastguard_cif_q32_g1.h264`
+- `deadline_cif_q22_g1.h264`
 
 ---
 

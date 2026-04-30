@@ -20,16 +20,21 @@ Quick start:
 import logging
 import math
 import os
+from functools import lru_cache
 from dataclasses import dataclass
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from .core.pipeline        import extract_all_idr_blocks, extract_bits_direct
-from .core.stego           import CAVLCSafetyFilter
+from .core.analysis_cache  import load_or_build_video_analysis
+from .core.pipeline        import extract_bits_direct
 from .core.chaos           import ChaosTransformer
-from .bitstream.bitstream_ops import BitstreamReconstructor
 from .zk_proof             import ZKSnarkBridge, unpack, blob_bit_length
+
+
+@lru_cache(maxsize=4)
+def _get_bridge(circuits_dir: str) -> ZKSnarkBridge:
+    return ZKSnarkBridge(circuits_dir)
 
 
 @dataclass
@@ -50,6 +55,9 @@ def verify(
     message_length:      int,
     max_modifications_per_block: int = 1,
     chaos_key: Optional[bytes] = None,
+    use_analysis_cache: bool = True,
+    force_analysis_refresh: bool = False,
+    analysis_cache_dir: Optional[str] = None,
 ) -> VerifyResult:
     """
     Extract and verify the ZK proof embedded in a stego H.264 video.
@@ -72,6 +80,9 @@ def verify(
         max_modifications_per_block: Must match value used in embed() (default 1).
         chaos_key:           Must match the chaos_key passed to embed() — if embed()
                              was called with chaos_key, pass the same value here.
+        use_analysis_cache:  Reuse cached cover-video analysis when available.
+        force_analysis_refresh: Ignore cached cover analysis and rebuild it.
+        analysis_cache_dir:  Optional custom directory for analysis cache files.
 
     Returns:
         VerifyResult with valid flag, message, and proof details.
@@ -92,18 +103,19 @@ def verify(
     if message_length <= 0:
         raise ValueError("message_length must be a positive integer")
 
-    # 1. Parse original video — get embedding position map
-    rec = BitstreamReconstructor()
-    coefficients, frame_verified_data, nC_map, nal_length_map, t1_override_map = \
-        extract_all_idr_blocks(original_video_path, rec)
-
-    # 2. Get safe positions (must be the same order used during embedding)
-    safety = CAVLCSafetyFilter()
-    safe_positions = safety.get_safe_positions(
+    # 1. Parse original video + 2. recover safe positions (runtime cacheable)
+    (
         coefficients,
-        nC_map=nC_map,
-        nal_length_map=nal_length_map,
-        t1_override_map=t1_override_map,
+        frame_verified_data,
+        nC_map,
+        nal_length_map,
+        t1_override_map,
+        safe_positions,
+    ) = load_or_build_video_analysis(
+        original_video_path,
+        use_cache=use_analysis_cache,
+        force_refresh=force_analysis_refresh,
+        cache_dir=analysis_cache_dir,
     )
 
     # 2b. Chaos: Logistic Map — apply the same position shuffle as embed()
@@ -151,7 +163,7 @@ def verify(
         )
 
     # 5. Verify ZK proof
-    bridge         = ZKSnarkBridge(circuits_dir)
+    bridge         = _get_bridge(circuits_dir)
     proof_dict     = bridge.bytes_to_proof(proof_bytes)
     public_signals = bridge._build_public_signals(message, secret_key)
     is_valid       = bridge.verify(proof_dict, public_signals)

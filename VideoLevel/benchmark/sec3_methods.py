@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from benchmark._common import (
-    PALETTE, SEQUENCES, SEQ_LABELS, MARKERS,
+    PALETTE, SEQUENCES, SEQ_LABELS,
     setup_style, save_fig, cache_save, cache_load,
     decode_luma_frames, embed_lsb_pixel,
     OUTPUT_DIR, annotate_literature, load_or_extract_idr_blocks,
@@ -492,7 +492,7 @@ def plot_radar_chart(data: dict) -> None:
 
     for method, vals in scores.items():
         vals_plot = vals + vals[:1]
-        ax.plot(angles, vals_plot, "o-", linewidth=2.0,
+        ax.plot(angles, vals_plot, "-", linewidth=2.0,
                 color=method_colors[method], label=method)
         ax.fill(angles, vals_plot, alpha=0.08, color=method_colors[method])
 

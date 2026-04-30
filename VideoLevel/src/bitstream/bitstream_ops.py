@@ -741,7 +741,8 @@ class BitstreamReconstructor:
                          modified_coefficients: List[Tuple[int, int, List[int]]],
                          output_file: str,
                          max_slices: Optional[int] = 50,
-                         frame_verified_data: Dict = None) -> Dict:
+                         frame_verified_data: Dict = None,
+                         reconstruction_context: Dict = None) -> Dict:
         """
         Reconstruct H.264 video with modified coefficients embedded via CAVLC re-encoding
         
@@ -758,6 +759,8 @@ class BitstreamReconstructor:
             max_slices: Optional cap on IDR slices to process.
                         Default 50 preserves legacy API behavior.
                         Set to None to process all slices.
+            reconstruction_context: Optional cached parse context with:
+                        {nal_units, sps, pps, mb_count_per_slice}
             
         Returns:
             Statistics dict with success status
@@ -766,37 +769,52 @@ class BitstreamReconstructor:
         logger.debug("H.264 VIDEO RECONSTRUCTION WITH CAVLC RE-ENCODING")
         logger.debug(f"{'='*70}")
         
-        # Parse original video
-        parser = H264BitstreamParser(original_file)
-        parser.parse()
-        
-        # Parse SPS and PPS from the video - find the most recent ones before each slice
-        # Store ALL SPS/PPS encountered
-        all_sps = {}  # {sps_id: SPSData}
-        all_pps = {}  # {pps_id: PPSData}
-        
-        for nal in parser.nal_units:
-            if nal.nal_unit_type == 7:  # SPS
-                try:
-                    parsed_sps = self._parse_sps_from_nal(nal)
-                    # SPS ID is parsed but we'll use 0 as default
-                    all_sps[0] = parsed_sps
-                except Exception as e:
-                    logger.error(f"[WARNING] Failed to parse SPS: {e}")
-            elif nal.nal_unit_type == 8:  # PPS
-                try:
-                    parsed_pps = self._parse_pps_from_nal(nal)
-                    # PPS ID is parsed but we'll use 0 as default
-                    all_pps[0] = parsed_pps
-                except Exception as e:
-                    logger.error(f"[WARNING] Failed to parse PPS: {e}")
-        
-        # Use the most recent SPS/PPS (last parsed)
-        self.sps = all_sps.get(0, None)
-        self.pps = all_pps.get(0, None)
-        
+        if reconstruction_context is not None:
+            nal_units = reconstruction_context.get("nal_units", [])
+            self.sps = reconstruction_context.get("sps", None)
+            self.pps = reconstruction_context.get("pps", None)
+            mb_count_per_slice = reconstruction_context.get("mb_count_per_slice", 264)
+        else:
+            # Parse original video
+            parser = H264BitstreamParser(original_file)
+            parser.parse()
+            nal_units = parser.nal_units
+
+            # Parse SPS and PPS from the video - find the most recent ones before each slice
+            # Store ALL SPS/PPS encountered
+            all_sps = {}  # {sps_id: SPSData}
+            all_pps = {}  # {pps_id: PPSData}
+
+            for nal in nal_units:
+                if nal.nal_unit_type == 7:  # SPS
+                    try:
+                        parsed_sps = self._parse_sps_from_nal(nal)
+                        # SPS ID is parsed but we'll use 0 as default
+                        all_sps[0] = parsed_sps
+                    except Exception as e:
+                        logger.error(f"[WARNING] Failed to parse SPS: {e}")
+                elif nal.nal_unit_type == 8:  # PPS
+                    try:
+                        parsed_pps = self._parse_pps_from_nal(nal)
+                        # PPS ID is parsed but we'll use 0 as default
+                        all_pps[0] = parsed_pps
+                    except Exception as e:
+                        logger.error(f"[WARNING] Failed to parse PPS: {e}")
+
+            # Use the most recent SPS/PPS (last parsed)
+            self.sps = all_sps.get(0, None)
+            self.pps = all_pps.get(0, None)
+
+            if self.sps:
+                mb_count_per_slice = (
+                    (self.sps.pic_width_in_mbs_minus1 + 1) *
+                    (self.sps.pic_height_in_map_units_minus1 + 1)
+                )
+            else:
+                mb_count_per_slice = 264  # CIF default: 22x12
+
         logger.debug(f"\n[1] Parsed original video:")
-        logger.debug(f"    NAL units: {len(parser.nal_units)}")
+        logger.debug(f"    NAL units: {len(nal_units)}")
         logger.debug(f"    Modified blocks: {len(modified_coefficients)}")
         if self.sps:
             logger.debug(f"    SPS parsed: log2_max_frame_num={self.sps.log2_max_frame_num_minus4 + 4}")
@@ -807,6 +825,13 @@ class BitstreamReconstructor:
         coeff_map = {}
         for mb_idx, block_idx, coeffs in modified_coefficients:
             coeff_map[(mb_idx, block_idx)] = coeffs
+
+        # Bucket modifications by slice start to avoid rescanning the entire map
+        # for every IDR slice during reconstruction.
+        mods_by_slice_start: Dict[int, Dict[Tuple[int, int], List[int]]] = {}
+        for (mb_idx, block_idx), coeffs in coeff_map.items():
+            slice_start = (mb_idx // mb_count_per_slice) * mb_count_per_slice
+            mods_by_slice_start.setdefault(slice_start, {})[(mb_idx, block_idx)] = coeffs
         
         # Log statistics
         if coeff_map:
@@ -821,19 +846,9 @@ class BitstreamReconstructor:
         slices_with_modifications = 0
         global_mb_idx = 0
         
-        # CRITICAL: Derive per-slice MB count from SPS (deterministic, matches TraceableCAVLCParser)
-        # Both the embedder (test) and reconstructor must use the SAME count for all slices.
-        # TraceableCAVLCParser uses max_mbs_in_frame derived the same way.
-        if self.sps:
-            mb_count_per_slice = (
-                (self.sps.pic_width_in_mbs_minus1 + 1) *
-                (self.sps.pic_height_in_map_units_minus1 + 1)
-            )
-        else:
-            mb_count_per_slice = 264  # CIF default: 22x12
         logger.debug(f"    [MB_COUNT] Per-slice MB count from SPS: {mb_count_per_slice}")
         
-        for nal in parser.nal_units:
+        for nal in nal_units:
             # Copy non-slice NALs and P/B-Frame slices as-is (SPS, PPS, SEI, P-slices, B-slices)
             # ONLY process I-Frames (NAL type 5) for coefficient modification
             if nal.nal_unit_type != 5:
@@ -853,19 +868,16 @@ class BitstreamReconstructor:
                 mb_count = mb_count_per_slice
                 logger.debug(f"    Slice {slices_reconstructed} (Type {nal.nal_unit_type}): {mb_count} MBs, checking for modifications...")
                 
-                # Check if slice has modifications
-                slice_has_mods = any(
-                    global_mb_idx <= key[0] < global_mb_idx + mb_count
-                    for key in coeff_map.keys()
-                )
-                
-                if slice_has_mods:
+                slice_mods = mods_by_slice_start.get(global_mb_idx)
+
+                if slice_mods:
                     # Re-encode slice with modified coefficients
-                    mods_count = sum(1 for k in coeff_map if global_mb_idx <= k[0] < global_mb_idx + mb_count)
+                    mods_count = len(slice_mods)
                     logger.debug(f"    Slice {slices_reconstructed}: Re-encoding with {mods_count} modifications")
                     modified_nal, actual_mb_count = self._reconstruct_slice_with_cavlc(
-                        nal, coeff_map, global_mb_idx,
-                        frame_verified_data=frame_verified_data
+                        nal, slice_mods, global_mb_idx,
+                        frame_verified_data=frame_verified_data,
+                        expected_num_mbs_in_slice=mb_count,
                     )
                     
                     # Use SPS count (not parsed actual) for consistency
@@ -918,7 +930,8 @@ class BitstreamReconstructor:
                                       original_nal: NALUnit,
                                       coeff_map: Dict,
                                       global_mb_idx: int,
-                                      frame_verified_data: Dict = None):
+                                      frame_verified_data: Dict = None,
+                                      expected_num_mbs_in_slice: Optional[int] = None):
         """
         Reconstruct slice with modified CAVLC coefficients
         
@@ -939,33 +952,50 @@ class BitstreamReconstructor:
             # The header's first_mb_in_slice can be slice-group relative, NOT global frame index.
             # We must TRUST the accumulated global_mb_idx parameter passed from reconstruct_video.
 
-            # Step 1: Extract ALL coefficients from this slice
-            # CRITICAL FIX: Use TraceableCAVLCParser instead of SimpleCAVLCExtractor
-            # SimpleCAVLCExtractor has a bug where it returns all-zero coefficients for P-slices
-            # because it only parses CBP for I-slices (slice_type 2,7), not P-slices (slice_type 0,5).
-            # This caused massive zero-preservation violations in Frames 1+.
-            
-            parser = TraceableCAVLCParser()
-            parsed_result = parser.extract_with_offsets(
-                original_nal,
-                self.sps,
-                self.pps,
-                global_mb_idx=global_mb_idx
-            )
-            
-            if 'blocks' not in parsed_result:
-                logger.error(f"        [ERROR] No blocks extracted from slice")
-                return (original_nal, None)  # Return tuple
-            
-            blocks = parsed_result['blocks']
-            mb_metadata = parsed_result.get('mb_metadata', {})
+            # Step 1: Reuse the embedder's verified slice data whenever available.
+            # This avoids an expensive TraceableCAVLCParser pass during reconstruction
+            # and keeps patching aligned with the exact block/offset view used upstream.
+            parsed_result = None
+            if frame_verified_data and global_mb_idx in frame_verified_data:
+                verified_offsets, verified_blocks = frame_verified_data[global_mb_idx]
+                blocks = {
+                    (mb - global_mb_idx, blk): list(coeffs)
+                    for (mb, blk), coeffs in verified_blocks.items()
+                    if mb >= global_mb_idx
+                }
+                pre_offsets = {
+                    (mb - global_mb_idx, blk): v
+                    for (mb, blk), v in verified_offsets.items()
+                    if mb >= global_mb_idx
+                }
+                pre_blocks = dict(blocks)
+                num_mbs_in_slice = expected_num_mbs_in_slice or (
+                    len({mb for mb, _ in blocks.keys()}) if blocks else 1
+                )
+            else:
+                # Fallback: parse the slice when verified data is unavailable.
+                parser = TraceableCAVLCParser()
+                parsed_result = parser.extract_with_offsets(
+                    original_nal,
+                    self.sps,
+                    self.pps,
+                    global_mb_idx=global_mb_idx
+                )
 
-            # CRITICAL: Use the actual MB count including SKIP MBs from TraceableCAVLCParser.
-            # Do NOT compute from len(blocks)//24 — SKIP MBs add blocks but don't advance global_mb_idx the same way.
-            num_mbs_in_slice = parsed_result.get('num_mbs', None)
-            if num_mbs_in_slice is None or num_mbs_in_slice == 0:
-                # Fallback: count unique MB indices in blocks dict
-                num_mbs_in_slice = len(set(mb for mb, _ in blocks.keys())) if blocks else 1
+                if 'blocks' not in parsed_result:
+                    logger.error(f"        [ERROR] No blocks extracted from slice")
+                    return (original_nal, None)  # Return tuple
+
+                blocks = parsed_result['blocks']
+
+                # CRITICAL: Use the actual MB count including SKIP MBs from TraceableCAVLCParser.
+                # Do NOT compute from len(blocks)//24 — SKIP MBs add blocks but don't advance global_mb_idx the same way.
+                num_mbs_in_slice = parsed_result.get('num_mbs', None)
+                if num_mbs_in_slice is None or num_mbs_in_slice == 0:
+                    # Fallback: count unique MB indices in blocks dict
+                    num_mbs_in_slice = len(set(mb for mb, _ in blocks.keys())) if blocks else 1
+                pre_offsets = parsed_result.get('offsets', {})
+                pre_blocks = parsed_result.get('blocks', {})
             
             # Step 2: Apply modifications to create combined blocks
             # CRITICAL FIX: Adjust MB indexing - coeff_map uses global indexing (starts from 0, 1, 2...)
@@ -1052,26 +1082,6 @@ class BitstreamReconstructor:
             # If frame_verified_data is available for this global_mb_idx,
             # it means the embedder pre-validated the offsets from its own parse.
             # Use those instead of the reconstructor's potentially divergent re-parse.
-            pre_offsets = None
-            pre_blocks = None
-            
-            if frame_verified_data and global_mb_idx in frame_verified_data:
-                verified_offsets, verified_blocks = frame_verified_data[global_mb_idx]
-                pre_offsets = {
-                    (mb - global_mb_idx, blk): v
-                    for (mb, blk), v in verified_offsets.items()
-                    if mb >= global_mb_idx
-                }
-                pre_blocks = {
-                    (mb - global_mb_idx, blk): v
-                    for (mb, blk), v in verified_blocks.items()
-                    if mb >= global_mb_idx
-                }
-            else:
-                # Fallback: use reconstructor's own parse results (may diverge from embedder's)
-                pre_offsets = parsed_result.get('offsets', {})
-                pre_blocks = parsed_result.get('blocks', {})
-            
             modified_nal = patcher.patch_slice(
                 original_nal,
                 modifications,
