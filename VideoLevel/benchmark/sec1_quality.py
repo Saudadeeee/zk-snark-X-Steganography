@@ -18,7 +18,7 @@ import matplotlib.ticker as ticker
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from benchmark._common import (
-    PALETTE, SEQUENCES, SEQ_LABELS, LINESTYLES,
+    PALETTE, SEQUENCES, SEQ_LABELS, MARKERS, LINESTYLES,
     setup_style, save_fig, cache_save, cache_load,
     decode_luma_frames, psnr_per_frame, ssim_per_frame, psnr,
     compute_quality_streaming,
@@ -64,14 +64,13 @@ FALLBACK_MIN_BITS = 64
 QUALITY_TARGET_PSNR_FULL_DB = 41.0
 QUALITY_TARGET_PSNR_FRAME_MIN_DB = float(os.environ.get("SEC1_QUALITY_TARGET_PSNR_FRAME_MIN_DB", "40.0"))
 QUALITY_ENFORCE_TARGET_STRICT = True
+QUALITY_STRICT_ALLOW_BEST_EFFORT = os.environ.get("SEC1_STRICT_ALLOW_BEST_EFFORT", "1") == "1"
 QUALITY_ENFORCE_FRAME_MIN_PSNR = os.environ.get("SEC1_ENFORCE_FRAME_MIN_PSNR", "1") == "1"
 QUALITY_TEMPORAL_STRIDE = max(1, int(os.environ.get("SEC1_QUALITY_TEMPORAL_STRIDE", "4")))
 QUALITY_TARGET_BITS_DEFAULT = len(PAYLOAD) * 8
 
 CIF_MB_COUNT = 396   # 22x18 (same for all CIF benchmark sequences)
 
-# All-intra QP=22 sequences: no P-frame cascade → full 1176-bit payload at >40 dB PSNR.
-# Legacy GOP=8 sequences kept as optional for comparison.
 DEFAULT_QUALITY_SEQUENCE_NAMES = ("foreman_q22_g1", "coastguard_q22_g1")
 QUALITY_SEQUENCES = {
     k: SEQUENCES[k]
@@ -255,6 +254,7 @@ def _sec1_cache_fingerprint() -> dict[str, object]:
         "quality_target_psnr_full_db": QUALITY_TARGET_PSNR_FULL_DB,
         "quality_target_psnr_frame_min_db": QUALITY_TARGET_PSNR_FRAME_MIN_DB,
         "quality_enforce_target_strict": QUALITY_ENFORCE_TARGET_STRICT,
+        "quality_strict_allow_best_effort": QUALITY_STRICT_ALLOW_BEST_EFFORT,
         "quality_enforce_frame_min_psnr": QUALITY_ENFORCE_FRAME_MIN_PSNR,
         "quality_temporal_stride": QUALITY_TEMPORAL_STRIDE,
         "quality_bits_per_idr": QUALITY_BITS_PER_IDR,
@@ -958,7 +958,8 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
                 chosen_min_frame_psnr = min_frame_psnr_probe
                 chosen_target_met = True
         elif frame_guard_ok and psnr_probe > best_fallback_psnr:
-            # Best-effort fallback (used only when strict mode is disabled).
+            # Best-effort fallback (used when strict mode is disabled or when
+            # strict best-effort is explicitly enabled).
             best_fallback_bits = probe_bits_exact
             best_fallback_psnr = psnr_probe
             best_fallback_min_frame_psnr = min_frame_psnr_probe
@@ -968,12 +969,18 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
         chosen_psnr = best_fallback_psnr
         chosen_min_frame_psnr = best_fallback_min_frame_psnr
     elif not chosen_target_met and QUALITY_ENFORCE_TARGET_STRICT:
-        # Strict mode: no positive payload budget can satisfy target quality,
-        # so use explicit zero-bit fallback and report it as fallback mode.
-        chosen_bits = 0
-        chosen_psnr = float("inf")
-        chosen_min_frame_psnr = float("inf")
-        validation_mode = "round_robin_patchable_quality_budget_adaptive_strict_zero_fallback"
+        # Strict mode: no payload budget met the target. If allowed, pick the
+        # best-effort budget; otherwise fall back to zero-bit embedding.
+        if QUALITY_STRICT_ALLOW_BEST_EFFORT and best_fallback_bits > 0:
+            chosen_bits = best_fallback_bits
+            chosen_psnr = best_fallback_psnr
+            chosen_min_frame_psnr = best_fallback_min_frame_psnr
+            validation_mode = "round_robin_patchable_quality_budget_adaptive_strict_best_effort_fallback"
+        else:
+            chosen_bits = 0
+            chosen_psnr = float("inf")
+            chosen_min_frame_psnr = float("inf")
+            validation_mode = "round_robin_patchable_quality_budget_adaptive_strict_zero_fallback"
 
     if probe_path.exists():
         probe_path.unlink(missing_ok=True)
@@ -1175,6 +1182,7 @@ def plot_psnr_timeline(data: dict) -> None:
         psnr_plot = [min(p, 60.0) for p in psnr_vals]
         ax.plot(frames, psnr_plot,
                 color=list(PALETTE.values())[i % len(PALETTE)],
+                marker=MARKERS[i % len(MARKERS)], markevery=5,
                 linestyle=LINESTYLES[i % len(LINESTYLES)],
                 label=label, alpha=0.9)
 
@@ -1213,6 +1221,7 @@ def plot_ssim_timeline(data: dict) -> None:
         frames    = list(range(len(ssim_vals)))
         ax.plot(frames, ssim_vals,
                 color=list(PALETTE.values())[i % len(PALETTE)],
+                marker=MARKERS[i % len(MARKERS)], markevery=5,
                 linestyle=LINESTYLES[i % len(LINESTYLES)],
                 label=label, alpha=0.9)
 
@@ -1241,8 +1250,7 @@ def plot_avg_quality_bar(data: dict) -> None:
 
     seqs   = [s for s in SEQ_LABELS.keys() if s in data]  # only sequences we measured
     labels = [SEQ_LABELS[s].split(" ")[0] for s in seqs]
-    palette_values = list(PALETTE.values())
-    colors = [palette_values[i % len(palette_values)] for i, s in enumerate(SEQ_LABELS.keys()) if s in data]
+    colors = [list(PALETTE.values())[i] for i, s in enumerate(SEQ_LABELS.keys()) if s in data]
     x      = np.arange(len(seqs))
 
     def _safe_float(seq: str, key: str, default: float) -> float:
@@ -1329,6 +1337,7 @@ def plot_psnr_vs_qp(data: dict) -> None:
         ax.plot(
             qps, psnr_vals,
             color=colors[i % len(colors)],
+            marker=MARKERS[i % len(MARKERS)],
             linestyle=LINESTYLES[i % len(LINESTYLES)],
             linewidth=2.2,
             label=label,
