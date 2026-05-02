@@ -1,6 +1,6 @@
 # ZK-Stego VideoLevel — IEEE Journal Readiness Plan
 
-Last updated: 2026-04-30  
+Last updated: 2026-05-02  
 Branch: `main`  
 All tests: **32/32 passed** (`py -3.12 src/runtest/run_all.py`)
 
@@ -127,6 +127,16 @@ All tests: **32/32 passed** (`py -3.12 src/runtest/run_all.py`)
 - [ ] **Error bars / confidence intervals** — Multiple runs per sequence
   - At least 3 runs, report mean ± std for PSNR and chi_p
   - Required for statistical validity in IEEE TIP/TIFS
+
+- [ ] **SEC1 auditability gaps** — Persist and report quality guard details
+  - Record the effective frame-min PSNR threshold in `benchmark/results/sec1_quality_data.json`
+    - Fields: `validation_threshold_db`, `validation_threshold_db_effective` (currently null)
+  - Report saturated/inf PSNR frame ratio alongside averages to avoid masking artifacts
+    - Field: `psnr_inf_frame_count` + total frame count per sequence
+  - Track headroom: min PSNR margin above the 40 dB gate is currently ~0.6 dB
+    - Scope: foreman_q22_g1 (40.67 dB) and coastguard_q22_g1 (40.57 dB) in 2026-05-01 run
+  - Note: running sec1 directly does not generate `benchmark/results/_run_metadata.json`
+    - Use `benchmark/safe_benchmark_runner.py` to emit run metadata
 
 - [ ] **SEC6 timing split in text** — Paper should quote operational cost separately
   - State clearly: "pre-processing 1496s (one-time, cacheable); per-embed 57s"
