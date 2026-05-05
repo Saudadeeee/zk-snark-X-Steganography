@@ -382,20 +382,30 @@ class CAVLCSafetyFilter:
             # Detect trailing ones for this block
             trailing_positions = self._detect_trailing_ones(coeffs)
 
-            # Check each coefficient position
-            for coeff_idx in range(len(coeffs)):
-                # Skip DC if requested
+            # Cheap per-block prefilter: collect only positions that can possibly
+            # survive rules 1/2/4 before doing any encode-length verification.
+            candidate_indices = []
+            for coeff_idx, original in enumerate(coeffs):
                 if skip_dc and coeff_idx == 0:
                     continue
-
-                # Skip zeros (Rule 1: zero-preservation)
-                if coeffs[coeff_idx] == 0:
+                if original == 0:
                     continue
-
-                # Skip trailing ones (Rule 2) — these are handled separately by the
-                # sign-bit loop below (uses ~coeff_idx marker).
                 if coeff_idx in trailing_positions:
                     continue
+
+                abs_val = abs(original)
+                new_abs = (abs_val & ~1) | ((abs_val & 1) ^ 1)
+                if min(abs_val, new_abs) < self.min_safe_magnitude:
+                    continue
+                if new_abs == 0:
+                    continue
+                candidate_indices.append(coeff_idx)
+
+            if not candidate_indices:
+                continue
+
+            # Check each coefficient position
+            for coeff_idx in candidate_indices:
 
                 # Calculate LSB-flipped value
                 original = coeffs[coeff_idx]
@@ -403,14 +413,6 @@ class CAVLCSafetyFilter:
                 abs_val = abs(original)
                 new_abs = (abs_val & ~1) | ((abs_val & 1) ^ 1)  # Flip LSB
                 new_val = sign * new_abs
-
-                # Symmetric magnitude check (both orig and mod must be >= min_safe)
-                if min(abs_val, new_abs) < self.min_safe_magnitude:
-                    continue
-
-                # Ensure not creating zero
-                if new_val == 0:
-                    continue
 
                 # Rule 3: Verify bit-length preservation via ACTUAL CAVLC encoding
                 if self.enable_bit_length:

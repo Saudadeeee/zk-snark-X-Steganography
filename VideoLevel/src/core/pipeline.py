@@ -19,7 +19,8 @@ from ..bitstream.cavlc         import CAVLCDecoder
 from .stego                    import sort_blocks_interleaved, _CIF_MB_COUNT
 
 def extract_all_idr_blocks(video_path: str, reconstructor: BitstreamReconstructor,
-                            verbose: bool = False):
+                            verbose: bool = False,
+                            parser: H264BitstreamParser | None = None):
     """
     Parse ALL IDR NAL units from video_path using TraceableCAVLCParser.
 
@@ -31,8 +32,9 @@ def extract_all_idr_blocks(video_path: str, reconstructor: BitstreamReconstructo
     nal_length_map     : {(mb_global, blk_idx): bit_length}
     t1_override_map    : {(mb_global, blk_idx): trailing_ones_override}
     """
-    parser = H264BitstreamParser(video_path)
-    parser.parse()
+    if parser is None:
+        parser = H264BitstreamParser(video_path)
+        parser.parse()
 
     sps = pps = None
     for nal in parser.nal_units:
@@ -66,7 +68,11 @@ def extract_all_idr_blocks(video_path: str, reconstructor: BitstreamReconstructo
             blocks  = result.get('blocks',  {})
             offsets = result.get('offsets', {})
 
-            luma_off = {(ml, bi): v for (ml, bi), v in offsets.items() if bi < 16}
+            luma_off = {
+                (ml, bi): v
+                for (ml, bi), v in offsets.items()
+                if bi < 16 and any(c != 0 for c in blocks.get((ml, bi), ()))
+            }
             unpatch, matched = patcher.get_unpatchable_blocks(nal.rbsp_byte, luma_off)
 
             idr_coeffs = []

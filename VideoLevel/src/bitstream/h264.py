@@ -1351,7 +1351,10 @@ class TraceableCAVLCParser:
                                         'start_bit': block_start_bit,
                                         'end_bit': block_end_bit,
                                         'bit_length': block_end_bit - block_start_bit,
-                                        'nC': nC  # CRITICAL: Store nC for BitstreamPatcher
+                                        'nC': nC,  # CRITICAL: Store nC for BitstreamPatcher
+                                        'total_coeffs': int(block.total_coeffs),
+                                        'trailing_ones': int(block.trailing_ones),
+                                        'max_num_coeff': int(max_coeffs),
                                     }
                                 # else: bit_length==0 ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ VLC decode failure (reader rewound) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â no valid offset
                                 

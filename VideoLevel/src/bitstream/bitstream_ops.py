@@ -426,12 +426,21 @@ class BitstreamPatcher:
     
     def _bits_to_bytes(self, bits: List[int]) -> bytes:
         """Pack list of 0/1 ints into bytes (MSB first), padding to byte boundary."""
-        padded = bits + [0] * ((8 - len(bits) % 8) % 8)
-        result = bytearray()
-        for i in range(0, len(padded), 8):
-            byte = sum(padded[i + j] << (7 - j) for j in range(8))
-            result.append(byte)
-        return bytes(result)
+        if isinstance(bits, np.ndarray):
+            arr = bits.astype(np.uint8, copy=False)
+        else:
+            arr = np.fromiter(bits, dtype=np.uint8)
+
+        if arr.size == 0:
+            return b""
+
+        pad = (-arr.size) % 8
+        if pad:
+            padded = np.empty(arr.size + pad, dtype=np.uint8)
+            padded[:arr.size] = arr
+            padded[arr.size:] = 0
+            arr = padded
+        return np.packbits(arr).tobytes()
 
     def get_unpatchable_blocks(self, rbsp_bytes: bytes, block_offsets: Dict):
         """
@@ -459,8 +468,10 @@ class BitstreamPatcher:
                             for patchable blocks — the bit-exact-verified nC and coefficients.
         """
         rbsp_bits = BitArray(rbsp_bytes)
+        rbsp_raw_bits = rbsp_bits.bits
         unpatchable = set()
         matched_info = {}
+        retro_pad_bits = np.zeros(64, dtype=np.uint8)
 
         # Build end_to_block reverse lookup for retroactive boundary check (second pass).
         end_to_block_retro = {}
@@ -477,9 +488,9 @@ class BitstreamPatcher:
             if start_bit is None or end_bit is None or original_length is None or original_length <= 0:
                 continue
 
-            actual_nal_bits = list(rbsp_bits[start_bit:end_bit])
+            actual_nal_bits = rbsp_raw_bits[start_bit:end_bit]
             lookahead_end = min(end_bit + 64, len(rbsp_bits))
-            raw_nal_bytes = self._bits_to_bytes(list(rbsp_bits[start_bit:lookahead_end]))
+            raw_nal_bytes = self._bits_to_bytes(rbsp_raw_bits[start_bit:lookahead_end])
 
             # Prefer TraceableCAVLCParser's pre-computed nC (matches FFmpeg's H.264 spec nC)
             # CRITICAL: Only use tracer_nC when available — fallbacks cause false positives.
@@ -490,30 +501,31 @@ class BitstreamPatcher:
                 nC_scan_order = [0, 2, 4, 6, 8]
 
             found = False
+            max_num_coeff = offset_data.get('max_num_coeff', 16)
             for nC_try in nC_scan_order:
                 try:
                     reader = BitstreamReader(raw_nal_bytes)
                     dec = CAVLCDecoder(reader)
-                    block = dec.decode_block_cavlc(nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16))
+                    block = dec.decode_block_cavlc(nC_try, max_num_coeff=max_num_coeff)
                     consumed = reader.pos
                     if consumed != original_length:
                         continue
                     nal_coeffs = list(block.levels)
                     # Standard encode (encoder picks max trailing-ones)
+                    t1_decoded = block.trailing_ones
                     candidate = self._encode_coefficients_to_bits(
-                        nal_coeffs, nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16))
-                    if len(candidate) == original_length and list(candidate) == actual_nal_bits:
+                        nal_coeffs, nC_try, max_num_coeff=max_num_coeff)
+                    if len(candidate) == original_length and np.array_equal(np.asarray(candidate, dtype=np.uint8), actual_nal_bits):
                         found = True
-                        matched_info[key] = (nC_try, nal_coeffs, None)  # no T1 override needed
+                        matched_info[key] = (nC_try, nal_coeffs, None)
                         break
                     # Retry with the decoded trailing_ones override
-                    t1_decoded = block.trailing_ones
                     candidate_t1 = self._encode_coefficients_to_bits(
-                        nal_coeffs, nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16),
+                        nal_coeffs, nC_try, max_num_coeff=max_num_coeff,
                         override_trailing_ones=t1_decoded)
-                    if len(candidate_t1) == original_length and list(candidate_t1) == actual_nal_bits:
+                    if len(candidate_t1) == original_length and np.array_equal(np.asarray(candidate_t1, dtype=np.uint8), actual_nal_bits):
                         found = True
-                        matched_info[key] = (nC_try, nal_coeffs, t1_decoded)  # T1 override required
+                        matched_info[key] = (nC_try, nal_coeffs, t1_decoded)
                         break
                 except Exception as e:
                     logger.debug("nC candidate %d failed for %s: %s", nC_try, key, e)
@@ -539,7 +551,7 @@ class BitstreamPatcher:
             if start_bit_b is None or bit_length_b is None or bit_length_b <= 0:
                 continue
 
-            b_orig_bits = list(rbsp_bits[start_bit_b:end_bit_b])
+            b_orig_bits = rbsp_raw_bits[start_bit_b:end_bit_b].copy()
 
             retroactively_constrained = False
 
@@ -558,14 +570,15 @@ class BitstreamPatcher:
                     break
 
                 # ancestor A's own bits + intermediate bits between A's end and B's start
-                anc_bits = list(rbsp_bits[anc_start:chain_boundary])         # A's encoding
-                intermediate = list(rbsp_bits[chain_boundary:start_bit_b])   # gap bits (0 when direct)
+                anc_bits = rbsp_raw_bits[anc_start:chain_boundary]         # A's encoding
+                intermediate = rbsp_raw_bits[chain_boundary:start_bit_b]   # gap bits (0 when direct)
 
                 # Test each single-bit flip of B against ancestor A
                 for p in range(bit_length_b):
-                    b_flipped = b_orig_bits[:]
+                    b_flipped = b_orig_bits.copy()
                     b_flipped[p] ^= 1
-                    combined = self._bits_to_bytes(anc_bits + intermediate + b_flipped + [0] * 64)
+                    combined_bits = np.concatenate((anc_bits, intermediate, b_flipped, retro_pad_bits))
+                    combined = self._bits_to_bytes(combined_bits)
                     try:
                         rr = BitstreamReader(combined)
                         rd = CAVLCDecoder(rr)

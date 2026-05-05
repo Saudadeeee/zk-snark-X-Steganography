@@ -127,11 +127,24 @@ All tests: **32/32 passed** (`py -3.12 src/runtest/run_all.py`)
 
 ### Important
 
+- [~] **Runtime manifest / sidecar hardening**
+  - Goal: make the public embed/verify APIs less benchmark-specific and less brittle than the original cover-analysis-only path
+  - 2026-05-05: `embed()` now emits `output.h264.positions.json` and `output.h264.meta.json` containing the final operating positions and payload bit count
+  - 2026-05-05: `verify()` now auto-loads those sidecars when available, so verified extraction can follow the real operating positions without benchmark glue code
+  - Remaining work:
+    - define an explicit versioned manifest schema
+    - optionally sign the manifest or bind it to the proof/public signals
+    - decide whether the manifest is only for benchmark/runtime convenience or part of the supported product interface
+
+- [ ] **Near-blind verification mode**
+  - Current strongest verify path is still effectively cover-assisted: extraction remains tied to original-video analysis unless a trusted sidecar is present
+  - To make the system genuinely stronger, add a clearly named near-blind mode that can reconstruct or authenticate extraction positions with less dependency on the original cover analysis
+
 - [ ] **Error bars / confidence intervals** — Multiple runs per sequence
   - At least 3 runs, report mean ± std for PSNR and chi_p
   - Required for statistical validity in IEEE TIP/TIFS
 
-- [ ] **SEC1 auditability gaps** — Persist and report quality guard details
+- [~] **SEC1 auditability gaps** — Persist and report quality guard details
   - Record the effective frame-min PSNR threshold in `benchmark/results/sec1_quality_data.json`
     - Fields: `validation_threshold_db`, `validation_threshold_db_effective` (currently null)
   - Report saturated/inf PSNR frame ratio alongside averages to avoid masking artifacts
@@ -140,6 +153,8 @@ All tests: **32/32 passed** (`py -3.12 src/runtest/run_all.py`)
     - Scope: foreman_q22_g1 (40.67 dB) and coastguard_q22_g1 (40.57 dB) in 2026-05-01 run
   - Note: running sec1 directly does not generate `benchmark/results/_run_metadata.json`
     - Use `benchmark/safe_benchmark_runner.py` to emit run metadata
+  - 2026-05-05: sec1 now records `frame_count`, `modified_frame_count`, `min_modified_frame_psnr`, `verify_valid`, and `verify_message_match`
+  - Remaining work: persist a per-sequence reason log when positions are pruned or headroom is reduced
 
 - [ ] **SEC6 timing split in text** — Paper should quote operational cost separately
   - State clearly: "pre-processing 1496s (one-time, cacheable); per-embed 57s"
@@ -166,10 +181,10 @@ All tests: **32/32 passed** (`py -3.12 src/runtest/run_all.py`)
 
 ## Key Paper Claims (verified by benchmark)
 
-1. **Imperceptibility**: Full-video PSNR = 54.79 dB (Foreman), 52.46 dB (Coastguard) at the true 1232-bit operating point
+1. **Imperceptibility**: all current SEC1 operating points embed the true `1232`-bit payload with `min_modified_frame_psnr > 40 dB`
 2. **Undetectability**: Chi-square p = 0.962 at operating point (α=0.05) — indistinguishable from cover
 3. **ZK correctness**: Groth16 proof verifies payload authenticity cryptographically
-4. **Capacity**: 286K–427K T1 bits available; we use 0.43% / 0.29% — massive safety margin
+4. **Capacity**: operating-point utilization remains tiny (roughly `0.029%` to `0.430%` of raw T1 capacity across the tested all-intra set)
 5. **PSNR advantage**: +10–17 dB over pixel-domain LSB at same payload size
 6. **RS inapplicability**: RS analysis gives delta=0 for H.264 (paper-reportable finding)
 
@@ -219,6 +234,21 @@ ffmpeg -i data/raw/coastguard_cif.y4m -c:v libx264 -profile:v baseline -coder 0 
 This section tracks all currently identified improvements that can make the
 system stronger, broader, faster, and easier to defend in benchmark or paper
 form. Groth16 remains fixed by design.
+
+### Highest-impact next steps for real system strength
+
+- [ ] **Decouple verification from full cover re-analysis**
+  - Strongest practical improvement remaining
+  - Current public API is now sidecar-aware, but still not truly blind
+  - A robust authenticated manifest or near-blind derivation would materially improve deployability
+
+- [ ] **Make runtime cost acceptable on new videos**
+  - `extract_all_idr_blocks()` remains the dominant bottleneck by far
+  - The system will not feel strong in practice until cold-start analysis drops by at least one order of magnitude
+
+- [ ] **Broaden beyond H.264 all-intra CAVLC**
+  - The current operating regime is strong but narrow
+  - Real strength requires either inter-coded H.264 support that survives drift, or a next-generation path for HEVC/H.265 and CABAC-class codecs
 
 ### Locked proof direction
 

@@ -69,10 +69,12 @@ def _video_fingerprint(video_path: str | Path) -> dict[str, Any]:
     }
 
 
-def _build_reconstruction_context(video_path: str | Path) -> dict[str, Any]:
+def _build_reconstruction_context(video_path: str | Path,
+                                  parser: H264BitstreamParser | None = None) -> dict[str, Any]:
     vp = Path(video_path)
-    parser = H264BitstreamParser(str(vp))
-    parser.parse()
+    if parser is None:
+        parser = H264BitstreamParser(str(vp))
+        parser.parse()
 
     rec = BitstreamReconstructor()
     sps = None
@@ -132,9 +134,12 @@ def load_or_build_video_analysis(
         except (OSError, pickle.PickleError, EOFError, AttributeError, ValueError):
             pass
 
+    parser = H264BitstreamParser(str(vp))
+    parser.parse()
+
     rec = BitstreamReconstructor()
     coefficients, frame_verified_data, nC_map, nal_length_map, t1_override_map = (
-        extract_all_idr_blocks(str(vp), rec)
+        extract_all_idr_blocks(str(vp), rec, parser=parser)
     )
 
     safety = CAVLCSafetyFilter()
@@ -159,6 +164,16 @@ def load_or_build_video_analysis(
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             with open(cache_path, "wb") as f:
                 pickle.dump({"fingerprint": fingerprint, "data": data}, f, protocol=pickle.HIGHEST_PROTOCOL)
+        except OSError:
+            pass
+
+        # Also persist reconstruction context from the same parsed bitstream so
+        # cold-start embed paths do not need to parse the video a second time.
+        try:
+            recon_path = cache_path.with_name(cache_path.stem + "_recon.pkl")
+            recon_data = _build_reconstruction_context(vp, parser=parser)
+            with open(recon_path, "wb") as f:
+                pickle.dump({"fingerprint": fingerprint, "data": recon_data}, f, protocol=pickle.HIGHEST_PROTOCOL)
         except OSError:
             pass
 

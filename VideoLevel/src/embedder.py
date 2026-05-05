@@ -17,6 +17,7 @@ Quick start:
 
 import logging
 import os
+import json
 import shutil
 from functools import lru_cache
 from dataclasses import dataclass
@@ -49,6 +50,7 @@ class EmbedResult:
     proof_dict:          dict          # Raw snarkjs proof dict
     public_dict:         dict          # Public signals dict (for verification)
     chaos_original_bits: Optional[int] = None  # Set when chaos_key used (orig bit count)
+    used_positions:      Optional[list[tuple[int, int, int]]] = None  # Final positions actually used for embedding
 
 
 def embed(
@@ -207,6 +209,11 @@ def embed(
             available_bits=bits_embedded,
         )
 
+    used_positions = [
+        (int(mb), int(blk), int(cidx))
+        for mb, blk, cidx in getattr(embedder, "last_used_safe_positions", [])
+    ]
+
     # 6. Reconstruct stego video
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     reconstruction_context = load_or_build_reconstruction_context(
@@ -223,6 +230,26 @@ def embed(
         reconstruction_context=reconstruction_context,
     )
 
+    if used_positions:
+        pos_path = f"{output_path}.positions.json"
+        with open(pos_path, "w", encoding="utf-8") as f:
+            json.dump([[mb, blk, cidx] for mb, blk, cidx in used_positions], f, ensure_ascii=True, indent=2)
+
+        meta_path = f"{output_path}.meta.json"
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "bits_embedded": int(bits_embedded),
+                    "bits_required": int(required_bits),
+                    "positions_count": len(used_positions),
+                    "chaos_enabled": bool(chaos is not None),
+                    "chaos_original_bits": (int(original_bit_count) if chaos is not None else None),
+                },
+                f,
+                ensure_ascii=True,
+                indent=2,
+            )
+
     capacity = sum(
         1 for _, _, coeffs in coefficients for v in coeffs if abs(v) == 1
     )
@@ -234,4 +261,5 @@ def embed(
         proof_dict=proof_dict,
         public_dict=public_dict,
         chaos_original_bits=original_bit_count if chaos is not None else None,
+        used_positions=used_positions,
     )

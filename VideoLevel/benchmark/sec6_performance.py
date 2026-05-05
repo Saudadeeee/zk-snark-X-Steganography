@@ -47,10 +47,10 @@ def _fast_mode_enabled() -> bool:
 # -------------------------------------------------------------------------
 def _measure_pipeline(seq_name: str, video_path: Path, *, force_extract: bool = False) -> dict:
     from src.core.pipeline import extract_bits_direct
-    from src.core.stego import PayloadEmbedder, CAVLCSafetyFilter
+    from src.core.stego import PayloadEmbedder
     from src.bitstream.bitstream_ops import BitstreamReconstructor
     from src.zk_proof import ZKSnarkBridge, pack, unpack, blob_bit_length
-    from benchmark._common import load_or_extract_idr_blocks
+    from benchmark._common import load_or_build_benchmark_analysis
 
     stego_out = OUTPUT_DIR / f"_sec6_{seq_name}_stego.h264"
 
@@ -58,18 +58,14 @@ def _measure_pipeline(seq_name: str, video_path: Path, *, force_extract: bool = 
 
     # --- Stage 1: IDR extraction ---
     t0 = time.perf_counter()
-    rec = BitstreamReconstructor()
-    coeffs, fvd, nC_map, nal_len, t1_over = load_or_extract_idr_blocks(
-        str(video_path), rec, force=force_extract
+    coeffs, fvd, nC_map, nal_len, t1_over, safe_pos = load_or_build_benchmark_analysis(
+        str(video_path), force=force_extract
     )
     timings["1_extract_idr"] = time.perf_counter() - t0
 
-    # --- Stage 2: Safety filter (get safe positions) ---
+    # --- Stage 2: Safety filter / safe-position materialization ---
     t0 = time.perf_counter()
-    sf = CAVLCSafetyFilter()
-    safe_pos = sf.get_safe_positions(
-        coeffs, nC_map=nC_map, nal_length_map=nal_len, t1_override_map=t1_over
-    )
+    safe_pos = list(safe_pos)
     timings["2_safety_filter"] = time.perf_counter() - t0
     capacity_bits = len(safe_pos)
 

@@ -20,6 +20,7 @@ Quick start:
 import logging
 import math
 import os
+import json
 from functools import lru_cache
 from dataclasses import dataclass
 from typing import Optional
@@ -30,6 +31,30 @@ from .core.analysis_cache  import load_or_build_video_analysis
 from .core.pipeline        import extract_bits_direct
 from .core.chaos           import ChaosTransformer
 from .zk_proof             import ZKSnarkBridge, unpack, blob_bit_length
+
+
+def _load_sidecar_positions(stego_video_path: str) -> tuple[Optional[list[tuple[int, int, int]]], Optional[int]]:
+    pos_path = f"{stego_video_path}.positions.json"
+    meta_path = f"{stego_video_path}.meta.json"
+
+    positions: Optional[list[tuple[int, int, int]]] = None
+    payload_bits: Optional[int] = None
+
+    if os.path.isfile(pos_path):
+        try:
+            raw = json.loads(open(pos_path, "r", encoding="utf-8").read())
+            positions = [tuple(int(v) for v in row) for row in raw]
+        except Exception:
+            positions = None
+
+    if os.path.isfile(meta_path):
+        try:
+            meta = json.loads(open(meta_path, "r", encoding="utf-8").read())
+            payload_bits = int(meta.get("bits_required") or meta.get("bits_embedded") or 0) or None
+        except Exception:
+            payload_bits = None
+
+    return positions, payload_bits
 
 
 @lru_cache(maxsize=4)
@@ -111,6 +136,13 @@ def verify(
         raise ValueError("secret_key must be exactly 32 bytes")
     if message_length <= 0:
         raise ValueError("message_length must be a positive integer")
+
+    if precomputed_positions is None or precomputed_payload_bits is None:
+        sidecar_positions, sidecar_bits = _load_sidecar_positions(stego_video_path)
+        if precomputed_positions is None and sidecar_positions is not None:
+            precomputed_positions = sidecar_positions
+        if precomputed_payload_bits is None and sidecar_bits is not None:
+            precomputed_payload_bits = sidecar_bits
 
     # 1. Parse original video + 2. recover safe positions (runtime cacheable)
     (
