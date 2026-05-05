@@ -2,9 +2,9 @@
 
 Hide a Groth16 zero-knowledge proof inside H.264 baseline video by modifying CAVLC coefficients in IDR frames.
 
-**Status:** Paper-ready benchmark set on `main`  
+**Status:** Research prototype with validated all-intra benchmark path  
 **Validated Runtime:** `py -3.12`  
-**Tests:** `32/32 passed`
+**Tests:** Phase 2/3 currently re-validated on the maintained asset set; full legacy suite requires further stabilization
 
 ---
 
@@ -51,47 +51,56 @@ Private input:
 
 ## Current Benchmark Snapshot
 
-All results below were regenerated on `2026-04-30` using the real proof pipeline and `py -3.12`.
+All results below were regenerated on `2026-05-05` using the real proof pipeline and `py -3.12`.
 
 ### SEC1: Quality at the true 1232-bit operating point
 
-| Sequence | Full-video PSNR | Avg SSIM | Embedded bits |
-|---|---:|---:|---:|
-| Foreman QP18 G1 | 49.45 dB | 0.9994 | 1232/1232 |
-| Foreman QP22 G1 | 54.79 dB | 0.9998 | 1232/1232 |
-| Foreman QP28 G1 | 47.61 dB | 0.9990 | 1232/1232 |
-| Coastguard QP18 G1 | 52.92 dB | 0.9998 | 1232/1232 |
-| Coastguard QP22 G1 | 52.46 dB | 0.9998 | 1232/1232 |
-| Coastguard QP28 G1 | 49.00 dB | 0.9996 | 1232/1232 |
-| Coastguard QP32 G1 | 48.48 dB | 0.9995 | 1232/1232 |
-| Deadline QP22 G1 | 59.03 dB | 1.0000 | 1232/1232 |
+All listed operating points now satisfy all of the following simultaneously:
 
-Note:
+- full real-proof embedding: `1232/1232` bits
+- end-to-end proof verification after extraction
+- `min_modified_frame_psnr > 40 dB`
 
-- `foreman_q32_g1` is currently **not** paper-valid at the same operating point. On the available 50-frame asset, the pipeline falls below the 40 dB per-frame guard after bad-IDR removal and cannot keep all `1232` bits.
+Representative SEC1 results:
+
+| Sequence | Full-video PSNR | Min Modified-Frame PSNR | Avg SSIM | Embedded bits |
+|---|---:|---:|---:|---:|
+| Akiyo QP22 G1 | 53.13 dB | 40.58 dB | 0.9997 | 1232/1232 |
+| Hall Monitor QP22 G1 | 50.38 dB | 40.18 dB | 0.9997 | 1232/1232 |
+| Foreman QP22 G1 | 55.15 dB | 40.67 dB | 0.9998 | 1232/1232 |
+| Container QP22 G1 | 51.70 dB | 40.10 dB | 0.9998 | 1232/1232 |
+| City QP22 G1 | 51.57 dB | 40.07 dB | 0.9998 | 1232/1232 |
+| Coastguard QP22 G1 | 51.23 dB | 40.52 dB | 0.9997 | 1232/1232 |
+| Football QP22 G1 | 52.24 dB | 41.56 dB | 0.9997 | 1232/1232 |
+| Deadline QP22 G1 | 58.55 dB | 40.28 dB | 1.0000 | 1232/1232 |
+| Coastguard QP22 G1 (1000f) | 56.02 dB | 40.22 dB | 0.9999 | 1232/1232 |
+| Deadline QP22 G1 (1000f) | 57.68 dB | 40.26 dB | 0.9999 | 1232/1232 |
+| Coastguard QP22 G1 (3000f) | 60.00 dB | 40.59 dB | 1.0000 | 1232/1232 |
 
 ### SEC2: Capacity
 
-| Sequence | Raw T1 capacity | Validated pool | Utilization of raw capacity |
-|---|---:|---:|---:|
-| Foreman QP22 G1 | 286,745 bits | 1,332 bits | 0.430% |
-| Coastguard QP22 G1 | 427,883 bits | 1,316 bits | 0.288% |
-| Deadline QP22 G1 | 1,735,622 bits | 1,321 bits | 0.071% |
+Representative SEC2 capacity results at the same operating point:
+
+| Sequence | Raw T1 capacity | Operating positions | Utilization of raw capacity | PSNR at 1232 bits |
+|---|---:|---:|---:|---:|
+| Foreman QP22 G1 | 286,745 bits | 1,232 bits | 0.430% | 55.15 dB |
+| Coastguard QP22 G1 | 427,883 bits | 1,232 bits | 0.288% | 51.23 dB |
+| Football QP22 G1 | 372,266 bits | 1,232 bits | 0.331% | 52.24 dB |
+| Deadline QP22 G1 | 1,735,622 bits | 1,232 bits | 0.071% | 58.55 dB |
+| Coastguard QP22 G1 (3000f) | 4,278,830 bits | 1,232 bits | 0.029% | 60.92 dB |
 
 ### SEC4: Steganalysis operating point
 
-- Foreman QP22 G1 operating point: `chi-square p = 0.962`
+- Foreman QP22 G1 operating point: `chi-square p = 0.9622`
+- SPA at operating point: `0.03762`
 - RS delta at operating point: `0.0`
 
-### SEC7: Fixed-payload QP recommendations
+### SEC7: Fixed-payload operating-point summary
 
-Under the current fixed `1232`-bit operating payload and the strict `frame-min PSNR >= 40 dB` guard:
+Under the current fixed `1232`-bit operating payload and the strict `frame-min PSNR > 40 dB` guard:
 
-| Sequence | Best tested QP |
-|---|---:|
-| Foreman | 28 |
-| Coastguard | 32 |
-| Deadline | 22 |
+- `11/11` tested SEC1 operating points pass the strict criterion
+- Every passing point also verifies the extracted Groth16 proof successfully
 
 ---
 
@@ -240,6 +249,26 @@ py -3.12 benchmark/sec4_security.py --force
 py -3.12 benchmark/sec7_tradeoff.py
 ```
 
+Developer iteration commands:
+
+```bash
+$env:BENCHMARK_TRUSTED_IDR_PICKLE_CACHE='1'
+py -3.12 benchmark/sec1_quality.py --fast --sequences foreman_q22_g1
+py -3.12 benchmark/sec2_capacity.py --fast --sequences foreman_q22_g1
+py -3.12 benchmark/sec3_methods.py --fast
+py -3.12 benchmark/sec4_security.py --fast --force
+py -3.12 benchmark/sec6_performance.py --fast --sequences foreman_q22_g1
+py -3.12 src/runtest/run_all.py --quick
+py -3.12 benchmark/safe_benchmark_runner.py --fast --sections 1 2 3 4 6
+```
+
+Notes:
+
+- `--fast` is intended for developer iteration, not headline paper numbers.
+- Benchmark luma decode is now cached under `.cache/benchmark_frames/`.
+- Cover-video analysis is now reused across `sec1/sec2/sec3/sec4` via `.cache/video_analysis/`.
+- Repeated runs on the same sequence are much faster once the sec1/analysis caches are warm.
+
 Artifacts are written to:
 
 - `benchmark/results/*.json`
@@ -252,6 +281,8 @@ Artifacts are written to:
 ## Known Limits
 
 - The default `python` on this machine may not have `numpy`; the validated runtime is `py -3.12`.
+- Current strongest operating mode is `GOP=1` / all-intra. GOP>1 support remains exploratory and degrades sharply on the current GOP8 benchmark assets.
+- Benchmark cold-start on a new video is still dominated by IDR extraction; frame decode caching and sec1 fast mode only reduce the repeated-run cost.
 - `foreman_q32_g1` currently does not sustain the full `1232`-bit operating payload under the 40 dB per-frame guard because the available asset is only 50 frames.
 - `benchmark/sec7_tradeoff.py` currently derives QP recommendations from the tested all-intra assets only; a full GOP sweep is still future work if the paper must claim bitrate-optimal operating points beyond `GOP=1`.
 - Some benchmark runs emit `TraceableParser resync failed ...` warnings on difficult streams. Current accepted artifacts still decode correctly and pass downstream quality/verification checks.

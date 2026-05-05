@@ -5,7 +5,7 @@ Quick start:
     from src.embedder import embed, EmbedResult
 
     result = embed(
-        video_path    = "data/encoded/foreman_cif_g8.h264",
+        video_path    = "data/encoded/foreman_cif_q22_g1.h264",
         message       = b"my secret message",
         output_path   = "data/output/stego.h264",
         circuits_dir  = "circuits/",
@@ -167,6 +167,7 @@ def embed(
     # pre_validated_positions is provided, so we must validate here instead.
     # Cap at 5× required bits to prevent hour-long loops on large position pools.
     if ffmpeg_validate:
+        rec = BitstreamReconstructor()
         _vfn, _cleanup = rec.make_ffmpeg_position_validator(
             video_path, coefficients, frame_verified_data
         )

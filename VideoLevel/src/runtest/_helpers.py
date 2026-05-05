@@ -29,7 +29,7 @@ def setup_path():
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 
-def get_video(name: str = 'foreman_cif_g8.h264') -> str:
+def get_video(name: str = 'foreman_cif_q22_g1.h264') -> str:
     return os.path.join(get_project_root(), 'data', 'encoded', name)
 
 

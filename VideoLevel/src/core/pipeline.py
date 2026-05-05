@@ -47,6 +47,7 @@ def extract_all_idr_blocks(video_path: str, reconstructor: BitstreamReconstructo
                 (sps.pic_height_in_map_units_minus1 + 1))
 
     traceable           = TraceableCAVLCParser()
+    patcher             = BitstreamPatcher()
     coefficients        = []
     frame_verified_data = {}
     nC_map              = {}
@@ -66,8 +67,7 @@ def extract_all_idr_blocks(video_path: str, reconstructor: BitstreamReconstructo
             offsets = result.get('offsets', {})
 
             luma_off = {(ml, bi): v for (ml, bi), v in offsets.items() if bi < 16}
-            _p = BitstreamPatcher()
-            unpatch, matched = _p.get_unpatchable_blocks(nal.rbsp_byte, luma_off)
+            unpatch, matched = patcher.get_unpatchable_blocks(nal.rbsp_byte, luma_off)
 
             idr_coeffs = []
             for (ml, bi) in sorted(blocks.keys()):

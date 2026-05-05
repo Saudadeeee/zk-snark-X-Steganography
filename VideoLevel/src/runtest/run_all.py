@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import argparse
 
 # ── Locate project root and test files ───────────────────────────────── #
 
@@ -67,6 +68,14 @@ def run_phase(label: str, description: str, filename: str):
 # ── Main ─────────────────────────────────────────────────────────────── #
 
 def main():
+    parser = argparse.ArgumentParser(description="Run full or quick phase test suite")
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="Run only the fast correctness phases (1-3), skip long reconstruction and verify phases",
+    )
+    args = parser.parse_args()
+
     # Force UTF-8 output on Windows (sys.stdout may be TextIOWrapper with cp1252)
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -78,8 +87,9 @@ def main():
     print("  ZK-SNARK Video Steganography — Full Test Suite")
     print(SEP2)
 
+    selected_phases = PHASES[:3] if args.quick else PHASES
     summary = []
-    for label, desc, filename in PHASES:
+    for label, desc, filename in selected_phases:
         print(f"\n>>> Running {label} — {desc}")
         print(SEP)
         passed, failed, skipped, code = run_phase(label, desc, filename)
@@ -112,7 +122,10 @@ def main():
     print()
 
     if all_pass:
-        print("  [SUCCESS] All test phases passed.")
+        if args.quick:
+            print("  [SUCCESS] Quick test phases passed.")
+        else:
+            print("  [SUCCESS] All test phases passed.")
     else:
         print("  [FAIL] One or more phases failed — see output above.")
 

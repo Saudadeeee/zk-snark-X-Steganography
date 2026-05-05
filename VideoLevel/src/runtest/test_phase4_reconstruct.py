@@ -25,7 +25,7 @@ from src.bitstream.bitstream_ops import BitstreamReconstructor
 
 # ── Fixtures ─────────────────────────────────────────────────────────── #
 
-VIDEO      = get_video('foreman_cif_g8.h264')
+VIDEO      = get_video('foreman_cif_g8_300f_b800k.h264')
 STEGO_OUT  = get_output('test_phase4_stego.h264')
 
 _fixture = None   # (modified_coeffs, frame_verified_data, safe_positions, stats)

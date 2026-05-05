@@ -20,6 +20,7 @@ Produces:
   - sec4_detection_rate.png    : Detection probability vs payload (ROC-style)
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -34,7 +35,7 @@ from benchmark._common import (
     PALETTE, SEQUENCES, SEQ_LABELS,
     setup_style, save_fig, cache_save, cache_load,
     decode_luma_frames, embed_lsb_pixel,
-    ROOT, OUTPUT_DIR, annotate_literature, load_or_extract_idr_blocks,
+    ROOT, OUTPUT_DIR, annotate_literature, load_or_build_benchmark_analysis, load_or_extract_idr_blocks,
 )
 
 CACHE_KEY = "sec4_security_data"
@@ -44,6 +45,10 @@ RATES     = [0, 5, 10, 20, 35, 50, 70, 100]  # % of raw T1 capacity
 # ZK operating point: actual bits embedded / raw T1 capacity
 ZK_BLOB_BITS    = 1232  # chaos-expanded payload
 ZK_PAYLOAD_BYTES = 147
+
+
+def _fast_mode_enabled() -> bool:
+    return os.environ.get("SEC4_FAST_MODE", "0") == "1"
 
 # -------------------------------------------------------------------------
 # Steganalysis implementations
@@ -224,26 +229,34 @@ def collect_data(force: bool = False) -> dict:
     import os as _os
     _os.environ["BENCHMARK_TRUSTED_IDR_PICKLE_CACHE"] = "1"
 
-    seq_name   = "foreman_q22_g1"
+    preferred = [
+        "foreman_q22_g1",
+        "coastguard_q22_g1",
+        "football_q22_g1",
+        "akiyo_q22_g1",
+    ]
+    seq_name = next(
+        (
+            seq for seq in preferred
+            if (OUTPUT_DIR / f"sec1_stego_{seq}.h264.positions.json").exists() and seq in SEQUENCES
+        ),
+        "foreman_q22_g1",
+    )
     video_path = SEQUENCES[seq_name]
 
-    from src.core.stego import CAVLCSafetyFilter
-    from src.bitstream.bitstream_ops import BitstreamReconstructor
-
-    rec = BitstreamReconstructor()
-    coeffs, _, nC_map, nal_len, t1_over = load_or_extract_idr_blocks(
-        video_path, rec, force=False
+    coeffs, _fvd, _nC_map, _nal_len, _t1_over, safe_pos = load_or_build_benchmark_analysis(
+        video_path,
+        force=False,
     )
-    sf = CAVLCSafetyFilter()
-    safe_pos = sf.get_safe_positions(coeffs, nC_map=nC_map,
-                                     nal_length_map=nal_len,
-                                     t1_override_map=t1_over)
     capacity = len(safe_pos)
     print(f"  capacity = {capacity} T1 bits")
 
     # Actual operating rate: ZK blob bits / raw capacity
     op_rate_pct = round(100.0 * ZK_BLOB_BITS / capacity, 3)
     print(f"  ZK operating point = {ZK_BLOB_BITS} bits = {op_rate_pct:.3f}% of capacity")
+
+    rates = [0, 10, 35, 100] if _fast_mode_enabled() else RATES
+    decode_max_frames = 180 if _fast_mode_enabled() else 9999
 
     chi_p_this_work = []
     chi_p_lsb       = []
@@ -252,7 +265,7 @@ def collect_data(force: bool = False) -> dict:
     rs_this_work    = []
     rs_lsb          = []
 
-    orig_frames = decode_luma_frames(video_path)
+    orig_frames = decode_luma_frames(video_path, max_frames=decode_max_frames)
     flat_orig   = np.concatenate([f.flatten() for f in orig_frames])
 
     print("  extracting cover T1 signs ...")
@@ -260,7 +273,7 @@ def collect_data(force: bool = False) -> dict:
     pos_pct = 100 * sum(cover_signs) / max(1, len(cover_signs))
     print(f"  cover T1 signs: {len(cover_signs)} total, {pos_pct:.1f}% positive")
 
-    for rate in RATES:
+    for rate in rates:
         print(f"  rate={rate}% ...")
         frac = rate / 100.0
 
@@ -280,7 +293,7 @@ def collect_data(force: bool = False) -> dict:
                 # Try old naming (legacy sec2 output)
                 stego_out = OUTPUT_DIR / f"_sec2_{seq_name}_r{rate}.h264"
             if stego_out.exists():
-                stego_frames = decode_luma_frames(stego_out)
+                stego_frames = decode_luma_frames(stego_out, max_frames=decode_max_frames)
                 n = min(len(orig_frames), len(stego_frames))
                 flat_s = np.concatenate([f.flatten() for f in stego_frames[:n]])
                 spa_this_work.append(spa_estimate(stego_frames[:n]))
@@ -318,7 +331,7 @@ def collect_data(force: bool = False) -> dict:
         _, op_chi_p = chi_square_t1_signs(op_t1_signs, cover_signs=cover_signs)
         # SPA/RS from the decoded stego file (already small pixel change)
         if sec1_stego.exists():
-            op_stego_frames = decode_luma_frames(sec1_stego)
+            op_stego_frames = decode_luma_frames(sec1_stego, max_frames=decode_max_frames)
             n_op = min(len(orig_frames), len(op_stego_frames))
             flat_op = op_stego_frames[:n_op].flatten()
             op_spa = spa_estimate(op_stego_frames[:n_op])
@@ -334,7 +347,7 @@ def collect_data(force: bool = False) -> dict:
         print(f"  positions.json not found — using cover values for operating point")
 
     data = {
-        "rates":            RATES,
+        "rates":            rates,
         "capacity":         capacity,
         "op_rate_pct":      op_rate_pct,
         "op_bits":          ZK_BLOB_BITS,
@@ -517,4 +530,6 @@ def run(force: bool = False) -> dict:
 
 
 if __name__ == "__main__":
+    if "--fast" in sys.argv:
+        os.environ["SEC4_FAST_MODE"] = "1"
     run(force="--force" in sys.argv)

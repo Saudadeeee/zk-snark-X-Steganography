@@ -15,6 +15,7 @@ Produces:
   - sec6_scalability.png         : Timing vs video length (simulated)
 """
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -37,14 +38,19 @@ SECRET_KEY = bytes(range(32))
 MESSAGE    = b"ZK-Stego performance benchmark!!"
 
 
+def _fast_mode_enabled() -> bool:
+    return os.environ.get("SEC6_FAST_MODE", "0") == "1"
+
+
 # -------------------------------------------------------------------------
 # Data collection: measure each stage separately
 # -------------------------------------------------------------------------
-def _measure_pipeline(seq_name: str, video_path: Path) -> dict:
-    from src.core.pipeline import extract_all_idr_blocks, extract_bits_direct
+def _measure_pipeline(seq_name: str, video_path: Path, *, force_extract: bool = False) -> dict:
+    from src.core.pipeline import extract_bits_direct
     from src.core.stego import PayloadEmbedder, CAVLCSafetyFilter
     from src.bitstream.bitstream_ops import BitstreamReconstructor
     from src.zk_proof import ZKSnarkBridge, pack, unpack, blob_bit_length
+    from benchmark._common import load_or_extract_idr_blocks
 
     stego_out = OUTPUT_DIR / f"_sec6_{seq_name}_stego.h264"
 
@@ -53,8 +59,8 @@ def _measure_pipeline(seq_name: str, video_path: Path) -> dict:
     # --- Stage 1: IDR extraction ---
     t0 = time.perf_counter()
     rec = BitstreamReconstructor()
-    coeffs, fvd, nC_map, nal_len, t1_over = extract_all_idr_blocks(
-        str(video_path), rec
+    coeffs, fvd, nC_map, nal_len, t1_over = load_or_extract_idr_blocks(
+        str(video_path), rec, force=force_extract
     )
     timings["1_extract_idr"] = time.perf_counter() - t0
 
@@ -135,7 +141,7 @@ def collect_data(force: bool = False,
 
     data: dict = {}
     # Default: all-intra q22_g1 sequences (fast, representative)
-    DEFAULT_PERF = {"foreman_q22_g1", "coastguard_q22_g1"}
+    DEFAULT_PERF = {"foreman_q22_g1"} if _fast_mode_enabled() else {"foreman_q22_g1", "coastguard_q22_g1"}
     active = include_sequences if include_sequences else DEFAULT_PERF
     PERF_SEQUENCES = {k: v for k, v in SEQUENCES.items()
                       if k in active}
@@ -143,7 +149,7 @@ def collect_data(force: bool = False,
         PERF_SEQUENCES = {k: v for k, v in SEQUENCES.items() if k != "deadline"}
     for seq_name, video_path in PERF_SEQUENCES.items():
         print(f"  [{seq_name}] measuring pipeline …")
-        result = _measure_pipeline(seq_name, video_path)
+        result = _measure_pipeline(seq_name, video_path, force_extract=force and not _fast_mode_enabled())
         data[seq_name] = result
         print(f"  [{seq_name}] total = {result['total_s']:.1f} s  "
               f"(ZK prove = {result['timings']['3_zk_prove']:.1f} s)")
@@ -424,6 +430,9 @@ if __name__ == "__main__":
     _parser = _ap.ArgumentParser()
     _parser.add_argument("--force", action="store_true")
     _parser.add_argument("--sequences", type=str, default=None)
+    _parser.add_argument("--fast", action="store_true")
     _args = _parser.parse_args()
+    if _args.fast:
+        os.environ["SEC6_FAST_MODE"] = "1"
     _seqs = set(_args.sequences.split(",")) if _args.sequences else None
     run(force=_args.force, include_sequences=_seqs)

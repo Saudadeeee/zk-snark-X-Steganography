@@ -1,9 +1,10 @@
 """
-Section 7 — Fixed-Payload QP Tradeoff Recommendations
-=====================================================
+Section 7 — Fixed-Payload Operating-Point Summary
+=================================================
 
-Summarises which all-intra QP operating points satisfy the paper's
-quality floor for the fixed Groth16-sized payload.
+Summarises which SEC1 operating points satisfy the paper's quality floor
+for the fixed Groth16-sized payload. When SEC1 contains multiple QP points
+for the same base sequence, this section also derives QP feasibility.
 
 Inputs:
   - benchmark/results/sec1_quality_data.json
@@ -56,6 +57,22 @@ def collect_data() -> dict:
     sec1_data = _load_sec1_data()
     groups = _qp_groups(sec1_data)
 
+    operating_points = []
+    for seq, values in sorted(sec1_data.items()):
+        min_psnr = float(values.get("min_modified_frame_psnr", values["min_psnr"]))
+        full_psnr = float(values["psnr_full_video"])
+        payload_ok = bool(values["payload_target_met"]) and int(values["embedded_bits"]) >= FIXED_PAYLOAD_BITS
+        verify_ok = bool(values.get("verify_valid", True)) and bool(values.get("verify_message_match", True))
+        operating_points.append({
+            "sequence": seq,
+            "label": SEQ_LABELS.get(seq, seq),
+            "full_video_psnr_db": full_psnr,
+            "frame_min_psnr_db": min_psnr,
+            "payload_ok": payload_ok,
+            "verify_ok": verify_ok,
+            "strict_ok": bool(payload_ok and verify_ok and min_psnr >= STRICT_THRESHOLD_DB),
+        })
+
     recommendations: dict[str, dict] = {}
     for base, items in groups.items():
         evaluated = []
@@ -93,6 +110,7 @@ def collect_data() -> dict:
         "fixed_payload_bits": FIXED_PAYLOAD_BITS,
         "strict_threshold_db": STRICT_THRESHOLD_DB,
         "relaxed_threshold_db": RELAXED_THRESHOLD_DB,
+        "operating_points": operating_points,
         "recommendations": recommendations,
     }
     with open(CACHE_KEY_OUT, "w", encoding="utf-8") as f:
@@ -134,9 +152,17 @@ def plot_qp_feasibility(data: dict) -> None:
 
 
 def run() -> dict:
-    print("\n=== §7  Fixed-Payload QP Tradeoff ===")
+    print("\n=== §7  Fixed-Payload Operating-Point Summary ===")
     data = collect_data()
     plot_qp_feasibility(data)
+
+    strict_ok = [row for row in data.get("operating_points", []) if row["strict_ok"]]
+    print(f"  strict operating points: {len(strict_ok)}/{len(data.get('operating_points', []))}")
+    for row in strict_ok:
+        print(
+            f"  [{row['sequence']}] full={row['full_video_psnr_db']:.2f} dB  "
+            f"min={row['frame_min_psnr_db']:.2f} dB"
+        )
 
     for base, rec in sorted(data["recommendations"].items()):
         print(

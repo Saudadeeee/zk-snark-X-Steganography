@@ -93,7 +93,7 @@ class NALParser:
             # end = start of NEXT start code (not position-after-sc), so that the
             # current NAL's payload does not accidentally include the next start code
             # bytes.  Including them causes _add_emulation_prevention to insert
-            # spurious EPBs on write-back (e.g. "00 00 00 01" → "00 00 03 00 01").
+            # spurious EPBs on write-back (e.g. "00 00 00 01" ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ "00 00 03 00 01").
             if i + 1 < len(positions):
                 next_start, next_sc = positions[i + 1]
                 end = next_start - next_sc  # start of next start code
@@ -637,7 +637,7 @@ class MacroblockParser:
             if mb_type <= 25:
                 return MBType(mb_type)
             else:
-                return None  # Invalid mb_type — parse_macroblock() will raise desync
+                return None  # Invalid mb_type ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â parse_macroblock() will raise desync
         elif self.is_p_slice:
             # P slice mapping (simplified)
             if mb_type == 0:
@@ -652,11 +652,11 @@ class MacroblockParser:
                 return MBType.P_8x8ref0
             # I types in P slice (offset by 5)
             elif mb_type >= 5 and mb_type <= 30:
-                # Map to I-slice types: mb_type 5→0, 6→1, ..., 30→25
+                # Map to I-slice types: mb_type 5ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢0, 6ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢1, ..., 30ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢25
                 i_type_val = mb_type - 5
                 return MBType(i_type_val)
             else:
-                return None  # Invalid mb_type — parse_macroblock() will raise desync
+                return None  # Invalid mb_type ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â parse_macroblock() will raise desync
         else:
             # Unknown slice type
             logger.debug(f"[WARN] Unknown slice_type={self.slice_type}, mb_type={mb_type}")
@@ -694,7 +694,7 @@ class MacroblockParser:
             # Simple 16x16 (1 partition) or 16x8/8x16 (2 partitions)
             num_partitions = 1 if raw_mb_type == 0 else 2
             for _ in range(num_partitions):
-                # ref_idx_l0: te(v) — only written when max > 0 (i.e. >1 reference frame)
+                # ref_idx_l0: te(v) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â only written when max > 0 (i.e. >1 reference frame)
                 if self.num_ref_idx_l0_active_minus1 > 0:
                     self.reader.read_ue()  # te(v) approximated as ue(v)
                 # Motion vector difference (horizontal, then vertical)
@@ -711,10 +711,10 @@ class MacroblockParser:
             # Step 3: MVDs per sub-partition
             for smt in sub_mb_types:
                 # Number of sub-partitions per sub-MB type:
-                #   0 → P_L0_8x8  : 1 sub-partition
-                #   1 → P_L0_8x4  : 2 sub-partitions
-                #   2 → P_L0_4x8  : 2 sub-partitions
-                #   3 → P_L0_4x4  : 4 sub-partitions
+                #   0 ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ P_L0_8x8  : 1 sub-partition
+                #   1 ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ P_L0_8x4  : 2 sub-partitions
+                #   2 ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ P_L0_4x8  : 2 sub-partitions
+                #   3 ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ P_L0_4x4  : 4 sub-partitions
                 num_subparts = 4 if smt == 3 else (2 if smt in (1, 2) else 1)
                 for _ in range(num_subparts):
                     self.reader.read_se()  # mvd x
@@ -828,11 +828,11 @@ class MacroblockParser:
         cbp_luma_flag = type_offset // 12
         luma_cbp = 15 if cbp_luma_flag else 0
 
-        # Chroma: (type_offset % 12) // 4 → 0=no chroma, 1=DC only, 2=DC+AC
+        # Chroma: (type_offset % 12) // 4 ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ 0=no chroma, 1=DC only, 2=DC+AC
         chroma_idx = (type_offset % 12) // 4  # 0, 1, or 2
-        # 0 → no chroma residual
-        # 1 → chroma DC only
-        # 2 → chroma DC + AC
+        # 0 ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ no chroma residual
+        # 1 ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ chroma DC only
+        # 2 ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ chroma DC + AC
         if chroma_idx == 0:
             chroma_cbp = 0  # No chroma
         elif chroma_idx == 1:
@@ -1060,9 +1060,9 @@ def _scan_for_mb_start(reader, from_pos, max_scan=3000):
     Scan forward from from_pos to find the next valid I-slice MB start.
 
     For each candidate bit position, validates:
-      - mb_type UE ≤ 25
-      - intra_chroma_pred_mode UE ≤ 3 (for I_4x4 / I_16x16)
-      - CBP me(v) ≤ 47 (for I_4x4)
+      - mb_type UE ÃƒÂ¢Ã¢â‚¬Â°Ã‚Â¤ 25
+      - intra_chroma_pred_mode UE ÃƒÂ¢Ã¢â‚¬Â°Ã‚Â¤ 3 (for I_4x4 / I_16x16)
+      - CBP me(v) ÃƒÂ¢Ã¢â‚¬Â°Ã‚Â¤ 47 (for I_4x4)
       - mb_qp_delta SE in [-26, 25]
 
     Returns the first bit-position that passes all checks, or None if none found.
@@ -1221,14 +1221,26 @@ class TraceableCAVLCParser:
                         err_str = str(header_err)
                         if "desync" in err_str:
                             # reader.pos has been reset to this MB's start by parse_macroblock()
-                            # Skip at least 100 bits past the corrupted MB start before scanning
+                            # Skip at least 100 bits past the corrupted MB start before scanning.
+                            # Near the tail of the slice, failure to resync is usually just end-of-slice.
+                            bits_left = total_bits - reader.pos
+                            mbs_left = max_mbs_in_frame - slice_mb_idx_counter
                             scan_from = reader.pos + 100
-                            resync_pos = _scan_for_mb_start(reader, scan_from, max_scan=3000)
+                            resync_pos = _scan_for_mb_start(reader, scan_from, max_scan=12000)
                             if resync_pos is not None:
                                 logger.debug(f"[TraceableParser] Resync: skipped MB {mb_idx}, next MB at bit {resync_pos}")
                                 reader.pos = resync_pos
                             else:
-                                logger.error(f"[TraceableParser] Resync failed at MB {mb_idx} — stopping IDR parse")
+                                if mbs_left <= 16 or bits_left <= 4096:
+                                    logger.debug(
+                                        "[TraceableParser] Tail resync not found at MB %d; treating as end-of-slice (mbs_left=%d, bits_left=%d)",
+                                        mb_idx, mbs_left, bits_left,
+                                    )
+                                else:
+                                    logger.warning(
+                                        "[TraceableParser] Resync failed at MB %d; stopping IDR parse (mbs_left=%d, bits_left=%d)",
+                                        mb_idx, mbs_left, bits_left,
+                                    )
                                 break
                             current_mb_addr += 1
                             slice_mb_idx_counter += 1
@@ -1280,7 +1292,7 @@ class TraceableCAVLCParser:
                         elif dc_top_tc is not None:
                             nC_dc = dc_top_tc
                         else:
-                            nC_dc = 0  # No I_16x16 DC neighbors → encoder uses nC=0
+                            nC_dc = 0  # No I_16x16 DC neighbors ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ encoder uses nC=0
                         # Parse Intra16x16DCLevel (4x4 DC coefficients, max_num_coeff=16)
                         try:
                             luma_dc_block = cavlc_decoder.decode_block_cavlc(nC_dc, max_num_coeff=16)
@@ -1318,9 +1330,9 @@ class TraceableCAVLCParser:
                                 # KEY: Track bit position AFTER decoding
                                 block_end_bit = reader.position
 
-                                # SANITY CHECK: TC must be in [0, max_coeffs] — reject desync'd blocks
+                                # SANITY CHECK: TC must be in [0, max_coeffs] ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â reject desync'd blocks
                                 if block.total_coeffs < 0 or block.total_coeffs > max_coeffs:
-                                    raise ValueError(f"TC={block.total_coeffs} out of valid range [0,{max_coeffs}] — parser desync!")
+                                    raise ValueError(f"TC={block.total_coeffs} out of valid range [0,{max_coeffs}] ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â parser desync!")
                                 
                                 # CRITICAL FIX: Always store 16 coefficients (pad if I_16x16 AC)
                                 # Encoder expects 16-element arrays for 4x4 blocks
@@ -1329,9 +1341,9 @@ class TraceableCAVLCParser:
                                 # Store coefficients
                                 blocks[cache_key] = coeffs_16
                                 
-                                # 🎯 CRITICAL: Store bit offset ONLY if block has actual bits
+                                # ÃƒÂ°Ã…Â¸Ã…Â½Ã‚Â¯ CRITICAL: Store bit offset ONLY if block has actual bits
                                 # If bit_length=0, it means decode_vlc failed and rewound the reader.
-                                # That signals a VLC decode failure — no real bitstream data here.
+                                # That signals a VLC decode failure ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â no real bitstream data here.
                                 # Storing bit_length=0 offsets causes patcher to try patching 0-bit
                                 # regions (always fails with our_enc=N vs NAL=0 mismatch).
                                 if block_end_bit > block_start_bit:
@@ -1341,7 +1353,7 @@ class TraceableCAVLCParser:
                                         'bit_length': block_end_bit - block_start_bit,
                                         'nC': nC  # CRITICAL: Store nC for BitstreamPatcher
                                     }
-                                # else: bit_length==0 → VLC decode failure (reader rewound) — no valid offset
+                                # else: bit_length==0 ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ VLC decode failure (reader rewound) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â no valid offset
                                 
                                 # Update neighbor cache WITH SAME KEY FORMAT
                                 # CRITICAL: Clamp to valid range [0,16] to prevent nC corruption
@@ -1396,7 +1408,7 @@ class TraceableCAVLCParser:
                             comp       = chroma_block_idx // 4   # 0=Cb, 1=Cr
                             local_idx  = chroma_block_idx %  4
                             bx, by     = _CHROMA_BXY[local_idx]
-                            blk_offset = 16 + comp * 4           # 16→Cb, 20→Cr
+                            blk_offset = 16 + comp * 4           # 16ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢Cb, 20ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢Cr
                             abs_blk    = blk_offset + local_idx  # 16-23
 
                             # Left chroma neighbor (nA) - same component

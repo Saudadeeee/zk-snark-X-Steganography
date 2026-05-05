@@ -18,6 +18,7 @@ Produces:
   - sec2_capacity_bar.png      : Raw T1 capacity per sequence (bits + bytes)
 """
 
+import os
 import sys
 import json
 import time
@@ -34,7 +35,7 @@ from benchmark._common import (
     PALETTE, SEQUENCES, SEQ_LABELS,
     setup_style, save_fig, cache_save, cache_load,
     decode_luma_frames,
-    OUTPUT_DIR, load_or_extract_idr_blocks,
+    OUTPUT_DIR, load_or_build_benchmark_analysis,
 )
 
 CACHE_KEY   = "sec2_capacity_data"
@@ -43,9 +44,14 @@ CIF_MB_COUNT = 396
 # Fractions of validated positions to test (in %)
 VALIDATED_FRACTIONS = [25, 50, 75, 100]
 
-# ZK payload size embedded in SEC1
+# Packed blob size before chaos. SEC2 operating point is driven by the
+# chaos-expanded payload imported from SEC1 at runtime.
 ZK_PAYLOAD_BYTES    = 147
-ZK_PAYLOAD_BITS     = ZK_PAYLOAD_BYTES * 8   # 1176 bits
+ZK_PAYLOAD_BITS     = ZK_PAYLOAD_BYTES * 8   # 1176 packed bits before chaos
+
+
+def _fast_mode_enabled() -> bool:
+    return os.environ.get("SEC2_FAST_MODE", "0") == "1"
 
 
 def _sec2_cache_meta(sweep_seqs: list[str]) -> dict[str, object]:
@@ -82,13 +88,13 @@ def _sweep_validated_psnr(
     all_positions = [tuple(p) for p in all_positions]
     total_valid   = len(all_positions)
 
+    decode_max_frames = 180 if _fast_mode_enabled() else 9999
     print(f"  [{seq_name}] {total_valid} validated positions -> sweep {fractions}%")
-    rec = BitstreamReconstructor()
-    coeffs, fvd, nC_map, nal_len, t1_over = load_or_extract_idr_blocks(
-        video_path, rec
+    coeffs, fvd, nC_map, nal_len, t1_over, _safe_positions = load_or_build_benchmark_analysis(
+        video_path
     )
 
-    orig_frames = decode_luma_frames(video_path)
+    orig_frames = decode_luma_frames(video_path, max_frames=decode_max_frames)
 
     results_bits: list[int]   = []
     results_psnr: list[float] = []
@@ -116,7 +122,7 @@ def _sweep_validated_psnr(
             max_slices=None, frame_verified_data=fvd,
         )
 
-        stego_frames = decode_luma_frames(out_path)
+        stego_frames = decode_luma_frames(out_path, max_frames=decode_max_frames)
         n = min(len(orig_frames), len(stego_frames))
         psnr_val = float(_psnr(orig_frames[:n], stego_frames[:n])) if n > 0 else 0.0
 
@@ -137,20 +143,27 @@ def _sweep_validated_psnr(
 # Raw T1 capacity (fast, no embed)
 # ---------------------------------------------------------------------------
 def _raw_t1_capacity(video_path: Path) -> int:
-    from src.bitstream.bitstream_ops import BitstreamReconstructor
-    from src.core.stego import CAVLCSafetyFilter
-    rec = BitstreamReconstructor()
-    coeffs, _, nC_map, nal_len, t1_over = load_or_extract_idr_blocks(video_path, rec)
-    sf = CAVLCSafetyFilter()
-    return len(sf.get_safe_positions(coeffs, nC_map=nC_map,
-                                     nal_length_map=nal_len, t1_override_map=t1_over))
+    _coeffs, _fvd, _nC_map, _nal_len, _t1_over, safe_positions = load_or_build_benchmark_analysis(video_path)
+    return len(safe_positions)
 
 
 # ---------------------------------------------------------------------------
 # Data collection
 # ---------------------------------------------------------------------------
 def collect_data(force: bool = False, include_sequences: set[str] | None = None) -> dict:
-    default_sweep = ["foreman_q22_g1", "coastguard_q22_g1", "deadline_q22_g1"]
+    default_sweep = [
+        "akiyo_q22_g1",
+        "hall_monitor_q22_g1",
+        "foreman_q22_g1",
+        "container_q22_g1",
+        "city_q22_g1",
+        "coastguard_q22_g1",
+        "football_q22_g1",
+        "deadline_q22_g1",
+        "coastguard_q22_g1_1000f",
+        "deadline_q22_g1_1000f",
+        "coastguard_q22_g1_3000f",
+    ]
     sweep_seqs = default_sweep
     if include_sequences:
         sweep_seqs = [seq for seq in default_sweep if seq in include_sequences]
@@ -172,6 +185,7 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
     payload_real, _ = _build_real_proof_payload()
     payload_scrambled, _ = ChaosTransformer(CHAOS_KEY).scramble(payload_real)
     zk_blob_bits = len(payload_scrambled) * 8
+    fractions = [25, 100] if _fast_mode_enabled() else VALIDATED_FRACTIONS
 
     data: dict = {}
 
@@ -195,7 +209,7 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
 
         sweep = _sweep_validated_psnr(
             seq_name, video_path, positions_path,
-            VALIDATED_FRACTIONS, payload_scrambled,
+            fractions, payload_scrambled,
         )
 
         # Validated capacity = number of positions saved from SEC1
@@ -231,7 +245,7 @@ def plot_psnr_vs_bits(data: dict) -> None:
         label = SEQ_LABELS.get(seq, seq).split(" (")[0]
         ax.plot(
             d["bits_at_fraction"], d["psnr_at_fraction"],
-            color=colors[i],
+            color=colors[i % len(colors)],
             linewidth=2.2, label=label,
         )
         # Annotate 100% point (actual operating point)
@@ -240,8 +254,8 @@ def plot_psnr_vs_bits(data: dict) -> None:
         ax.annotate(
             f"{y100:.1f} dB",
             xy=(x100, y100), xytext=(x100 + 30, y100 - 1.5),
-            fontsize=9, color=colors[i], fontweight="bold",
-            arrowprops=dict(arrowstyle="->", color=colors[i], lw=1.2),
+            fontsize=9, color=colors[i % len(colors)], fontweight="bold",
+            arrowprops=dict(arrowstyle="->", color=colors[i % len(colors)], lw=1.2),
         )
 
     ax.axvline(ZK_PAYLOAD_BITS, color="#888888", linestyle="--", linewidth=1.5,
@@ -321,7 +335,7 @@ def plot_capacity_bar(data: dict) -> None:
     labels = [SEQ_LABELS.get(s, s).split(" (")[0] for s in seqs]
     cap_bits  = [data[s]["raw_t1_bits"]  for s in seqs]
     cap_bytes = [data[s]["raw_t1_bytes"] for s in seqs]
-    colors    = list(PALETTE.values())[:len(seqs)]
+    colors    = [list(PALETTE.values())[i % len(PALETTE)] for i in range(len(seqs))]
 
     x = np.arange(len(seqs))
 
@@ -373,6 +387,13 @@ if __name__ == "__main__":
         default="",
         help="Comma-separated sequence names to run (e.g. foreman_q22_g1,deadline_q22_g1)",
     )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Developer fast mode: reduced sweep fractions and shorter decode window",
+    )
     args = parser.parse_args()
+    if args.fast:
+        os.environ["SEC2_FAST_MODE"] = "1"
     selected = {s.strip() for s in args.sequences.split(",") if s.strip()} or None
     run(force=args.force, include_sequences=selected)

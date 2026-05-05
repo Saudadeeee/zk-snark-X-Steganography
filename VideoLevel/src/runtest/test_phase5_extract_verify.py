@@ -27,8 +27,8 @@ from src.zk_proof import pack, unpack, blob_bit_length, PROOF_SIZE_BYTES
 
 # ── Config ────────────────────────────────────────────────────────────── #
 
-VIDEO     = get_video('foreman_cif_g8.h264')
-VIDEO_HQ  = get_video('foreman_cif_hq.h264')  # QP=30 all-intra: ~50 000 bits capacity
+VIDEO     = get_video('foreman_cif_g8_300f_b800k.h264')
+VIDEO_HQ  = get_video('foreman_cif_q22_g1.h264')  # All-intra baseline with ample capacity for larger payload roundtrip
 SECRET_KEY = b"zk_mv_stego_2026_secret_key!!!!!"
 TEST_MSG   = b"Hello ZK-Stego"
 

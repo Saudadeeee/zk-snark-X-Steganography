@@ -1,0 +1,18 @@
+{
+  "foreman_q22_g1": {
+    "timings": {
+      "1_extract_idr": 749.1977,
+      "2_safety_filter": 20.3738,
+      "3_zk_prove": 2.3177,
+      "4_embed": 20.477,
+      "5_reconstruct": 3.1036,
+      "6_extract_bits": 1.1824,
+      "7_zk_verify": 0.9851
+    },
+    "total_s": 797.6374,
+    "capacity_bits": 286745,
+    "bits_embedded": 1320,
+    "blob_size": 165,
+    "zk_valid": true
+  }
+}

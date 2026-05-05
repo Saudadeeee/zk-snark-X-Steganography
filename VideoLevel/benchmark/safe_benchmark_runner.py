@@ -8,7 +8,7 @@ Wrapper script to run benchmark suite safely with:
 - Result validation
 
 Usage:
-    python safe_benchmark_runner.py [--force] [--sections 1 2 3] [--timeout 180]
+    python safe_benchmark_runner.py [--force] [--fast] [--sections 1 2 3] [--timeout 180]
 """
 
 import argparse
@@ -17,6 +17,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 BENCHMARK_DIR = Path(__file__).parent
 RESULTS_DIR = BENCHMARK_DIR / "results"
@@ -32,6 +35,7 @@ SECTIONS = {
 }
 
 DEFAULT_TIMEOUT = 180  # 3 minutes per section
+FAST_CAPABLE_SECTIONS = {1, 2, 3, 4, 6}
 
 
 def _load_json_file(path: Path) -> tuple[dict | None, str | None]:
@@ -150,7 +154,7 @@ def _parse_sections(raw_sections: list[str] | None) -> list[int]:
     return parsed
 
 
-def run_section_safe(sec_id: int, force: bool, timeout: int) -> dict:
+def run_section_safe(sec_id: int, force: bool, timeout: int, fast: bool = False) -> dict:
     """
     Run a benchmark section with timeout protection.
     Returns: {success: bool, time: float, error: str or None, output: str}
@@ -159,6 +163,8 @@ def run_section_safe(sec_id: int, force: bool, timeout: int) -> dict:
     cmd = [sys.executable, "-m", module_name]
     if force:
         cmd.append("--force")
+    if fast and sec_id in FAST_CAPABLE_SECTIONS:
+        cmd.append("--fast")
     
     print(f"  [§{sec_id}] Running {SECTIONS[sec_id]} (timeout={timeout}s) ...")
     
@@ -282,6 +288,8 @@ def main():
     parser = argparse.ArgumentParser(description="Safe benchmark runner with timeout")
     parser.add_argument("--force", action="store_true",
                         help="Re-run all experiments (ignore cache)")
+    parser.add_argument("--fast", action="store_true",
+                        help="Pass --fast through to supported benchmark sections")
     parser.add_argument("--sections", type=str, nargs="+",
                         help="Run only these sections (e.g., --sections 1 3 5 or --sections 1,3,5)")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
@@ -298,6 +306,7 @@ def main():
     print("=" * 70)
     print(f"  Sections: {sections_to_run}")
     print(f"  Force: {args.force}")
+    print(f"  Fast: {args.fast}")
     print(f"  Timeout: {args.timeout}s per section")
     print()
     
@@ -309,7 +318,7 @@ def main():
             print(f"  [warn] Unknown section {sec_id}, skipping")
             continue
         
-        result = run_section_safe(sec_id, args.force, args.timeout)
+        result = run_section_safe(sec_id, args.force, args.timeout, args.fast)
         results[sec_id] = result
         
         if result["success"]:

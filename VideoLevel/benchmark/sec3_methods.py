@@ -19,6 +19,7 @@ Produces:
   - sec3_radar_chart.png       : Radar/spider chart of all criteria
 """
 
+import os
 import sys
 import argparse
 from pathlib import Path
@@ -32,7 +33,7 @@ from benchmark._common import (
     PALETTE, SEQUENCES, SEQ_LABELS,
     setup_style, save_fig, cache_save, cache_load,
     decode_luma_frames, embed_lsb_pixel,
-    OUTPUT_DIR, annotate_literature, load_or_extract_idr_blocks,
+    OUTPUT_DIR, annotate_literature, load_or_build_benchmark_analysis,
     sort_positions_round_robin_idrs,
 )
 
@@ -44,6 +45,10 @@ CIF_MB_COUNT = 396
 
 # Fixed payload for fair comparison (= ZK blob size)
 PAYLOAD_BYTES = 147
+
+
+def _fast_mode_enabled() -> bool:
+    return os.environ.get("SEC3_FAST_MODE", "0") == "1"
 
 # -------------------------------------------------------------------------
 # Literature values (clearly cited)
@@ -95,7 +100,7 @@ def _measure_lsb_psnr(seq_name: str, video_path: Path, n_bytes: int) -> float:
     H.264 bitstream methods which suffer from intra prediction cascade.
     This value is shown for reference only with an explicit disclaimer.
     """
-    frames = decode_luma_frames(video_path, max_frames=300)
+    frames = decode_luma_frames(video_path, max_frames=120 if _fast_mode_enabled() else 300)
     n_bits = n_bytes * 8
     stego  = embed_lsb_pixel(frames, n_bits)
     from benchmark._common import psnr as _psnr
@@ -132,6 +137,8 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
     # Default sec3 scope is pinned to literature-supported sequences so method
     # comparisons stay stable across runs and include all baseline methods.
     default_sequence_names = tuple(LITERATURE_PSNR["F5-H264"].keys())
+    if _fast_mode_enabled():
+        default_sequence_names = default_sequence_names[:1]
     if include_sequences:
         measure_sequences = {k: v for k, v in SEQUENCES.items() if k in include_sequences}
     else:
@@ -149,8 +156,9 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
         if sec1_stego.exists():
             # Use sec1 stego: chaos + FFmpeg-validated embedding at actual proof payload.
             print(f"  [this work / {seq_name}] using sec1 stego (chaos_v5_ffmpeg_validated)…")
-            orig  = decode_luma_frames(video_path, max_frames=300)
-            stego = decode_luma_frames(sec1_stego, max_frames=300)
+            max_frames = 120 if _fast_mode_enabled() else 300
+            orig  = decode_luma_frames(video_path, max_frames=max_frames)
+            stego = decode_luma_frames(sec1_stego, max_frames=max_frames)
             n     = min(len(orig), len(stego))
             psnr_val = float(min(_psnr(orig[:n], stego[:n]), 60.0)) if n > 0 else 0.0
             validation_mode = "chaos_v5_ffmpeg_validated_sec1_stego"
@@ -165,7 +173,7 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
         else:
             # Fallback: embed synthetic payload with round-robin (no FFmpeg validation).
             print(f"  [this work / {seq_name}] sec1 stego not found, falling back to round-robin embed…")
-            from src.core.stego import PayloadEmbedder, CAVLCSafetyFilter
+            from src.core.stego import PayloadEmbedder
             from src.bitstream.bitstream_ops import BitstreamReconstructor
 
             payload_fb = bytes([i % 256 for i in range(PAYLOAD_BYTES)])
@@ -173,11 +181,10 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
             if out_path.exists():
                 out_path.unlink()
 
-            rec = BitstreamReconstructor()
-            coeffs, fvd, nC_map, nal_len, t1_over = load_or_extract_idr_blocks(video_path, rec, force=force)
-
-            sf = CAVLCSafetyFilter()
-            safe_pos   = sf.get_safe_positions(coeffs, nC_map=nC_map, nal_length_map=nal_len, t1_override_map=t1_over)
+            coeffs, fvd, nC_map, nal_len, t1_over, safe_pos = load_or_build_benchmark_analysis(
+                video_path,
+                force=force,
+            )
             sorted_pos = sort_positions_round_robin_idrs(safe_pos, CIF_MB_COUNT)
             target_bits = len(payload_fb) * 8
             validated   = sorted_pos[:target_bits]
@@ -196,8 +203,9 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
             rec2.reconstruct_video(str(video_path), modified, str(out_path),
                                    max_slices=None, frame_verified_data=fvd)
 
-            orig  = decode_luma_frames(video_path, max_frames=300)
-            stego_frames = decode_luma_frames(out_path, max_frames=300)
+            max_frames = 120 if _fast_mode_enabled() else 300
+            orig  = decode_luma_frames(video_path, max_frames=max_frames)
+            stego_frames = decode_luma_frames(out_path, max_frames=max_frames)
             n     = min(len(orig), len(stego_frames))
             psnr_val = float(min(_psnr(orig[:n], stego_frames[:n]), 60.0)) if n > 0 else 0.0
 
@@ -530,6 +538,13 @@ if __name__ == "__main__":
         default="",
         help="Comma-separated sequence names to run (e.g. foreman,coastguard)",
     )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Developer fast mode: fewer sequences and shorter decode window",
+    )
     args = parser.parse_args()
+    if args.fast:
+        os.environ["SEC3_FAST_MODE"] = "1"
     selected = {s.strip() for s in args.sequences.split(",") if s.strip()} or None
     run(force=args.force, include_sequences=selected)

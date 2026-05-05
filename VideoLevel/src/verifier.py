@@ -6,7 +6,7 @@ Quick start:
 
     result = verify(
         stego_video_path    = "data/output/stego.h264",
-        original_video_path = "data/encoded/foreman_cif_g8.h264",
+        original_video_path = "data/encoded/foreman_cif_q22_g1.h264",
         circuits_dir        = "circuits/",
         secret_key          = secret_key,
         message_length      = len(original_message),
@@ -55,6 +55,8 @@ def verify(
     message_length:      int,
     max_modifications_per_block: int = 1,
     chaos_key: Optional[bytes] = None,
+    precomputed_positions: Optional[list[tuple[int, int, int]]] = None,
+    precomputed_payload_bits: Optional[int] = None,
     use_analysis_cache: bool = True,
     force_analysis_refresh: bool = False,
     analysis_cache_dir: Optional[str] = None,
@@ -80,6 +82,13 @@ def verify(
         max_modifications_per_block: Must match value used in embed() (default 1).
         chaos_key:           Must match the chaos_key passed to embed() — if embed()
                              was called with chaos_key, pass the same value here.
+        precomputed_positions: Optional final embedding positions to use directly.
+                             When provided, these must already reflect any chaos
+                             shuffle and benchmark-side validation/pruning.
+        precomputed_payload_bits: Optional exact number of payload bits to extract.
+                              Use with precomputed_positions when the benchmark
+                              embedded a chaos-padded payload whose size differs
+                              from blob_bit_length(message).
         use_analysis_cache:  Reuse cached cover-video analysis when available.
         force_analysis_refresh: Ignore cached cover analysis and rebuild it.
         analysis_cache_dir:  Optional custom directory for analysis cache files.
@@ -121,7 +130,11 @@ def verify(
     # 2b. Chaos: Logistic Map — apply the same position shuffle as embed()
     chaos: Optional[ChaosTransformer] = None
     original_bit_count = blob_bit_length(b"\x00" * message_length)
-    if chaos_key is not None:
+    if precomputed_positions is not None:
+        safe_positions = [tuple(int(v) for v in pos) for pos in precomputed_positions]
+        if chaos_key is not None:
+            chaos = ChaosTransformer(chaos_key)
+    elif chaos_key is not None:
         chaos = ChaosTransformer(chaos_key)
         safe_positions = chaos.shuffle_positions(safe_positions)
         logger.info(
@@ -130,11 +143,15 @@ def verify(
         )
 
     # 3. Compute how many bits to extract
-    if chaos is not None:
+    if precomputed_payload_bits is not None:
+        extract_bit_count = int(precomputed_payload_bits)
+    elif chaos is not None:
         # Must extract M² bits (padded) to correctly unscramble
         padded_bits = ChaosTransformer.padded_bit_count(original_bit_count)
         # Round up to byte boundary for extract_bits_direct
         extract_bit_count = math.ceil(padded_bits / 8) * 8
+    elif precomputed_positions is not None:
+        extract_bit_count = len(safe_positions)
     else:
         extract_bit_count = original_bit_count
 

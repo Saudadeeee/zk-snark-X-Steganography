@@ -1,0 +1,284 @@
+{
+  "fixed_payload_bits": 1232,
+  "strict_threshold_db": 40.0,
+  "relaxed_threshold_db": 35.0,
+  "operating_points": [
+    {
+      "sequence": "akiyo_q22_g1",
+      "label": "Akiyo all-intra QP22 (low motion)",
+      "full_video_psnr_db": 53.133074169998345,
+      "frame_min_psnr_db": 40.57890883984367,
+      "payload_ok": true,
+      "verify_ok": true,
+      "strict_ok": true
+    },
+    {
+      "sequence": "city_q22_g1",
+      "label": "City all-intra QP22 (texture-heavy)",
+      "full_video_psnr_db": 51.57416462418537,
+      "frame_min_psnr_db": 40.073252458350936,
+      "payload_ok": true,
+      "verify_ok": true,
+      "strict_ok": true
+    },
+    {
+      "sequence": "coastguard_q22_g1",
+      "label": "Coastguard all-intra QP22 (baseline)",
+      "full_video_psnr_db": 51.231435837685794,
+      "frame_min_psnr_db": 40.52204991728396,
+      "payload_ok": true,
+      "verify_ok": true,
+      "strict_ok": true
+    },
+    {
+      "sequence": "coastguard_q22_g1_1000f",
+      "label": "Coastguard all-intra QP22 high-motion (1000f)",
+      "full_video_psnr_db": 56.016871258136014,
+      "frame_min_psnr_db": 40.22023042274034,
+      "payload_ok": true,
+      "verify_ok": true,
+      "strict_ok": true
+    },
+    {
+      "sequence": "coastguard_q22_g1_3000f",
+      "label": "Coastguard all-intra QP22 high-motion (3000f, repeated)",
+      "full_video_psnr_db": 60.0,
+      "frame_min_psnr_db": 40.587446058092304,
+      "payload_ok": true,
+      "verify_ok": true,
+      "strict_ok": true
+    },
+    {
+      "sequence": "container_q22_g1",
+      "label": "Container all-intra QP22 (detail)",
+      "full_video_psnr_db": 51.69659426065038,
+      "frame_min_psnr_db": 40.10265214336012,
+      "payload_ok": true,
+      "verify_ok": true,
+      "strict_ok": true
+    },
+    {
+      "sequence": "deadline_q22_g1",
+      "label": "Deadline all-intra QP22 (baseline)",
+      "full_video_psnr_db": 58.54904200766117,
+      "frame_min_psnr_db": 40.28178152808526,
+      "payload_ok": true,
+      "verify_ok": true,
+      "strict_ok": true
+    },
+    {
+      "sequence": "deadline_q22_g1_1000f",
+      "label": "Deadline all-intra QP22 mixed-motion (1000f)",
+      "full_video_psnr_db": 57.67591457140307,
+      "frame_min_psnr_db": 40.264305345340674,
+      "payload_ok": true,
+      "verify_ok": true,
+      "strict_ok": true
+    },
+    {
+      "sequence": "football_q22_g1",
+      "label": "Football all-intra QP22 (high motion)",
+      "full_video_psnr_db": 52.238444969455706,
+      "frame_min_psnr_db": 41.55936798726576,
+      "payload_ok": true,
+      "verify_ok": true,
+      "strict_ok": true
+    },
+    {
+      "sequence": "foreman_q22_g1",
+      "label": "Foreman all-intra QP22 (baseline)",
+      "full_video_psnr_db": 55.146672591829066,
+      "frame_min_psnr_db": 40.66744209261874,
+      "payload_ok": true,
+      "verify_ok": true,
+      "strict_ok": true
+    },
+    {
+      "sequence": "hall_monitor_q22_g1",
+      "label": "Hall Monitor all-intra QP22 (surveillance)",
+      "full_video_psnr_db": 50.37978453645724,
+      "frame_min_psnr_db": 40.18156211926382,
+      "payload_ok": true,
+      "verify_ok": true,
+      "strict_ok": true
+    }
+  ],
+  "recommendations": {
+    "akiyo": {
+      "evaluated": [
+        {
+          "sequence": "akiyo_q22_g1",
+          "label": "Akiyo all-intra QP22 (low motion)",
+          "qp": 22,
+          "full_video_psnr_db": 53.133074169998345,
+          "frame_min_psnr_db": 40.57890883984367,
+          "payload_ok": true
+        }
+      ],
+      "strict_threshold_db": 40.0,
+      "relaxed_threshold_db": 35.0,
+      "best_qp_strict": 22,
+      "best_qp_relaxed": 22,
+      "strict_pass_qps": [
+        22
+      ],
+      "relaxed_pass_qps": [
+        22
+      ]
+    },
+    "hall_monitor": {
+      "evaluated": [
+        {
+          "sequence": "hall_monitor_q22_g1",
+          "label": "Hall Monitor all-intra QP22 (surveillance)",
+          "qp": 22,
+          "full_video_psnr_db": 50.37978453645724,
+          "frame_min_psnr_db": 40.18156211926382,
+          "payload_ok": true
+        }
+      ],
+      "strict_threshold_db": 40.0,
+      "relaxed_threshold_db": 35.0,
+      "best_qp_strict": 22,
+      "best_qp_relaxed": 22,
+      "strict_pass_qps": [
+        22
+      ],
+      "relaxed_pass_qps": [
+        22
+      ]
+    },
+    "foreman": {
+      "evaluated": [
+        {
+          "sequence": "foreman_q22_g1",
+          "label": "Foreman all-intra QP22 (baseline)",
+          "qp": 22,
+          "full_video_psnr_db": 55.146672591829066,
+          "frame_min_psnr_db": 40.66744209261874,
+          "payload_ok": true
+        }
+      ],
+      "strict_threshold_db": 40.0,
+      "relaxed_threshold_db": 35.0,
+      "best_qp_strict": 22,
+      "best_qp_relaxed": 22,
+      "strict_pass_qps": [
+        22
+      ],
+      "relaxed_pass_qps": [
+        22
+      ]
+    },
+    "container": {
+      "evaluated": [
+        {
+          "sequence": "container_q22_g1",
+          "label": "Container all-intra QP22 (detail)",
+          "qp": 22,
+          "full_video_psnr_db": 51.69659426065038,
+          "frame_min_psnr_db": 40.10265214336012,
+          "payload_ok": true
+        }
+      ],
+      "strict_threshold_db": 40.0,
+      "relaxed_threshold_db": 35.0,
+      "best_qp_strict": 22,
+      "best_qp_relaxed": 22,
+      "strict_pass_qps": [
+        22
+      ],
+      "relaxed_pass_qps": [
+        22
+      ]
+    },
+    "city": {
+      "evaluated": [
+        {
+          "sequence": "city_q22_g1",
+          "label": "City all-intra QP22 (texture-heavy)",
+          "qp": 22,
+          "full_video_psnr_db": 51.57416462418537,
+          "frame_min_psnr_db": 40.073252458350936,
+          "payload_ok": true
+        }
+      ],
+      "strict_threshold_db": 40.0,
+      "relaxed_threshold_db": 35.0,
+      "best_qp_strict": 22,
+      "best_qp_relaxed": 22,
+      "strict_pass_qps": [
+        22
+      ],
+      "relaxed_pass_qps": [
+        22
+      ]
+    },
+    "coastguard": {
+      "evaluated": [
+        {
+          "sequence": "coastguard_q22_g1",
+          "label": "Coastguard all-intra QP22 (baseline)",
+          "qp": 22,
+          "full_video_psnr_db": 51.231435837685794,
+          "frame_min_psnr_db": 40.52204991728396,
+          "payload_ok": true
+        }
+      ],
+      "strict_threshold_db": 40.0,
+      "relaxed_threshold_db": 35.0,
+      "best_qp_strict": 22,
+      "best_qp_relaxed": 22,
+      "strict_pass_qps": [
+        22
+      ],
+      "relaxed_pass_qps": [
+        22
+      ]
+    },
+    "football": {
+      "evaluated": [
+        {
+          "sequence": "football_q22_g1",
+          "label": "Football all-intra QP22 (high motion)",
+          "qp": 22,
+          "full_video_psnr_db": 52.238444969455706,
+          "frame_min_psnr_db": 41.55936798726576,
+          "payload_ok": true
+        }
+      ],
+      "strict_threshold_db": 40.0,
+      "relaxed_threshold_db": 35.0,
+      "best_qp_strict": 22,
+      "best_qp_relaxed": 22,
+      "strict_pass_qps": [
+        22
+      ],
+      "relaxed_pass_qps": [
+        22
+      ]
+    },
+    "deadline": {
+      "evaluated": [
+        {
+          "sequence": "deadline_q22_g1",
+          "label": "Deadline all-intra QP22 (baseline)",
+          "qp": 22,
+          "full_video_psnr_db": 58.54904200766117,
+          "frame_min_psnr_db": 40.28178152808526,
+          "payload_ok": true
+        }
+      ],
+      "strict_threshold_db": 40.0,
+      "relaxed_threshold_db": 35.0,
+      "best_qp_strict": 22,
+      "best_qp_relaxed": 22,
+      "strict_pass_qps": [
+        22
+      ],
+      "relaxed_pass_qps": [
+        22
+      ]
+    }
+  }
+}

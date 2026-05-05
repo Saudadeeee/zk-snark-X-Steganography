@@ -28,62 +28,68 @@ DATA_DIR    = ROOT / "data" / "encoded"
 OUTPUT_DIR  = ROOT / "data" / "output"
 RESULTS_DIR = Path(__file__).parent / "results"
 CIRCUITS_DIR = ROOT / "circuits"
+BENCHMARK_CACHE_DIR = ROOT / ".cache" / "benchmark_frames"
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+BENCHMARK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # CIF resolution used by all test sequences
 WIDTH, HEIGHT = 352, 288
 CIF_MB_COUNT = 396  # 22x18
 
-# Test sequences: full-length + additional CIF variants from encoded assets.
-# foreman=300f (6x loop of 50f source), coastguard=300f, deadline=1374f.
-# Added short/variant clips to broaden benchmark coverage.
+# Test sequences: baseline all-intra assets + new diversified variants.
 SEQUENCES = {
-    "foreman":    DATA_DIR / "foreman_cif_300_g8.h264",
-    "coastguard": DATA_DIR / "coastguard_cif_full_g8.h264",
-    "deadline":   DATA_DIR / "deadline_cif_full_g8.h264",
-    "foreman_long": DATA_DIR / "foreman_cif_1200_g8.h264",
-    "coastguard_long": DATA_DIR / "coastguard_cif_1200_g8.h264",
-    "akiyo": DATA_DIR / "akiyo_cif_g8.h264",
-    "foreman_hq": DATA_DIR / "foreman_cif_hq.h264",
-    "coastguard_short": DATA_DIR / "coastguard_cif_g8.h264",
-    # All-intra (GOP=1) QP=22 — eliminates P-frame cascade for high-quality stego
+    # Baseline (paper / reference)
     "foreman_q22_g1": DATA_DIR / "foreman_cif_q22_g1.h264",
     "coastguard_q22_g1": DATA_DIR / "coastguard_cif_q22_g1.h264",
     "deadline_q22_g1": DATA_DIR / "deadline_cif_q22_g1.h264",
-    # Additional all-intra QP sweep assets
-    "foreman_q18_g1": DATA_DIR / "foreman_cif_q18_g1.h264",
-    "foreman_q28_g1": DATA_DIR / "foreman_cif_q28_g1.h264",
-    "foreman_q32_g1": DATA_DIR / "foreman_cif_q32_g1.h264",
-    "coastguard_q18_g1": DATA_DIR / "coastguard_cif_q18_g1.h264",
-    "coastguard_q28_g1": DATA_DIR / "coastguard_cif_q28_g1.h264",
-    "coastguard_q32_g1": DATA_DIR / "coastguard_cif_q32_g1.h264",
-    # 1000-frame all-intra QP=22 — lower flips/IDR → better per-frame min PSNR
-    "foreman_q22_g1_1000": DATA_DIR / "foreman_cif_q22_g1_1000.h264",
-    "coastguard_q22_g1_1000": DATA_DIR / "coastguard_cif_q22_g1_1000.h264",
+    "akiyo_q22_g1": DATA_DIR / "akiyo_cif_q22_g1.h264",
+    "container_q22_g1": DATA_DIR / "container_cif_q22_g1.h264",
+    "hall_monitor_q22_g1": DATA_DIR / "hall_monitor_cif_q22_g1.h264",
+    "football_q22_g1": DATA_DIR / "football_cif_q22_g1.h264",
+    "city_q22_g1": DATA_DIR / "city_cif_q22_g1.h264",
+    # New all-intra variants (length + quality sweep)
+    "foreman_q18_g1_150f": DATA_DIR / "foreman_cif_q18_g1_150f.h264",
+    "foreman_q28_g1_300f": DATA_DIR / "foreman_cif_q28_g1_300f.h264",
+    "coastguard_q18_g1_150f": DATA_DIR / "coastguard_cif_q18_g1_150f.h264",
+    "coastguard_q22_g1_600f": DATA_DIR / "coastguard_cif_q22_g1_600f.h264",
+    "coastguard_q22_g1_1000f": DATA_DIR / "coastguard_cif_q22_g1_1000f.h264",
+    "coastguard_q22_g1_3000f": DATA_DIR / "coastguard_cif_q22_g1_3000f.h264",
+    "coastguard_q28_g1_300f": DATA_DIR / "coastguard_cif_q28_g1_300f.h264",
+    "deadline_q18_g1_150f": DATA_DIR / "deadline_cif_q18_g1_150f.h264",
+    "deadline_q22_g1_600f": DATA_DIR / "deadline_cif_q22_g1_600f.h264",
+    "deadline_q22_g1_1000f": DATA_DIR / "deadline_cif_q22_g1_1000f.h264",
+    "deadline_q28_g1_300f": DATA_DIR / "deadline_cif_q28_g1_300f.h264",
+    # GOP=8 bitrate-controlled variants (content + bitrate diversity)
+    "foreman_g8_300f_b800k": DATA_DIR / "foreman_cif_g8_300f_b800k.h264",
+    "coastguard_g8_300f_b800k": DATA_DIR / "coastguard_cif_g8_300f_b800k.h264",
+    "deadline_g8_300f_b800k": DATA_DIR / "deadline_cif_g8_300f_b800k.h264",
 }
 
 SEQ_FRAMES = {
-    "foreman":    300,
-    "coastguard": 300,
-    "deadline":   1374,
-    "foreman_long": 1200,
-    "coastguard_long": 1200,
-    "akiyo": 50,
-    "foreman_hq": 50,
-    "coastguard_short": 50,
-    "deadline_q22_g1": 1374,
-    "foreman_q18_g1": 50,
-    "foreman_q28_g1": 50,
-    "foreman_q32_g1": 50,
-    "coastguard_q18_g1": 300,
-    "coastguard_q28_g1": 300,
-    "coastguard_q32_g1": 300,
     "foreman_q22_g1": 300,
     "coastguard_q22_g1": 300,
-    "foreman_q22_g1_1000": 1000,
-    "coastguard_q22_g1_1000": 1000,
+    "deadline_q22_g1": 300,
+    "akiyo_q22_g1": 300,
+    "container_q22_g1": 300,
+    "hall_monitor_q22_g1": 300,
+    "football_q22_g1": 260,
+    "city_q22_g1": 300,
+    "foreman_q18_g1_150f": 150,
+    "foreman_q28_g1_300f": 300,
+    "coastguard_q18_g1_150f": 150,
+    "coastguard_q22_g1_600f": 600,
+    "coastguard_q22_g1_1000f": 1000,
+    "coastguard_q22_g1_3000f": 3000,
+    "coastguard_q28_g1_300f": 300,
+    "deadline_q18_g1_150f": 150,
+    "deadline_q22_g1_600f": 600,
+    "deadline_q22_g1_1000f": 1000,
+    "deadline_q28_g1_300f": 300,
+    "foreman_g8_300f_b800k": 300,
+    "coastguard_g8_300f_b800k": 300,
+    "deadline_g8_300f_b800k": 300,
 }
 
 # ---------------------------------------------------------------------------
@@ -102,28 +108,32 @@ PALETTE = {
     "bulletproof":"#00838F",
 }
 
-LINESTYLES = ["-", "--", "-.", ":", (0,(3,1,1,1)), (0,(5,1))]
+MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*", "+", "x"]
+LINESTYLES = ["-", "--", "-.", ":", (0, (3, 1, 1, 1)), (0, (5, 1))]
 
 SEQ_LABELS = {
-    "foreman":    "Foreman (low motion)",
-    "coastguard": "Coastguard (high motion)",
-    "deadline":   "Deadline (mixed)",
-    "foreman_long": "Foreman long (1200f)",
-    "coastguard_long": "Coastguard long (1200f)",
-    "akiyo": "Akiyo (very low motion)",
-    "foreman_hq": "Foreman HQ (short)",
-    "coastguard_short": "Coastguard short (50f)",
-    "deadline_q22_g1": "Deadline all-intra QP22",
-    "foreman_q18_g1": "Foreman all-intra QP18",
-    "foreman_q28_g1": "Foreman all-intra QP28",
-    "foreman_q32_g1": "Foreman all-intra QP32",
-    "coastguard_q18_g1": "Coastguard all-intra QP18",
-    "coastguard_q28_g1": "Coastguard all-intra QP28",
-    "coastguard_q32_g1": "Coastguard all-intra QP32",
-    "foreman_q22_g1": "Foreman all-intra QP22",
-    "coastguard_q22_g1": "Coastguard all-intra QP22",
-    "foreman_q22_g1_1000": "Foreman all-intra QP22 (1000f)",
-    "coastguard_q22_g1_1000": "Coastguard all-intra QP22 (1000f)",
+    "foreman_q22_g1": "Foreman all-intra QP22 (baseline)",
+    "coastguard_q22_g1": "Coastguard all-intra QP22 (baseline)",
+    "deadline_q22_g1": "Deadline all-intra QP22 (baseline)",
+    "akiyo_q22_g1": "Akiyo all-intra QP22 (low motion)",
+    "container_q22_g1": "Container all-intra QP22 (detail)",
+    "hall_monitor_q22_g1": "Hall Monitor all-intra QP22 (surveillance)",
+    "football_q22_g1": "Football all-intra QP22 (high motion)",
+    "city_q22_g1": "City all-intra QP22 (texture-heavy)",
+    "foreman_q18_g1_150f": "Foreman all-intra QP18 (150f)",
+    "foreman_q28_g1_300f": "Foreman all-intra QP28 (300f)",
+    "coastguard_q18_g1_150f": "Coastguard all-intra QP18 (150f)",
+    "coastguard_q22_g1_600f": "Coastguard all-intra QP22 (600f)",
+    "coastguard_q22_g1_1000f": "Coastguard all-intra QP22 high-motion (1000f)",
+    "coastguard_q22_g1_3000f": "Coastguard all-intra QP22 high-motion (3000f, repeated)",
+    "coastguard_q28_g1_300f": "Coastguard all-intra QP28 (300f)",
+    "deadline_q18_g1_150f": "Deadline all-intra QP18 (150f)",
+    "deadline_q22_g1_600f": "Deadline all-intra QP22 (600f)",
+    "deadline_q22_g1_1000f": "Deadline all-intra QP22 mixed-motion (1000f)",
+    "deadline_q28_g1_300f": "Deadline all-intra QP28 (300f)",
+    "foreman_g8_300f_b800k": "Foreman GOP8 ABR 800 kbps (300f)",
+    "coastguard_g8_300f_b800k": "Coastguard GOP8 ABR 800 kbps (300f)",
+    "deadline_g8_300f_b800k": "Deadline GOP8 ABR 800 kbps (300f)",
 }
 
 # ---------------------------------------------------------------------------
@@ -160,7 +170,41 @@ def setup_style() -> None:
 # ---------------------------------------------------------------------------
 # Video decode helpers
 # ---------------------------------------------------------------------------
-def decode_luma_frames(h264_path: str | Path, max_frames: int = 9999) -> np.ndarray:
+FRAME_CACHE_SCHEMA_VERSION = "v1-2026-05-04"
+
+
+def _frame_cache_enabled() -> bool:
+    return os.environ.get("BENCHMARK_DISABLE_FRAME_CACHE", "0") != "1"
+
+
+def _frame_cache_paths(h264_path: str | Path, max_frames: int) -> tuple[Path, Path]:
+    p = Path(h264_path)
+    try:
+        resolved = str(p.resolve()).encode("utf-8")
+    except OSError:
+        resolved = str(p).encode("utf-8")
+    key = hashlib.sha1(
+        resolved + b"|" + str(int(max_frames)).encode("ascii") + b"|" + f"{WIDTH}x{HEIGHT}".encode("ascii")
+    ).hexdigest()[:16]
+    stem = f"{p.stem}_{key}_{int(max_frames)}f"
+    return BENCHMARK_CACHE_DIR / f"{stem}.npy", BENCHMARK_CACHE_DIR / f"{stem}.json"
+
+
+def _frame_cache_meta(h264_path: str | Path, max_frames: int) -> dict[str, object]:
+    p = Path(h264_path)
+    stat = p.stat()
+    return {
+        "schema": FRAME_CACHE_SCHEMA_VERSION,
+        "path": str(p.resolve()),
+        "size": int(stat.st_size),
+        "mtime_ns": int(stat.st_mtime_ns),
+        "max_frames": int(max_frames),
+        "width": WIDTH,
+        "height": HEIGHT,
+    }
+
+
+def _decode_luma_frames_uncached(h264_path: str | Path, max_frames: int = 9999) -> np.ndarray:
     """
     Decode H.264 -> array of Y (luma) frames, shape (N, H, W), dtype float32.
     Uses ffmpeg subprocess. float32 halves memory vs float64 (sufficient for PSNR/SSIM).
@@ -183,6 +227,88 @@ def decode_luma_frames(h264_path: str | Path, max_frames: int = 9999) -> np.ndar
         start = i * frame_size_420
         out[i] = np.frombuffer(raw[start: start + WIDTH * HEIGHT], dtype=np.uint8).reshape(HEIGHT, WIDTH)
     return out
+
+
+def decode_luma_frames(h264_path: str | Path, max_frames: int = 9999) -> np.ndarray:
+    """
+    Decode H.264 -> array of Y (luma) frames, shape (N, H, W), dtype float32.
+    Uses a disk-backed cache keyed by file fingerprint and max_frames to avoid
+    repeated ffmpeg decode across benchmark sections and validation passes.
+    """
+    if max_frames <= 0:
+        return np.empty((0, HEIGHT, WIDTH), dtype=np.float32)
+
+    p = Path(h264_path)
+    if not _frame_cache_enabled():
+        return _decode_luma_frames_uncached(p, max_frames=max_frames)
+
+    npy_path, meta_path = _frame_cache_paths(p, max_frames)
+    try:
+        expected_meta = _frame_cache_meta(p, max_frames)
+        if npy_path.exists() and meta_path.exists():
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if meta == expected_meta:
+                return np.load(npy_path, mmap_mode="r")
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass
+
+    frames = _decode_luma_frames_uncached(p, max_frames=max_frames)
+    try:
+        np.save(npy_path, frames, allow_pickle=False)
+        meta_path.write_text(json.dumps(expected_meta, ensure_ascii=True, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    return frames
+
+
+def benchmark_analysis_cache_enabled() -> bool:
+    """Allow benchmark sections to reuse runtime video-analysis cache."""
+    return os.environ.get("BENCHMARK_DISABLE_ANALYSIS_CACHE", "0") != "1"
+
+
+def load_or_build_benchmark_analysis(
+    video_path: str | Path,
+    *,
+    force: bool = False,
+):
+    """
+    Return cached cover-video analysis for benchmark sections.
+
+    Reuses the runtime analysis cache so sec1/sec2/sec3/sec4 can share the same
+    expensive IDR extraction and safety-filter output across repeated runs.
+    """
+    vp = Path(video_path)
+    if benchmark_analysis_cache_enabled():
+        from src.core.analysis_cache import load_or_build_video_analysis
+
+        return load_or_build_video_analysis(
+            vp,
+            use_cache=True,
+            force_refresh=force,
+        )
+
+    from src.bitstream.bitstream_ops import BitstreamReconstructor
+    from src.core.stego import CAVLCSafetyFilter
+
+    rec = BitstreamReconstructor()
+    coefficients, frame_verified_data, nC_map, nal_length_map, t1_override_map = (
+        load_or_extract_idr_blocks(vp, rec, force=force)
+    )
+    safety = CAVLCSafetyFilter()
+    safe_positions = safety.get_safe_positions(
+        coefficients,
+        nC_map=nC_map,
+        nal_length_map=nal_length_map,
+        t1_override_map=t1_override_map,
+    )
+    return (
+        coefficients,
+        frame_verified_data,
+        nC_map,
+        nal_length_map,
+        t1_override_map,
+        safe_positions,
+    )
 
 # ---------------------------------------------------------------------------
 # Quality metrics
@@ -212,20 +338,6 @@ def ssim_per_frame(orig_frames: np.ndarray, stego_frames: np.ndarray) -> list[fl
     return [ssim_frame(orig_frames[i], stego_frames[i]) for i in range(n)]
 
 
-def _decode_raw_bytes(h264_path: str | Path) -> bytes:
-    """Run ffmpeg and return raw yuv420p bytes (no frame array allocation)."""
-    cmd = [
-        "ffmpeg", "-i", str(h264_path),
-        "-f", "rawvideo", "-pix_fmt", "yuv420p",
-        "-vf", f"scale={WIDTH}:{HEIGHT}",
-        "pipe:1", "-loglevel", "quiet",
-    ]
-    result = subprocess.run(cmd, capture_output=True, check=False)
-    if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed: {result.stderr.decode()}")
-    return result.stdout
-
-
 def compute_quality_streaming(
     orig_path: str | Path,
     stego_path: str | Path,
@@ -234,24 +346,17 @@ def compute_quality_streaming(
     """
     Compute per-frame and full-video PSNR/SSIM without holding large frame arrays.
 
-    Decodes both videos to raw bytes (~145 MB each), then processes one frame
-    pair at a time.  Peak memory ~290 MB vs ~774 MB for float32 full arrays.
+    Uses cached luma decode when available, then processes one frame pair at a
+    time. This avoids repeated ffmpeg decode across benchmark passes.
 
     Returns dict with keys:
       psnr_per_frame, ssim_per_frame, psnr_full_video, n
     """
     from skimage.metrics import structural_similarity
 
-    orig_raw = _decode_raw_bytes(orig_path)
-    stego_raw = _decode_raw_bytes(stego_path)
-
-    frame_size_420 = WIDTH * HEIGHT * 3 // 2
-    luma_size = WIDTH * HEIGHT
-    n = min(
-        len(orig_raw) // frame_size_420,
-        len(stego_raw) // frame_size_420,
-        max_frames,
-    )
+    orig_frames = decode_luma_frames(orig_path, max_frames=max_frames)
+    stego_frames = decode_luma_frames(stego_path, max_frames=max_frames)
+    n = min(len(orig_frames), len(stego_frames))
 
     psnr_list: list[float] = []
     ssim_list: list[float] = []
@@ -259,16 +364,15 @@ def compute_quality_streaming(
     total_pixels = 0
 
     for i in range(n):
-        base = i * frame_size_420
-        o = np.frombuffer(orig_raw[base: base + luma_size], dtype=np.uint8).reshape(HEIGHT, WIDTH)
-        s = np.frombuffer(stego_raw[base: base + luma_size], dtype=np.uint8).reshape(HEIGHT, WIDTH)
+        o = np.asarray(orig_frames[i], dtype=np.uint8)
+        s = np.asarray(stego_frames[i], dtype=np.uint8)
 
         diff = o.astype(np.float32) - s.astype(np.float32)
         ssd = float(np.dot(diff.ravel(), diff.ravel()))
         total_ssd += ssd
-        total_pixels += luma_size
+        total_pixels += WIDTH * HEIGHT
 
-        frame_mse = ssd / luma_size
+        frame_mse = ssd / (WIDTH * HEIGHT)
         psnr_list.append(
             float("inf") if frame_mse < 1e-12
             else 20.0 * math.log10(255.0 / math.sqrt(frame_mse))
@@ -286,6 +390,42 @@ def compute_quality_streaming(
         "ssim_per_frame": ssim_list,
         "psnr_full_video": full_psnr,
         "n": n,
+    }
+
+
+def compute_quality_subset(
+    orig_path: str | Path,
+    stego_path: str | Path,
+    frame_indices: list[int] | set[int] | tuple[int, ...],
+    *,
+    include_ssim: bool = False,
+    max_frames: int = 9999,
+) -> dict[str, object]:
+    """
+    Compute quality only for the selected frame indices.
+
+    This is primarily used by sec1 validation loops so all-intra retries do not
+    need a full-video quality pass when only a small set of IDR frames changed.
+    """
+    orig_frames = decode_luma_frames(orig_path, max_frames=max_frames)
+    stego_frames = decode_luma_frames(stego_path, max_frames=max_frames)
+    n = min(len(orig_frames), len(stego_frames))
+    selected = sorted({int(i) for i in frame_indices if 0 <= int(i) < n})
+
+    psnr_vals: list[float] = []
+    ssim_vals: list[float] = []
+    for idx in selected:
+        o = orig_frames[idx]
+        s = stego_frames[idx]
+        psnr_vals.append(psnr(o, s))
+        if include_ssim:
+            ssim_vals.append(ssim_frame(o, s))
+
+    return {
+        "frame_indices": selected,
+        "psnr_per_frame": psnr_vals,
+        "ssim_per_frame": ssim_vals,
+        "n": len(selected),
     }
 
 # ---------------------------------------------------------------------------
