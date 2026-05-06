@@ -442,6 +442,103 @@ class BitstreamPatcher:
             arr = padded
         return np.packbits(arr).tobytes()
 
+    def validate_block_patchability(self, rbsp_bytes: bytes, block_key, offset_data: Dict,
+                                    end_to_block_retro: Dict | None = None):
+        """
+        Validate patchability for a single luma block lazily.
+
+        Returns:
+            None if block is not patchable, else (matched_nC, coefficients, t1_override)
+        """
+        rbsp_bits = BitArray(rbsp_bytes)
+        rbsp_raw_bits = rbsp_bits.bits
+        retro_pad_bits = np.zeros(64, dtype=np.uint8)
+
+        start_bit = offset_data.get('start_bit')
+        end_bit = offset_data.get('end_bit')
+        original_length = offset_data.get('bit_length')
+        if start_bit is None or end_bit is None or original_length is None or original_length <= 0:
+            return None
+
+        actual_nal_bits = rbsp_raw_bits[start_bit:end_bit]
+        lookahead_end = min(end_bit + 64, len(rbsp_bits))
+        raw_nal_bytes = self._bits_to_bytes(rbsp_raw_bits[start_bit:lookahead_end])
+
+        tracer_nC = offset_data.get('nC', None) if isinstance(offset_data, dict) else None
+        if tracer_nC is not None:
+            nC_scan_order = [tracer_nC]
+        else:
+            nC_scan_order = [0, 2, 4, 6, 8]
+
+        max_num_coeff = offset_data.get('max_num_coeff', 16)
+        matched = None
+        for nC_try in nC_scan_order:
+            try:
+                reader = BitstreamReader(raw_nal_bytes)
+                dec = CAVLCDecoder(reader)
+                block = dec.decode_block_cavlc(nC_try, max_num_coeff=max_num_coeff)
+                consumed = reader.pos
+                if consumed != original_length:
+                    continue
+                nal_coeffs = list(block.levels)
+                t1_decoded = block.trailing_ones
+
+                candidate = self._encode_coefficients_to_bits(
+                    nal_coeffs, nC_try, max_num_coeff=max_num_coeff)
+                if len(candidate) == original_length and np.array_equal(np.asarray(candidate, dtype=np.uint8), actual_nal_bits):
+                    matched = (nC_try, nal_coeffs, None)
+                    break
+
+                candidate_t1 = self._encode_coefficients_to_bits(
+                    nal_coeffs, nC_try, max_num_coeff=max_num_coeff,
+                    override_trailing_ones=t1_decoded)
+                if len(candidate_t1) == original_length and np.array_equal(np.asarray(candidate_t1, dtype=np.uint8), actual_nal_bits):
+                    matched = (nC_try, nal_coeffs, t1_decoded)
+                    break
+            except Exception:
+                continue
+
+        if matched is None:
+            return None
+
+        if end_to_block_retro is None:
+            return matched
+
+        start_bit_b = start_bit
+        bit_length_b = original_length
+        b_orig_bits = rbsp_raw_bits[start_bit_b:end_bit].copy()
+        chain_boundary = start_bit_b
+        CHAIN_LOOKBACK = 8
+        for _hop in range(CHAIN_LOOKBACK):
+            anc_entry = end_to_block_retro.get(chain_boundary)
+            if anc_entry is None:
+                break
+            anc_key, anc_offset = anc_entry
+            anc_nC = anc_offset.get('nC')
+            anc_start = anc_offset.get('start_bit')
+            anc_len = anc_offset.get('bit_length')
+            if anc_nC is None or anc_start is None or anc_len is None or anc_len <= 0:
+                break
+
+            anc_bits = rbsp_raw_bits[anc_start:chain_boundary]
+            intermediate = rbsp_raw_bits[chain_boundary:start_bit_b]
+            for p in range(bit_length_b):
+                b_flipped = b_orig_bits.copy()
+                b_flipped[p] ^= 1
+                combined_bits = np.concatenate((anc_bits, intermediate, b_flipped, retro_pad_bits))
+                combined = self._bits_to_bytes(combined_bits)
+                try:
+                    rr = BitstreamReader(combined)
+                    rd = CAVLCDecoder(rr)
+                    rd.decode_block_cavlc(anc_nC, max_num_coeff=anc_offset.get('max_num_coeff', 16))
+                    if rr.pos != anc_len:
+                        return None
+                except Exception:
+                    return None
+            chain_boundary = anc_start
+
+        return matched
+
     def get_unpatchable_blocks(self, rbsp_bytes: bytes, block_offsets: Dict):
         """
         Return the set of (mb_local, blk_idx) keys that CANNOT be successfully
@@ -970,7 +1067,7 @@ class BitstreamReconstructor:
             # and keeps patching aligned with the exact block/offset view used upstream.
             parsed_result = None
             if frame_verified_data and global_mb_idx in frame_verified_data:
-                verified_offsets, verified_blocks = frame_verified_data[global_mb_idx]
+                verified_offsets, verified_blocks, _verified_rbsp = frame_verified_data[global_mb_idx]
                 blocks = {
                     (mb - global_mb_idx, blk): list(coeffs)
                     for (mb, blk), coeffs in verified_blocks.items()
@@ -1355,7 +1452,7 @@ class BitstreamReconstructor:
         def _get_pre(idr_off):
             if not frame_verified_data or idr_off not in frame_verified_data:
                 return None, None
-            g_off, g_blk = frame_verified_data[idr_off]
+            g_off, g_blk, _g_rbsp = frame_verified_data[idr_off]
             pre_off = {(mb - idr_off, blk): v
                        for (mb, blk), v in g_off.items() if mb >= idr_off}
             pre_blk = {(mb - idr_off, blk): v
@@ -1581,7 +1678,7 @@ class BitstreamReconstructor:
         def _get_pre(idr_off):
             if not frame_verified_data or idr_off not in frame_verified_data:
                 return None, None
-            g_off, g_blk = frame_verified_data[idr_off]
+            g_off, g_blk, _g_rbsp = frame_verified_data[idr_off]
             pre_off = {(mb - idr_off, blk): v
                        for (mb, blk), v in g_off.items() if mb >= idr_off}
             pre_blk = {(mb - idr_off, blk): v

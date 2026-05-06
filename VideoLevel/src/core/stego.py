@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from ..bitstream.cavlc import CAVLCEncoder, CAVLCDecoder
 from ..bitstream.bitstream_io import BitstreamWriter, BitstreamReader
+from ..bitstream.bitstream_ops import BitstreamPatcher
 from ..exceptions import SafetyFilterError, EmbeddingError
 
 logger = logging.getLogger(__name__)
@@ -153,6 +154,7 @@ class CAVLCSafetyFilter:
         
         # Cache for trailing ones detection (performance optimization)
         self._trailing_ones_cache: Dict[Tuple[int, ...], Set[int]] = {}
+        self._lazy_patchability_cache: Dict[Tuple[int, int], Optional[Tuple[int, List[int], Optional[int]]]] = {}
     
     def _detect_trailing_ones(self, coeffs: List[int]) -> Set[int]:
         """
@@ -315,7 +317,9 @@ class CAVLCSafetyFilter:
         skip_dc: bool = True,
         nC_map: Dict[Tuple[int, int], int] = None,
         nal_length_map: Dict[Tuple[int, int], int] = None,
-        t1_override_map: Dict[Tuple[int, int], int] = None
+        t1_override_map: Dict[Tuple[int, int], int] = None,
+        frame_verified_data: Dict[int, Tuple[Dict, Dict]] | None = None,
+        cif_mb_count: int = 396,
     ) -> List[Tuple[int, int, int]]:
         """
         Get list of safe embedding positions across all blocks
@@ -369,13 +373,9 @@ class CAVLCSafetyFilter:
             # create a bit-shift in the embedded bit-stream.
             block_key = (mb_idx, block_idx)
             nal_len_entry = nal_length_map.get(block_key)
-            # Skip explicitly unpatchable blocks (-1).
-            # Also skip blocks with no NAL bit-length record when nal_length_map is
-            # non-empty: a missing key means the parser failed for that block (e.g.
-            # resync failure at MB 393-395), so we can't guarantee patcher success.
-            # When nal_length_map is empty (not provided) we allow all blocks.
-            if nal_len_entry == -1:
-                continue
+            # Skip blocks with no NAL bit-length record when nal_length_map is non-empty.
+            # A missing key means the parser failed for that block, so we cannot guarantee
+            # patcher success. When nal_length_map is empty (not provided) we allow all blocks.
             if nal_length_map and nal_len_entry is None:
                 continue
 
@@ -404,6 +404,45 @@ class CAVLCSafetyFilter:
             if not candidate_indices:
                 continue
 
+            # Lazy patchability validation: validate the block only when it has at least
+            # one coefficient candidate that survives the cheap structural rules.
+            if nal_length_map and frame_verified_data is not None:
+                cached_match = self._lazy_patchability_cache.get(block_key)
+                if cached_match is None:
+                    idr_off = (mb_idx // cif_mb_count) * cif_mb_count
+                    idr_data = frame_verified_data.get(idr_off)
+                    if idr_data is None:
+                        self._lazy_patchability_cache[block_key] = None
+                        continue
+                    g_off, _g_blk, nal_rbsp = idr_data
+                    local_offsets = {
+                        (mb - idr_off, blk): od
+                        for (mb, blk), od in g_off.items()
+                        if blk < 16 and od.get('bit_length') not in (None, 0)
+                    }
+                    patcher = BitstreamPatcher()
+                    end_to_block = {
+                        od['end_bit']: ((mb - idr_off, blk), od)
+                        for (mb, blk), od in g_off.items()
+                        if blk < 16 and 'end_bit' in od
+                    }
+                    local_key = (mb_idx - idr_off, block_idx)
+                    cached_match = patcher.validate_block_patchability(
+                        nal_rbsp,
+                        local_key,
+                        local_offsets.get(local_key, {}),
+                        end_to_block,
+                    )
+                    self._lazy_patchability_cache[block_key] = cached_match
+
+                if cached_match is None:
+                    continue
+                actual_nC = cached_match[0]
+                t1_override = cached_match[2]
+            else:
+                actual_nC = nC_map.get(block_key, 0)
+                t1_override = t1_override_map.get(block_key)
+
             # Check each coefficient position
             for coeff_idx in candidate_indices:
 
@@ -418,9 +457,6 @@ class CAVLCSafetyFilter:
                 if self.enable_bit_length:
                     modified_block = coeffs[:]
                     modified_block[coeff_idx] = new_val
-
-                    actual_nC = nC_map.get(block_key, 0)
-                    t1_override = t1_override_map.get(block_key)
 
                     is_safe, orig_bits, mod_bits = self._verify_block_bit_length_invariance(
                         coeffs,

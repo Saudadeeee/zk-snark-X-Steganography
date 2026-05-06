@@ -1,18 +1,18 @@
 {
   "foreman_q22_g1": {
     "timings": {
-      "1_extract_idr": 271.6073,
-      "2_safety_filter": 0.0041,
-      "3_zk_prove": 2.4031,
-      "4_embed": 20.2398,
-      "5_reconstruct": 2.951,
-      "6_extract_bits": 1.6047,
-      "7_zk_verify": 1.177
+      "1_extract_idr": 63.4937,
+      "2_safety_filter": 0.003,
+      "3_zk_prove": 2.1754,
+      "4_embed": 140.7967,
+      "5_reconstruct": 3.4606,
+      "6_extract_bits": 0.8872,
+      "7_zk_verify": 3.6311
     },
-    "total_s": 299.9869,
-    "capacity_bits": 291943,
-    "bits_embedded": 1320,
-    "blob_size": 165,
-    "zk_valid": true
+    "total_s": 214.4477,
+    "capacity_bits": 1232,
+    "bits_embedded": 1232,
+    "blob_size": 147,
+    "zk_valid": false
   }
 }

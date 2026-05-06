@@ -49,8 +49,20 @@ def _measure_pipeline(seq_name: str, video_path: Path, *, force_extract: bool = 
     from src.core.pipeline import extract_bits_direct
     from src.core.stego import PayloadEmbedder
     from src.bitstream.bitstream_ops import BitstreamReconstructor
-    from src.zk_proof import ZKSnarkBridge, pack, unpack, blob_bit_length
+    from src.zk_proof import ZKSnarkBridge, blob_bit_length
     from benchmark._common import load_or_build_benchmark_analysis
+    from benchmark.sec1_quality import (
+        CHAOS_KEY,
+        REAL_PROOF_MESSAGE,
+        REAL_PROOF_SMART_MAX_MODS_PER_BLOCK,
+        REAL_PROOF_VALIDATION_HEADROOM_BITS,
+        SEQ_MAX_FLIPS_PER_IDR,
+        CIF_MB_COUNT,
+        _build_real_proof_payload,
+        _take_positions_excluding_idrs,
+    )
+    from src.core.chaos import ChaosTransformer
+    from src.verifier import verify
 
     stego_out = OUTPUT_DIR / f"_sec6_{seq_name}_stego.h264"
 
@@ -72,22 +84,71 @@ def _measure_pipeline(seq_name: str, video_path: Path, *, force_extract: bool = 
     # --- Stage 3: ZK proof generation ---
     t0 = time.perf_counter()
     bridge = ZKSnarkBridge(str(CIRCUITS_DIR))
-    proof_dict, public_dict = bridge.generate_proof_for_payload(MESSAGE, SECRET_KEY)
+    proof_dict, public_dict = bridge.generate_proof_for_payload(REAL_PROOF_MESSAGE, SECRET_KEY)
     timings["3_zk_prove"] = time.perf_counter() - t0
 
-    # --- Stage 4: Embed (pack blob + CAVLC T1) ---
-    proof_bytes = bridge.proof_to_bytes(proof_dict)
-    blob = pack(MESSAGE, proof_bytes)
+    payload_real, _ = _build_real_proof_payload()
+    chaos = ChaosTransformer(CHAOS_KEY)
+    payload_scrambled, _ = chaos.scramble(payload_real)
+    scrambled_required_bits = len(payload_scrambled) * 8
+
+    SEC1_MAX_FLIPS_PER_IDR = SEQ_MAX_FLIPS_PER_IDR.get(seq_name, 5)
+    headroom_bits = REAL_PROOF_VALIDATION_HEADROOM_BITS
+
+    # --- Stage 4: SEC1 operating-point validation / selection ---
     t0 = time.perf_counter()
-    embedder = PayloadEmbedder(max_modifications_per_block=1)
-    modified, bits_emb = embedder.embed_payload(
-        coeffs, blob,
-        nC_map=nC_map, nal_length_map=nal_len, t1_override_map=t1_over,
+    shuffled = chaos.shuffle_positions(safe_pos)
+    seen = set()
+    deduped = []
+    for p in shuffled:
+        bk = (p[0], p[1])
+        if bk not in seen:
+            seen.add(bk)
+            deduped.append(p)
+
+    validation_target_bits = min(len(deduped), scrambled_required_bits + headroom_bits)
+    rec = BitstreamReconstructor()
+    validator, cleanup = rec.make_ffmpeg_position_validator(str(video_path), coeffs, fvd)
+    validated = []
+    idr_counts = {}
+    try:
+        for p in deduped:
+            if len(validated) >= validation_target_bits:
+                break
+            fi = p[0] // CIF_MB_COUNT
+            if idr_counts.get(fi, 0) >= SEC1_MAX_FLIPS_PER_IDR:
+                continue
+            if validator(p[0], p[1], p[2]):
+                validated.append(p)
+                idr_counts[fi] = idr_counts.get(fi, 0) + 1
+    finally:
+        cleanup()
+
+    if len(validated) < scrambled_required_bits:
+        raise RuntimeError(f"[{seq_name}] insufficient validated positions: {len(validated)} < {scrambled_required_bits}")
+
+    psnr_rec = BitstreamReconstructor()
+    validated = psnr_rec.batch_psnr_validate(
+        str(video_path), coeffs, validated, fvd,
+        psnr_threshold_db=40.0,
+        max_bisect_iters=8,
+        max_greedy_per_idr=SEC1_MAX_FLIPS_PER_IDR,
+        min_local_mb=0,
+        gop_span_frames=1,
+        gop_psnr_quantile=0.0,
+        target_positions=min(validation_target_bits, len(validated)),
     )
+    embed_positions = _take_positions_excluding_idrs(validated, set(), scrambled_required_bits, CIF_MB_COUNT)
     timings["4_embed"] = time.perf_counter() - t0
 
-    # --- Stage 5: Bitstream reconstruction ---
+    # --- Stage 5: Payload embedding + reconstruction (real SEC1 path) ---
     t0 = time.perf_counter()
+    embedder = PayloadEmbedder(max_modifications_per_block=REAL_PROOF_SMART_MAX_MODS_PER_BLOCK)
+    modified, bits_emb = embedder.embed_payload(
+        coeffs, payload_scrambled,
+        nC_map=nC_map, nal_length_map=nal_len, t1_override_map=t1_over,
+        pre_validated_positions=embed_positions,
+    )
     rec2 = BitstreamReconstructor()
     rec2.reconstruct_video(
         str(video_path),
@@ -98,22 +159,32 @@ def _measure_pipeline(seq_name: str, video_path: Path, *, force_extract: bool = 
     )
     timings["5_reconstruct"] = time.perf_counter() - t0
 
-    # --- Stage 6: Extract bits (decode stego using original safe positions) ---
+    # --- Stage 6: Extract bits / verify extraction path ---
     t0 = time.perf_counter()
-    n_bits_needed = blob_bit_length(MESSAGE)
     extracted_blob = extract_bits_direct(
         str(stego_out),
-        safe_pos,
+        embed_positions,
         fvd,
         nC_map,
-        n_bits_needed,
-        max_modifications_per_block=1,
+        len(embed_positions),
+        max_modifications_per_block=REAL_PROOF_SMART_MAX_MODS_PER_BLOCK,
     )
     timings["6_extract_bits"] = time.perf_counter() - t0
 
     # --- Stage 7: ZK verification ---
     t0 = time.perf_counter()
-    valid = bridge.verify(proof_dict, public_dict)
+    verify_result = verify(
+        stego_video_path=str(stego_out),
+        original_video_path=str(video_path),
+        circuits_dir=str(CIRCUITS_DIR),
+        secret_key=SECRET_KEY,
+        message_length=len(REAL_PROOF_MESSAGE),
+        max_modifications_per_block=REAL_PROOF_SMART_MAX_MODS_PER_BLOCK,
+        chaos_key=CHAOS_KEY,
+        precomputed_positions=embed_positions,
+        precomputed_payload_bits=len(embed_positions),
+    )
+    valid = bool(verify_result.valid and verify_result.message == REAL_PROOF_MESSAGE)
     timings["7_zk_verify"] = time.perf_counter() - t0
 
     total = sum(timings.values())
@@ -121,9 +192,9 @@ def _measure_pipeline(seq_name: str, video_path: Path, *, force_extract: bool = 
     return {
         "timings":        {k: round(v, 4) for k, v in timings.items()},
         "total_s":        round(total, 4),
-        "capacity_bits":  capacity_bits,
+        "capacity_bits":  len(embed_positions),
         "bits_embedded":  bits_emb,
-        "blob_size":      len(blob),
+        "blob_size":      len(payload_real),
         "zk_valid":       valid,
     }
 

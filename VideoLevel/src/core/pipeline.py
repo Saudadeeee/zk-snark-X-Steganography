@@ -27,7 +27,7 @@ def extract_all_idr_blocks(video_path: str, reconstructor: BitstreamReconstructo
     Returns
     -------
     coefficients       : list[(mb_global, blk_idx, coeffs)]
-    frame_verified_data: {idr_mb_offset: (global_offsets, global_blocks)}
+    frame_verified_data: {idr_mb_offset: (global_offsets, global_blocks, rbsp_bytes)}
     nC_map             : {(mb_global, blk_idx): nC}
     nal_length_map     : {(mb_global, blk_idx): bit_length}
     t1_override_map    : {(mb_global, blk_idx): trailing_ones_override}
@@ -73,7 +73,10 @@ def extract_all_idr_blocks(video_path: str, reconstructor: BitstreamReconstructo
                 for (ml, bi), v in offsets.items()
                 if bi < 16 and any(c != 0 for c in blocks.get((ml, bi), ()))
             }
-            unpatch, matched = patcher.get_unpatchable_blocks(nal.rbsp_byte, luma_off)
+            # Lazy patchability validation: do not eagerly round-trip every block here.
+            # Keep original parser metadata and let the safety filter validate only
+            # blocks that actually survive cheap candidate checks.
+            unpatch, matched = set(), {}
 
             idr_coeffs = []
             for (ml, bi) in sorted(blocks.keys()):
@@ -90,7 +93,7 @@ def extract_all_idr_blocks(video_path: str, reconstructor: BitstreamReconstructo
             for (ml, bi), v in blocks.items():
                 g_blk[(ml + idr_off, bi)] = (matched[(ml, bi)][1]
                                               if (ml, bi) in matched else v)
-            frame_verified_data[idr_off] = (g_off, g_blk)
+            frame_verified_data[idr_off] = (g_off, g_blk, nal.rbsp_byte)
 
             for (ml, bi), od in offsets.items():
                 if bi >= 16:
@@ -189,7 +192,7 @@ def extract_bits_direct(stego_video_path: str,
         idr_off = next((off for off in idr_desc if off <= mb), None)
         if idr_off is None:
             continue
-        g_off, _ = frame_verified_data[idr_off]
+        g_off, _, _rbsp = frame_verified_data[idr_off]
         od = g_off.get((mb, blk))
         if od is None:
             continue
