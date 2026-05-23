@@ -34,6 +34,14 @@ from .core.chaos           import ChaosTransformer
 from .bitstream.bitstream_ops import BitstreamReconstructor
 from .exceptions           import InsufficientCapacityError
 from .zk_proof             import ZKSnarkBridge, pack
+from .manifest             import (
+    StegoManifest,
+    PayloadMetadata,
+    EmbeddingMetadata,
+    VideoMetadata,
+    ProofMetadata,
+    compute_file_hash,
+)
 
 
 @lru_cache(maxsize=4)
@@ -231,10 +239,12 @@ def embed(
     )
 
     if used_positions:
+        # Save positions.json (legacy, for compatibility)
         pos_path = f"{output_path}.positions.json"
         with open(pos_path, "w", encoding="utf-8") as f:
             json.dump([[mb, blk, cidx] for mb, blk, cidx in used_positions], f, ensure_ascii=True, indent=2)
 
+        # Save meta.json (legacy, for compatibility)
         meta_path = f"{output_path}.meta.json"
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(
@@ -249,6 +259,36 @@ def embed(
                 ensure_ascii=True,
                 indent=2,
             )
+
+        # Save versioned manifest.json
+        manifest = StegoManifest(
+            payload=PayloadMetadata(
+                message_length=len(message),
+                bits_embedded=bits_embedded,
+                bits_required=required_bits,
+                chaos_enabled=chaos is not None,
+                chaos_original_bits=original_bit_count if chaos is not None else None,
+                chaos_expansion_factor=len(payload_blob) * 8 / original_bit_count if chaos is not None else 1.0,
+            ),
+            embedding=EmbeddingMetadata(
+                strategy="t1_sign_flip",
+                max_modifications_per_block=max_modifications_per_block,
+                positions_count=len(used_positions),
+            ),
+            video=VideoMetadata(
+                file_path=video_path,
+                file_hash=compute_file_hash(video_path),
+                codec="h264",
+                profile="baseline",
+            ),
+            proof=ProofMetadata(
+                proof_system="groth16",
+                proof_size_bytes=len(proof_bytes),
+                constraint_count=bridge.get_constraint_count(),
+            ),
+        )
+        manifest_path = f"{output_path}.manifest.json"
+        manifest.save(manifest_path)
 
     capacity = sum(
         1 for _, _, coeffs in coefficients for v in coeffs if abs(v) == 1

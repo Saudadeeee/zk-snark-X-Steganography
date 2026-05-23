@@ -31,30 +31,52 @@ from .core.analysis_cache  import load_or_build_video_analysis
 from .core.pipeline        import extract_bits_direct
 from .core.chaos           import ChaosTransformer
 from .zk_proof             import ZKSnarkBridge, unpack, blob_bit_length
+from .manifest             import StegoManifest
 
 
-def _load_sidecar_positions(stego_video_path: str) -> tuple[Optional[list[tuple[int, int, int]]], Optional[int]]:
-    pos_path = f"{stego_video_path}.positions.json"
-    meta_path = f"{stego_video_path}.meta.json"
+def _load_sidecar_data(stego_video_path: str) -> tuple[Optional[list[tuple[int, int, int]]], Optional[int], Optional[StegoManifest]]:
+    """Load positions, payload bits, and manifest from sidecar files.
 
+    Priority: manifest.json > meta.json + positions.json
+    """
+    manifest: Optional[StegoManifest] = None
     positions: Optional[list[tuple[int, int, int]]] = None
     payload_bits: Optional[int] = None
 
-    if os.path.isfile(pos_path):
+    # Try manifest.json first
+    manifest_path = f"{stego_video_path}.manifest.json"
+    if os.path.isfile(manifest_path):
         try:
-            raw = json.loads(open(pos_path, "r", encoding="utf-8").read())
-            positions = [tuple(int(v) for v in row) for row in raw]
+            manifest = StegoManifest.load(manifest_path)
+            payload_bits = manifest.payload.bits_required
+            # Load positions.json separately
+            pos_path = f"{stego_video_path}.positions.json"
+            if os.path.isfile(pos_path):
+                raw = json.loads(open(pos_path, "r", encoding="utf-8").read())
+                positions = [tuple(int(v) for v in row) for row in raw]
         except Exception:
-            positions = None
+            manifest = None
 
-    if os.path.isfile(meta_path):
-        try:
-            meta = json.loads(open(meta_path, "r", encoding="utf-8").read())
-            payload_bits = int(meta.get("bits_required") or meta.get("bits_embedded") or 0) or None
-        except Exception:
-            payload_bits = None
+    # Fallback to legacy meta.json + positions.json
+    if not manifest:
+        pos_path = f"{stego_video_path}.positions.json"
+        meta_path = f"{stego_video_path}.meta.json"
 
-    return positions, payload_bits
+        if os.path.isfile(pos_path):
+            try:
+                raw = json.loads(open(pos_path, "r", encoding="utf-8").read())
+                positions = [tuple(int(v) for v in row) for row in raw]
+            except Exception:
+                positions = None
+
+        if os.path.isfile(meta_path):
+            try:
+                meta = json.loads(open(meta_path, "r", encoding="utf-8").read())
+                payload_bits = int(meta.get("bits_required") or meta.get("bits_embedded") or 0) or None
+            except Exception:
+                payload_bits = None
+
+    return positions, payload_bits, manifest
 
 
 @lru_cache(maxsize=4)
@@ -138,7 +160,7 @@ def verify(
         raise ValueError("message_length must be a positive integer")
 
     if precomputed_positions is None or precomputed_payload_bits is None:
-        sidecar_positions, sidecar_bits = _load_sidecar_positions(stego_video_path)
+        sidecar_positions, sidecar_bits, _ = _load_sidecar_data(stego_video_path)
         if precomputed_positions is None and sidecar_positions is not None:
             precomputed_positions = sidecar_positions
         if precomputed_payload_bits is None and sidecar_bits is not None:

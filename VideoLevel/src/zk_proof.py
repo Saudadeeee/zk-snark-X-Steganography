@@ -195,11 +195,16 @@ class ZKSnarkBridge:
     WASM_FILE  = "payload_verify.wasm"
     ZKEY_FILE  = "proving_key.zkey"
     VKEY_FILE  = "verification_key.json"
+    CONSTRAINT_COUNT = 18680
 
     def __init__(self, circuits_dir: str):
         self.circuits_dir = Path(circuits_dir).resolve()
         self.build_dir    = self.circuits_dir / "build"
         self.js_dir       = self.build_dir / "payload_verify_js"
+
+    def get_constraint_count(self) -> int:
+        """Return the number of arithmetic constraints in the circuit."""
+        return self.CONSTRAINT_COUNT
 
     # ------------------------------------------------------------------ #
     # Public API
