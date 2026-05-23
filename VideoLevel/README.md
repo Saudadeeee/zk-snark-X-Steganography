@@ -345,3 +345,32 @@ npm run compile
 npm run generate_proof_key
 npm run generate_verification_key
 ```
+
+---
+
+## Documentation
+
+### Project Documentation
+- [`plan.md`](plan.md) — Paper-readiness tracking and roadmap
+- [`COMPLETION.md`](COMPLETION.md) — Completion summary checklist
+- [`OPERATING_ENVELOPE.md`](OPERATING_ENVELOPE.md) — Supported codec/GOP/QP ranges
+- [`ARTIFACT_POLICY.md`](ARTIFACT_POLICY.md) — Cleanup and artifact management
+- [`COMPARATIVE_ANALYSIS.md`](COMPARATIVE_ANALYSIS.md) — Comparison with existing systems
+
+### Benchmark Documentation
+- [`benchmark/sec1_quality.py`](benchmark/sec1_quality.py) — Quality benchmark
+- [`benchmark/sec2_capacity.py`](benchmark/sec2_capacity.py) — Capacity analysis
+- [`benchmark/sec3_methods.py`](benchmark/sec3_methods.py) — Method comparison
+- [`benchmark/sec4_security.py`](benchmark/sec4_security.py) — Steganalysis
+- [`benchmark/sec4_modern_detectors.py`](benchmark/sec4_modern_detectors.py) — WS/SPAM detectors
+- [`benchmark/sec6_performance.py`](benchmark/sec6_performance.py) — Performance analysis
+- [`benchmark/sec6_paper_summary.py`](benchmark/sec6_paper_summary.py) — Paper timing text
+- [`benchmark/sec7_tradeoff.py`](benchmark/sec7_tradeoff.py) — QP/GOP tradeoff
+- [`benchmark/sec10_gop_sweep.py`](benchmark/sec10_gop_sweep.py) — GOP sweep
+- [`benchmark/statistical_benchmark.py`](benchmark/statistical_benchmark.py) — Error bars wrapper
+- [`benchmark/sec1_audit.py`](benchmark/sec1_audit.py) — Quality guard audit logging
+
+### API Documentation
+- [`src/manifest.py`](src/manifest.py) — Manifest schema (v1.0.0)
+- [`src/verifier_blind.py`](src/verifier_blind.py) — Near-blind verification
+- [`src/verify_modes.py`](src/verify_modes.py) — Explicit verifier modes
