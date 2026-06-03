@@ -1,317 +1,65 @@
 {
   "__meta__": {
     "sequence_names": [
-      "akiyo_q22_g1",
-      "hall_monitor_q22_g1",
-      "foreman_q22_g1",
-      "container_q22_g1",
-      "city_q22_g1",
       "coastguard_q22_g1",
-      "football_q22_g1",
-      "deadline_q22_g1",
-      "coastguard_q22_g1_1000f",
-      "deadline_q22_g1_1000f",
-      "coastguard_q22_g1_3000f"
+      "deadline_q22_g1"
     ],
     "positions_mtimes": {
-      "akiyo_q22_g1": 1777920812.3070738,
-      "hall_monitor_q22_g1": 1777921683.500111,
-      "foreman_q22_g1": 1777922490.3980026,
-      "container_q22_g1": 1777923339.8286946,
-      "city_q22_g1": 1777924218.0126991,
       "coastguard_q22_g1": 1777925079.0644836,
-      "football_q22_g1": 1777935211.1732552,
-      "deadline_q22_g1": 1777928954.7993388,
-      "coastguard_q22_g1_1000f": 1777955350.8457918,
-      "deadline_q22_g1_1000f": 1777933787.0971591,
-      "coastguard_q22_g1_3000f": 1777955931.275469
+      "deadline_q22_g1": 1777928954.7993388
     }
   },
   "data": {
-    "akiyo_q22_g1": {
-      "raw_t1_bits": 412859,
-      "raw_t1_bytes": 51607,
-      "validated_bits": 1232,
-      "zk_blob_bits": 1232,
-      "zk_payload_bits": 1176,
-      "utilization_pct": 0.298,
-      "fractions_pct": [
-        25,
-        50,
-        75,
-        100
-      ],
-      "bits_at_fraction": [
-        304,
-        616,
-        920,
-        1232
-      ],
-      "psnr_at_fraction": [
-        60.64207458496094,
-        57.544673919677734,
-        54.94207763671875,
-        53.13307189941406
-      ]
-    },
-    "hall_monitor_q22_g1": {
-      "raw_t1_bits": 412521,
-      "raw_t1_bytes": 51565,
-      "validated_bits": 1232,
-      "zk_blob_bits": 1232,
-      "zk_payload_bits": 1176,
-      "utilization_pct": 0.299,
-      "fractions_pct": [
-        25,
-        50,
-        75,
-        100
-      ],
-      "bits_at_fraction": [
-        304,
-        616,
-        920,
-        1232
-      ],
-      "psnr_at_fraction": [
-        55.94833755493164,
-        52.81368637084961,
-        51.250057220458984,
-        50.37978744506836
-      ]
-    },
-    "foreman_q22_g1": {
-      "raw_t1_bits": 286745,
-      "raw_t1_bytes": 35843,
-      "validated_bits": 1232,
-      "zk_blob_bits": 1232,
-      "zk_payload_bits": 1176,
-      "utilization_pct": 0.43,
-      "fractions_pct": [
-        25,
-        50,
-        75,
-        100
-      ],
-      "bits_at_fraction": [
-        304,
-        616,
-        920,
-        1232
-      ],
-      "psnr_at_fraction": [
-        62.12788009643555,
-        57.89154052734375,
-        56.17961883544922,
-        55.14667510986328
-      ]
-    },
-    "container_q22_g1": {
-      "raw_t1_bits": 394262,
-      "raw_t1_bytes": 49282,
-      "validated_bits": 1232,
-      "zk_blob_bits": 1232,
-      "zk_payload_bits": 1176,
-      "utilization_pct": 0.312,
-      "fractions_pct": [
-        25,
-        50,
-        75,
-        100
-      ],
-      "bits_at_fraction": [
-        304,
-        616,
-        920,
-        1232
-      ],
-      "psnr_at_fraction": [
-        59.538307189941406,
-        55.37153625488281,
-        53.1251106262207,
-        51.69659423828125
-      ]
-    },
-    "city_q22_g1": {
-      "raw_t1_bits": 430645,
-      "raw_t1_bytes": 53830,
-      "validated_bits": 1232,
-      "zk_blob_bits": 1232,
-      "zk_payload_bits": 1176,
-      "utilization_pct": 0.286,
-      "fractions_pct": [
-        25,
-        50,
-        75,
-        100
-      ],
-      "bits_at_fraction": [
-        304,
-        616,
-        920,
-        1232
-      ],
-      "psnr_at_fraction": [
-        57.35366439819336,
-        54.206321716308594,
-        52.73923873901367,
-        51.57416534423828
-      ]
-    },
     "coastguard_q22_g1": {
-      "raw_t1_bits": 427883,
-      "raw_t1_bytes": 53485,
-      "validated_bits": 1232,
+      "raw_safe_bits": 433256,
+      "raw_safe_bytes": 54157,
+      "patchable_usable_bits": 1391,
+      "validated_bits": 1316,
+      "operating_bits": 1232,
+      "ffmpeg_validated_bits": null,
+      "requested_position_bits": null,
+      "applied_position_bits": null,
+      "validation_mode": "real_proof_allintra_chaos_v5_ffmpeg_validated",
       "zk_blob_bits": 1232,
       "zk_payload_bits": 1176,
-      "utilization_pct": 0.288,
+      "utilization_pct": 0.284,
       "fractions_pct": [
         25,
-        50,
-        75,
         100
       ],
       "bits_at_fraction": [
         304,
-        616,
-        920,
         1232
       ],
       "psnr_at_fraction": [
-        56.31649398803711,
-        53.890724182128906,
-        52.260108947753906,
-        51.23143768310547
-      ]
-    },
-    "football_q22_g1": {
-      "raw_t1_bits": 372266,
-      "raw_t1_bytes": 46533,
-      "validated_bits": 1232,
-      "zk_blob_bits": 1232,
-      "zk_payload_bits": 1176,
-      "utilization_pct": 0.331,
-      "fractions_pct": [
-        25,
-        50,
-        75,
-        100
-      ],
-      "bits_at_fraction": [
-        304,
-        616,
-        920,
-        1232
-      ],
-      "psnr_at_fraction": [
-        59.85477828979492,
-        56.27643585205078,
-        53.59669494628906,
-        52.23844528198242
+        56.46858215332031,
+        50.9745979309082
       ]
     },
     "deadline_q22_g1": {
-      "raw_t1_bits": 1735622,
-      "raw_t1_bytes": 216952,
-      "validated_bits": 1232,
+      "raw_safe_bits": 1775749,
+      "raw_safe_bytes": 221968,
+      "patchable_usable_bits": 1383,
+      "validated_bits": 1321,
+      "operating_bits": 1232,
+      "ffmpeg_validated_bits": null,
+      "requested_position_bits": null,
+      "applied_position_bits": null,
+      "validation_mode": "real_proof_allintra_chaos_v5_ffmpeg_validated",
       "zk_blob_bits": 1232,
       "zk_payload_bits": 1176,
-      "utilization_pct": 0.071,
+      "utilization_pct": 0.069,
       "fractions_pct": [
         25,
-        50,
-        75,
         100
       ],
       "bits_at_fraction": [
         304,
-        616,
-        920,
         1232
       ],
       "psnr_at_fraction": [
-        63.327938079833984,
-        61.37838363647461,
-        59.8191032409668,
-        58.549041748046875
-      ]
-    },
-    "coastguard_q22_g1_1000f": {
-      "raw_t1_bits": 1427959,
-      "raw_t1_bytes": 178494,
-      "validated_bits": 1232,
-      "zk_blob_bits": 1232,
-      "zk_payload_bits": 1176,
-      "utilization_pct": 0.086,
-      "fractions_pct": [
-        25,
-        50,
-        75,
-        100
-      ],
-      "bits_at_fraction": [
-        304,
-        616,
-        920,
-        1232
-      ],
-      "psnr_at_fraction": [
-        63.50627136230469,
-        59.450050354003906,
-        57.38167190551758,
-        56.016868591308594
-      ]
-    },
-    "deadline_q22_g1_1000f": {
-      "raw_t1_bits": 1262881,
-      "raw_t1_bytes": 157860,
-      "validated_bits": 1232,
-      "zk_blob_bits": 1232,
-      "zk_payload_bits": 1176,
-      "utilization_pct": 0.098,
-      "fractions_pct": [
-        25,
-        50,
-        75,
-        100
-      ],
-      "bits_at_fraction": [
-        304,
-        616,
-        920,
-        1232
-      ],
-      "psnr_at_fraction": [
-        64.26789093017578,
-        60.65721893310547,
-        58.76136016845703,
-        57.6759147644043
-      ]
-    },
-    "coastguard_q22_g1_3000f": {
-      "raw_t1_bits": 4278830,
-      "raw_t1_bytes": 534853,
-      "validated_bits": 1232,
-      "zk_blob_bits": 1232,
-      "zk_payload_bits": 1176,
-      "utilization_pct": 0.029,
-      "fractions_pct": [
-        25,
-        50,
-        75,
-        100
-      ],
-      "bits_at_fraction": [
-        304,
-        616,
-        920,
-        1232
-      ],
-      "psnr_at_fraction": [
-        65.17703247070312,
-        63.47349166870117,
-        61.92884063720703,
-        60.91716766357422
+        59.04975891113281,
+        57.123046875
       ]
     }
   }

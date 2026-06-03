@@ -139,6 +139,7 @@ class BitstreamPatcher:
         # Step 3: Patch each modified block
         patched_count = 0
         skipped_count = 0
+        successful_block_keys: List[Tuple[int, int]] = []
         
         for mb_idx, block_idx, new_coeffs in modifications:
             key = (mb_idx, block_idx)  # Already global from embedder!
@@ -398,6 +399,7 @@ class BitstreamPatcher:
             try:
                 rbsp_bits[start_bit:end_bit] = new_bits
                 patched_count += 1
+                successful_block_keys.append(key)
             except Exception as e:
                 logger.error(f"[PATCHER] Error patching block {key}: {e}")
                 skipped_count += 1
@@ -413,7 +415,7 @@ class BitstreamPatcher:
         # Step 8: Create new NAL unit with patched RBSP
         # Create a simple NAL-like object (match original structure)
         class PatchedNAL:
-            def __init__(self, original_nal, new_rbsp):
+            def __init__(self, original_nal, new_rbsp, applied_block_keys):
                 self.forbidden_zero_bit = original_nal.forbidden_zero_bit
                 self.nal_ref_idc = original_nal.nal_ref_idc
                 self.nal_unit_type = original_nal.nal_unit_type
@@ -421,8 +423,9 @@ class BitstreamPatcher:
                 self.start_pos = original_nal.start_pos
                 self.size = len(new_rbsp) + 1  # +1 for NAL header
                 self.start_code_size = getattr(original_nal, 'start_code_size', 4)
+                self.applied_block_keys = list(applied_block_keys)
         
-        return PatchedNAL(original_nal, patched_rbsp)
+        return PatchedNAL(original_nal, patched_rbsp, successful_block_keys)
     
     def _bits_to_bytes(self, bits: List[int]) -> bytes:
         """Pack list of 0/1 ints into bytes (MSB first), padding to byte boundary."""
@@ -955,6 +958,7 @@ class BitstreamReconstructor:
         slices_reconstructed = 0
         slices_with_modifications = 0
         global_mb_idx = 0
+        applied_block_keys: set[Tuple[int, int]] = set()
         
         logger.debug(f"    [MB_COUNT] Per-slice MB count from SPS: {mb_count_per_slice}")
         
@@ -989,6 +993,8 @@ class BitstreamReconstructor:
                         frame_verified_data=frame_verified_data,
                         expected_num_mbs_in_slice=mb_count,
                     )
+                    for key in getattr(modified_nal, "applied_block_keys", []):
+                        applied_block_keys.add((int(key[0]), int(key[1])))
                     
                     # Use SPS count (not parsed actual) for consistency
                     if actual_mb_count is not None and actual_mb_count > 0 and actual_mb_count != mb_count:
@@ -1033,7 +1039,8 @@ class BitstreamReconstructor:
             'slices_modified': slices_with_modifications,
             'total_nals': len(reconstructed_nals),
             'nal_units_written': len(reconstructed_nals),
-            'blocks_modified': len(modified_coefficients)
+            'blocks_modified': len(modified_coefficients),
+            'applied_block_keys': sorted(applied_block_keys),
         }
     
     def _reconstruct_slice_with_cavlc(self,

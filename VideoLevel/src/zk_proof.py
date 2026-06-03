@@ -36,6 +36,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Tuple
 
@@ -273,8 +274,9 @@ class ZKSnarkBridge:
                 [str(len(payload_bytes))])
 
     def _compute_witness(self, circuit_input: dict) -> Path:
-        witness_path = self.build_dir / "witness_live.wtns"
-        input_path   = self.build_dir / "input_live.json"
+        temp_dir = Path(tempfile.mkdtemp(prefix="zkp_witness_", dir=str(self.build_dir)))
+        witness_path = temp_dir / "witness_live.wtns"
+        input_path   = temp_dir / "input_live.json"
         wasm_path    = self.js_dir / self.WASM_FILE
         gen_js       = self.js_dir / self.GENERATE_WITNESS_JS
 
@@ -297,8 +299,9 @@ class ZKSnarkBridge:
 
     def _snarkjs_prove(self, witness_path: Path) -> Tuple[dict, dict]:
         zkey_path  = self.build_dir / self.ZKEY_FILE
-        proof_out  = self.build_dir / "proof_live.json"
-        public_out = self.build_dir / "public_live.json"
+        temp_dir = witness_path.parent
+        proof_out  = temp_dir / "proof_live.json"
+        public_out = temp_dir / "public_live.json"
 
         try:
             result = subprocess.run(
@@ -319,11 +322,16 @@ class ZKSnarkBridge:
             witness_path.unlink(missing_ok=True)
             proof_out.unlink(missing_ok=True)
             public_out.unlink(missing_ok=True)
+            try:
+                temp_dir.rmdir()
+            except OSError:
+                pass
 
     def _snarkjs_verify(self, proof_dict: dict, public_signals) -> bool:
         vkey_path   = self.build_dir / self.VKEY_FILE
-        proof_tmp   = self.build_dir / "proof_verify_tmp.json"
-        public_tmp  = self.build_dir / "public_verify_tmp.json"
+        temp_dir = Path(tempfile.mkdtemp(prefix="zkp_verify_", dir=str(self.build_dir)))
+        proof_tmp   = temp_dir / "proof_verify_tmp.json"
+        public_tmp  = temp_dir / "public_verify_tmp.json"
 
         try:
             with open(proof_tmp, "w") as f:
@@ -341,6 +349,10 @@ class ZKSnarkBridge:
         finally:
             proof_tmp.unlink(missing_ok=True)
             public_tmp.unlink(missing_ok=True)
+            try:
+                temp_dir.rmdir()
+            except OSError:
+                pass
 
     # ------------------------------------------------------------------ #
     # Dependency checks

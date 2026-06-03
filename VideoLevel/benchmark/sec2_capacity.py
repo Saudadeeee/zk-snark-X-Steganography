@@ -4,18 +4,21 @@ Section 2 — Embedding Capacity & PSNR vs Payload Size
 Answers: "How much data can we embed while maintaining quality?"
 
 Methodology:
-  1. Raw T1 capacity: total CAVLC T1 sign positions in the video.
-  2. Quality-constrained capacity: positions surviving per-position FFmpeg
-     hard-error filter + batch PSNR validation (≥ 40 dB per frame).
-     Loaded from the positions.json file saved by SEC1.
-  3. PSNR vs bits embedded: embed increasing fractions of the validated
+  1. Raw safe-position capacity: all CAVLC-safe candidate positions before
+     SEC1 operating-point quality pruning.
+  2. Patchable usable capacity: positions surviving the public API patchability
+     flow before SEC1 quality validation.
+  3. Quality-constrained capacity: positions surviving SEC1 validation
+     (FFmpeg hard-error filter + PSNR validation).
+  4. Operating-point capacity: exact positions used by the SEC1 operating point.
+  5. PSNR vs bits embedded: embed increasing fractions of the validated
      positions (25 / 50 / 75 / 100 %) and measure full-video PSNR.
      No additional FFmpeg validation needed — positions are pre-verified.
 
 Produces:
   - sec2_psnr_vs_bits.png      : PSNR vs bits embedded (validated positions)
-  - sec2_capacity_budget.png   : Three-tier capacity chart (raw / validated / payload)
-  - sec2_capacity_bar.png      : Raw T1 capacity per sequence (bits + bytes)
+  - sec2_capacity_budget.png   : Capacity chart (raw safe / patchable / validated / operating / payload)
+  - sec2_capacity_bar.png      : Raw safe-position capacity per sequence (bits + bytes)
 """
 
 import os
@@ -35,7 +38,7 @@ from benchmark._common import (
     PALETTE, SEQUENCES, SEQ_LABELS,
     setup_style, save_fig, cache_save, cache_load,
     decode_luma_frames,
-    OUTPUT_DIR, load_or_build_benchmark_analysis,
+    OUTPUT_DIR, get_capacity_views, load_or_build_benchmark_analysis,
 )
 
 CACHE_KEY   = "sec2_capacity_data"
@@ -140,14 +143,6 @@ def _sweep_validated_psnr(
 
 
 # ---------------------------------------------------------------------------
-# Raw T1 capacity (fast, no embed)
-# ---------------------------------------------------------------------------
-def _raw_t1_capacity(video_path: Path) -> int:
-    _coeffs, _fvd, _nC_map, _nal_len, _t1_over, safe_positions = load_or_build_benchmark_analysis(video_path)
-    return len(safe_positions)
-
-
-# ---------------------------------------------------------------------------
 # Data collection
 # ---------------------------------------------------------------------------
 def collect_data(force: bool = False, include_sequences: set[str] | None = None) -> dict:
@@ -164,6 +159,11 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
         "deadline_q22_g1_1000f",
         "coastguard_q22_g1_3000f",
     ]
+    if _fast_mode_enabled():
+        default_sweep = [
+            "coastguard_q22_g1",
+            "deadline_q22_g1",
+        ]
     sweep_seqs = default_sweep
     if include_sequences:
         sweep_seqs = [seq for seq in default_sweep if seq in include_sequences]
@@ -203,22 +203,34 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
             print(f"  [{seq_name}] positions.json not found (run sec1 first) — skip")
             continue
 
-        print(f"\n  [{seq_name}] measuring raw T1 capacity ...")
-        raw_capacity = _raw_t1_capacity(video_path)
-        print(f"  [{seq_name}] raw T1 = {raw_capacity:,} bits")
+        caps = get_capacity_views(seq_name, video_path, force=force)
+        raw_capacity = int(caps["raw_safe_bits"])
+        patchable_cap = int(caps["patchable_usable_bits"] or 0)
+        validated_cap = int(caps["validated_pool_bits"] or 0)
+        operating_cap = int(caps["operating_bits"] or 0)
+        print(f"\n  [{seq_name}] raw safe positions = {raw_capacity:,} bits")
+        if patchable_cap:
+            print(f"  [{seq_name}] patchable usable    = {patchable_cap:,} bits")
+        if validated_cap:
+            print(f"  [{seq_name}] validated pool      = {validated_cap:,} bits")
+        if operating_cap:
+            print(f"  [{seq_name}] operating positions = {operating_cap:,} bits")
 
         sweep = _sweep_validated_psnr(
             seq_name, video_path, positions_path,
             fractions, payload_scrambled,
         )
 
-        # Validated capacity = number of positions saved from SEC1
-        validated_cap = sweep["validated_positions"]
-
         data[seq_name] = {
-            "raw_t1_bits":          raw_capacity,
-            "raw_t1_bytes":         raw_capacity // 8,
-            "validated_bits":       validated_cap,
+            "raw_safe_bits":        raw_capacity,
+            "raw_safe_bytes":       raw_capacity // 8,
+            "patchable_usable_bits": patchable_cap or None,
+            "validated_bits":       validated_cap or sweep["validated_positions"],
+            "operating_bits":       operating_cap or None,
+            "ffmpeg_validated_bits": caps.get("ffmpeg_validated_bits"),
+            "requested_position_bits": caps.get("requested_position_bits"),
+            "applied_position_bits": caps.get("applied_position_bits"),
+            "validation_mode":      caps.get("validation_mode"),
             "zk_blob_bits":         zk_blob_bits,
             "zk_payload_bits":      ZK_PAYLOAD_BITS,
             "utilization_pct":      round(100.0 * zk_blob_bits / raw_capacity, 3),
@@ -289,16 +301,22 @@ def plot_capacity_budget(data: dict) -> None:
     x      = np.arange(n)
     w      = 0.22
 
-    raw_bits       = [data[s]["raw_t1_bits"]    for s in seqs]
+    raw_bits       = [data[s]["raw_safe_bits"]  for s in seqs]
+    patchable_bits = [data[s].get("patchable_usable_bits") or data[s]["raw_safe_bits"] for s in seqs]
     validated_bits = [data[s]["validated_bits"] for s in seqs]
+    operating_bits = [data[s].get("operating_bits") or data[s]["validated_bits"] for s in seqs]
     zk_blob_bits = data[seqs[0]]["zk_blob_bits"] if seqs else 0
     zk_bits        = [zk_blob_bits] * n
 
-    ax.bar(x - w,     raw_bits,       width=w, color=PALETTE["this_work"],
-           alpha=0.80, label="Raw T1 capacity (unvalidated)", zorder=3)
-    ax.bar(x,         validated_bits, width=w, color=PALETTE["f5"],
-           alpha=0.85, label="Quality-constrained capacity (PSNR ≥ 40 dB)", zorder=3)
-    ax.bar(x + w,     zk_bits,        width=w, color=PALETTE["lsb"],
+    ax.bar(x - 2.0 * w, raw_bits,       width=w, color=PALETTE["this_work"],
+           alpha=0.80, label="Raw safe positions", zorder=3)
+    ax.bar(x - 1.0 * w, patchable_bits, width=w, color=PALETTE["bulletproof"],
+           alpha=0.85, label="Patchable usable positions", zorder=3)
+    ax.bar(x + 0.0 * w, validated_bits, width=w, color=PALETTE["f5"],
+           alpha=0.85, label="Validated pool", zorder=3)
+    ax.bar(x + 1.0 * w, operating_bits, width=w, color=PALETTE["mv"],
+           alpha=0.85, label="SEC1 operating positions", zorder=3)
+    ax.bar(x + 2.0 * w, zk_bits,        width=w, color=PALETTE["lsb"],
            alpha=0.85, label=f"ZK blob payload ({zk_blob_bits} bits)", zorder=3)
 
     ax.set_yscale("log")
@@ -306,20 +324,28 @@ def plot_capacity_budget(data: dict) -> None:
     ax.set_xticklabels(labels, fontsize=11)
     ax.set_ylabel("Bits (log scale)")
     ax.set_title("§2  Embedding Capacity Budget\n"
-                 "(raw T1 positions vs quality-constrained vs ZK payload requirement)")
+                 "(raw safe vs patchable vs validated vs operating vs ZK payload)")
     ax.legend(fontsize=9)
 
     # Annotate utilization rate
     for i, s in enumerate(seqs):
         util = data[s]["utilization_pct"]
-        ax.text(x[i] - w / 2, raw_bits[i] * 1.3,
+        ax.text(x[i] - 2.0 * w, raw_bits[i] * 1.3,
                 f"{util:.2f}%\nof raw",
                 ha="center", va="bottom", fontsize=8.5,
                 color=PALETTE["this_work"], fontweight="bold")
-        ax.text(x[i], validated_bits[i] * 1.3,
+        ax.text(x[i] - 1.0 * w, patchable_bits[i] * 1.3,
+                f"{patchable_bits[i]:,}",
+                ha="center", va="bottom", fontsize=8.5,
+                color=PALETTE["bulletproof"], fontweight="bold")
+        ax.text(x[i] + 0.0 * w, validated_bits[i] * 1.3,
                 f"{validated_bits[i]:,}",
                 ha="center", va="bottom", fontsize=8.5,
                 color=PALETTE["f5"], fontweight="bold")
+        ax.text(x[i] + 1.0 * w, operating_bits[i] * 1.3,
+                f"{operating_bits[i]:,}",
+                ha="center", va="bottom", fontsize=8.5,
+                color=PALETTE["mv"], fontweight="bold")
 
     save_fig(fig, "sec2_capacity_budget")
 
@@ -333,16 +359,16 @@ def plot_capacity_bar(data: dict) -> None:
 
     seqs   = list(data.keys())
     labels = [SEQ_LABELS.get(s, s).split(" (")[0] for s in seqs]
-    cap_bits  = [data[s]["raw_t1_bits"]  for s in seqs]
-    cap_bytes = [data[s]["raw_t1_bytes"] for s in seqs]
+    cap_bits  = [data[s]["raw_safe_bits"]  for s in seqs]
+    cap_bytes = [data[s]["raw_safe_bytes"] for s in seqs]
     colors    = [list(PALETTE.values())[i % len(PALETTE)] for i in range(len(seqs))]
 
     x = np.arange(len(seqs))
 
     bars1 = ax1.bar(x, cap_bits, color=colors, width=0.5, zorder=3)
     ax1.set_xticks(x); ax1.set_xticklabels(labels, fontsize=10)
-    ax1.set_ylabel("Raw T1 bits available")
-    ax1.set_title("§2  Raw T1 Capacity (bits)")
+    ax1.set_ylabel("Raw safe-position bits available")
+    ax1.set_title("§2  Raw Safe-Position Capacity (bits)")
     for bar, val in zip(bars1, cap_bits):
         ax1.text(bar.get_x() + bar.get_width() / 2,
                  bar.get_height() * 1.02,
@@ -352,7 +378,7 @@ def plot_capacity_bar(data: dict) -> None:
     bars2 = ax2.bar(x, cap_bytes, color=colors, width=0.5, zorder=3)
     ax2.set_xticks(x); ax2.set_xticklabels(labels, fontsize=10)
     ax2.set_ylabel("Capacity (bytes)")
-    ax2.set_title("§2  Raw T1 Capacity (bytes)")
+    ax2.set_title("§2  Raw Safe-Position Capacity (bytes)")
     for bar, val in zip(bars2, cap_bytes):
         ax2.text(bar.get_x() + bar.get_width() / 2,
                  bar.get_height() * 1.02,
@@ -372,6 +398,9 @@ def plot_capacity_bar(data: dict) -> None:
 def run(force: bool = False, include_sequences: set[str] | None = None) -> dict:
     print("\n=== §2  Capacity & PSNR vs Payload Size ===")
     data = collect_data(force=force, include_sequences=include_sequences)
+    if not data:
+        print("  [skip] no SEC1 sidecars available for the requested sequences")
+        return {}
     plot_psnr_vs_bits(data)
     plot_capacity_budget(data)
     plot_capacity_bar(data)

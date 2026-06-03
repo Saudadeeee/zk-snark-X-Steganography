@@ -1,475 +1,357 @@
-# ZK-Stego VideoLevel — IEEE Journal Readiness Plan
+# ZK-Stego VideoLevel Playbook
 
-Last updated: 2026-05-02  
-Branch: `main`  
-All tests: **32/32 passed** (`py -3.12 src/runtest/run_all.py`)
+Last updated: 2026-06-03
+Branch: `main`
 
----
+## Mission
 
-## Completed Work
+The goal of this repository is to reach a system that is defensible in both
+benchmarking and paper form, with:
+- one clear baseline system,
+- one trustworthy benchmark workflow,
+- and one research roadmap that does not contradict the current claims.
 
-### Core System (all fixes merged to main)
+This playbook keeps only:
+- the current baseline we must protect,
+- the work that still remains,
+- the correct order of priorities,
+- and the criteria for stopping or raising claims.
 
-| Fix | Location | Description |
-|-----|----------|-------------|
-| Fix #1 | `src/bitstream/h264.py` | Chroma AC nC cross-MB bug |
-| Fix #2 | `src/bitstream/h264.py` | Luma nC cross-MB bug |
-| Fix #3 | `src/bitstream/bitstream_ops.py` | FFmpeg position validator |
-| Fix #4 | `src/core/stego.py` | `_detect_trailing_ones` direction bug |
-| Fix #5 | `src/runtest/test_phase5_extract_verify.py` | High-capacity test setup |
-| Fix #6 | `src/runtest/_idr_extract.py` | `first_resync` cut removed |
-| Fix #7 | `src/core/stego.py`, `_idr_extract.py` | Embedding order — intra cascade |
-| Fix #8 | `src/bitstream/bitstream_ops.py` | `batch_psnr_validate` single-IDR + greedy |
-
-### Benchmark Fixes (IEEE-ready, all committed)
-
-#### SEC1 — Quality (updated `2026-05-05`)
-- Pipeline: chaos_v5 with real ZK proof payload (147 bytes)
-- `batch_psnr_validate` false-positive fix: removed `"invalid"` from `critical_tokens`
-- Post-embed PSNR guard: retry loop removes bad IDR frames, re-embeds
-- 2026-04-29 fix: `bits_required` now tracks the true chaos-expanded payload (`1232` bits), not the pre-chaos blob (`1176` bits)
-- 2026-04-29 fix: all-intra validation now uses headroom + refill after bad-IDR removal, so the benchmark reaches the real operating point instead of under-filling
-- 2026-05-05 refresh: SEC1 now uses the real extracted operating positions for verify and stores the validated pool separately from the actual operating set
-- 2026-05-05 refresh: Xiph/DERF CIF sequences (`Akiyo`, `Hall Monitor`, `Container`, `City`, `Football`) added to the representative all-intra benchmark set
-- **Results at 1232/1232 bits embedded and verified**:
-  - Akiyo QP22 = 53.13 dB, modified-frame min = 40.58 dB
-  - Hall Monitor QP22 = 50.38 dB, modified-frame min = 40.18 dB
-  - Foreman QP22 = 55.15 dB, modified-frame min = 40.67 dB
-  - Container QP22 = 51.70 dB, modified-frame min = 40.10 dB
-  - City QP22 = 51.57 dB, modified-frame min = 40.07 dB
-  - Coastguard QP22 = 51.23 dB, modified-frame min = 40.52 dB
-  - Football QP22 = 52.24 dB, modified-frame min = 41.56 dB
-  - Deadline QP22 = 58.55 dB, modified-frame min = 40.28 dB
-  - Coastguard QP22 (1000f) = 56.02 dB, modified-frame min = 40.22 dB
-  - Deadline QP22 (1000f) = 57.68 dB, modified-frame min = 40.26 dB
-  - Coastguard QP22 (3000f) = 60.00 dB, modified-frame min = 40.59 dB
-- Current strict operating summary: `11/11` tested SEC1 points pass `1232/1232 + verify + min_modified_frame_psnr > 40 dB`
-- Positions saved to `data/output/sec1_stego_*.h264.positions.json`
-
-#### SEC2 — Capacity (updated `2026-05-05`)
-- Completely rewritten: now uses pre-validated positions from SEC1 positions.json
-- 2026-04-29 fix: sweep payload now reuses the exact SEC1 real-proof + chaos operating payload, not a placeholder chaos key
-- 2026-05-05 refresh: default SEC2 sweep now matches the broader SEC1 sequence set, including Xiph/DERF content classes and long all-intra variants
-- 3 new plots: `sec2_psnr_vs_bits.png`, `sec2_capacity_budget.png`, `sec2_capacity_bar.png`
-- **Results**:
-  - Operating-point utilization: foreman 0.430%, coastguard 0.288%, football 0.331%, deadline 0.071%
-  - Long-sequence utilization: coastguard 1000f = 0.086%, coastguard 3000f = 0.029%
-  - 100% operating-point sweep: akiyo 53.13 dB, football 52.24 dB, deadline 58.55 dB, coastguard 3000f 60.92 dB
-
-#### SEC3 — Methods comparison (commit `8d1167b`, updated `55bf23e`)
-- Cache bust to pick up new SEC1 stego files
-- Corrected PSNR: foreman 44.82→54.79 dB, coastguard 37.60→52.46 dB
-- Added literature disclosure annotation on PSNR comparison plot
-
-#### SEC4 — Security (updated `2026-05-05`)
-- Fixed `force=True` bypassing IDR pickle cache
-- Replaced `embed_payload` with direct T1-flip simulation (O(n_pos) not O(all_blocks))
-- Vectorized `rs_analysis`: numpy batch ops replace 7.6M-iteration Python loop
-- Operating point uses `positions.json` simulation (avoids stego IDR re-extraction)
-- 2026-05-05 refresh: sec4 now prefers any sequence with a valid SEC1 positions file instead of assuming only `foreman_q22_g1`
-- **Results**: chi_p = 0.9622 at the Foreman QP22 operating point (0.43%) → still comfortably undetectable at α=0.05
-- Added RS=0 explanation annotation (RS inapplicable to H.264 compressed video)
-- Added chi-square non-monotonic explanation annotation
-
-#### SEC5 — ZK proof properties (pre-existing, stable)
-- 147B payload, 2.4s Groth16 prove, 1.0s verify, 18,680 constraints
-- Design assumption locked: Groth16 proof size is treated as fixed for this system configuration, so payload budgeting should assume a stable proof footprint and only the message/packing/chaos expansion changes total embedded bits
-
-#### SEC6 — Timing (commit `4de999b`, redesign `54bf00f`)
-- New `plot_two_phase()`: side-by-side pre-processing vs operational cost
-- Pie chart now shows operational stages only
-- **Results**: IDR extraction 1496s/870s (one-time); operational ~57s/run
-- ZK prove = 2.4s (competitive)
-
-#### `_common.py` fixes (commit `4de999b`)
-- IDR cache flag evaluated at call-time not import-time
-- Supports `BENCHMARK_TRUSTED_IDR_PICKLE_CACHE` env var
-
-#### `.gitignore` (commit `4de999b`)
-- Added `!benchmark/results/sec*.json` exception to track result JSONs
+Anything already completed and no longer useful for decision-making has been
+removed from this file.
 
 ---
 
-## Remaining Gaps for IEEE Journal
+## Frozen Baseline
 
-## Locked Design Assumptions
+This is the current source of truth for paper writing, benchmarks, and docs.
 
-### Payload sizing
+### Core claim now
+- locked operating-point embedding
+- all-intra H.264 baseline / CAVLC
+- strict non-blind verification
+- sidecar-assisted near-blind verification
 
-- [x] **Groth16 proof size treated as fixed**
-  - For this repository and circuit setup, Groth16 proof size is assumed stable and should not be treated as a sweep variable
-  - Capacity planning should therefore budget around a fixed proof footprint, with total payload variation coming from:
-    - message length
-    - 4-byte packing header
-    - chaos padding / bit-expansion
-  - Current benchmark operating point remains the chaos-expanded `1232`-bit payload
+### Do not over-claim beyond this
+- broad public API mode is not yet the headline path
+- inter-coded / GOP>1 is not yet a strong supported regime
+- blind-core is not yet a usable system path
 
-### Quality floor
-
-- [x] **Primary quality constraint**
-  - Preferred paper constraint: `frame-min PSNR > 35–40 dB`
-  - Current strict benchmark guard remains the stronger setting: `frame-min PSNR >= 40 dB`
-  - Interpretation for future tuning:
-    - `>= 40 dB`: target operating point / strongest claim
-    - `35–40 dB`: acceptable lower band for exploratory GOP/QP tradeoff studies if bitrate savings are needed
+### Rule
+- If a change makes this baseline weaker or more ambiguous, do not move it into
+  the main narrative.
+- Every paper claim must stay anchored to this baseline until we have stronger
+  evidence.
 
 ---
 
-### Critical
+## Decision Rules
 
-- [x] **Symmetric QP sweep dataset** — `foreman_cif_300f.y4m` created (300 frames by looping 50-frame source)
-  - `foreman_cif_q18_g1_300f.h264` and `foreman_cif_q32_g1_300f.h264` encoded
-  - Apples-to-apples comparison with coastguard QP18/28/32 now possible
-  - 2026-05-22: All foreman QP sweep assets now at 300 frames
+These rules are here to keep us from drifting into the wrong direction.
 
-- [x] **Third test sequence** — `deadline_q22_g1` is now integrated into SEC1 and SEC2
-  - Result: 59.03 dB at the 1232-bit operating point
-  - Capacity: 1,735,622 raw T1 bits, 1321 validated bits
+### When a branch can be promoted into a main claim
+- It has a benchmark that can be repeated through the runner.
+- It has stable JSON output.
+- It has clean artifact naming and schema.
+- It has at least one clear end-to-end use case.
+- It does not only win on a synthetic proxy; it also stands on near-real data.
 
-### Important
+### When a branch should remain a research branch
+- It has good signals but is not end-to-end yet.
+- Runtime is still too heavy for regular use.
+- It only passes on synthetic setup.
+- Major trade-offs are still unresolved.
 
-- [x] **Runtime manifest / sidecar hardening**
-  - 2026-05-22: `src/manifest.py` implements versioned manifest schema (v1.0.0)
-  - `embed()` now emits `output.h264.manifest.json` with full metadata
-  - `verify()` loads manifest with fallback to legacy `.meta.json`/`.positions.json`
-  - Schema includes: payload, embedding, video, proof metadata
-  - Signing hooks implemented (placeholder for HMAC/ED25519)
-
-- [x] **Near-blind verification mode**
-  - 2026-05-22: `src/verifier_blind.py` implements near-blind extraction
-  - Uses manifest.json for positions, parses stego video directly
-  - No full cover analysis required for verification
-  - Tradeoff: requires manifest.json file (but no original video)
-
-- [x] **Error bars / confidence intervals** — Multiple runs per sequence
-  - 2026-05-22: `benchmark/statistical_benchmark.py` implements multi-runner
-  - Supports ≥3 runs per sequence for IEEE TIP/TIFS validity
-  - Aggregates results with mean ± std deviation
-  - Output: `benchmark/results/sec*_statistical.json`
-
-- [x] **SEC1 auditability gaps** — Persist and report quality guard details
-  - 2026-05-22: `benchmark/sec1_audit.py` implements audit logging
-  - Tracks: position pruning, quality gate iterations, headroom margin
-  - Records: psnr_inf_frame_count, modified_frame_count
-  - Output: `audit_*.json` per sequence, `sec1_audit_aggregated.json` summary
-
-- [x] **SEC6 timing split in text** — Paper should quote operational cost separately
-  - 2026-05-22: `benchmark/sec6_paper_summary.py` generates paper-ready timing text
-  - Clearly states: "pre-processing ~1496s (one-time, cacheable); per-embed ~57s"
-  - Provides mean ± std for statistical reporting
-
-- [x] **Environment reproducibility note** — `requirements.txt` added and validated runtime pinned to `py -3.12`
-  - Repo now documents the minimum Python dependencies (`numpy`, `matplotlib`)
-  - Paper/runtime claims should still reference the validated environment: `py -3.12`
-
-- [~] **GOP/QP tradeoff study under fixed payload assumption**
-  - QP recommendation layer is now implemented in `benchmark/sec7_tradeoff.py`
-  - Current fixed-payload recommendations under the strict `frame-min PSNR >= 40 dB` guard:
-    - Foreman: best tested QP = 28
-    - Coastguard: best tested QP = 32
-    - Deadline: best tested QP = 22
-  - Remaining work: add an explicit GOP sweep if the paper must claim bitrate-efficient operating points beyond all-intra
-
-### Minor
-
-- [x] **SEC4 modern detector** — Add WS (Weighted Stego) or SPAM features
-  - 2026-05-22: `benchmark/sec4_modern_detectors.py` implements WS and SPAM
-  - WS: `ws_estimate_t1()` adapted for T1 coefficient domain
-  - SPAM: `spam_estimate_t1()` with order-1/2 Markov models
-  - Includes report generation with α=0.05 detection threshold
+### Global priority order
+1. Keep the main baseline clean and defensible.
+2. Only expand claims when benchmark evidence catches up.
+3. On blind-core, prioritize telemetry and error modeling before trying new heuristics.
 
 ---
 
-## Key Paper Claims (verified by benchmark)
+## Priority Roadmap
 
-1. **Imperceptibility**: all current SEC1 operating points embed the true `1232`-bit payload with `min_modified_frame_psnr > 40 dB`
-2. **Undetectability**: Chi-square p = 0.962, WS p ≈ 0.85, SPAM p ≈ 0.78 (all >α=0.05)
-3. **ZK correctness**: Groth16 proof verifies payload authenticity cryptographically
-4. **Capacity**: operating-point utilization remains tiny (roughly `0.029%` to `0.430%` of raw T1 capacity across the tested all-intra set)
-5. **PSNR advantage**: +10–17 dB over pixel-domain LSB at same payload size
-6. **RS inapplicability**: RS analysis gives delta=0 for H.264 (paper-reportable finding)
-7. **Statistical validity**: Multi-run benchmarking with mean±std error bars (≥3 runs)
-8. **Near-blind verification**: Cover-independent extraction via manifest
+## P0 - Protect The Main System
 
----
+This is the work that always comes first.
 
-## Encoded Test Sequences (data/encoded/)
+### P0.1 Benchmark-grade core must stay healthy
+- [ ] Keep `Phase 5`, `Phase 6`, `Phase 7`, and the quick suite passing.
+- [ ] Do not let blind-core experiments drift the locked operating-point path.
+- [ ] If a refactor affects embed, verify, or the benchmark runner, rerun the
+      minimum required suite immediately after.
 
-| File | Sequence | QP | GOP | Frames | Notes |
-|------|----------|----|-----|--------|-------|
-| `foreman_cif_q22_g1.h264` | Foreman CIF | 22 | 1 | 300 | **Primary** |
-| `coastguard_cif_q22_g1.h264` | Coastguard CIF | 22 | 1 | 300 | **Primary** |
-| `deadline_cif_q22_g1.h264` | Deadline CIF | 22 | 1 | 300 | **Third sequence** |
-| `foreman_cif_300f.y4m` | Foreman CIF | - | - | 300 | **Raw source (looped)** |
-| `foreman_cif_q18_g1_300f.h264` | Foreman CIF | 18 | 1 | 300 | **QP sweep** |
-| `foreman_cif_q32_g1_300f.h264` | Foreman CIF | 32 | 1 | 300 | **QP sweep** |
+### P0.2 Paper-grade workflow must stay clean
+- [ ] Keep `safe_benchmark_runner.py` clean for paper-grade sections.
+- [ ] Keep artifact schema and naming stable.
+- [ ] Keep `README.md`, `PAPER_EVIDENCE.md`, `OPERATING_ENVELOPE.md`, and
+      `ARTIFACT_POLICY.md` synchronized when the baseline changes for real.
 
-**Additional encoded assets already present:**
-- `foreman_cif_q18_g1.h264`, `foreman_cif_q28_g1.h264`
-- `coastguard_cif_q18_g1.h264`, `coastguard_cif_q28_g1.h264`, `coastguard_cif_q32_g1.h264`
-- Extended sequences (1000f, 3000f variants)
+### P0.3 Keep the narrative honest
+- [ ] Do not promote blind-core to a main claim before there is a real-proof
+      end-to-end blind result.
+- [ ] Do not use broad public API generic mode as a headline result.
 
 ---
 
-## FFmpeg Encode Commands
+## P1 - Paper Readiness
 
-```bash
-# QP=22 (done)
-ffmpeg -i data/raw/foreman_cif.y4m -c:v libx264 -profile:v baseline -coder 0 -g 1 -qp 22 -y data/encoded/foreman_cif_q22_g1.h264
+This is the branch that must be finished before full paper drafting.
 
-# TODO: QP=18, 28, 32
-ffmpeg -i data/raw/foreman_cif.y4m -c:v libx264 -profile:v baseline -coder 0 -g 1 -qp 18 -y data/encoded/foreman_cif_q18_g1.h264
-ffmpeg -i data/raw/foreman_cif.y4m -c:v libx264 -profile:v baseline -coder 0 -g 1 -qp 28 -y data/encoded/foreman_cif_q28_g1.h264
-ffmpeg -i data/raw/foreman_cif.y4m -c:v libx264 -profile:v baseline -coder 0 -g 1 -qp 32 -y data/encoded/foreman_cif_q32_g1.h264
+### P1.1 Freeze wording everywhere
+- [ ] Lock manuscript wording to the frozen baseline across all main docs.
+- [ ] Finish the threat model around the three verifier layers:
+      - strict non-blind
+      - sidecar-assisted near-blind
+      - blind-core as future/research branch
 
-ffmpeg -i data/raw/coastguard_cif.y4m -c:v libx264 -profile:v baseline -coder 0 -g 1 -qp 18 -y data/encoded/coastguard_cif_q18_g1.h264
-ffmpeg -i data/raw/coastguard_cif.y4m -c:v libx264 -profile:v baseline -coder 0 -g 1 -qp 28 -y data/encoded/coastguard_cif_q28_g1.h264
-ffmpeg -i data/raw/coastguard_cif.y4m -c:v libx264 -profile:v baseline -coder 0 -g 1 -qp 32 -y data/encoded/coastguard_cif_q32_g1.h264
-```
+### P1.2 Final paper-facing tables
+- [ ] Finish the verifier-mode table.
+- [ ] Finish the four-level capacity table:
+      - raw safe
+      - patchable usable
+      - validated or operating pool
+      - operating bits
+- [ ] Finish the operating-point stability table.
+- [ ] Finish the baseline vs ablation vs this-work comparison table.
+
+### P1.3 Final paper-grade benchmark pass
+- [ ] Re-run the full paper-grade benchmark set after the final freeze.
+- [ ] Update `PAPER_EVIDENCE.md` with the final numbers.
 
 ---
 
-## Additional System Improvement Roadmap
+## P2 - Engineering Follow-up On The Main System
 
-This section tracks all currently identified improvements that can make the
-system stronger, broader, faster, and easier to defend in benchmark or paper
-form. Groth16 remains fixed by design.
+These tasks do not block the paper immediately, but they still matter.
 
-### Highest-impact next steps for real system strength
+### P2.1 Broad public API
+- [ ] Improve generic public API realization beyond locked operating-point mode.
+- [ ] Raise realized payload in broad mode on representative all-intra assets.
+- [ ] Keep diagnostics explicit about failure stage and budget collapse.
 
-- [ ] **Decouple verification from full cover re-analysis**
-  - Strongest practical improvement remaining
-  - Current public API is now sidecar-aware, but still not truly blind
-  - A robust authenticated manifest or near-blind derivation would materially improve deployability
+### P2.2 Inter-coded support
+- [ ] Decide clearly whether to build a real inter-coded path or freeze it as unsupported.
+- [ ] If built, add a separate policy for GOP>1 instead of reusing all-intra logic.
 
-- [ ] **Make runtime cost acceptable on new videos**
-  - `extract_all_idr_blocks()` remains the dominant bottleneck by far
-  - The system will not feel strong in practice until cold-start analysis drops by at least one order of magnitude
+### P2.3 Performance
+- [ ] Reduce runtime for patchability measurement.
+- [ ] Reduce runtime for the heaviest blind diagnostics.
 
-- [ ] **Broaden beyond H.264 all-intra CAVLC**
-  - The current operating regime is strong but narrow
-  - Real strength requires either inter-coded H.264 support that survives drift, or a next-generation path for HEVC/H.265 and CABAC-class codecs
+---
 
-### Locked proof direction
+## P3 - Blind-Core Research Playbook
 
-- [x] **Keep Groth16 as the proof system**
-  - Do not migrate this repository to PLONK / STARK / Bulletproofs in the current roadmap
-  - Keep optimization work focused on:
-    - Groth16 invocation efficiency
-    - payload packing efficiency around the fixed proof footprint
-    - stego robustness, extraction, and benchmark quality
+Blind-core is still a research branch, but this is the correct way to keep
+pushing it without going in circles.
 
-### A. Generality across video types
+### Current blind-core position
 
-- [ ] **Split embedding strategy by stream type**
-  - Keep current CAVLC/T1 mode as the preferred path for `GOP=1` / all-intra assets
-  - Add a dedicated strategy for `GOP>1` / inter-coded streams instead of reusing the same policy unchanged
-  - Minimum target:
-    - detect stream class automatically
-    - choose an embedding policy per class
+Blind-core already has:
+- validated-pool-proxy self-consistency between cover and stego,
+- prefix-level feasibility under heavy redundancy,
+- structured partial-payload success on synthetic proof prefixes,
+- and a very strong structured partial-payload result:
+  - synthetic `[length][message][129B proof_prefix]` can be recovered exactly
+    with hotspot-focused protection.
 
-- [ ] **Formalize supported operating scope**
-  - If inter-coded support remains weak, explicitly scope the current system as:
-    - "all-intra H.264/CAVLC steganography with ZK-verifiable payload"
-  - Align README, benchmark text, and paper claims to that scope
+Blind-core still does not have:
+- blind full payload end-to-end usability,
+- blind proof verification end-to-end,
+- or a safe mainline claim on real proof bytes.
 
-- [ ] **Prototype a hybrid inter-coded branch**
-  - Explore at least one of:
-    - motion-vector-based embedding for inter-coded video
-    - IPM-based embedding for intra-heavy but non-all-intra content
-    - adaptive mixed-mode fallback away from T1-only when GOP is large
-  - Goal: prevent the strong quality collapse currently observed on GOP8 assets
+### Known operating envelopes
 
-### B. Embedding optimality and security
+#### Synthetic proof-prefix envelope
+- Exact structured partial-payload success is confirmed at:
+  - `[length][message][16B proof_prefix]`
+  - `[length][message][24B proof_prefix]`
+  - `[length][message][32B proof_prefix]`
+  - `[length][message][48B proof_prefix]`
+  - `[length][message][64B proof_prefix]`
+  - `[length][message][80B proof_prefix]`
+- Baseline break region begins at:
+  - `84B`
+  - `88B`
+  - `96B`
+  - `112B`
+  - `129B`
+- Targeted repair results:
+  - `proof_tail_triplicate16` repairs `84B` and `96B`
+  - `proof_hotspot_triplicate80_8` repairs `112B` and `129B`
+- Failed repair branches:
+  - `proof_triplicate`
+  - `proof_interleaved`
+  - `proof_byte_stride4`
+  - larger tail variants such as `tail32` and `tail64`
 
-- [ ] **Replace position heuristics with distortion-aware costs**
-  - Compute a cost per candidate using:
-    - coefficient magnitude / local texture
-    - block patchability risk
-    - local prediction sensitivity
-    - temporal concentration penalty
-  - Use the costs to rank or optimize candidate positions instead of relying only on round-robin + pruning
+#### Real-proof envelope
+- Current real-proof branch observations:
+  - `96B` real proof prefix can reach perfect proof-prefix recovery while header still fails
+  - `112B` real proof prefix currently misses one proof byte
+  - `129B` real proof prefix currently misses multiple earlier proof bytes
+- Current known tension:
+  - strengthening header redundancy can restore decoded length
+  - but may damage message/proof recovery
+- Current implication:
+  - real-proof header robustness and real-proof proof-prefix robustness must be optimized separately before recombining them
 
-- [ ] **Investigate syndrome coding / STC-style embedding**
-  - Reduce the number of modified coefficients needed per payload bit
-  - Improve imperceptibility and steganalysis resistance at the same payload size
-  - Compare directly against the current position-per-bit operating behavior
+### State of the synthetic branch
 
-- [ ] **Allow adaptive multi-bit embedding only on low-risk blocks**
-  - Permit more than one embedded bit per block only where cost and reconstruction guards allow it
-  - Keep strict constraints:
-    - zero preservation
-    - bit-length invariance
-    - patchability
-    - per-frame quality floor
+The synthetic branch currently shows:
+- exact structured partial-payload success up to
+  `[length][message][80B proof_prefix]` with the baseline coding,
+- the first break region beginning at `84B`,
+- `proof_tail_triplicate16` repairs `84B` and `96B`,
+- `proof_hotspot_triplicate80_8` repairs:
+  - `112B`
+  - `129B`
 
-- [ ] **Strengthen steganalysis evaluation**
-  - Extend beyond chi-square and RS notes to include:
-    - WS / weighted stego features
-    - SPAM/SRM-style features where feasible
-    - cross-sequence detector behavior at identical payload budgets
+This means:
+- blind-core is no longer blocked at synchronization,
+- and coding/protection can expand the operating envelope significantly.
 
-### C. Payload efficiency
+### State of the real-proof branch
 
-- [ ] **Improve effective payload efficiency**
-  - Optimize useful embedded bits per visible distortion
-  - Track:
-    - bits per modified block
-    - bits per dB PSNR loss
-    - bits per validated safe position
+The real-proof branch currently shows:
+- the synthetic hotspot map does not transfer directly to real proof bytes,
+- `96B` real proof prefix can reach `96/96B` on the proof prefix while still
+  failing at the header,
+- `112B` real proof prefix currently fails at proof byte `79`,
+- `129B` real proof prefix currently fails at several earlier bytes,
+- raising `header_redundancy` to `8` fixes decoded length but collapses the
+  message/proof branch.
+- isolated real-proof header diagnostics show:
+  - `header_redundancy = 4` passes in header-only mode,
+  - `header_redundancy = 8` also passes in header-only mode,
+  - `header_redundancy = 12` already fails in header-only mode.
 
-- [ ] **Audit message/proof packing overhead**
-  - Keep Groth16 fixed, but optimize around it:
-    - message header size
-    - chaos padding overhead
-    - payload alignment / byte packing
-  - Document the exact inflation from raw message -> proof blob -> chaos-expanded payload
+This means:
+- the real-proof blind branch must be split into:
+  - header robustness
+  - proof-prefix robustness
+- the immediate issue is not raw header coding strength by itself,
+  but the interaction between header and body/proof placement.
+- header/body decoupling is not yet a proven fix:
+  - `body_gap_blocks = 0` leaves header broken and drops proof-prefix recovery to `89/96B`
+  - `body_gap_blocks = 2` can degrade the same `96B` case even further
+  - so the decoupling path must be treated as experimental, not yet promoted
 
-- [ ] **Support multiple operating points**
-  - Define at least three payload modes:
-    - conservative / paper-safe
-    - balanced
-    - stress / max-feasible
-  - Report quality-security-capacity tradeoffs for each mode
+### Confirmed failure patterns
 
-### D. Extraction architecture
+These are not assumptions. They are already observed and should guide future work.
 
-- [ ] **Investigate blind or near-blind extraction**
-  - Current extraction depends on original cover analysis
-  - Explore designs that reduce or remove dependence on the original video:
-    - self-synchronizing side information
-    - deterministic recoverable position maps
-    - lightweight metadata channels protected by the same safety rules
+- Synthetic branch:
+  - the first dominant mismatch was repeatedly observed at byte index `82`
+  - local targeted protection works better than global repetition or simple permutation
+- Real-proof branch:
+  - the dominant synthetic mismatch pattern does not transfer directly
+  - proof-prefix mismatch locations move earlier for longer real proof prefixes
+  - header failure can appear even when proof-prefix recovery is already perfect for the tested prefix length
 
-- [ ] **Define verifier modes clearly**
-  - Preserve the current high-integrity verify path
-  - Add explicit mode naming if needed:
-    - `strict_nonblind_verify`
-    - `nearblind_verify`
-    - `benchmark_verify`
-  - Prevent ambiguity about what information verification requires
+### What not to do next
 
-### E. Runtime and scalability
+Do not continue by:
+- trying more blind heuristics without telemetry,
+- increasing global redundancy before understanding the error map,
+- or reusing the synthetic hotspot map as if it were valid for real proof bytes.
 
-- [ ] **Accelerate cold-start analysis**
-  - `extract_all_idr_blocks()` is currently the dominant runtime cost
-  - Optimization targets:
-    - parser hotspots
-    - offset extraction overhead
-    - repeated object allocation
-    - opportunities for chunked or frame-local processing
+Also avoid:
+- treating synthetic proof-prefix success as if it were equivalent to real-proof success,
+- adding global redundancy before confirming which branch it damages,
+- or mixing benchmark-grade baseline claims with blind-core experimental results.
 
-- [~] **Cache decoded luma frames for benchmark reuse**
-  - Avoid repeated `ffmpeg` decode of the same original/stego videos across SEC1/SEC2/SEC3/SEC4/SEC9
-  - Add bounded cache invalidation keyed by:
-    - file path
-    - size
-    - mtime
-  - 2026-05-04: process-local and disk-backed luma cache added in `benchmark/_common.py`
-  - Remaining work: benchmark the win across SEC2/SEC3/SEC4/SEC9 and document cache policy
+### Correct next blind-core steps
 
-- [~] **Reduce repeated full-video quality passes**
-  - Especially for all-intra streams, avoid recomputing quality over unaffected frames during validation loops
-  - Prefer frame-local or IDR-local rechecks where mathematically justified
-  - 2026-05-04: sec1 all-intra retry loop now checks only modified frame indices instead of full-video passes
-  - Remaining work: extend the same idea to other validation/probe paths
+#### P3.1 Stabilize the real-proof header path
+- [ ] Measure a header-specific error map on the real-proof branch.
+- [ ] Design header protection that does not damage the body/proof branch.
+- [ ] Immediate target:
+      - `96B real proof prefix` must pass both header and proof prefix at the same time.
+- [ ] Record the smallest header coding change that preserves proof-prefix recovery.
+- [ ] Use the header-only result as a guardrail:
+      - do not keep increasing redundancy globally once `4` and `8` are already clean in isolation.
+- [ ] Do not lock in any body-gap policy until it is repeatable across reruns.
 
-- [ ] **Parallelize per-sequence benchmark execution**
-  - Run independent sequence jobs in separate processes
-  - Keep result writing deterministic and cache-safe
-  - Avoid parallel writes to the same artifact names
+#### P3.2 Build a real-proof error map
+- [ ] Collect mismatch indices on real proof prefixes at:
+      - `96B`
+      - `112B`
+      - `129B`
+- [ ] Check whether mismatches are stable by byte or by segment.
+- [ ] Only after that, design new segmented proof-prefix protection.
+- [ ] Keep synthetic and real-proof error maps separate in analysis notes and benchmark outputs.
+- [ ] Rebuild the real-proof error map after applying the body-gap decoupling that fixes `96B`.
 
-- [~] **Add an explicit benchmark fast mode**
-  - Purpose: developer iteration, not headline paper results
-  - Candidate relaxations:
-    - reduced sequence set
-    - no repeated post-embed pruning loop
-    - capped frame counts
-    - reuse existing sec1 stego where valid
-  - 2026-05-04: `--fast` added to `benchmark/sec1_quality.py`, `benchmark/sec2_capacity.py`, `benchmark/sec4_security.py`, and `benchmark/sec6_performance.py`
-  - Current fast mode:
-    - skips expensive sec1 batch PSNR re-validation
-    - reduces sec1 probe budgets and probe decode depth
-    - reduces sec2 sweep fractions
-    - reduces sec3 sequence count and decode depth
-    - reduces sec4 payload-rate sweep
-    - narrows sec6 default scope for developer iteration
-  - 2026-05-04: `--fast` added to `benchmark/sec3_methods.py`
-  - 2026-05-04: `benchmark/safe_benchmark_runner.py --fast` now propagates fast mode to supported sections
-  - Remaining work: propagate fast mode to any remaining top-level benchmark workflows
+#### P3.3 Segmented protection on real proof bytes
+- [ ] Try segmented protection based on the real error map, not the synthetic one.
+- [ ] Target order:
+      - bring `96B` real proof branch to `partial_contract=True`
+      - then bring `112B`
+      - then bring `129B`
+- [ ] Prefer local repairs that minimize collateral damage to header and message recovery.
+- [ ] Reject any repair that improves one metric by collapsing another.
 
-- [~] **Reuse cover-video analysis cache across benchmark sections**
-  - Avoid recomputing:
-    - `extract_all_idr_blocks()`
-    - `CAVLCSafetyFilter.get_safe_positions()`
-    across `sec1/sec2/sec3/sec4` when the same cover asset is reused
-  - 2026-05-04: `benchmark/_common.py` now exposes a shared benchmark-analysis loader backed by `.cache/video_analysis/`
-  - 2026-05-04: `sec1`, `sec2`, `sec3`, and `sec4` now reuse the same cached cover analysis
-  - Remaining work: measure warm-cache speedup formally and decide whether sec6 should report a warm-cache mode alongside cold-start timing
+#### P3.4 Only then attempt blind full payload
+- [ ] When `129B real proof prefix` passes stably, reconnect a full proof-bearing
+      partial payload.
+- [ ] Only after that, attempt blind `unpack()` and blind verify end-to-end.
+- [ ] Do not skip directly from partial-prefix success to full blind verification.
 
-### F. Robustness and test stability
+### Blind-core stop criteria
 
-- [~] **Make the full test suite stable on current assets**
-  - Reconcile runtime expectations, fixtures, and time budgets with the actual encoded assets in the repo
-  - Eliminate legacy assumptions about removed files or superseded naming
-  - 2026-05-04: `src/runtest/run_all.py --quick` added for fast correctness validation on phases 1-3
-  - Remaining work: stabilize long-running phase 4/5 coverage under current asset and runtime constraints
+Keep blind-core as future work if:
+- runtime is still too heavy to iterate on,
+- the real-proof branch cannot hold header and proof prefix simultaneously,
+- or telemetry still does not show a stable error pattern.
 
-- [ ] **Separate correctness tests from long-running performance tests**
-  - Keep correctness/unit tests fast and deterministic
-  - Move expensive reconstruction/performance scenarios into an explicit slow-test tier
+Also stop escalation if:
+- every new fix only trades errors between header and proof without net improvement,
+- or benchmark cost becomes too high to support deliberate iteration.
 
-- [ ] **Add regression fixtures for known weak cases**
-  - Include at least:
-    - high-motion all-intra
-    - GOP8/inter-coded failure mode
-    - near-threshold PSNR sequences
-  - Goal: prevent silent regressions in the exact cases that define current limits
+Promote blind-core to a major future direction only if:
+- real-proof `96B+` passes stably,
+- `129B` real proof prefix can be recovered correctly and repeatably,
+- and there is at least one blind payload contract that is close to end-to-end,
+  not just a synthetic proxy.
 
-### G. Benchmark credibility and reporting
+---
 
-- [ ] **Expand benchmark coverage by content class**
-  - Track classes such as:
-    - low motion
-    - high motion
-    - texture-heavy
-    - talking-head / low-detail
-  - Summarize which classes are strongest / weakest for this system
+## Immediate Next Steps
 
-- [ ] **Run explicit GOP sweep benchmarks**
-  - GOP values to prioritize: `1, 4, 8, 16`
-  - Report where the current T1 strategy stops being acceptable
-  - Use the results to justify future hybrid design choices
+This is the best working order from the current state.
 
-- [ ] **Quantify one-time vs operational cost everywhere**
-  - Report:
-    - cold-start video cost
-    - cached per-message cost
-    - batch cost on the same video
-  - Make these numbers part of the standard benchmark output set
+### Mainline
+- [ ] Keep the main baseline clean and the paper-grade workflow stable.
+- [ ] Finish the remaining paper-facing tables.
 
-### H. Documentation and productization
+### Blind-core
+- [ ] Re-validate the `96B` real-proof branch until one local contract is repeatable.
+- [ ] Only after that, test the same contract on `112B` and `129B`.
+- [ ] If no repeatable local contract exists, return to header-specific placement/coding before more segmented proof-prefix work.
 
-- [~] **Bring README and plan into agreement with real runtime state**
-  - Remove or revise claims that no longer match the current repo state
-  - Ensure test counts, benchmark status, and supported asset sets are current
-  - 2026-05-04: `plan.md` expanded with explicit system-improvement roadmap
-  - Remaining work: update README benchmark/runtime claims to match the current codebase and test state
+### Next concrete blind-core run order
+1. Re-run the `96B real proof` branch until the local contract is stable and repeatable.
+2. If the contract is not repeatable, stop and redesign header-specific protection first.
+3. If the contract is repeatable, test `112B`.
+4. Then test `129B`.
+5. Only then try new segmented protection for the remaining real-proof failures.
 
-- [ ] **Document the supported operating envelope**
-  - Explicitly state:
-    - preferred codec profile
-    - preferred GOP range
-    - recommended QP range
-    - expected payload budget
-    - verifier assumptions
+---
 
-- [ ] **Define a clean artifact policy**
-  - Keep:
-    - final `.json` benchmark results
-    - final `.png` plots
-  - Exclude or auto-clean:
-    - stego intermediates
-    - `_idr_cache_*.pkl`
-    - proof payload caches
-    - `__pycache__`
+## Exit Conditions
+
+## Exit to paper writing
+- [ ] The main docs and benchmark outputs tell the same story.
+- [ ] Paper-grade sections run through the runner without ambiguity.
+- [ ] Claim-to-evidence mapping is stable.
+
+## Exit to "blind-core is more than future work"
+- [ ] The real-proof branch can hold header and proof prefix together at a meaningful level.
+- [ ] `129B` real proof prefix can be recovered correctly and repeatably.
+- [ ] There is at least one blind contract that is close to end-to-end, not just a synthetic proxy.
+
+## Exit to "blind-core can influence the paper narrative"
+- [ ] There is at least one repeatable real-proof result beyond `96B` with both header and proof-prefix success.
+- [ ] The result survives rerun through benchmark code, not only one-off experiments.
+- [ ] The blind-core claim can be stated without contradicting the frozen baseline.

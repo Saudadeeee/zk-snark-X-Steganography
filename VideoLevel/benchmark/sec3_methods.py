@@ -33,7 +33,7 @@ from benchmark._common import (
     PALETTE, SEQUENCES, SEQ_LABELS,
     setup_style, save_fig, cache_save, cache_load,
     decode_luma_frames, embed_lsb_pixel,
-    OUTPUT_DIR, annotate_literature, load_or_build_benchmark_analysis,
+    OUTPUT_DIR, annotate_literature, get_capacity_views, load_or_build_benchmark_analysis,
     sort_positions_round_robin_idrs,
 )
 
@@ -49,6 +49,10 @@ PAYLOAD_BYTES = 147
 
 def _fast_mode_enabled() -> bool:
     return os.environ.get("SEC3_FAST_MODE", "0") == "1"
+
+
+def _allow_fallback_mode() -> bool:
+    return os.environ.get("SEC3_ALLOW_FALLBACK", "0") == "1"
 
 # -------------------------------------------------------------------------
 # Literature values (clearly cited)
@@ -120,6 +124,31 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
     data: dict = {
         "payload_bytes": PAYLOAD_BYTES,
         "validation_threshold_db": None,  # No PSNR validation threshold (unvalidated embedding)
+        "comparison_protocol": {
+            "method_groups": {
+                "This Work (CAVLC T1)": "proposed_compressed_domain",
+                "LSB pixel": "spatial_reference_baseline",
+                "F5-H264": "compressed_domain_literature_baseline",
+                "MV-based": "compressed_domain_literature_baseline",
+                "IPM-based": "compressed_domain_literature_baseline",
+            },
+            "measurement_type": {
+                "This Work (CAVLC T1)": "measured",
+                "LSB pixel": "measured",
+                "F5-H264": "literature",
+                "MV-based": "literature",
+                "IPM-based": "literature",
+            },
+            "primary_peer_group": [
+                "F5-H264",
+                "MV-based",
+                "IPM-based",
+            ],
+            "reference_baseline_group": [
+                "LSB pixel",
+            ],
+            "internal_ablation_reference": "benchmark/results/sec3_ablation_data.json",
+        },
         "methods": {},
     }
 
@@ -133,12 +162,11 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
     this_work_validation_mode: dict[str, str] = {}
     this_work_embedded_bits: dict[str, int] = {}
     this_work_requested_bits: dict[str, int] = {}
+    this_work_capacity_context: dict[str, dict[str, int | None]] = {}
 
     # Default sec3 scope is pinned to literature-supported sequences so method
     # comparisons stay stable across runs and include all baseline methods.
     default_sequence_names = tuple(LITERATURE_PSNR["F5-H264"].keys())
-    if _fast_mode_enabled():
-        default_sequence_names = default_sequence_names[:1]
     if include_sequences:
         measure_sequences = {k: v for k, v in SEQUENCES.items() if k in include_sequences}
     else:
@@ -147,12 +175,28 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
             for k in default_sequence_names
             if k in SEQUENCES
         }
+        locked_measure_sequences = {}
+        for k, v in measure_sequences.items():
+            sec1_stego = OUTPUT_DIR / f"sec1_stego_{k}.h264"
+            caps = get_capacity_views(k, v, force=force)
+            if sec1_stego.exists() and int(caps.get("operating_bits") or 0) > 0:
+                locked_measure_sequences[k] = v
+        if locked_measure_sequences:
+            measure_sequences = locked_measure_sequences
+        if _fast_mode_enabled():
+            first_key = next(iter(measure_sequences.keys()), None)
+            measure_sequences = (
+                {first_key: measure_sequences[first_key]}
+                if first_key is not None else
+                {}
+            )
     if not measure_sequences:
         raise ValueError("No valid sequences selected for sec3 measurement")
 
     for seq_name, video_path in measure_sequences.items():
         sec1_stego = OUTPUT_DIR / f"sec1_stego_{seq_name}.h264"
         sec1_meta  = OUTPUT_DIR / f"sec1_stego_{seq_name}.h264.meta.json"
+        caps = get_capacity_views(seq_name, video_path, force=force)
         if sec1_stego.exists():
             # Use sec1 stego: chaos + FFmpeg-validated embedding at actual proof payload.
             print(f"  [this work / {seq_name}] using sec1 stego (chaos_v5_ffmpeg_validated)…")
@@ -171,6 +215,9 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
                 target_bits = int(_m.get("bits_required", target_bits))
                 validation_mode = str(_m.get("validation_mode", validation_mode))
         else:
+            if not _allow_fallback_mode():
+                print(f"  [this work / {seq_name}] skip: no locked SEC1 operating-point artifact")
+                continue
             # Fallback: embed synthetic payload with round-robin (no FFmpeg validation).
             print(f"  [this work / {seq_name}] sec1 stego not found, falling back to round-robin embed…")
             from src.core.stego import PayloadEmbedder
@@ -185,10 +232,11 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
                 video_path,
                 force=force,
             )
+            caps = get_capacity_views(seq_name, video_path, force=force)
             sorted_pos = sort_positions_round_robin_idrs(safe_pos, CIF_MB_COUNT)
-            target_bits = len(payload_fb) * 8
+            target_bits = int(caps.get("operating_bits") or len(payload_fb) * 8)
             validated   = sorted_pos[:target_bits]
-            validation_mode = "round_robin_full_frame_unvalidated_fallback"
+            validation_mode = "round_robin_raw_safe_fallback"
             usable_bytes = len(validated) // 8
             payload_now  = payload_fb[:usable_bytes] if usable_bytes > 0 else b""
 
@@ -213,13 +261,33 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
         this_work_validation_mode[seq_name] = validation_mode
         this_work_embedded_bits[seq_name] = int(bits_emb)
         this_work_requested_bits[seq_name] = int(target_bits)
+        this_work_capacity_context[seq_name] = {
+            "raw_safe_bits": int(caps.get("raw_safe_bits") or 0),
+            "patchable_usable_bits": int(caps.get("patchable_usable_bits") or 0),
+            "validated_pool_bits": int(caps.get("validated_pool_bits") or 0) if caps.get("validated_pool_bits") is not None else None,
+            "operating_bits": int(caps.get("operating_bits") or 0) if caps.get("operating_bits") is not None else None,
+            "bits_embedded": int(caps.get("bits_embedded") or 0) if caps.get("bits_embedded") is not None else None,
+            "bits_required": int(caps.get("bits_required") or 0) if caps.get("bits_required") is not None else None,
+            "ffmpeg_validated_bits": int(caps.get("ffmpeg_validated_bits") or 0) if caps.get("ffmpeg_validated_bits") is not None else None,
+            "requested_position_bits": int(caps.get("requested_position_bits") or 0) if caps.get("requested_position_bits") is not None else None,
+            "applied_position_bits": int(caps.get("applied_position_bits") or 0) if caps.get("applied_position_bits") is not None else None,
+        }
         print(f"  [this work / {seq_name}] full-video PSNR={psnr_val:.2f} dB")
+
+    if not this_work_psnr:
+        raise RuntimeError(
+            "sec3 could not find any sequence with a locked SEC1 operating-point artifact. "
+            "Run sec1 first or set SEC3_ALLOW_FALLBACK=1 for diagnostic fallback mode."
+        )
 
     data["methods"]["This Work (CAVLC T1)"] = {
         "psnr":       this_work_psnr,
         "validation_mode": this_work_validation_mode,
         "embedded_bits": this_work_embedded_bits,
         "requested_bits": this_work_requested_bits,
+        "capacity_context": this_work_capacity_context,
+        "method_group": "proposed_compressed_domain",
+        "measurement_type": "measured",
         "simulated":  False,
     }
 
@@ -232,6 +300,8 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
 
     data["methods"]["LSB pixel"] = {
         "psnr":       lsb_psnr,
+        "method_group": "spatial_reference_baseline",
+        "measurement_type": "measured",
         "simulated":  False,
     }
 
@@ -239,6 +309,8 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
     for method_name, psnr_vals in LITERATURE_PSNR.items():
         data["methods"][method_name] = {
             "psnr":       psnr_vals,
+            "method_group": "compressed_domain_literature_baseline",
+            "measurement_type": "literature",
             "simulated":  True,
         }
 

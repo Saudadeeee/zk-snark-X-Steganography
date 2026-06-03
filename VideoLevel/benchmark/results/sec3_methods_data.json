@@ -1,26 +1,68 @@
 {
   "payload_bytes": 147,
   "validation_threshold_db": null,
+  "comparison_protocol": {
+    "method_groups": {
+      "This Work (CAVLC T1)": "proposed_compressed_domain",
+      "LSB pixel": "spatial_reference_baseline",
+      "F5-H264": "compressed_domain_literature_baseline",
+      "MV-based": "compressed_domain_literature_baseline",
+      "IPM-based": "compressed_domain_literature_baseline"
+    },
+    "measurement_type": {
+      "This Work (CAVLC T1)": "measured",
+      "LSB pixel": "measured",
+      "F5-H264": "literature",
+      "MV-based": "literature",
+      "IPM-based": "literature"
+    },
+    "primary_peer_group": [
+      "F5-H264",
+      "MV-based",
+      "IPM-based"
+    ],
+    "reference_baseline_group": [
+      "LSB pixel"
+    ],
+    "internal_ablation_reference": "benchmark/results/sec3_ablation_data.json"
+  },
   "methods": {
     "This Work (CAVLC T1)": {
       "psnr": {
-        "foreman_q22_g1": 40.83055877685547
+        "coastguard_q22_g1": 52.64698028564453
       },
       "validation_mode": {
-        "foreman_q22_g1": "real_proof_allintra_chaos_v5_ffmpeg_validated_fast"
+        "coastguard_q22_g1": "real_proof_allintra_chaos_v5_ffmpeg_validated"
       },
       "embedded_bits": {
-        "foreman_q22_g1": 1232
+        "coastguard_q22_g1": 1232
       },
       "requested_bits": {
-        "foreman_q22_g1": 1232
+        "coastguard_q22_g1": 1232
       },
+      "capacity_context": {
+        "coastguard_q22_g1": {
+          "raw_safe_bits": 433256,
+          "patchable_usable_bits": 2000,
+          "validated_pool_bits": 1316,
+          "operating_bits": 1232,
+          "bits_embedded": 1232,
+          "bits_required": 1232,
+          "ffmpeg_validated_bits": null,
+          "requested_position_bits": null,
+          "applied_position_bits": null
+        }
+      },
+      "method_group": "proposed_compressed_domain",
+      "measurement_type": "measured",
       "simulated": false
     },
     "LSB pixel": {
       "psnr": {
-        "foreman_q22_g1": 60.0
+        "coastguard_q22_g1": 60.0
       },
+      "method_group": "spatial_reference_baseline",
+      "measurement_type": "measured",
       "simulated": false
     },
     "F5-H264": {
@@ -28,6 +70,8 @@
         "foreman_q22_g1": 38.2,
         "coastguard_q22_g1": 32.7
       },
+      "method_group": "compressed_domain_literature_baseline",
+      "measurement_type": "literature",
       "simulated": true
     },
     "MV-based": {
@@ -35,6 +79,8 @@
         "foreman_q22_g1": 34.5,
         "coastguard_q22_g1": 28.3
       },
+      "method_group": "compressed_domain_literature_baseline",
+      "measurement_type": "literature",
       "simulated": true
     },
     "IPM-based": {
@@ -42,6 +88,8 @@
         "foreman_q22_g1": 33.8,
         "coastguard_q22_g1": 27.5
       },
+      "method_group": "compressed_domain_literature_baseline",
+      "measurement_type": "literature",
       "simulated": true
     }
   },

@@ -3,7 +3,7 @@ verify_modes.py — Explicit verifier mode selection.
 
 Provides clear mode naming for verification:
 - strict_nonblind_verify: Full cover analysis, highest integrity
-- nearblind_verify: Manifest-driven, no cover video needed
+- nearblind_verify: Sidecar-assisted, no cover video needed
 - benchmark_verify: Optimized for benchmark runs
 
 Usage:
@@ -18,7 +18,7 @@ Usage:
         message_length=len(message),
     )
 
-    # Near-blind mode (manifest only, no original video)
+    # Sidecar-assisted near-blind mode (no original video)
     result = verify_nearblind(
         stego_video_path="stego.h264",
         circuits_dir="circuits/",
@@ -85,39 +85,38 @@ def verify_nearblind(
     message_length: int,
     max_modifications_per_block: int = 1,
     chaos_key: Optional[bytes] = None,
+    use_analysis_cache: bool = True,
+    force_analysis_refresh: bool = False,
+    analysis_cache_dir: Optional[str] = None,
+    manifest_signing_key: Optional[bytes] = None,
 ) -> VerifyResult:
     """
-    Near-blind verification using manifest-driven extraction.
+    Sidecar-assisted near-blind verification using manifest-driven extraction.
 
     **Requirements:**
     - manifest.json must exist alongside stego video
     - positions.json must exist (from embedding)
     - No original video required
-    - Suitable for: production deployment, verification at scale
+    - Suitable for: sidecar-assisted verification at scale
 
     **Runtime:** ~10s per verification (no full analysis)
-    **Trade-off:** Requires manifest.json (but no original video)
+    **Trade-off:** Requires sidecar metadata (but no original video)
 
     **Missing requirements:**
-    - If manifest.json is missing, falls back to verify() with original video
+    - If manifest.json or positions.json is missing, this mode fails explicitly
     """
-    try:
-        return _verify_near_blind(
-            stego_video_path=stego_video_path,
-            circuits_dir=circuits_dir,
-            secret_key=secret_key,
-            message_length=message_length,
-            max_modifications_per_block=max_modifications_per_block,
-            chaos_key=chaos_key,
-        )
-    except RuntimeError as e:
-        # Fallback to standard verification if manifest missing
-        print(f"[verify_modes] Manifest not found: {e}")
-        print("[verify_modes] Falling back to standard verification (requires original video)")
-        raise RuntimeError(
-            "Near-blind verification requires manifest.json and original_video_path "
-            "was not provided. Either ensure manifest.json exists or use verify_strict()."
-        )
+    return _verify_near_blind(
+        stego_video_path=stego_video_path,
+        circuits_dir=circuits_dir,
+        secret_key=secret_key,
+        message_length=message_length,
+        max_modifications_per_block=max_modifications_per_block,
+        chaos_key=chaos_key,
+        use_analysis_cache=use_analysis_cache,
+        force_analysis_refresh=force_analysis_refresh,
+        analysis_cache_dir=analysis_cache_dir,
+        manifest_signing_key=manifest_signing_key,
+    )
 
 
 def verify_benchmark(
@@ -164,6 +163,7 @@ def verify_auto(
     original_video_path: Optional[str] = None,
     max_modifications_per_block: int = 1,
     chaos_key: Optional[bytes] = None,
+    manifest_signing_key: Optional[bytes] = None,
 ) -> VerifyResult:
     """
     Auto-select verification mode based on available files.
@@ -179,14 +179,19 @@ def verify_auto(
 
     if __import__("os").path.isfile(manifest_path):
         # Use near-blind if manifest exists
-        return verify_nearblind(
-            stego_video_path=stego_video_path,
-            circuits_dir=circuits_dir,
-            secret_key=secret_key,
-            message_length=message_length,
-            max_modifications_per_block=max_modifications_per_block,
-            chaos_key=chaos_key,
-        )
+        try:
+            return verify_nearblind(
+                stego_video_path=stego_video_path,
+                circuits_dir=circuits_dir,
+                secret_key=secret_key,
+                message_length=message_length,
+                max_modifications_per_block=max_modifications_per_block,
+                chaos_key=chaos_key,
+                manifest_signing_key=manifest_signing_key,
+            )
+        except RuntimeError:
+            if not original_video_path:
+                raise
     elif original_video_path:
         # Use strict if original video provided
         return verify_strict(
@@ -198,11 +203,11 @@ def verify_auto(
             max_modifications_per_block=max_modifications_per_block,
             chaos_key=chaos_key,
         )
-    else:
-        raise RuntimeError(
-            "verify_auto() requires either manifest.json or original_video_path. "
-            "Neither was provided."
-        )
+
+    raise RuntimeError(
+        "verify_auto() requires a usable near-blind sidecar set or original_video_path. "
+        "Neither was available."
+    )
 
 
 # Export for backward compatibility

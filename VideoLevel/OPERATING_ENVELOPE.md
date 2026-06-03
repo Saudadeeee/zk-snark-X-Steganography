@@ -78,18 +78,28 @@ This document defines the supported operating envelope for ZK-SNARK Video Stegan
 
 **Standard mode (verify):**
 - Requires: original video path
-- Optional: positions.json sidecar
+- Optional: trusted precomputed operating positions
 - Purpose: benchmark and development
 
 **Near-blind mode (verify_near_blind):**
-- Requires: stego video + manifest.json
-- Optional: positions.json sidecar
+- Requires: stego video + manifest.json + positions.json
 - No original video needed
-- Purpose: production deployment
+- Purpose: sidecar-assisted verification
 
-**Required in manifest:**
-- positions.json (embedding positions)
-- meta.json or manifest.json (payload metadata)
+**Blind-core branch:**
+- Experimental only
+- Not part of the supported operating envelope for the current paper baseline
+- Treat as future work until header readout and end-to-end verification become stable
+
+**Locked operating-point mode (embed):**
+- Requires: pre-validated operating positions
+- Intended for benchmark-grade operating-point reproduction
+- Current strongest end-to-end path in the repository
+
+**Sidecar assumptions:**
+- `positions.json` carries operating extraction positions
+- `manifest.json` carries payload and embedding metadata
+- The current near-blind mode is not blind in the strict steganographic sense
 
 ## Known Limitations
 

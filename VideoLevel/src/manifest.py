@@ -5,6 +5,7 @@ Versioned manifest structure for embed/verify sidecars.
 
 from __future__ import annotations
 
+import hmac
 import hashlib
 import json
 from dataclasses import dataclass, field
@@ -197,29 +198,25 @@ class StegoManifest:
 
     def compute_content_hash(self) -> str:
         """Compute SHA-256 hash of manifest content (excluding signature)."""
-        content = self.to_json()
+        manifest_dict = self.to_dict()
+        manifest_dict["signature"] = None
+        manifest_dict["signer"] = None
+        content = json.dumps(manifest_dict, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         return hashlib.sha256(content.encode()).hexdigest()
 
     def verify_signature(self, public_key: bytes) -> bool:
-        """Verify manifest signature.
-
-        Placeholder for signature verification implementation.
-        Options:
-        - HMAC with shared secret
-        - ED25519 signature
-        - RSA signature
-        """
-        # TODO: Implement actual signature verification
-        return self.signature is not None
+        """Verify manifest signature using HMAC-SHA256."""
+        if not self.signature or not isinstance(public_key, (bytes, bytearray)) or len(public_key) == 0:
+            return False
+        expected = hmac.new(bytes(public_key), self.compute_content_hash().encode("utf-8"), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(self.signature, expected)
 
     def sign(self, private_key: bytes, signer_id: Optional[str] = None) -> None:
-        """Sign manifest content.
-
-        Placeholder for signature generation implementation.
-        """
-        # TODO: Implement actual signature generation
+        """Sign manifest content using HMAC-SHA256."""
+        if not isinstance(private_key, (bytes, bytearray)) or len(private_key) == 0:
+            raise ValueError("private_key must be non-empty bytes")
         content_hash = self.compute_content_hash()
-        self.signature = f"hmac_{content_hash[:16]}"  # Placeholder
+        self.signature = hmac.new(bytes(private_key), content_hash.encode("utf-8"), hashlib.sha256).hexdigest()
         self.signer = signer_id or "default"
 
 

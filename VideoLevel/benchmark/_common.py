@@ -310,6 +310,157 @@ def load_or_build_benchmark_analysis(
         safe_positions,
     )
 
+
+def load_sec1_positions(
+    seq_name: str,
+    *,
+    validated_pool: bool = False,
+) -> list[tuple[int, int, int]]:
+    """Load SEC1 operating positions or validated pool for a sequence."""
+    suffix = ".validated_pool.json" if validated_pool else ".positions.json"
+    path = OUTPUT_DIR / f"sec1_stego_{seq_name}.h264{suffix}"
+    if not path.exists():
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return [tuple(int(v) for v in row) for row in raw]
+    except Exception:
+        return []
+
+
+def load_sec1_meta(seq_name: str) -> dict | None:
+    """Load SEC1 meta sidecar for a sequence when available."""
+    path = OUTPUT_DIR / f"sec1_stego_{seq_name}.h264.meta.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def get_capacity_views(
+    seq_name: str,
+    video_path: str | Path,
+    *,
+    force: bool = False,
+) -> dict[str, int | None]:
+    """
+    Return harmonized capacity counts for benchmark reporting.
+
+    Terms:
+      - raw_safe_bits: CAVLC-safe positions before patchability / quality validation
+      - validated_pool_bits: SEC1 validated candidate pool
+      - operating_bits: exact positions used by the SEC1 operating point
+      - bits_embedded / bits_required: taken from SEC1 meta when available
+    """
+    _coeffs, _fvd, _nC_map, _nal_len, _t1_over, safe_positions = load_or_build_benchmark_analysis(
+        video_path,
+        force=force,
+    )
+    validated_positions = load_sec1_positions(seq_name, validated_pool=True)
+    operating_positions = load_sec1_positions(seq_name, validated_pool=False)
+    meta = load_sec1_meta(seq_name) or {}
+    bits_embedded = meta.get("bits_embedded")
+    bits_required = meta.get("bits_required")
+    ffmpeg_validated_bits = meta.get("ffmpeg_validated_bits")
+    requested_position_bits = meta.get("requested_position_bits")
+    applied_position_bits = meta.get("applied_position_bits")
+    validation_mode = meta.get("validation_mode")
+
+    patchable = measure_patchable_usable_bits(video_path, force=force, max_positions=2000)
+
+    return {
+        "raw_safe_bits": len(safe_positions),
+        "patchable_usable_bits": int(patchable["patchable_usable_bits"]),
+        "validated_pool_bits": len(validated_positions) if validated_positions else None,
+        "operating_bits": len(operating_positions) if operating_positions else None,
+        "bits_embedded": int(bits_embedded) if isinstance(bits_embedded, (int, float)) else None,
+        "bits_required": int(bits_required) if isinstance(bits_required, (int, float)) else None,
+        "ffmpeg_validated_bits": int(ffmpeg_validated_bits) if isinstance(ffmpeg_validated_bits, (int, float)) else None,
+        "requested_position_bits": int(requested_position_bits) if isinstance(requested_position_bits, (int, float)) else None,
+        "applied_position_bits": int(applied_position_bits) if isinstance(applied_position_bits, (int, float)) else None,
+        "validation_mode": str(validation_mode) if isinstance(validation_mode, str) else None,
+    }
+
+
+def measure_patchable_usable_bits(
+    video_path: str | Path,
+    *,
+    force: bool = False,
+    max_positions: int | None = None,
+    max_modifications_per_block: int = 1,
+) -> dict[str, object]:
+    """
+    Measure how many candidate positions survive the patchability flow used by embed().
+
+    Returns:
+      {
+        "raw_safe_bits": int,
+        "patchable_usable_bits": int,
+        "positions": list[tuple[int,int,int]],
+      }
+    """
+    from src.embedder import _limit_positions_per_block, _prune_patchable_positions
+
+    (
+        _coeffs,
+        frame_verified_data,
+        _nC_map,
+        _nal_length_map,
+        _t1_override_map,
+        safe_positions,
+    ) = load_or_build_benchmark_analysis(video_path, force=force)
+
+    target_bits = len(safe_positions) if max_positions is None else min(len(safe_positions), int(max_positions))
+    usable_positions = _prune_patchable_positions(
+        list(safe_positions),
+        frame_verified_data,
+        required_bits=target_bits,
+    )
+    usable_positions = _limit_positions_per_block(
+        usable_positions,
+        max_modifications_per_block=max_modifications_per_block,
+    )
+    return {
+        "raw_safe_bits": len(safe_positions),
+        "patchable_usable_bits": len(usable_positions),
+        "positions": usable_positions,
+    }
+
+
+def select_best_sec1_operating_asset(
+    *,
+    required_bits: int,
+    preferred_sequences: list[str] | None = None,
+) -> tuple[str | None, str | None]:
+    """
+    Pick the best asset that already has an SEC1 operating-point sidecar meeting required_bits.
+
+    Returns:
+      (sequence_name, video_path)
+    """
+    seq_names = preferred_sequences or list(SEQUENCES.keys())
+    best_seq = None
+    best_path = None
+    best_score = (-1, -1)
+
+    for seq_name in seq_names:
+        video_path = SEQUENCES.get(seq_name)
+        if video_path is None or not Path(video_path).exists():
+            continue
+        caps = get_capacity_views(seq_name, video_path, force=False)
+        operating_bits = int(caps.get("operating_bits") or 0)
+        validated_bits = int(caps.get("validated_pool_bits") or 0)
+        if operating_bits >= required_bits:
+            score = (operating_bits, validated_bits)
+            if score > best_score:
+                best_score = score
+                best_seq = seq_name
+                best_path = str(video_path)
+
+    return best_seq, best_path
+
 # ---------------------------------------------------------------------------
 # Quality metrics
 # ---------------------------------------------------------------------------

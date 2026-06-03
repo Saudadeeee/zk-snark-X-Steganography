@@ -591,6 +591,7 @@ class PayloadEmbedder:
                      payload: bytes, nC_map: Optional[Dict[Tuple[int, int], int]] = None,
                      nal_length_map: Optional[Dict[Tuple[int, int], int]] = None,
                      t1_override_map: Optional[Dict[Tuple[int, int], int]] = None,
+                     frame_verified_data: Optional[Dict[int, Tuple[Dict, Dict]]] = None,
                      ffmpeg_validator=None,
                      pre_validated_positions=None) -> Tuple[List[Tuple[int, int, List[int]]], int]:
         """
@@ -616,7 +617,7 @@ class PayloadEmbedder:
         if self.use_safety_filter and self.safety_filter:
             return self._embed_with_safety_filter(
                 coefficients, payload_bits, nC_map, nal_length_map,
-                t1_override_map, ffmpeg_validator, pre_validated_positions)
+                t1_override_map, frame_verified_data, ffmpeg_validator, pre_validated_positions)
         raise EmbeddingError("use_safety_filter=False embedding path is not implemented")
     
     def _embed_with_safety_filter(
@@ -626,6 +627,7 @@ class PayloadEmbedder:
         nC_map: Optional[Dict[Tuple[int, int], int]] = None,
         nal_length_map: Optional[Dict[Tuple[int, int], int]] = None,
         t1_override_map: Optional[Dict[Tuple[int, int], int]] = None,
+        frame_verified_data: Optional[Dict[int, Tuple[Dict, Dict]]] = None,
         ffmpeg_validator=None,
         pre_validated_positions=None,
     ) -> Tuple[List[Tuple[int, int, List[int]]], int]:
@@ -649,7 +651,8 @@ class PayloadEmbedder:
                 skip_dc=self.skip_dc,
                 nC_map=nC_map,
                 nal_length_map=nal_length_map,
-                t1_override_map=t1_override_map
+                t1_override_map=t1_override_map,
+                frame_verified_data=frame_verified_data,
             )
 
         # Build coeff lookup: (mb_idx, block_idx) -> mutable coefficients list.

@@ -35,14 +35,15 @@ from benchmark._common import (
     PALETTE, SEQUENCES, SEQ_LABELS,
     setup_style, save_fig, cache_save, cache_load,
     decode_luma_frames, embed_lsb_pixel,
-    ROOT, OUTPUT_DIR, annotate_literature, load_or_build_benchmark_analysis, load_or_extract_idr_blocks,
+    ROOT, OUTPUT_DIR, annotate_literature, get_capacity_views,
+    load_or_build_benchmark_analysis, load_or_extract_idr_blocks,
 )
 
 CACHE_KEY = "sec4_security_data"
 # Rate sweep: 0 = cover, then realistic operating range + high-rate reference
-RATES     = [0, 5, 10, 20, 35, 50, 70, 100]  # % of raw T1 capacity
+RATES     = [0, 5, 10, 20, 35, 50, 70, 100]  # % of raw safe-position capacity
 
-# ZK operating point: actual bits embedded / raw T1 capacity
+# ZK operating point: actual bits embedded / raw safe-position capacity
 ZK_BLOB_BITS    = 1232  # chaos-expanded payload
 ZK_PAYLOAD_BYTES = 147
 
@@ -248,12 +249,22 @@ def collect_data(force: bool = False) -> dict:
         video_path,
         force=False,
     )
-    capacity = len(safe_pos)
-    print(f"  capacity = {capacity} T1 bits")
+    caps = get_capacity_views(seq_name, video_path, force=False)
+    capacity = int(caps["raw_safe_bits"])
+    patchable_capacity = int(caps.get("patchable_usable_bits") or 0)
+    validated_capacity = int(caps.get("validated_pool_bits") or 0)
+    operating_capacity = int(caps.get("operating_bits") or 0)
+    print(f"  raw safe-position capacity = {capacity} bits")
+    if patchable_capacity:
+        print(f"  patchable usable capacity = {patchable_capacity} bits")
+    if validated_capacity:
+        print(f"  validated pool            = {validated_capacity} bits")
+    if operating_capacity:
+        print(f"  operating positions       = {operating_capacity} bits")
 
-    # Actual operating rate: ZK blob bits / raw capacity
+    # Actual operating rate: ZK blob bits / raw safe-position capacity
     op_rate_pct = round(100.0 * ZK_BLOB_BITS / capacity, 3)
-    print(f"  ZK operating point = {ZK_BLOB_BITS} bits = {op_rate_pct:.3f}% of capacity")
+    print(f"  ZK operating point = {ZK_BLOB_BITS} bits = {op_rate_pct:.3f}% of raw safe capacity")
 
     rates = [0, 10, 35, 100] if _fast_mode_enabled() else RATES
     decode_max_frames = 180 if _fast_mode_enabled() else 9999
@@ -349,6 +360,13 @@ def collect_data(force: bool = False) -> dict:
     data = {
         "rates":            rates,
         "capacity":         capacity,
+        "patchable_capacity": patchable_capacity,
+        "validated_capacity": validated_capacity,
+        "operating_capacity": operating_capacity,
+        "ffmpeg_validated_bits": caps.get("ffmpeg_validated_bits"),
+        "requested_position_bits": caps.get("requested_position_bits"),
+        "applied_position_bits": caps.get("applied_position_bits"),
+        "validation_mode": caps.get("validation_mode"),
         "op_rate_pct":      op_rate_pct,
         "op_bits":          ZK_BLOB_BITS,
         "op_chi_p":         op_chi_p,
@@ -398,7 +416,7 @@ def plot_chi_square(data: dict) -> None:
             arrowprops=dict(arrowstyle="->", color=PALETTE["this_work"], lw=1.2),
         )
 
-    ax.set_xlabel("Payload rate (% of raw T1 capacity)")
+    ax.set_xlabel("Payload rate (% of raw safe-position capacity)")
     ax.set_ylabel("Chi-square p-value (log scale)")
     ax.set_title("§4  Chi-square Test on T1 Sign Distribution\n"
                  "(2-sample: stego vs cover; p > 0.05 = undetectable)")
@@ -472,7 +490,7 @@ def plot_spa_rs(data: dict) -> None:
              bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow",
                        edgecolor="#aaa", alpha=0.9))
 
-    fig.suptitle("§4  Steganalysis Resistance  (Foreman sequence, T1 capacity = "
+    fig.suptitle("§4  Steganalysis Resistance  (Foreman sequence, raw safe capacity = "
                  f"{data['capacity']} bits)", fontsize=13, fontweight="bold")
 
     save_fig(fig, "sec4_spa_rs")

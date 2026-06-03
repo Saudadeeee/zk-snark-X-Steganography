@@ -2,9 +2,9 @@
 
 Hide a Groth16 zero-knowledge proof inside H.264 baseline video by modifying CAVLC coefficients in IDR frames.
 
-**Status:** IEEE-ready with validated all-intra benchmark path  
+**Status:** Research prototype with a frozen benchmark-grade core: locked operating-point embedding plus sidecar-assisted near-blind verification  
 **Validated Runtime:** `py -3.12`  
-**Tests:** 32/32 passed (Phase 1-5)  
+**Tests:** Phase coverage includes embed/verify, manifest integrity, and near-blind sidecar flows  
 **Benchmark Sections:** SEC1-SEC10 (Quality, Capacity, Methods, Security, Performance, Tradeoff, Real-time, Motion/GOP, Statistical, Audit)
 
 ---
@@ -18,7 +18,7 @@ The system embeds a message-authentication proof into H.264 bitstreams without l
 3. Optionally applies chaos transforms:
    - Arnold Cat Map on payload bits
    - Logistic Map on embedding-position order
-4. Locates CAVLC-safe positions in IDR frames.
+4. Locates CAVLC-safe candidate positions in IDR frames.
 5. Applies length-preserving coefficient/sign modifications.
 6. Reconstructs a valid H.264 bitstream.
 7. Extracts and verifies the proof from the stego video.
@@ -26,7 +26,7 @@ The system embeds a message-authentication proof into H.264 bitstreams without l
 ### New Features (IEEE-ready)
 
 - **Versioned Manifest Schema** (v1.0.0): Structured sidecar files with signing hooks
-- **Near-Blind Verification**: Reduced cover dependency via manifest-driven extraction
+- **Near-Blind Verification**: Reduced cover dependency via sidecar-driven extraction
 - **Statistical Benchmarking**: Multi-run error bars for IEEE TIP/TIFS validity (≥3 runs)
 - **Audit Logging**: SEC1 quality guard tracking with reason logs
 - **Modern Detectors**: WS and SPAM steganalysis features
@@ -89,12 +89,17 @@ All listed operating points satisfy:
 
 ### SEC2: Capacity
 
-| Sequence | Raw T1 capacity | Operating positions | Utilization | PSNR @ 1232 bits |
-|---|---:|---:|---:|---:|
-| Foreman QP22 G1 | 286,745 bits | 1,232 bits | 0.430% | 55.15 dB |
-| Coastguard QP22 G1 | 427,883 bits | 1,232 bits | 0.288% | 51.23 dB |
-| Football QP22 G1 | 372,266 bits | 1,232 bits | 0.331% | 52.24 dB |
-| Deadline QP22 G1 | 1,735,622 bits | 1,232 bits | 0.071% | 58.55 dB |
+| Sequence | Raw safe positions | Patchable usable bits | Operating positions | Utilization | PSNR @ 1232 bits |
+|---|---:|---:|---:|---:|---:|
+| Foreman QP22 G1 | 286,745 bits | ~1.3k | 1,232 bits | 0.430% | 55.15 dB |
+| Coastguard QP22 G1 | 427,883 bits | ~1.3k | 1,232 bits | 0.288% | 51.23 dB |
+| Football QP22 G1 | 372,266 bits | operating-point locked | 1,232 bits | 0.331% | 52.24 dB |
+| Deadline QP22 G1 | 1,735,622 bits | ~1.3k | 1,232 bits | 0.071% | 58.55 dB |
+
+`Raw safe positions` means positions that pass the structural CAVLC safety filter.
+`Patchable usable bits` is a stronger estimate based on the public API patchability
+flow, while `operating positions` denotes the final benchmark-validated positions
+actually used at the locked operating point.
 
 ### SEC4: Steganalysis
 
@@ -215,6 +220,29 @@ print(result.bits_embedded, result.output_path)
 # - data/output/stego.h264.manifest.json (v1.0.0)
 ```
 
+### Embed (locked operating-point mode)
+
+When reproducing a benchmark-grade operating point, the API can reuse a
+pre-validated operating-position set directly:
+
+```python
+from src.embedder import embed
+
+result = embed(
+    video_path="data/encoded/coastguard_cif_q22_g1.h264",
+    message=b"ZK-bench-v1.0!",
+    output_path="data/output/stego_locked.h264",
+    circuits_dir="circuits",
+    secret_key=bytes(range(32)),
+    chaos_key=b"sec1_benchmark_chaos_v1",
+    precomputed_positions=locked_positions,
+    trust_precomputed_positions=True,
+)
+```
+
+This mode is intended for locked benchmark operating points that have already
+been validated end-to-end.
+
 ### Verify (standard mode)
 
 ```python
@@ -234,7 +262,10 @@ print(result.valid, result.message)
 
 ### Verify (near-blind mode)
 
-Reduced dependency on cover video:
+Reduced dependency on the original cover video. This mode requires:
+- `manifest.json`
+- `positions.json`
+- a stego asset whose stored operating positions are still valid after reconstruction
 
 ```python
 from src.verifier_blind import verify_near_blind
@@ -248,13 +279,25 @@ result = verify_near_blind(
 )
 ```
 
+### Verifier modes
+
+- `verify()`:
+  - strict non-blind verification
+  - requires the original cover video or equivalent precomputed operating positions
+- `verify_near_blind()`:
+  - sidecar-assisted near-blind verification
+  - does not require the original cover video
+  - still requires sidecar metadata such as `manifest.json` and `positions.json`
+- blind-core verification:
+  - currently experimental / research-only
+  - not part of the frozen benchmark-grade core path
+  - should be treated as future work in the current paper
+
 ### Run tests
 
 ```bash
 py -3.12 src/runtest/run_all.py
 ```
-
-Expected: `32/32 passed`
 
 ### Run benchmarks
 
@@ -307,10 +350,29 @@ py -3.12 benchmark/sec10_gop_sweep.py --sequences foreman_q22_g1
 ### Near-blind extraction
 
 `verify_near_blind()` reduces cover dependency by:
-1. Loading manifest.json for positions and metadata
-2. Parsing stego video T1 coefficients directly
-3. Extracting from specified positions
-4. Verifying ZK proof
+1. Loading `manifest.json` / `positions.json`
+2. Rebuilding extraction offsets from the stego bitstream
+3. Extracting from the stored operating positions
+4. Verifying the ZK proof
+
+### Threat model summary
+
+- Sender knows:
+  - the original cover video
+  - the embedding key material
+  - the proof-generation inputs
+- Strict verifier knows:
+  - the stego video
+  - the original cover video or locked operating positions
+  - the verification key material
+- Sidecar-assisted near-blind verifier knows:
+  - the stego video
+  - authenticated sidecar metadata
+  - the verification key material
+- Passive observer / attacker is assumed to see:
+  - the stego video
+  - any public stream metadata
+  - but not the secret embedding / verification keys
 
 ---
 
@@ -318,6 +380,10 @@ py -3.12 benchmark/sec10_gop_sweep.py --sequences foreman_q22_g1
 
 - **Optimal Operating Mode:** GOP=1 / all-intra. GOP>1 support exists but degrades due to intra-prediction cascade.
 - **Cold-start Cost:** IDR extraction dominates (~1500s per video). Cacheable after first run.
+- **Capacity Reporting:** raw safe-position counts are not the same as final patchable or quality-validated operating capacity.
+- **Locked Operating-Point Mode:** the strongest end-to-end path currently reuses pre-validated operating positions for selected benchmark assets.
+- **Broad Public API Mode:** generic embedding without locked operating positions still under-fills on representative assets and should not be used for headline claims.
+- **Blind-Core Branch:** candidate synchronization and proxy research exists, but blind extraction is not yet a usable system feature and should be treated as future work.
 - **High QP Limits:** QP=32 assets have limited capacity under 40 dB guard.
 - **Parser Resync Warnings:** Some streams emit warnings but still decode correctly.
 
