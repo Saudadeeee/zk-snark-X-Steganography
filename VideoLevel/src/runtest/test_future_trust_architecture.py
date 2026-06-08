@@ -5,7 +5,11 @@ the frozen paper-grade runtime phases unless explicitly added later.
 """
 
 import os
+import json
+import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
 import numpy as np
 
@@ -316,6 +320,159 @@ def t_ready_to_use_trust_workflows():
                 os.remove(path)
 
 
+def t_trust_workflows_cli_entrypoints():
+    root_dir = Path(os.path.join(os.path.dirname(__file__), "..", "..")).resolve()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        manifest_path = tmp / "manifest.json"
+        provenance_out = tmp / "provenance.json"
+        provenance_sidecar = tmp / "provenance_sidecar.json"
+        frames_path = tmp / "frames.npy"
+        registry_path = tmp / "registry.json"
+        fingerprint_out = tmp / "fingerprint.json"
+        base_path = tmp / "base.npy"
+        embedded_path = tmp / "embedded.npy"
+        watermark_out = tmp / "watermark.json"
+        video_path = tmp / "video.bin"
+        model_config_path = tmp / "model.json"
+        model_binary_path = tmp / "model.bin"
+        attestation_out = tmp / "attestation.json"
+        attestation_sidecar = tmp / "attestation_sidecar.json"
+
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "claim_generator": "cli-test",
+                    "assertions": [{"label": "canonical_asset", "value": "asset-1"}],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        frames = np.stack([np.full((32, 32), i, dtype=np.float32) for i in range(6)])
+        np.save(frames_path, frames, allow_pickle=False)
+        fp_policy = FingerprintPreprocessPolicy(sample_count=3, hash_size=8)
+        fp = compute_video_fingerprint(frames, policy=fp_policy)
+        FingerprintRegistry([FingerprintRecord("canonical-asset-1", fp.fingerprint_hex, bit_count=fp.bit_count)]).save(
+            registry_path
+        )
+
+        base = np.stack(
+            [
+                np.tile(np.linspace(32 + i * 8, 220 + i * 8, 64, dtype=np.float32), (64, 1))
+                for i in range(8)
+            ]
+        )
+        detector = KeyedTemplateDetector(b"upgrade-v2-watermark-key", frame_shape=(64, 64), grid_size=8)
+        embedded = detector.embed(base, strength=8.0)
+        np.save(base_path, base, allow_pickle=False)
+        np.save(embedded_path, embedded, allow_pickle=False)
+
+        video_path.write_bytes(b"video-bytes")
+        model_config_path.write_text('{"model":"unit"}', encoding="utf-8")
+        model_binary_path.write_bytes(b"model-bytes")
+
+        def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+            completed = subprocess.run(
+                [sys.executable, "-m", "src.trust.workflows", *args],
+                cwd=root_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert completed.returncode == 0, (
+                f"CLI failed for {' '.join(args)}\nSTDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}"
+            )
+            return completed
+
+        provenance_run = run_cli(
+            "provenance",
+            "--manifest",
+            str(manifest_path),
+            "--registry-uri",
+            "registry://cli-test/asset-1",
+            "--sidecar-out",
+            str(provenance_sidecar),
+            "--output",
+            str(provenance_out),
+        )
+        provenance_json = json.loads(provenance_out.read_text(encoding="utf-8"))
+        assert provenance_json["verified"]
+        assert provenance_json["embedded_payload_tamper_detected"]
+        assert provenance_json["manifest_tamper_detected"]
+        assert provenance_sidecar.exists()
+        assert "verified" in provenance_run.stdout
+
+        fingerprint_run = run_cli(
+            "fingerprint",
+            "--frames",
+            str(frames_path),
+            "--records",
+            str(registry_path),
+            "--sample-count",
+            "3",
+            "--hash-size",
+            "8",
+            "--threshold",
+            "0",
+            "--output",
+            str(fingerprint_out),
+        )
+        fingerprint_json = json.loads(fingerprint_out.read_text(encoding="utf-8"))
+        assert fingerprint_json["match"]["matched"]
+        assert fingerprint_json["match"]["record_id"] == "canonical-asset-1"
+        assert "registry_commitment" in fingerprint_run.stdout
+
+        watermark_run = run_cli(
+            "watermark",
+            "--frames",
+            str(embedded_path),
+            "--key",
+            "upgrade-v2-watermark-key",
+            "--frame-shape",
+            "64",
+            "64",
+            "--positive",
+            str(embedded_path),
+            "--negative",
+            str(base_path),
+            "--output",
+            str(watermark_out),
+        )
+        watermark_json = json.loads(watermark_out.read_text(encoding="utf-8"))
+        assert watermark_json["resynchronized_receipt"]["valid"]
+        assert watermark_json["calibration"]["accuracy"] == 1.0
+        assert "resynchronized_receipt" in watermark_run.stdout
+
+        attestation_run = run_cli(
+            "attestation",
+            "--signer-key",
+            "workflow-key",
+            "--video-path",
+            str(video_path),
+            "--model-config-path",
+            str(model_config_path),
+            "--model-binary-path",
+            str(model_binary_path),
+            "--policy-id",
+            "workflow-policy-v1",
+            "--timestamp",
+            "2026-06-09T00:00:00Z",
+            "--provenance-root-hash",
+            "dd" * 32,
+            "--sidecar-out",
+            str(attestation_sidecar),
+            "--output",
+            str(attestation_out),
+        )
+        attestation_json = json.loads(attestation_out.read_text(encoding="utf-8"))
+        assert attestation_json["signature_valid"]
+        assert attestation_json["sidecar_roundtrip_valid"]
+        assert attestation_sidecar.exists()
+        assert "signature_valid" in attestation_run.stdout
+
+
 def main():
     section("Future Trust Architecture Interfaces")
     results = [
@@ -337,6 +494,7 @@ def main():
         run_test("attestation_sidecar_roundtrip", t_attestation_sidecar_roundtrip),
         run_test("zkml_interface_is_explicit_stub", t_zkml_interface_is_explicit_stub),
         run_test("ready_to_use_trust_workflows", t_ready_to_use_trust_workflows),
+        run_test("trust_workflows_cli_entrypoints", t_trust_workflows_cli_entrypoints),
     ]
     sys.exit(summarise(results, "Future Trust Architecture"))
 

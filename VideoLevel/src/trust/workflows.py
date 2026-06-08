@@ -8,8 +8,8 @@ be called directly by the system, not just by diagnostics.
 from __future__ import annotations
 
 import copy
+import argparse
 import json
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -82,7 +82,7 @@ class ProvenanceWorkflowResult:
             "embedded_payload_valid": self.embedded_payload_valid,
             "embedded_payload_tamper_detected": self.embedded_payload_tamper_detected,
             "manifest_tamper_detected": self.manifest_tamper_detected,
-            "attached_manifest": self.attached_manifest.to_json() if self.attached_manifest else None,
+            "attached_manifest": self.attached_manifest.to_dict() if self.attached_manifest else None,
             "sidecar_roundtrip_valid": self.sidecar_roundtrip_valid,
         }
 
@@ -309,3 +309,187 @@ def attestation_workflow(
         sidecar_roundtrip_valid=sidecar_roundtrip_valid,
     )
 
+
+def _load_json_file(path: str | Path) -> Any:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return data
+
+
+def _load_frames(path: str | Path) -> np.ndarray:
+    loaded = np.load(path, allow_pickle=False)
+    if loaded.ndim not in (3, 4):
+        raise ValueError("frames .npy file must have shape T,H,W or T,H,W,C")
+    return loaded
+
+
+def _load_bytes(path: str | Path) -> bytes:
+    return Path(path).read_bytes()
+
+
+def _write_json(path: str | Path, data: dict[str, Any]) -> None:
+    Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=True), encoding="utf-8")
+
+
+def _provenance_cli(args: argparse.Namespace) -> dict[str, Any]:
+    manifest = _load_json_file(args.manifest)
+    stego_manifest = StegoManifest.load(args.stego_manifest) if args.stego_manifest else None
+    result = provenance_workflow(
+        manifest,
+        registry_uri=args.registry_uri,
+        media_path=args.media_path,
+        stego_manifest=stego_manifest,
+        sidecar_path=args.sidecar_out,
+    )
+    output = result.to_dict()
+    if args.output:
+        _write_json(args.output, output)
+    print(json.dumps(output, indent=2, ensure_ascii=True))
+    return output
+
+
+def _fingerprint_cli(args: argparse.Namespace) -> dict[str, Any]:
+    frames = _load_frames(args.frames)
+    records_data = _load_json_file(args.records)
+    if isinstance(records_data, dict):
+        registry = FingerprintRegistry.from_dict(records_data)
+    elif isinstance(records_data, list):
+        registry = FingerprintRegistry(FingerprintRecord.from_dict(record) for record in records_data)
+    else:
+        raise ValueError("fingerprint records must be a registry JSON object or a record list")
+    policy = FingerprintPreprocessPolicy(
+        sample_count=args.sample_count,
+        hash_size=args.hash_size,
+    )
+    result = fingerprint_workflow(frames, registry.records, policy=policy, threshold=args.threshold)
+    output = result.to_dict()
+    if args.output:
+        _write_json(args.output, output)
+    print(json.dumps(output, indent=2, ensure_ascii=True))
+    return output
+
+
+def _watermark_cli(args: argparse.Namespace) -> dict[str, Any]:
+    frames = _load_frames(args.frames)
+    positive_clips = [_load_frames(path) for path in args.positive] if args.positive else None
+    negative_clips = [_load_frames(path) for path in args.negative] if args.negative else None
+    if not args.key and not args.key_file:
+        raise ValueError("either --key or --key-file must be provided")
+    if args.threshold is None and (not positive_clips or not negative_clips):
+        raise ValueError("calibration requires both --positive and --negative clips when --threshold is omitted")
+    result = watermark_workflow(
+        frames,
+        key=_load_bytes(args.key_file) if args.key_file else args.key.encode("utf-8"),
+        frame_shape=tuple(args.frame_shape),
+        threshold=args.threshold,
+        positive_clips=positive_clips,
+        negative_clips=negative_clips,
+        grid_size=args.grid_size,
+        crop_margins=tuple(args.crop_margins),
+        payload_commitment=args.payload_commitment,
+    )
+    output = result.to_dict()
+    if args.output:
+        _write_json(args.output, output)
+    print(json.dumps(output, indent=2, ensure_ascii=True))
+    return output
+
+
+def _attestation_cli(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.signer_key and not args.signer_key_file:
+        raise ValueError("either --signer-key or --signer-key-file must be provided")
+    signer_key = _load_bytes(args.signer_key_file) if args.signer_key_file else args.signer_key.encode("utf-8")
+    signer = MockTEESigner(signer_key, signer_id=args.signer_id)
+    bundle = None
+    if args.bundle:
+        bundle_data = _load_json_file(args.bundle)
+        bundle = AttestationBundle(
+            video_hash=str(bundle_data["video_hash"]),
+            model_config_hash=str(bundle_data["model_config_hash"]),
+            model_binary_hash=str(bundle_data["model_binary_hash"]),
+            policy_id=str(bundle_data["policy_id"]),
+            timestamp=str(bundle_data["timestamp"]),
+            hardware_root=bundle_data.get("hardware_root"),
+        )
+    result = attestation_workflow(
+        signer=signer,
+        bundle=bundle,
+        video_path=args.video_path,
+        model_config_path=args.model_config_path,
+        model_binary_path=args.model_binary_path,
+        policy_id=args.policy_id,
+        timestamp=args.timestamp,
+        hardware_root=args.hardware_root,
+        provenance_root_hash=args.provenance_root_hash,
+        sidecar_path=args.sidecar_out,
+    )
+    output = result.to_dict()
+    if args.output:
+        _write_json(args.output, output)
+    print(json.dumps(output, indent=2, ensure_ascii=True))
+    return output
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run ready-to-use trust workflows")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    provenance = subparsers.add_parser("provenance", help="Run provenance anchor workflow")
+    provenance.add_argument("--manifest", required=True, help="Path to manifest JSON")
+    provenance.add_argument("--registry-uri", required=True, help="Registry URI for the manifest")
+    provenance.add_argument("--media-path", help="Optional media path used in the root hash")
+    provenance.add_argument("--stego-manifest", help="Optional stego manifest to attach the anchor to")
+    provenance.add_argument("--sidecar-out", help="Optional path to save the audit sidecar JSON")
+    provenance.add_argument("--output", help="Optional path to save workflow output JSON")
+    provenance.set_defaults(func=_provenance_cli)
+
+    fingerprint = subparsers.add_parser("fingerprint", help="Run fingerprint registry workflow")
+    fingerprint.add_argument("--frames", required=True, help="Path to .npy luma frames")
+    fingerprint.add_argument("--records", required=True, help="Path to registry records JSON array")
+    fingerprint.add_argument("--sample-count", type=int, default=4)
+    fingerprint.add_argument("--hash-size", type=int, default=8)
+    fingerprint.add_argument("--threshold", type=int, default=8)
+    fingerprint.add_argument("--output", help="Optional path to save workflow output JSON")
+    fingerprint.set_defaults(func=_fingerprint_cli)
+
+    watermark = subparsers.add_parser("watermark", help="Run watermark receipt workflow")
+    watermark.add_argument("--frames", required=True, help="Path to .npy luma frames")
+    watermark.add_argument("--key", help="ASCII key for the detector")
+    watermark.add_argument("--key-file", help="Binary key file for the detector")
+    watermark.add_argument("--frame-shape", nargs=2, type=int, required=True, metavar=("H", "W"))
+    watermark.add_argument("--threshold", type=float)
+    watermark.add_argument("--positive", nargs="*", default=[], help="Positive .npy clips for calibration")
+    watermark.add_argument("--negative", nargs="*", default=[], help="Negative .npy clips for calibration")
+    watermark.add_argument("--grid-size", type=int, default=8)
+    watermark.add_argument("--crop-margins", nargs="*", type=int, default=[0, 4, 8, 12])
+    watermark.add_argument("--payload-commitment", help="Optional payload commitment")
+    watermark.add_argument("--output", help="Optional path to save workflow output JSON")
+    watermark.set_defaults(func=_watermark_cli)
+
+    attestation = subparsers.add_parser("attestation", help="Run attestation workflow")
+    attestation.add_argument("--signer-key", help="ASCII signer key")
+    attestation.add_argument("--signer-key-file", help="Binary signer key file")
+    attestation.add_argument("--signer-id", default="mock-tee-v1")
+    attestation.add_argument("--bundle", help="Optional bundle JSON with hash fields")
+    attestation.add_argument("--video-path", help="Path to video file")
+    attestation.add_argument("--model-config-path", help="Path to model config file")
+    attestation.add_argument("--model-binary-path", help="Path to model binary file")
+    attestation.add_argument("--policy-id", help="Policy identifier")
+    attestation.add_argument("--timestamp", help="ISO-8601 timestamp")
+    attestation.add_argument("--hardware-root", help="Optional hardware root string")
+    attestation.add_argument("--provenance-root-hash", help="Optional provenance root hash")
+    attestation.add_argument("--sidecar-out", help="Optional path to save the attestation sidecar JSON")
+    attestation.add_argument("--output", help="Optional path to save workflow output JSON")
+    attestation.set_defaults(func=_attestation_cli)
+
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
+    args.func(args)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

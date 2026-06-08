@@ -276,6 +276,7 @@ Current implementation status:
 
 - [x] Add experimental trust-plane package under `src/trust`.
 - [x] Add ready-to-use workflow facade `src/trust/workflows.py`.
+- [x] Add terminal CLI entrypoint for `src.trust.workflows` and lock it with CLI tests.
 - [x] Add diagnostic runner `benchmark/trust_architecture_diagnostic.py`.
 - [x] Add interface tests in `src/runtest/test_future_trust_architecture.py`.
 - [x] Register diagnostic-grade runner section `44`.
@@ -288,7 +289,7 @@ Current implementation status:
 
 Current diagnostic status on 2026-06-09:
 
-- Future trust interface tests now pass `15/15`.
+- Future trust interface tests now pass `16/16`, including terminal CLI coverage.
 - Section `44`: passed with schema validation OK.
 - `fingerprint_verify.circom`: compiled and proved, `606` non-linear
   constraints, `842` linear constraints, Groth16 verify passed.
@@ -320,6 +321,8 @@ Current diagnostic status on 2026-06-09:
 - Ready-to-use trust workflow facade is covered in section `44` and section
   `45`: provenance, fingerprint registry, watermark receipt, and attestation
   workflows validate through `src.trust.workflows`.
+- The same trust workflows are now runnable from the terminal via
+  `python -m src.trust.workflows`.
 - Section `45` claim gates pass `6/6`, but `promotion_ready=false` because no
   non-local or externally curated real-video corpus is registered.
 - Section `45` artifacts are

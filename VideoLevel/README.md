@@ -377,6 +377,15 @@ Upgrade-v2 application-level trust workflows are exposed through
 `src.trust.workflows` for provenance anchoring, fingerprint registry lookup,
 watermark receipt, and model/device attestation.
 
+CLI usage:
+
+```bash
+py -3.12 -m src.trust.workflows provenance --manifest manifest.json --registry-uri registry://example/asset --output provenance.json
+py -3.12 -m src.trust.workflows fingerprint --frames frames.npy --records registry.json --threshold 0 --output fingerprint.json
+py -3.12 -m src.trust.workflows watermark --frames embedded.npy --key demo-key --frame-shape 64 64 --threshold 0.5 --output watermark.json
+py -3.12 -m src.trust.workflows attestation --signer-key demo-key --video-path video.bin --model-config-path model.json --model-binary-path model.bin --policy-id policy-v1 --timestamp 2026-06-09T00:00:00Z --output attestation.json
+```
+
 ---
 
 ## How The Embedding Works
