@@ -361,6 +361,42 @@ class CAVLCSafetyFilter:
                 )
         safe_positions = []
 
+        def _validated_patch_context(mb_idx: int, block_idx: int):
+            block_key = (mb_idx, block_idx)
+            if not (nal_length_map and frame_verified_data is not None):
+                return nC_map.get(block_key, 0), t1_override_map.get(block_key)
+
+            if block_key not in self._lazy_patchability_cache:
+                idr_off = (mb_idx // cif_mb_count) * cif_mb_count
+                idr_data = frame_verified_data.get(idr_off)
+                if idr_data is None:
+                    self._lazy_patchability_cache[block_key] = None
+                else:
+                    g_off, _g_blk, nal_rbsp = idr_data
+                    local_offsets = {
+                        (mb - idr_off, blk): od
+                        for (mb, blk), od in g_off.items()
+                        if blk < 16 and od.get("bit_length") not in (None, 0)
+                    }
+                    end_to_block = {
+                        od["end_bit"]: ((mb - idr_off, blk), od)
+                        for (mb, blk), od in g_off.items()
+                        if blk < 16 and "end_bit" in od
+                    }
+                    local_key = (mb_idx - idr_off, block_idx)
+                    patcher = BitstreamPatcher()
+                    self._lazy_patchability_cache[block_key] = patcher.validate_block_patchability(
+                        nal_rbsp,
+                        local_key,
+                        local_offsets.get(local_key, {}),
+                        end_to_block,
+                    )
+
+            cached_match = self._lazy_patchability_cache.get(block_key)
+            if cached_match is None:
+                return None
+            return cached_match[0], cached_match[2]
+
         for mb_idx, block_idx, coeffs in coefficients:
             total_coeffs = sum(1 for c in coeffs if c != 0)
             if total_coeffs == 0:
@@ -404,44 +440,10 @@ class CAVLCSafetyFilter:
             if not candidate_indices:
                 continue
 
-            # Lazy patchability validation: validate the block only when it has at least
-            # one coefficient candidate that survives the cheap structural rules.
-            if nal_length_map and frame_verified_data is not None:
-                cached_match = self._lazy_patchability_cache.get(block_key)
-                if cached_match is None:
-                    idr_off = (mb_idx // cif_mb_count) * cif_mb_count
-                    idr_data = frame_verified_data.get(idr_off)
-                    if idr_data is None:
-                        self._lazy_patchability_cache[block_key] = None
-                        continue
-                    g_off, _g_blk, nal_rbsp = idr_data
-                    local_offsets = {
-                        (mb - idr_off, blk): od
-                        for (mb, blk), od in g_off.items()
-                        if blk < 16 and od.get('bit_length') not in (None, 0)
-                    }
-                    patcher = BitstreamPatcher()
-                    end_to_block = {
-                        od['end_bit']: ((mb - idr_off, blk), od)
-                        for (mb, blk), od in g_off.items()
-                        if blk < 16 and 'end_bit' in od
-                    }
-                    local_key = (mb_idx - idr_off, block_idx)
-                    cached_match = patcher.validate_block_patchability(
-                        nal_rbsp,
-                        local_key,
-                        local_offsets.get(local_key, {}),
-                        end_to_block,
-                    )
-                    self._lazy_patchability_cache[block_key] = cached_match
-
-                if cached_match is None:
-                    continue
-                actual_nC = cached_match[0]
-                t1_override = cached_match[2]
-            else:
-                actual_nC = nC_map.get(block_key, 0)
-                t1_override = t1_override_map.get(block_key)
+            patch_context = _validated_patch_context(mb_idx, block_idx)
+            if patch_context is None:
+                continue
+            actual_nC, t1_override = patch_context
 
             # Check each coefficient position
             for coeff_idx in candidate_indices:
@@ -483,8 +485,10 @@ class CAVLCSafetyFilter:
             nal_len = nal_length_map.get(block_key)
             if nal_len is None or nal_len == -1:
                 continue
-            actual_nC = nC_map.get(block_key, 0)
-            t1_override = t1_override_map.get(block_key)
+            patch_context = _validated_patch_context(mb_idx, block_idx)
+            if patch_context is None:
+                continue
+            actual_nC, t1_override = patch_context
             # Determine the TRUE T1 candidate positions (those actually encoded as
             # trailing_one_sign_flags in the bitstream, not as regular level codes).
             #

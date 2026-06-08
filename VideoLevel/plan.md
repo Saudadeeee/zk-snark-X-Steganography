@@ -1,357 +1,583 @@
-# ZK-Stego VideoLevel Playbook
+# ZK-Stego VideoLevel Plan
 
-Last updated: 2026-06-03
+Last updated: 2026-06-08
 Branch: `main`
 
-## Mission
-
-The goal of this repository is to reach a system that is defensible in both
-benchmarking and paper form, with:
-- one clear baseline system,
-- one trustworthy benchmark workflow,
-- and one research roadmap that does not contradict the current claims.
-
-This playbook keeps only:
-- the current baseline we must protect,
-- the work that still remains,
-- the correct order of priorities,
-- and the criteria for stopping or raising claims.
-
-Anything already completed and no longer useful for decision-making has been
-removed from this file.
+This plan reflects the repository as it exists now. The current `main` branch is
+for finishing the frozen H.264/CAVLC + Groth16 baseline. The broader
+cryptographic trust architecture is valuable, but it belongs on a later branch
+after the current system is stable, tested, and documented.
 
 ---
 
-## Frozen Baseline
+## 1. Current Baseline Scope
 
-This is the current source of truth for paper writing, benchmarks, and docs.
+The current system is:
 
-### Core claim now
-- locked operating-point embedding
-- all-intra H.264 baseline / CAVLC
-- strict non-blind verification
-- sidecar-assisted near-blind verification
+- compressed-domain H.264 baseline / CAVLC embedding,
+- strongest operating regime: GOP=1 / all-intra,
+- payload format: `[4B message_length][message][129B compressed Groth16 proof]`,
+- proof relation: `commitment = SHA256(SHA256(message) || secret_key)`,
+- patchability-aware coefficient selection,
+- reconstruction-aware applied-position accounting,
+- strict non-blind verification via `src/verifier.py`,
+- sidecar-assisted near-blind verification via `src/verifier_blind.py`,
+- blind-core research kept out of the main claim.
 
-### Do not over-claim beyond this
-- broad public API mode is not yet the headline path
-- inter-coded / GOP>1 is not yet a strong supported regime
-- blind-core is not yet a usable system path
+The current branch must not claim:
 
-### Rule
-- If a change makes this baseline weaker or more ambiguous, do not move it into
-  the main narrative.
-- Every paper claim must stay anchored to this baseline until we have stronger
-  evidence.
-
----
-
-## Decision Rules
-
-These rules are here to keep us from drifting into the wrong direction.
-
-### When a branch can be promoted into a main claim
-- It has a benchmark that can be repeated through the runner.
-- It has stable JSON output.
-- It has clean artifact naming and schema.
-- It has at least one clear end-to-end use case.
-- It does not only win on a synthetic proxy; it also stands on near-real data.
-
-### When a branch should remain a research branch
-- It has good signals but is not end-to-end yet.
-- Runtime is still too heavy for regular use.
-- It only passes on synthetic setup.
-- Major trade-offs are still unresolved.
-
-### Global priority order
-1. Keep the main baseline clean and defensible.
-2. Only expand claims when benchmark evidence catches up.
-3. On blind-core, prioritize telemetry and error modeling before trying new heuristics.
+- full blind extraction,
+- robust survival through recompression/transcoding,
+- generic support for CABAC / HEVC / arbitrary GOP>1,
+- C2PA, fingerprint registry, watermark receipt, TEE, or ZKML production support.
 
 ---
 
-## Priority Roadmap
+## 2. Current Repository Reality
 
-## P0 - Protect The Main System
+Use the real runner and APIs that exist in the codebase.
 
-This is the work that always comes first.
+### Correct test commands
 
-### P0.1 Benchmark-grade core must stay healthy
-- [ ] Keep `Phase 5`, `Phase 6`, `Phase 7`, and the quick suite passing.
-- [ ] Do not let blind-core experiments drift the locked operating-point path.
-- [ ] If a refactor affects embed, verify, or the benchmark runner, rerun the
-      minimum required suite immediately after.
+```powershell
+py -3.12 src\runtest\run_all.py --quick
+py -3.12 src\runtest\test_phase4_reconstruct.py
+py -3.12 src\runtest\test_phase5_extract_verify.py
+py -3.12 src\runtest\test_phase6_near_blind_manifest.py
+py -3.12 src\runtest\test_phase7_regression_cases.py
+```
 
-### P0.2 Paper-grade workflow must stay clean
-- [ ] Keep `safe_benchmark_runner.py` clean for paper-grade sections.
-- [ ] Keep artifact schema and naming stable.
-- [ ] Keep `README.md`, `PAPER_EVIDENCE.md`, `OPERATING_ENVELOPE.md`, and
-      `ARTIFACT_POLICY.md` synchronized when the baseline changes for real.
+Full suite:
 
-### P0.3 Keep the narrative honest
-- [ ] Do not promote blind-core to a main claim before there is a real-proof
-      end-to-end blind result.
-- [ ] Do not use broad public API generic mode as a headline result.
+```powershell
+py -3.12 src\runtest\run_all.py
+```
 
----
+Benchmark runner:
 
-## P1 - Paper Readiness
+```powershell
+py -3.12 benchmark\safe_benchmark_runner.py --paper-grade
+py -3.12 benchmark\safe_benchmark_runner.py --sections 1 2 3 4 5 6
+```
 
-This is the branch that must be finished before full paper drafting.
+### Commands that are not currently valid
 
-### P1.1 Freeze wording everywhere
-- [ ] Lock manuscript wording to the frozen baseline across all main docs.
-- [ ] Finish the threat model around the three verifier layers:
-      - strict non-blind
-      - sidecar-assisted near-blind
-      - blind-core as future/research branch
+- Do not use `python -m pytest -q` as the main validation command unless a real
+  pytest suite is added.
+- Do not document `python src/embedder.py --demo ...`; `embedder.py` is a module
+  API, not a CLI demo.
 
-### P1.2 Final paper-facing tables
-- [ ] Finish the verifier-mode table.
-- [ ] Finish the four-level capacity table:
-      - raw safe
-      - patchable usable
-      - validated or operating pool
-      - operating bits
-- [ ] Finish the operating-point stability table.
-- [ ] Finish the baseline vs ablation vs this-work comparison table.
+### Current test status
 
-### P1.3 Final paper-grade benchmark pass
-- [ ] Re-run the full paper-grade benchmark set after the final freeze.
-- [ ] Update `PAPER_EVIDENCE.md` with the final numbers.
+`src/runtest/_helpers.py::SKIP()` now raises an explicit skip result.
+`run_test()` and `summarise()` report pass/fail/skip separately.
 
----
+Current validation state on 2026-06-08:
 
-## P2 - Engineering Follow-up On The Main System
+- quick suite: `23/23` passed,
+- Phase 4: `5/5` passed,
+- Phase 5: `2/2` passed,
+- Phase 6: `2/2` passed,
+- Phase 7: `3/3` passed.
+- full suite: `35/35` passed, `0` failed, `0` skipped.
 
-These tasks do not block the paper immediately, but they still matter.
+Phase 5/6 now exercise public API and near-blind E2E coverage without skips.
+Phase 7 now uses the verified SEC1 operating artifact for `akiyo_q22_g1`.
 
-### P2.1 Broad public API
-- [ ] Improve generic public API realization beyond locked operating-point mode.
-- [ ] Raise realized payload in broad mode on representative all-intra assets.
-- [ ] Keep diagnostics explicit about failure stage and budget collapse.
+Additional artifact-policy fix on 2026-06-08:
 
-### P2.2 Inter-coded support
-- [ ] Decide clearly whether to build a real inter-coded path or freeze it as unsupported.
-- [ ] If built, add a separate policy for GOP>1 instead of reusing all-intra logic.
-
-### P2.3 Performance
-- [ ] Reduce runtime for patchability measurement.
-- [ ] Reduce runtime for the heaviest blind diagnostics.
+- SEC1 failed runs now clean their stego/sidecar artifacts.
+- SEC1 real-proof metadata can carry `verify_valid` and `verify_message_match`.
+- `locked_operating_contract.py` refuses SEC1 artifacts that are not verified.
+- Phase 7 skips unverified SEC1 artifacts instead of using them as fixtures.
+- Public API embedding now uses reconstruction-aware retry/headroom so skipped
+  patcher blocks do not create false capacity under-fill.
+- Phase 5/6 fresh public-API embeds now use the SEC1 `validated_pool` as the
+  candidate universe, then verify against the post-reconstruction positions
+  returned by `embed()`.
+- SEC1/SEC2/SEC6 paper-grade artifacts have been regenerated for the locked
+  `akiyo_q22_g1` operating point.
+- `safe_benchmark_runner.py --sections 1 2 3 4 5 6` passed `6/6` sections
+  with schema validation OK.
 
 ---
 
-## P3 - Blind-Core Research Playbook
+## 3. Mainline Work Remaining
 
-Blind-core is still a research branch, but this is the correct way to keep
-pushing it without going in circles.
+### P0 - Fix validation semantics
 
-### Current blind-core position
+- [x] Replace the current print-only `SKIP()` behavior with explicit skipped
+      accounting.
+- [x] Update `run_test()` and `summarise()` to report pass/fail/skip separately.
+- [x] Re-run Phase 5/6/7 after skip semantics are fixed.
+- [x] Treat E2E phases with skipped core cases as incomplete, not fully passing.
 
-Blind-core already has:
-- validated-pool-proxy self-consistency between cover and stego,
-- prefix-level feasibility under heavy redundancy,
-- structured partial-payload success on synthetic proof prefixes,
-- and a very strong structured partial-payload result:
-  - synthetic `[length][message][129B proof_prefix]` can be recovered exactly
-    with hotspot-focused protection.
+### P1 - Freeze dependency and environment notes
 
-Blind-core still does not have:
-- blind full payload end-to-end usability,
-- blind proof verification end-to-end,
-- or a safe mainline claim on real proof bytes.
+- [x] Keep `requirements.txt` as the installable minimal dependency list.
+- [x] Keep `requirements.lock` as the audited local package snapshot.
+- [x] Document required native tools:
+      Node.js, circom, snarkjs, ffmpeg.
+- [x] Ensure `circuits/package.json` remains the source of JS dependency truth.
+- [x] Do not commit private proving keys or large circuit build artifacts unless
+      explicitly intended and allowed by artifact policy.
 
-### Known operating envelopes
+Observed local toolchain on 2026-06-08:
 
-#### Synthetic proof-prefix envelope
-- Exact structured partial-payload success is confirmed at:
-  - `[length][message][16B proof_prefix]`
-  - `[length][message][24B proof_prefix]`
-  - `[length][message][32B proof_prefix]`
-  - `[length][message][48B proof_prefix]`
-  - `[length][message][64B proof_prefix]`
-  - `[length][message][80B proof_prefix]`
-- Baseline break region begins at:
-  - `84B`
-  - `88B`
-  - `96B`
-  - `112B`
-  - `129B`
-- Targeted repair results:
-  - `proof_tail_triplicate16` repairs `84B` and `96B`
-  - `proof_hotspot_triplicate80_8` repairs `112B` and `129B`
-- Failed repair branches:
-  - `proof_triplicate`
-  - `proof_interleaved`
-  - `proof_byte_stride4`
-  - larger tail variants such as `tail32` and `tail64`
+- Python: `3.12.10`
+- Node.js: `22.20.0`
+- circom: `2.2.0`
+- snarkjs: `0.7.6`
+- ffmpeg: `8.0.1`
 
-#### Real-proof envelope
-- Current real-proof branch observations:
-  - `96B` real proof prefix can reach perfect proof-prefix recovery while header still fails
-  - `112B` real proof prefix currently misses one proof byte
-  - `129B` real proof prefix currently misses multiple earlier proof bytes
-- Current known tension:
-  - strengthening header redundancy can restore decoded length
-  - but may damage message/proof recovery
-- Current implication:
-  - real-proof header robustness and real-proof proof-prefix robustness must be optimized separately before recombining them
+### P2 - Stabilize current docs
 
-### State of the synthetic branch
+- [x] Keep `README.md` aligned with current benchmark JSON, current API, and
+      the new pass/fail/skip runner semantics.
+- [x] Keep `system.txt` as the plain-text current-system summary.
+- [x] Keep `PAPER_EVIDENCE.md` as claim-to-evidence map.
+- [x] Keep `OPERATING_ENVELOPE.md` focused on current supported envelope.
+- [x] Keep `ARTIFACT_POLICY.md` aligned with committed benchmark artifacts.
+- [x] Keep `COMPLETION.md` honest about completed E2E phase coverage.
+- [x] Keep `doc/system_video_embedding_walkthrough.tex` buildable.
 
-The synthetic branch currently shows:
-- exact structured partial-payload success up to
-  `[length][message][80B proof_prefix]` with the baseline coding,
-- the first break region beginning at `84B`,
-- `proof_tail_triplicate16` repairs `84B` and `96B`,
-- `proof_hotspot_triplicate80_8` repairs:
-  - `112B`
-  - `129B`
+### P3 - Current benchmark reproducibility
 
-This means:
-- blind-core is no longer blocked at synchronization,
-- and coding/protection can expand the operating envelope significantly.
+- [x] Run paper-grade sections through `safe_benchmark_runner.py`.
+- [x] Ensure SEC2 schema consistently uses `validated_pool_bits`, while accepting
+      legacy `validated_bits` only for backward compatibility.
+- [x] Ensure benchmark metadata records environment, random seeds where relevant,
+      and git commit when possible.
+- [x] Keep diagnostic blind-core outputs separate from paper-grade evidence.
+- [x] Prevent failed SEC1 attempts from leaving contract-looking sidecars.
+- [x] Require `verify_valid=True` before a SEC1 artifact can become a locked
+      operating contract.
+- [x] Include SEC5 in the paper-grade default runner.
+- [x] Validate SEC1/SEC2/SEC3/SEC4/SEC5/SEC6 schemas in the runner.
+- [x] Treat empty SEC2 capacity JSON and SEC6 `zk_valid=false` as invalid
+      paper-grade evidence.
+- [x] Restore at least one verified SEC1 operating artifact for Phase 5/6/7 and
+      SEC2 replay.
+- [x] Refresh SEC6 so paper-grade performance rows have `zk_valid=true`.
 
-### State of the real-proof branch
+Current runner status:
 
-The real-proof branch currently shows:
-- the synthetic hotspot map does not transfer directly to real proof bytes,
-- `96B` real proof prefix can reach `96/96B` on the proof prefix while still
-  failing at the header,
-- `112B` real proof prefix currently fails at proof byte `79`,
-- `129B` real proof prefix currently fails at several earlier bytes,
-- raising `header_redundancy` to `8` fixes decoded length but collapses the
-  message/proof branch.
-- isolated real-proof header diagnostics show:
-  - `header_redundancy = 4` passes in header-only mode,
-  - `header_redundancy = 8` also passes in header-only mode,
-  - `header_redundancy = 12` already fails in header-only mode.
+- Locked paper-grade operating point: `akiyo_q22_g1`.
+- SEC1: `1232/1232` bits embedded, `verify_valid=true`, full-video PSNR
+  `53.01 dB`, modified-frame minimum PSNR `40.30 dB`, average SSIM `0.9997`.
+- SEC2: non-empty capacity data for `akiyo_q22_g1`; raw safe `413415` bits,
+  patchable usable `2000` bits, validated pool `1449` bits, operating
+  `1232` bits.
+- SEC6: public API path timing for `akiyo_q22_g1`; total `85.0 s`,
+  bits embedded `1232`, capacity `1449`, `zk_valid=true`.
+- Runner: `py -3.12 -m benchmark.safe_benchmark_runner --sections 1 2 3 4 5 6`
+  passed `6/6` sections with paper-grade schema validation OK on the final
+  2026-06-08 validation pass.
 
-This means:
-- the real-proof blind branch must be split into:
-  - header robustness
-  - proof-prefix robustness
-- the immediate issue is not raw header coding strength by itself,
-  but the interaction between header and body/proof placement.
-- header/body decoupling is not yet a proven fix:
-  - `body_gap_blocks = 0` leaves header broken and drops proof-prefix recovery to `89/96B`
-  - `body_gap_blocks = 2` can degrade the same `96B` case even further
-  - so the decoupling path must be treated as experimental, not yet promoted
+### P4 - Current API correctness
 
-### Confirmed failure patterns
+- [x] Keep `embed()` behavior stable for legacy v1 payload format.
+- [x] Keep `verify()` strict non-blind path stable.
+- [x] Keep `verify_near_blind()` explicitly sidecar-assisted.
+- [x] Keep manifest v1.0.0 backward-compatible.
+- [x] Avoid refactoring `embedder` / `verifier` unless tests are strengthened
+      first. Current refactor risk is higher than the benefit before paper freeze.
 
-These are not assumptions. They are already observed and should guide future work.
+Current API validation:
 
-- Synthetic branch:
-  - the first dominant mismatch was repeatedly observed at byte index `82`
-  - local targeted protection works better than global repetition or simple permutation
-- Real-proof branch:
-  - the dominant synthetic mismatch pattern does not transfer directly
-  - proof-prefix mismatch locations move earlier for longer real proof prefixes
-  - header failure can appear even when proof-prefix recovery is already perfect for the tested prefix length
+- Phase 5 public `embed()` + strict `verify()` passes.
+- Phase 6 public `embed()` + sidecar-assisted `verify_near_blind()` passes.
+- Phase 7 verified SEC1 strict and near-blind fixtures pass.
+- Public embedding keeps additional patchability headroom and retries after
+  reconstruction if modified blocks were skipped by the patcher.
 
-### What not to do next
+### P5 - Minimal runnable demo
 
-Do not continue by:
-- trying more blind heuristics without telemetry,
-- increasing global redundancy before understanding the error map,
-- or reusing the synthetic hotspot map as if it were valid for real proof bytes.
+Add a real demo only if it uses existing APIs and existing sample assets.
 
-Also avoid:
-- treating synthetic proof-prefix success as if it were equivalent to real-proof success,
-- adding global redundancy before confirming which branch it damages,
-- or mixing benchmark-grade baseline claims with blind-core experimental results.
+Proposed location:
 
-### Correct next blind-core steps
+```text
+src/runtest/demo_embed_verify.py
+```
 
-#### P3.1 Stabilize the real-proof header path
-- [ ] Measure a header-specific error map on the real-proof branch.
-- [ ] Design header protection that does not damage the body/proof branch.
-- [ ] Immediate target:
-      - `96B real proof prefix` must pass both header and proof prefix at the same time.
-- [ ] Record the smallest header coding change that preserves proof-prefix recovery.
-- [ ] Use the header-only result as a guardrail:
-      - do not keep increasing redundancy globally once `4` and `8` are already clean in isolation.
-- [ ] Do not lock in any body-gap policy until it is repeatable across reruns.
+Requirements:
 
-#### P3.2 Build a real-proof error map
-- [ ] Collect mismatch indices on real proof prefixes at:
-      - `96B`
-      - `112B`
-      - `129B`
-- [ ] Check whether mismatches are stable by byte or by segment.
-- [ ] Only after that, design new segmented proof-prefix protection.
-- [ ] Keep synthetic and real-proof error maps separate in analysis notes and benchmark outputs.
-- [ ] Rebuild the real-proof error map after applying the body-gap decoupling that fixes `96B`.
+- [x] Use `src.embedder.embed()` as a Python API.
+- [x] Use `src.verifier.verify()` or `src.verifier_blind.verify_near_blind()`.
+- [x] Fail gracefully if benchmark assets, verified SEC1 contract, or circuit
+      artifacts are missing.
+- [x] Do not pretend `embedder.py` is a CLI.
 
-#### P3.3 Segmented protection on real proof bytes
-- [ ] Try segmented protection based on the real error map, not the synthetic one.
-- [ ] Target order:
-      - bring `96B` real proof branch to `partial_contract=True`
-      - then bring `112B`
-      - then bring `129B`
-- [ ] Prefer local repairs that minimize collateral damage to header and message recovery.
-- [ ] Reject any repair that improves one metric by collapsing another.
+Implemented:
 
-#### P3.4 Only then attempt blind full payload
-- [ ] When `129B real proof prefix` passes stably, reconnect a full proof-bearing
-      partial payload.
-- [ ] Only after that, attempt blind `unpack()` and blind verify end-to-end.
-- [ ] Do not skip directly from partial-prefix success to full blind verification.
+```text
+src/runtest/demo_embed_verify.py
+```
 
-### Blind-core stop criteria
-
-Keep blind-core as future work if:
-- runtime is still too heavy to iterate on,
-- the real-proof branch cannot hold header and proof prefix simultaneously,
-- or telemetry still does not show a stable error pattern.
-
-Also stop escalation if:
-- every new fix only trades errors between header and proof without net improvement,
-- or benchmark cost becomes too high to support deliberate iteration.
-
-Promote blind-core to a major future direction only if:
-- real-proof `96B+` passes stably,
-- `129B` real proof prefix can be recovered correctly and repeatably,
-- and there is at least one blind payload contract that is close to end-to-end,
-  not just a synthetic proxy.
+Current locked contract is available through `akiyo_q22_g1`.
 
 ---
 
-## Immediate Next Steps
+## 4. Current Paper Claim Guardrails
 
-This is the best working order from the current state.
+Safe framing:
 
-### Mainline
-- [ ] Keep the main baseline clean and the paper-grade workflow stable.
-- [ ] Finish the remaining paper-facing tables.
+> A proof-verifiable compressed-domain H.264/CAVLC steganography system that
+> embeds a compact Groth16 payload at a patchability-aware operating point and
+> verifies extraction through strict or sidecar-assisted verifier modes.
 
-### Blind-core
-- [ ] Re-validate the `96B` real-proof branch until one local contract is repeatable.
-- [ ] Only after that, test the same contract on `112B` and `129B`.
-- [ ] If no repeatable local contract exists, return to header-specific placement/coding before more segmented proof-prefix work.
+Use these terms carefully:
 
-### Next concrete blind-core run order
-1. Re-run the `96B real proof` branch until the local contract is stable and repeatable.
-2. If the contract is not repeatable, stop and redesign header-specific protection first.
-3. If the contract is repeatable, test `112B`.
-4. Then test `129B`.
-5. Only then try new segmented protection for the remaining real-proof failures.
+- `raw_safe_bits`: structural CAVLC-safe positions.
+- `patchable_usable_bits`: positions surviving patchability checks.
+- `validated_pool_bits`: benchmark-validated pool.
+- `operating_bits`: final locked operating-point budget.
+- `applied_position_bits`: positions that survived reconstruction.
+
+Avoid these claims on `main`:
+
+- fully blind,
+- robust watermark,
+- universal H.264 support,
+- C2PA-ready production system,
+- detector receipt system,
+- model attestation system.
 
 ---
 
-## Exit Conditions
+## 5. Future Branch: Cryptographic Trust Architecture
 
-## Exit to paper writing
-- [ ] The main docs and benchmark outputs tell the same story.
-- [ ] Paper-grade sections run through the runner without ambiguity.
-- [ ] Claim-to-evidence mapping is stable.
+This section records the next architecture direction, but it must be implemented
+on a separate branch after the current baseline is frozen.
 
-## Exit to "blind-core is more than future work"
-- [ ] The real-proof branch can hold header and proof prefix together at a meaningful level.
-- [ ] `129B` real proof prefix can be recovered correctly and repeatably.
-- [ ] There is at least one blind contract that is close to end-to-end, not just a synthetic proxy.
+The strategic goal is to evolve from a fragile compressed-domain steganography
+prototype into a broader video provenance and attestation framework.
 
-## Exit to "blind-core can influence the paper narrative"
-- [ ] There is at least one repeatable real-proof result beyond `96B` with both header and proof-prefix success.
-- [ ] The result survives rerun through benchmark code, not only one-off experiments.
-- [ ] The blind-core claim can be stated without contradicting the frozen baseline.
+### 5.0 Execution Order
+
+Build the future branch in this order:
+
+1. Provenance anchor and manifest hash contract.
+2. Private fingerprint registry lookup.
+3. Robust watermark receipt.
+4. TEE attestation bundle.
+5. ZKML only after a realistic proving target exists.
+
+Rules:
+
+- Keep one trust plane per benchmark family.
+- Do not mix fragile and robust metrics in one table.
+- Promote a layer only after it has a stable schema, tests, and regression
+  cases.
+
+Current implementation status:
+
+- [x] Add experimental trust-plane package under `src/trust`.
+- [x] Add diagnostic runner `benchmark/trust_architecture_diagnostic.py`.
+- [x] Add interface tests in `src/runtest/test_future_trust_architecture.py`.
+- [x] Register diagnostic-grade runner section `44`.
+- [x] Validate section `44` through `safe_benchmark_runner.py`.
+- [ ] Promote any future trust plane into paper-grade benchmark evidence.
+
+Current diagnostic status on 2026-06-08:
+
+- Future trust interface tests: `10/10` passed.
+- Future trust interface tests now pass `11/11`.
+- Section `44`: passed with schema validation OK.
+- `fingerprint_verify.circom`: compiled and proved, `606` non-linear
+  constraints, `842` linear constraints, Groth16 verify passed.
+- `detector_receipt.circom`: compiled and proved, `465` non-linear
+  constraints, `448` linear constraints, Groth16 verify passed.
+- The diagnostic JSON is `benchmark/results/trust_architecture_diagnostic.json`.
+- Real-clip fingerprint diagnostics now run on local H.264 assets.
+- Detector transform diagnostics now run on synthetic transforms.
+
+### 5.1 ZK + C2PA Provenance Root
+
+Value:
+
+- C2PA is strong as a metadata standard, but metadata can be stripped.
+- The current compressed-domain embedding path can act as a physical anchor for
+  a C2PA manifest root hash.
+- If the external C2PA metadata disappears, an extractor can recover the root
+  hash from the video bitstream and compare it with a registry or published
+  manifest.
+
+Feasibility:
+
+- High.
+- A C2PA root hash is only 32 bytes, and the current 146-byte proof-bearing
+  payload budget can carry it.
+- The existing `payload_verify.circom` can be reused initially by treating the
+  C2PA root as the message/payload.
+
+Risks:
+
+- Still fragile: re-encoding can destroy exact hidden bits.
+- Requires registry or manifest retrieval policy.
+- Needs careful wording: this anchors provenance; it is not robust watermarking.
+
+Future tasks:
+
+- [x] Add experimental canonical provenance root helper in `src/trust/provenance.py`.
+- [x] Define canonical manifest hashing.
+- [x] Add production-style `src/provenance/c2pa_bridge.py`.
+- [x] Add manifest fields for `provenance_uri` and `provenance_root_hash`.
+- [x] Add tamper-evidence test vector.
+- [x] Add C2PA anchor-to-stego-manifest roundtrip test.
+- [x] Validate 32-byte embedded root payload and manifest tamper detection in
+      section `44`.
+
+Implementation sequence:
+
+1. Freeze the manifest byte canonicalization rule.
+2. Hash the manifest root outside the circuit first.
+3. Decide whether the root hash is carried in payload bytes or sidecar policy.
+4. Add strip-metadata and tamper tests on representative assets.
+5. Measure whether the current payload budget still holds after any schema change.
+
+Definition of done:
+
+- The embedded root hash survives metadata stripping.
+- A registry mismatch fails verification cleanly.
+- The paper wording stays on "provenance anchor", not "robust watermark".
+- The audit sidecar can be saved, loaded, and re-verified without cover video.
+
+### 5.2 ZK + Fingerprint Registry
+
+Value:
+
+- Separates content identity from metadata identity.
+- A perceptual fingerprint can represent visual/audio content even when metadata
+  changes.
+- ZK can let a platform prove membership or near-match against a private
+  registry without exposing the registry fingerprint database.
+- The inverse use case is also possible: a user proves ownership or match
+  without uploading the original video.
+
+Feasibility:
+
+- Medium.
+- Fingerprint extraction is feasible outside the circuit.
+- Circuit feasibility depends on fingerprint length and Hamming-distance logic.
+
+Risks:
+
+- Perceptual hashes are noisy and threshold-sensitive.
+- False positives and false negatives become policy issues.
+- A useful circuit may be larger than the current SHA256 commitment circuit.
+
+Future tasks:
+
+- [x] Add deterministic pHash/vHash prototype.
+- [x] Define deterministic frame sampling and preprocessing policy.
+- [x] Design `fingerprint_verify.circom`.
+- [x] Measure circuit constraint count through section `44`.
+- [x] Add synthetic threshold behavior rows for false-accept/true-accept sanity.
+- [x] Measure Groth16 proving time for `fingerprint_verify.circom`.
+- [x] Add a local-clip fingerprint benchmark over available H.264 assets.
+- [ ] Benchmark false accept/reject behavior on a broader committed clip set.
+
+Implementation sequence:
+
+1. Choose one fingerprint family and lock the preprocessing steps.
+2. Define the registry lookup policy: exact match, Hamming threshold, or bucketed
+   candidate set.
+3. Keep the fingerprint extractor outside the circuit unless the circuit size is
+   still practical.
+4. Add privacy tests for registry leakage and failure mode clarity.
+5. Benchmark false accept and false reject rates on committed clips.
+
+Definition of done:
+
+- The registry path can prove membership or near-match without exposing the
+  private fingerprint database.
+- Threshold calibration is stable across reruns.
+- Constraint count and proving time are documented.
+
+### 5.3 ZK + Watermark Receipt For GenAI
+
+Value:
+
+- This is the most commercially interesting direction.
+- Systems such as SynthID or Video Seal face a detector-trust problem: third
+  parties need confidence in detector results, but the detector/key/weights
+  cannot simply be open-sourced without increasing bypass risk.
+- A ZK circuit can wrap a lightweight detector and output only a threshold
+  result plus proof.
+
+Ideal workflow:
+
+```text
+generated video
+  -> watermark detector inside ZK circuit
+  -> score >= threshold
+  -> public boolean + ZK proof
+```
+
+Breakthrough:
+
+- ZK can hide detector keying material and detector weights.
+- The current repo already has a Groth16 bridge, but the circuit must change
+  from SHA256 payload verification to lightweight threshold logic.
+
+Feasibility:
+
+- Medium to low for real detector parity.
+- High for a small proof-of-concept detector.
+
+Risks:
+
+- Real detectors may be too large for Circom/Groth16.
+- Robust watermarking must survive compression, resize, crop, frame-rate change,
+  and screen recording.
+- This is not the same problem as exact bit extraction from CAVLC coefficients.
+
+Future tasks:
+
+- [x] Define a tiny feature extractor.
+- [x] Define a small dot-product or threshold detector.
+- [x] Create `detector_receipt.circom`.
+- [x] Model a receipt that exposes only a boolean threshold result plus commitments.
+- [x] Measure circuit constraint count through section `44`.
+- [x] Measure Groth16 proving time for `detector_receipt.circom`.
+- [x] Benchmark detector behavior under a small transform matrix.
+- [ ] Benchmark detector accuracy and proof overhead on a broader transform set.
+
+Implementation sequence:
+
+1. Build a tiny detector that can run on fixed features.
+2. Keep the detector keying material and weights outside public artifacts.
+3. Make the circuit output only the threshold result, not the detector internals.
+4. Test the detector under recompression, resize, crop, and frame-rate change.
+5. Compare robustness against the current fragile plane, but in a separate
+   benchmark family.
+
+Definition of done:
+
+- The proof certifies a detector decision, not a raw model dump.
+- Robustness survives the transform matrix defined for the branch.
+- The benchmark story is separate from the fragile CAVLC embedding story.
+
+### 5.4 TEE / Model Attestation + ZKML
+
+Value:
+
+- Answers a stronger provenance question:
+  "Did this exact model binary/configuration, running in this attested
+  environment, produce or approve this video?"
+- Useful for legal/audit-grade chains of custody.
+
+Feasibility:
+
+- TEE signature path: medium.
+- Full ZKML video-generation proof: low today due to massive proving cost.
+
+Risks:
+
+- TEE trust shifts to hardware/vendor attestation roots.
+- ZKML for video generation is likely too expensive for this repo's current
+  scope.
+- Should be framed as highest-security audit tier, not normal UGC workflow.
+
+Future tasks:
+
+- [x] Add a mock TEE signer interface in `src/trust/attestation.py`.
+- [x] Sign canonical attestation bundles containing video/model/policy hashes.
+- [x] Sidecar the signature under fragile audit mode.
+- [x] Keep ZKML as interface/stub only until a realistic proving target exists.
+
+Implementation sequence:
+
+1. Define the attestation bundle fields and canonical hash order.
+2. Add a mock signer first so the interface is stable before hardware binding.
+3. Keep TEE signatures separate from C2PA and watermark proofs.
+4. Treat ZKML as an interface contract, not a promised implementation target.
+5. Only promote ZKML if a concrete video-generation circuit target becomes
+   realistic.
+
+Definition of done:
+
+- An audit bundle can be verified end-to-end with a stable signature policy.
+- The attestation path does not depend on fragile CAVLC extraction.
+- ZKML remains clearly marked as future interface work unless and until a
+  realistic proving target exists.
+
+---
+
+## 6. Fragile vs Robust Bottleneck
+
+The current system is intentionally fragile:
+
+- it requires exact bit recovery from H.264/CAVLC residual coefficients,
+- `CAVLCSafetyFilter` and reconstruction logic assume bitstream-level stability,
+- lossy re-encoding can destroy the hidden payload.
+
+The future watermark/provenance directions, especially GenAI watermark receipts,
+need robustness:
+
+- survive recompression,
+- survive resizing/cropping,
+- survive frame-rate changes,
+- survive platform transcodes.
+
+These goals conflict. Do not try to make one mode satisfy both.
+
+### Correct reconciliation strategy
+
+Use a dual-plane architecture:
+
+1. Fragile plane
+   - Current H.264/CAVLC exact-bit embedding.
+   - Best for archives, audit logs, tamper evidence, C2PA root anchoring in
+     controlled workflows.
+   - Verification fails if the bitstream is altered, which is a feature for
+     tamper evidence.
+
+2. Robust plane
+   - Future watermark or detector-receipt path.
+   - Does not depend on exact bit recovery from CAVLC positions.
+   - Uses perceptual/feature-domain detection and threshold proofs.
+   - Must have separate benchmarks and claims.
+
+3. Registry / attestation plane
+   - Public registry, sidecar, C2PA manifest, TEE signature, or model attestation
+     binds the fragile and robust evidence together.
+
+### Plane Map
+
+- Fragile plane: exact-bit CAVLC embedding and C2PA root anchoring.
+- Robust plane: fingerprint registry and watermark receipt.
+- Attestation plane: TEE signatures and model provenance bundles.
+
+### Design rule
+
+Do not retrofit robust behavior into the current fragile CAVLC path by simply
+adding redundancy. That will increase payload size, damage capacity, and still
+fail under real transcoding.
+
+Do not merge fragile, robust, and attestation evidence into one benchmark row.
+Each plane must keep its own files, metrics, and failure modes.
+
+Instead:
+
+- keep current CAVLC path for exact-bit provenance and tamper evidence,
+- add robust detector/feature logic as a separate mode,
+- bind both modes through manifest/registry semantics.
+
+---
+
+## 7. Exit Conditions For Current Baseline
+
+The current baseline is ready to freeze when:
+
+- [x] `plan.md` uses only real commands and APIs.
+- [x] quick suite passes.
+- [x] Phase 4 passes.
+- [x] Phase 5/6/7 report pass/fail/skip accurately.
+- [x] paper-grade benchmark sections validate through `safe_benchmark_runner.py`.
+- [x] docs and benchmark JSON tell the same story in `plan.md`.
+- [x] future architecture is documented as future branch work only.
+- [x] git status contains only intentional files for the baseline commit.
+- [x] full runtime suite has been re-run after the final benchmark/code edits.

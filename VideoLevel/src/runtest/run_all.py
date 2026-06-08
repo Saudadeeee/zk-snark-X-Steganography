@@ -4,7 +4,7 @@ run_all.py — Run all phase tests in order and print a summary table.
 Usage:
     python src/runtest/run_all.py
 
-Exit code: 0 if all phases pass, 1 if any phase fails.
+Exit code: 0 if all phases pass, 1 if any phase fails, 2 if any phase is incomplete.
 """
 
 import io
@@ -67,6 +67,14 @@ def run_phase(label: str, description: str, filename: str):
     return passed, failed, skipped, result.returncode
 
 
+def _status_from_exit_code(code: int) -> str:
+    if code == 0:
+        return 'OK'
+    if code == 2:
+        return 'INCOMPLETE'
+    return 'FAIL'
+
+
 # ── Main ─────────────────────────────────────────────────────────────── #
 
 def main():
@@ -96,10 +104,13 @@ def main():
         print(SEP)
         passed, failed, skipped, code = run_phase(label, desc, filename)
         print(SEP)
-        total_run = passed + failed
-        status    = 'OK' if code == 0 else 'FAIL'
+        total_run = passed + failed + skipped
+        status    = _status_from_exit_code(code)
         summary.append((label, desc, passed, failed, skipped, status))
-        print(f"  {label} result: {passed}/{total_run} passed, {skipped} skipped  [{status}]")
+        print(
+            f"  {label} result: {passed}/{total_run} passed, "
+            f"{failed} failed, {skipped} skipped  [{status}]"
+        )
 
     # Final summary table
     print()
@@ -107,15 +118,20 @@ def main():
     print("  SUMMARY")
     print(SEP2)
     all_pass  = True
+    any_incomplete = False
     total_p = total_f = total_s = 0
     for label, desc, p, f, s, status in summary:
-        marker = '+' if status == 'OK' else 'X'
-        col    = f"{p}/{p+f} passed"
+        marker = '+' if status == 'OK' else ('!' if status == 'INCOMPLETE' else 'X')
+        col    = f"{p}/{p+f+s} passed"
         if s:
             col += f", {s} skipped"
+        if f:
+            col += f", {f} failed"
         print(f"  [{marker}] {label:8s}  {desc:22s}  {col}")
         total_p += p; total_f += f; total_s += s
-        if status != 'OK':
+        if status == 'INCOMPLETE':
+            any_incomplete = True
+        elif status != 'OK':
             all_pass = False
 
     print(SEP)
@@ -123,16 +139,22 @@ def main():
           + (f", {total_s} skipped" if total_s else ""))
     print()
 
-    if all_pass:
+    if all_pass and not any_incomplete:
         if args.quick:
             print("  [SUCCESS] Quick test phases passed.")
         else:
             print("  [SUCCESS] All test phases passed.")
+    elif any_incomplete and not total_f:
+        print("  [INCOMPLETE] One or more phases skipped required coverage.")
     else:
         print("  [FAIL] One or more phases failed — see output above.")
 
     print(SEP2)
-    sys.exit(0 if all_pass else 1)
+    if total_f:
+        sys.exit(1)
+    if any_incomplete:
+        sys.exit(2)
+    sys.exit(0)
 
 
 if __name__ == '__main__':

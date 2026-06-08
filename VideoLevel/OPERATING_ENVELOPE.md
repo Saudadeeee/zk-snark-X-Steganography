@@ -1,156 +1,115 @@
 # Supported Operating Envelope
 
-This document defines the supported operating envelope for ZK-SNARK Video Steganography.
+Last updated: 2026-06-08
 
-## Codec Requirements
+This file defines the supported operating envelope for the current system.
+Future robust watermarking, C2PA trust tiers, fingerprint registries, TEE, and
+ZKML are not part of this baseline.
 
-**Preferred:** H.264 Baseline Profile
-- Codec: H.264/AVC
-- Profile: Baseline (constrained baseline)
-- Entropy coding: CAVLC (Context-Adaptive Variable-Length Coding)
-- **NOT supported:** CABAC, HEVC/H.265
+## Strongest Supported Regime
 
-## GOP Configuration
+- Codec: H.264/AVC.
+- Profile: baseline / constrained baseline.
+- Entropy coding: CAVLC.
+- GOP: GOP=1 / all-intra.
+- Payload: real Groth16 proof-bearing payload.
+- Embedding mode: patchability-aware residual-coefficient modification.
+- Verification:
+  - strict non-blind via `verify()`,
+  - sidecar-assisted near-blind via `verify_near_blind()`.
 
-**Recommended:** GOP=1 (all-intra)
-- All frames are IDR frames
-- Zero intra-prediction cascade
-- Optimal for quality and capacity
+## Unsupported Or Future Work
 
-**Supported with limitations:**
-- GOP=4: ~15% capacity reduction, ~2dB quality loss
-- GOP=8: ~50% capacity reduction, ~5dB quality loss
-- GOP=16: ~66% capacity reduction, ~8dB quality loss
-
-**NOT recommended:**
-- GOP > 16: Severe quality degradation due to cascade
-
-## QP Range
-
-**Recommended:** QP 18-32
-- QP=18: High quality, lower capacity
-- QP=22: Operating point (balanced)
-- QP=28: Better quality/capacity tradeoff
-- QP=32: Highest capacity, may fail 40 dB guard
-
-**Tested sequences:**
-- foreman: QP 18, 22, 28, 32 (300 frames)
-- coastguard: QP 18, 22, 28, 32 (300 frames)
-- deadline: QP 22 (300 frames)
-
-## Resolution
-
-**Tested:** CIF (352×288)
-- 22×18 macroblocks (396 total)
-- 30 fps standard
-
-**Supported:** Any resolution with same MB alignment pattern
-- Theoretically scales to 4K, but not validated
+- Full sidecar-free blind verification.
+- CABAC / H.264 Main or High profile.
+- HEVC/H.265.
+- Robust survival under arbitrary recompression/transcoding.
+- General inter-coded GOP support as a main claim.
+- Trust-tier architecture such as C2PA, fingerprint registry proofs, TEE, or
+  ZKML.
 
 ## Payload Budget
 
-**Operating payload:** 1232 bits
-- Message: 13 bytes (104 bits)
-- Groth16 proof: 129 bytes (1032 bits)
-- Header: 4 bytes (32 bits)
-- Chaos expansion: 64 bits padding
+Current legacy payload format:
 
-**Capacity range (per 300-frame sequence):**
-- Low QP (18): ~200k bits
-- Mid QP (22): ~286k bits (foreman)
-- High QP (32): ~500k bits
+```text
+[4B message_length][message][129B compressed Groth16 proof]
+```
 
-**Utilization at operating point:**
-- 0.03% - 0.43% of raw T1 capacity
+Benchmark payload:
 
-## Quality Requirements
+- message: `13` bytes, usually `b"ZK-bench-v1.0!"`
+- proof: `129` bytes
+- header: `4` bytes
+- packed payload: `146` bytes = `1168` bits
+- chaos-expanded benchmark operating payload: `1232` bits
 
-**Strict guard:** min_modified_frame_psnr ≥ 40 dB
-- Applied to all benchmark results
-- Each individual modified frame must pass
-- Full-video PSNR typically 50-60 dB
+## Capacity Vocabulary
 
-**Optional relaxed guard:** min_modified_frame_psnr ≥ 35 dB
-- For exploratory GOP/QP studies
-- Not used for paper claims
+Use these terms consistently:
 
-## Verifier Assumptions
+- `raw_safe_bits`: CAVLC-safe candidate positions before stronger validation.
+- `patchable_usable_bits`: positions surviving public API patchability checks.
+- `validated_pool_bits`: benchmark-validated candidate pool.
+- `operating_bits`: final locked operating-point positions.
+- `applied_position_bits`: positions actually applied after reconstruction.
 
-**Standard mode (verify):**
-- Requires: original video path
-- Optional: trusted precomputed operating positions
-- Purpose: benchmark and development
+Do not report raw safe positions as final usable capacity.
 
-**Near-blind mode (verify_near_blind):**
-- Requires: stego video + manifest.json + positions.json
-- No original video needed
-- Purpose: sidecar-assisted verification
+## Quality Guard
 
-**Blind-core branch:**
-- Experimental only
-- Not part of the supported operating envelope for the current paper baseline
-- Treat as future work until header readout and end-to-end verification become stable
+Paper-grade operating-point results should satisfy:
 
-**Locked operating-point mode (embed):**
-- Requires: pre-validated operating positions
-- Intended for benchmark-grade operating-point reproduction
-- Current strongest end-to-end path in the repository
+- full real-proof embedding succeeds,
+- proof verification succeeds,
+- minimum modified-frame PSNR is above the selected guard, normally `40 dB`,
+- average SSIM remains close to cover quality.
 
-**Sidecar assumptions:**
-- `positions.json` carries operating extraction positions
-- `manifest.json` carries payload and embedding metadata
-- The current near-blind mode is not blind in the strict steganographic sense
+## Verification Assumptions
 
-## Known Limitations
+### Strict non-blind
 
-1. **Cold-start cost:** ~1500s per video (IDR extraction)
-   - Cacheable after first run
-   - Operational cost per embed: ~57s
+`verify()` is the strongest verification path for development and benchmark
+reproduction. It can use the original cover video or trusted precomputed
+operating positions.
 
-2. **Inter-coded videos:** Quality degradation at GOP>1
-   - Not recommended for production use
-   - Use SEC10 GOP sweep for analysis
+### Sidecar-assisted near-blind
 
-3. **High QP:** QP=32 may fail capacity under 40 dB guard
-   - Depends on sequence characteristics
-   - Test before deployment
+`verify_near_blind()` does not require the original cover video, but it requires
+sidecars:
 
-## Performance Benchmarks
+- `.manifest.json`
+- `.positions.json`
 
-**Operating point (Foreman QP22 G1):**
-- Embed time: ~50s
-- Extract time: ~7s
-- ZK prove: 2.4s
-- ZK verify: 1.0s
+This is not full blind steganographic extraction.
 
-**Pre-processing (one-time):**
-- IDR extraction: ~1496s
-- Safety filtering: included above
+### Blind-core
 
-## Security Claims (Validated)
+Blind-core diagnostics are future work. They must not be used as mainline
+claims until real-proof full payload recovery and proof verification are stable
+without sidecars.
 
-**Steganalysis at operating point (1232 bits):**
-- Chi-square: p = 0.962 (α=0.05)
-- WS (Weighted Stego): p ≈ 0.85
-- SPAM (Markov-1): p ≈ 0.78
+## Test Evidence Semantics
 
-**Result:** Indistinguishable from cover at α=0.05
+The phase runner distinguishes:
 
-## Citation for Paper
+- pass: the case executed and all assertions passed,
+- fail: at least one assertion or unexpected exception occurred,
+- skip: required assets, capacity, or native tools were unavailable.
 
-When citing this system, use:
+Any phase with skipped core E2E cases is incomplete evidence, even when there
+are no assertion failures.
 
-> ZK-SNARK Video Steganography: Proof-Verifiable Payload Embedding in H.264 Baseline CAVLC
+## Performance Envelope
 
-Recommended operating point:
-- H.264 Baseline Profile, CAVLC
-- GOP=1 (all-intra)
-- QP=22
-- 1232-bit payload (Groth16 proof)
-- min_modified_frame_psnr ≥ 40 dB
+Current evidence separates:
 
-Resulting performance:
-- Full-video PSNR: 50-60 dB
-- Frame-min PSNR: 40-42 dB
-- Utilization: 0.03-0.43% of T1 capacity
-- Undetectable: χ²=0.962, WS=0.85, SPAM=0.78
+- cold-start analysis/preprocessing,
+- operational per-embed cost,
+- proof generation,
+- proof verification,
+- extraction.
+
+Cold-start video analysis can be expensive and should be treated as cacheable.
+Paper tables should not collapse one-time preprocessing and warm operational
+cost into one ambiguous number.

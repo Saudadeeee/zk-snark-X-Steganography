@@ -1,89 +1,122 @@
-# Artifact Cleanup Policy
+# Artifact Policy
 
-This policy defines which artifacts are kept, which are considered rebuildable,
-and how benchmark outputs are tiered.
+Last updated: 2026-06-08
 
-## Keep
+This policy defines which files are part of the current reproducible baseline
+and which files are rebuildable diagnostics or local cache.
 
-### Paper-grade benchmark artifacts
-- `benchmark/results/sec1_*.png`
-- `benchmark/results/sec1_*.json`
-- `benchmark/results/sec2_*.png`
-- `benchmark/results/sec2_*.json`
-- `benchmark/results/sec3_methods*.png`
-- `benchmark/results/sec3_methods*.json`
-- `benchmark/results/sec4_*.png`
-- `benchmark/results/sec4_*.json`
-- `benchmark/results/sec6_*.png`
-- `benchmark/results/sec6_*.json`
-- `benchmark/results/sec*_statistical.json`
-- `benchmark/results/sec6_paper_summary.txt`
-- `benchmark/results/sec10_gop_sweep_data.json`
+## Keep In Repository
 
-### Diagnostic-grade benchmark artifacts
-- `benchmark/results/sec3_ablation.*`
-- `benchmark/results/patchable_capacity_scan.json`
-- `benchmark/results/_run_metadata.json`
+### Source and tests
 
-### Documentation
+- `src/**`
+- `benchmark/*.py`
+- `src/trust/**`
+- `src/provenance/**`
+- `src/runtest/test_future_trust_architecture.py`
+- `benchmark/trust_architecture_diagnostic.py`
+- `circuits/payload_verify.circom`
+- `circuits/package.json`
+- `requirements.txt`
+- `requirements.lock`
+
+### Main documentation
+
 - `README.md`
 - `plan.md`
+- `system.txt`
 - `PAPER_EVIDENCE.md`
 - `OPERATING_ENVELOPE.md`
+- `ARTIFACT_POLICY.md`
 - `COMPARATIVE_ANALYSIS.md`
 - `COMPLETION.md`
+- `doc/system_video_embedding_walkthrough.tex`
+- `doc/system_video_embedding_walkthrough.pdf`
 
-## Rebuildable / Auto-clean Candidates
+### Paper-grade benchmark outputs
 
-### Stego outputs
+Keep benchmark outputs that are directly referenced by paper evidence:
+
+- `benchmark/results/sec1_*.json`
+- `benchmark/results/sec1_*.png`
+- `benchmark/results/sec2_*.json`
+- `benchmark/results/sec2_*.png`
+- `benchmark/results/sec3_methods*.json`
+- `benchmark/results/sec3_*.png`
+- `benchmark/results/sec4_*.json`
+- `benchmark/results/sec4_*.png`
+- `benchmark/results/sec5_*.json`
+- `benchmark/results/sec5_*.png`
+- `benchmark/results/sec6_*.json`
+- `benchmark/results/sec6_*.png`
+- `benchmark/results/sec7_*.json`
+- `benchmark/results/sec7_*.png`
+- `benchmark/results/trust_architecture_diagnostic.json`
+
+## Rebuildable Or Local Only
+
+These files can be regenerated and should normally stay out of commits unless a
+specific paper table depends on them:
+
+- `.cache/**`
+- `.pytest_cache/**`
+- `__pycache__/**`
+- `benchmark/results/_idr_cache_*.pkl`
+- `benchmark/results/_proof_payload_cache.bin`
+- `benchmark/results/_run_metadata.json`
+- `benchmark/results/sec6_paper_summary.txt`
 - `data/output/*.h264`
 - `data/output/*.positions.json`
-- `data/output/*.validated_pool.json`
 - `data/output/*.meta.json`
 - `data/output/*.manifest.json`
-
-### Caches
-- `.cache/video_analysis/*.pkl`
-- `.cache/benchmark_frames/*.npy`
-- `benchmark/results/_proof_payload_cache.bin`
-- `benchmark/results/_idr_cache_*.pkl`
-- `.pytest_cache/`
-- `__pycache__/`
-
-### Temporary / diagnostic intermediates
-- `data/output/_sec*.h264`
-- `benchmark/results/_run_metadata.json`
 
 ## Never Commit
 
 - `data/raw/*.y4m`
+- `data/raw/*.h264`
 - `data/encoded/*.h264`
+- `circuits/node_modules/**`
 - `circuits/build/*.zkey`
 - `circuits/build/*.wasm`
-- `circuits/node_modules/`
-- `.cache/`
+- local scratch scripts such as `debug_*.py`, `tmp*.py`, `check_*.py`
 
 ## Cleanup Commands
 
-### Controlled cleanup helper
+Use the controlled helper first:
+
 ```bash
 py -3.12 benchmark/clean_artifacts.py --diagnostic
 py -3.12 benchmark/clean_artifacts.py --stego
 py -3.12 benchmark/clean_artifacts.py --cache
-py -3.12 benchmark/clean_artifacts.py --all-rebuildable
 ```
 
-### Manual cleanup
+Manual cleanup is acceptable for local-only artifacts:
+
 ```bash
-rm -f data/output/*.h264 data/output/*.json
-rm -rf .cache/
-rm -rf __pycache__/ src/__pycache__/ benchmark/__pycache__/
+Remove-Item -Recurse -Force .pytest_cache
+Remove-Item -Recurse -Force .cache
 ```
 
-## Notes
+## Policy Notes
 
-- `safe_benchmark_runner.py` now distinguishes `paper_grade` vs `diagnostic_grade`
-  sections, so diagnostic outputs should not block paper-grade automation.
-- The strongest reproducible E2E path currently uses locked operating-point
-  artifacts, so deleting `positions.json` / `manifest.json` will remove that
-  reproduction path until they are regenerated.
+- Do not mix blind-core diagnostics into paper-grade evidence.
+- Do not mix future trust architecture diagnostics into paper-grade evidence.
+- Do not use raw safe-position counts as final capacity evidence.
+- Keep sidecar files only when they are needed to reproduce a specific
+  operating-point artifact.
+- Future architecture artifacts for C2PA, robust watermarking, TEE, or ZKML
+  should be added on a separate branch, not mixed into the current-system
+  baseline.
+
+## Required Native Tooling
+
+The audited current baseline expects the following local tools to be present:
+
+- Python 3.12.10 observed locally
+- Node.js 22.20.0 observed locally
+- `circom` 2.2.x
+- `snarkjs` 0.7.6 observed locally
+- `ffmpeg` 8.0.1 observed locally
+
+These tools are used for circuit compilation, witness/proof generation, video
+encoding/validation, and benchmark replay.

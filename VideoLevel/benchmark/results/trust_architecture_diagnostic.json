@@ -1,0 +1,472 @@
+{
+  "tier": "diagnostic_grade",
+  "provenance": {
+    "root": {
+      "algorithm": "sha256-canonical-json-v1",
+      "manifest_root_hash": "478c192f0906784d713458f7d1ad7f4d980084942f7d88d14469f70489d13cb0",
+      "manifest_uri": "registry://example/manifest/1",
+      "media_hash": null
+    },
+    "valid": true,
+    "tamper_detected": true
+  },
+  "c2pa_bridge": {
+    "sidecar": {
+      "sidecar_schema": "zk-stego-c2pa-audit-v1",
+      "registry_uri": "registry://example/manifest/1",
+      "media_hash": null,
+      "manifest_commitment": "478c192f0906784d713458f7d1ad7f4d980084942f7d88d14469f70489d13cb0",
+      "anchor": {
+        "schema": "zk-stego-c2pa-anchor-v1",
+        "root": {
+          "algorithm": "sha256-canonical-json-v1",
+          "manifest_root_hash": "478c192f0906784d713458f7d1ad7f4d980084942f7d88d14469f70489d13cb0",
+          "manifest_uri": "registry://example/manifest/1",
+          "media_hash": null
+        },
+        "payload_b64": "R4wZLwkGeE1xNFj30a1/TZgAhJQvfYjRRGn3BInRPLA="
+      }
+    },
+    "payload_bytes": 32,
+    "manifest_fields": {
+      "provenance_uri": "registry://example/manifest/1",
+      "provenance_root_hash": "478c192f0906784d713458f7d1ad7f4d980084942f7d88d14469f70489d13cb0",
+      "roundtrip_valid": true
+    },
+    "embedded_payload_valid": true,
+    "embedded_payload_tamper_detected": true,
+    "manifest_tamper_detected": true
+  },
+  "fingerprint_registry": {
+    "fingerprint_hex": "00000000ffffffff",
+    "video_fingerprint": {
+      "fingerprint_hex": "00000000ffffffff",
+      "bit_count": 64,
+      "sample_indices": [
+        0,
+        2,
+        5
+      ],
+      "frame_hashes": [
+        "00000000ffffffff",
+        "00000000ffffffff",
+        "00000000ffffffff"
+      ],
+      "policy": {
+        "sample_count": 3,
+        "hash_size": 8,
+        "color_mode": "bt601_luma",
+        "resize_mode": "block_mean",
+        "aggregate_mode": "majority_vote"
+      }
+    },
+    "registry_commitment": "4bf202b0957d22aac4b2c1fda901e44c2e3e6d2948b9e02c817cbc355a8c54e5",
+    "matched": true,
+    "record_id": "synthetic-frame-1",
+    "distance": 0,
+    "threshold": 0,
+    "threshold_behavior": {
+      "synthetic_rows": [
+        {
+          "threshold": 0,
+          "true_accept_rate": 0.5,
+          "false_accept_rate": 0.0
+        },
+        {
+          "threshold": 2,
+          "true_accept_rate": 0.5,
+          "false_accept_rate": 0.0
+        },
+        {
+          "threshold": 4,
+          "true_accept_rate": 1.0,
+          "false_accept_rate": 0.0
+        },
+        {
+          "threshold": 8,
+          "true_accept_rate": 1.0,
+          "false_accept_rate": 0.0
+        }
+      ],
+      "base_fingerprint": "00000000ffffffff",
+      "near_distance": 3,
+      "far_distance": 32
+    },
+    "real_clip_benchmark": {
+      "available": true,
+      "policy": {
+        "sample_count": 4,
+        "hash_size": 8,
+        "color_mode": "bt601_luma",
+        "resize_mode": "block_mean",
+        "aggregate_mode": "majority_vote"
+      },
+      "registry_record": "akiyo_q22_g1",
+      "clip_count": 4,
+      "fingerprints": {
+        "akiyo_q22_g1": {
+          "fingerprint_hex": "00c6ce1e183e7e7e",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "00c6ce1e183e7e7e",
+            "00c6ce1e183e7e7e",
+            "00c6ce1e183e7e7e",
+            "00c6ce1e183e7e7e"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
+        "foreman_q22_g1": {
+          "fingerprint_hex": "3333333333333333",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "3373333133333333",
+            "3333733333313333",
+            "3333333373333331",
+            "3333333333337133"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
+        "coastguard_q22_g1": {
+          "fingerprint_hex": "00000002efffffff",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "00000002efffffff",
+            "00000002efffffff",
+            "00000002efffffff",
+            "00000002efffffff"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
+        "deadline_q22_g1": {
+          "fingerprint_hex": "ffffe81f1f090c00",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "ffffe81e1e090810",
+            "ffffe81f1e090800",
+            "fff7e01f1f090c00",
+            "fff7e01f1f090c00"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        }
+      },
+      "rows": [
+        {
+          "threshold": 0,
+          "true_accept_rate": 1.0,
+          "false_accept_rate": 0.0,
+          "negative_count": 3
+        },
+        {
+          "threshold": 4,
+          "true_accept_rate": 1.0,
+          "false_accept_rate": 0.0,
+          "negative_count": 3
+        },
+        {
+          "threshold": 8,
+          "true_accept_rate": 1.0,
+          "false_accept_rate": 0.0,
+          "negative_count": 3
+        },
+        {
+          "threshold": 16,
+          "true_accept_rate": 1.0,
+          "false_accept_rate": 0.0,
+          "negative_count": 3
+        }
+      ]
+    }
+  },
+  "watermark_receipt": {
+    "receipt": {
+      "detector_id": "tiny-threshold-v1",
+      "score": 0.75,
+      "threshold": 0.7,
+      "valid": true,
+      "payload_commitment": "478c192f0906784d713458f7d1ad7f4d980084942f7d88d14469f70489d13cb0",
+      "detector_commitment": "e1244e34d78e5a1a66ea5b0c375fe5a56150dadaa7791b59bc8bc5ec77f7e1aa"
+    },
+    "receipt_commitment": "cd04097de638be3656621bcf0ee12d85c846f16b396d69cc798b4e7f41d62113",
+    "transform_benchmark": {
+      "detector_commitment": "ee0dbf60ef896a57c21099db7aa7ed456dec969ac26bc2a64f131dd13f7d667e",
+      "threshold": 0.278075909614563,
+      "rows": [
+        {
+          "transform": "original",
+          "features": [
+            0.5411764979362488,
+            0.4363010823726654,
+            0.011702459305524826,
+            0.0313725508749485
+          ],
+          "score": 0.34759488701820374,
+          "threshold": 0.278075909614563,
+          "accepted": true
+        },
+        {
+          "transform": "brightness_shift",
+          "features": [
+            0.5882200002670288,
+            0.4362434446811676,
+            0.011686896905303001,
+            0.031352125108242035
+          ],
+          "score": 0.3640348017215729,
+          "threshold": 0.278075909614563,
+          "accepted": true
+        },
+        {
+          "transform": "down_up_nearest",
+          "features": [
+            0.5353252291679382,
+            0.4361453354358673,
+            0.01151670515537262,
+            0.0313725508749485
+          ],
+          "score": 0.3454552888870239,
+          "threshold": 0.278075909614563,
+          "accepted": true
+        },
+        {
+          "transform": "center_crop_padded",
+          "features": [
+            0.5411764979362488,
+            0.39768725633621216,
+            0.008730405941605568,
+            0.0313725508749485
+          ],
+          "score": 0.3334856629371643,
+          "threshold": 0.278075909614563,
+          "accepted": true
+        },
+        {
+          "transform": "frame_drop",
+          "features": [
+            0.5254902243614197,
+            0.43518051505088806,
+            0.011702459305524826,
+            0.062745101749897
+          ],
+          "score": 0.34484976530075073,
+          "threshold": 0.278075909614563,
+          "accepted": true
+        }
+      ],
+      "accept_rate": 1.0,
+      "proof_overhead_reference": "detector_receipt.circom Groth16 measurement"
+    }
+  },
+  "attestation": {
+    "statement_hash": "785adef202d7b624d603fd4942575d6bc5c6f8059d3a8b12a8850d0cf6aa4aee",
+    "signature_valid": true,
+    "signed": {
+      "bundle": {
+        "video_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "model_config_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "model_binary_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "policy_id": "mock-policy-v1",
+        "timestamp": "2026-06-08T00:00:00Z",
+        "hardware_root": "mock-root"
+      },
+      "signature": "c10da5c0cfe85a3de38fc442813248420699d11917ae074b39551c02a4f701a1",
+      "signer_id": "mock-tee-v1",
+      "scheme": "mock-hmac-sha256"
+    },
+    "sidecar_roundtrip_valid": true
+  },
+  "zkml_interface": {
+    "spec": {
+      "circuit_name": "future_video_model_attestation",
+      "public_outputs": [
+        "accepted",
+        "model_commitment"
+      ],
+      "private_inputs": [
+        "model_weights",
+        "activation_trace"
+      ],
+      "status": "interface_only"
+    },
+    "interface_valid": true
+  },
+  "circuits": {
+    "fingerprint_verify": {
+      "exists": true,
+      "compile_ok": true,
+      "error": null,
+      "stats": {
+        "template_instances": 81,
+        "non_linear_constraints": 606,
+        "linear_constraints": 842,
+        "public_inputs": 65,
+        "private_inputs": 72,
+        "public_outputs": 2,
+        "wires": 1449,
+        "labels": 2258
+      },
+      "groth16_measurement": {
+        "attempted": true,
+        "verified": true,
+        "setup_ran": true,
+        "setup_time_ms": 1794.7,
+        "witness_time_ms": 110.62,
+        "prove_time_ms": 1044.34,
+        "verify_time_ms": 949.25,
+        "proof_json_size_bytes": 804,
+        "public_signal_count": 67,
+        "public_signals": [
+          "1",
+          "21451698921772718435912221772150976482499822594119359987538900709054009240964",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "0"
+        ]
+      }
+    },
+    "detector_receipt": {
+      "exists": true,
+      "compile_ok": true,
+      "error": null,
+      "stats": {
+        "template_instances": 79,
+        "non_linear_constraints": 465,
+        "linear_constraints": 448,
+        "public_inputs": 5,
+        "private_inputs": 4,
+        "public_outputs": 2,
+        "wires": 914,
+        "labels": 1360
+      },
+      "groth16_measurement": {
+        "attempted": true,
+        "verified": true,
+        "setup_ran": true,
+        "setup_time_ms": 1395.8,
+        "witness_time_ms": 94.72,
+        "prove_time_ms": 1031.32,
+        "verify_time_ms": 1023.87,
+        "proof_json_size_bytes": 804,
+        "public_signal_count": 7,
+        "public_signals": [
+          "1",
+          "4220715926047232732883364092278159128484462297542435605209235091838322135833",
+          "100",
+          "100",
+          "50",
+          "50",
+          "7000"
+        ]
+      }
+    }
+  }
+}

@@ -13,6 +13,9 @@ Usage:
 
 import argparse
 import json
+import os
+import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -45,12 +48,13 @@ SECTIONS = {
     41: "blind_payload_coding_diagnostic",
     42: "blind_partial_payload_contract",
     43: "blind_real_proof_header_diagnostic",
+    44: "trust_architecture_diagnostic",
 }
 
 DEFAULT_TIMEOUT = 180  # 3 minutes per section
-FAST_CAPABLE_SECTIONS = {1, 2, 3, 4, 6, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43}
-PAPER_GRADE_DEFAULT = [1, 2, 3, 4, 6]
-DIAGNOSTIC_DEFAULT = [31, 32]
+FAST_CAPABLE_SECTIONS = {1, 2, 3, 4, 6, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44}
+PAPER_GRADE_DEFAULT = [1, 2, 3, 4, 5, 6]
+DIAGNOSTIC_DEFAULT = [31, 32, 44]
 SECTION_CLASS = {
     1: "paper_grade",
     2: "paper_grade",
@@ -71,6 +75,7 @@ SECTION_CLASS = {
     41: "diagnostic_grade",
     42: "diagnostic_grade",
     43: "diagnostic_grade",
+    44: "diagnostic_grade",
 }
 ARTIFACT_SPEC = {
     1: {
@@ -149,6 +154,10 @@ ARTIFACT_SPEC = {
         "charts": [],
         "data": ["blind_real_proof_header_diagnostic.json"],
     },
+    44: {
+        "charts": [],
+        "data": ["trust_architecture_diagnostic.json"],
+    },
 }
 
 
@@ -173,6 +182,8 @@ def _validate_sec1_schema(data: dict) -> list[str]:
         "required_bits",
         "payload_target_met",
         "validation_mode",
+        "verify_valid",
+        "verify_message_match",
     }
     if not data:
         return ["sec1: empty JSON object"]
@@ -183,6 +194,11 @@ def _validate_sec1_schema(data: dict) -> list[str]:
         missing = sorted(required - set(payload.keys()))
         if missing:
             errors.append(f"sec1:{seq} missing keys: {', '.join(missing)}")
+            continue
+        if payload.get("payload_target_met") is not True:
+            errors.append(f"sec1:{seq} payload_target_met must be true")
+        if payload.get("verify_valid") is not True or payload.get("verify_message_match") is not True:
+            errors.append(f"sec1:{seq} must have verified proof/message match")
     return errors
 
 
@@ -191,14 +207,13 @@ def _validate_sec2_schema(data: dict) -> list[str]:
     required = {
         "raw_safe_bits",
         "patchable_usable_bits",
-        "validated_bits",
         "zk_blob_bits",
         "fractions_pct",
         "bits_at_fraction",
         "psnr_at_fraction",
     }
     if not data:
-        return []
+        return ["sec2: empty JSON object; regenerate after verified SEC1 sidecars exist"]
     for seq, payload in data.items():
         if not isinstance(payload, dict):
             errors.append(f"sec2:{seq} must be object")
@@ -206,6 +221,9 @@ def _validate_sec2_schema(data: dict) -> list[str]:
         missing = sorted(required - set(payload.keys()))
         if missing:
             errors.append(f"sec2:{seq} missing keys: {', '.join(missing)}")
+            continue
+        if "validated_pool_bits" not in payload and "validated_bits" not in payload:
+            errors.append(f"sec2:{seq} missing keys: validated_pool_bits (or legacy validated_bits)")
             continue
         rates = payload.get("fractions_pct", [])
         psnr_vals = payload.get("psnr_at_fraction", [])
@@ -247,6 +265,128 @@ def _validate_sec3_schema(data: dict) -> list[str]:
     return errors
 
 
+def _validate_sec4_schema(data: dict) -> list[str]:
+    required = {
+        "rates",
+        "capacity",
+        "op_rate_pct",
+        "op_bits",
+        "op_chi_p",
+        "op_spa",
+        "op_rs",
+    }
+    missing = sorted(required - set(data.keys()))
+    return [f"sec4 missing keys: {', '.join(missing)}"] if missing else []
+
+
+def _validate_sec5_schema(data: dict) -> list[str]:
+    errors: list[str] = []
+    groth16 = data.get("Groth16 BN128\n(This Work)")
+    if not isinstance(groth16, dict):
+        return ["sec5: missing Groth16 BN128\\n(This Work) row"]
+    required = {"proof_size_bytes", "prove_time_ms", "verify_time_ms", "trusted_setup", "simulated"}
+    missing = sorted(required - set(groth16.keys()))
+    if missing:
+        errors.append(f"sec5: Groth16 row missing keys: {', '.join(missing)}")
+    return errors
+
+
+def _validate_sec6_schema(data: dict) -> list[str]:
+    errors: list[str] = []
+    if not data:
+        return ["sec6: empty JSON object"]
+    for seq, payload in data.items():
+        if not isinstance(payload, dict):
+            errors.append(f"sec6:{seq} must be object")
+            continue
+        required = {"timings", "total_s", "capacity_bits", "bits_embedded", "blob_size", "zk_valid"}
+        missing = sorted(required - set(payload.keys()))
+        if missing:
+            errors.append(f"sec6:{seq} missing keys: {', '.join(missing)}")
+            continue
+        timings = payload.get("timings")
+        if not isinstance(timings, dict) or not timings:
+            errors.append(f"sec6:{seq} missing timing breakdown")
+        if payload.get("zk_valid") is not True:
+            errors.append(f"sec6:{seq} zk_valid must be true for paper-grade performance evidence")
+    return errors
+
+
+def _validate_trust_architecture_schema(data: dict) -> list[str]:
+    required = {
+        "tier",
+        "provenance",
+        "c2pa_bridge",
+        "fingerprint_registry",
+        "watermark_receipt",
+        "attestation",
+        "zkml_interface",
+        "circuits",
+    }
+    missing = sorted(required - set(data.keys()))
+    if missing:
+        return [f"trust_architecture missing keys: {', '.join(missing)}"]
+    errors: list[str] = []
+    if data.get("tier") != "diagnostic_grade":
+        errors.append("trust_architecture tier must be diagnostic_grade")
+    if data["provenance"].get("valid") is not True:
+        errors.append("trust_architecture provenance root must verify")
+    if data["provenance"].get("tamper_detected") is not True:
+        errors.append("trust_architecture provenance tamper test must pass")
+    c2pa = data["c2pa_bridge"]
+    if c2pa.get("payload_bytes") != 32:
+        errors.append("trust_architecture C2PA payload must be 32 bytes")
+    if c2pa.get("manifest_fields", {}).get("roundtrip_valid") is not True:
+        errors.append("trust_architecture C2PA manifest provenance fields must roundtrip")
+    if c2pa.get("embedded_payload_valid") is not True:
+        errors.append("trust_architecture C2PA embedded payload must verify")
+    if c2pa.get("embedded_payload_tamper_detected") is not True:
+        errors.append("trust_architecture C2PA payload tamper test must pass")
+    if c2pa.get("manifest_tamper_detected") is not True:
+        errors.append("trust_architecture C2PA manifest tamper test must pass")
+    if data["fingerprint_registry"].get("matched") is not True:
+        errors.append("trust_architecture fingerprint registry must match")
+    video_fp = data["fingerprint_registry"].get("video_fingerprint", {})
+    if not isinstance(video_fp, dict) or not video_fp.get("fingerprint_hex"):
+        errors.append("trust_architecture video fingerprint policy must produce a fingerprint")
+    threshold_rows = data["fingerprint_registry"].get("threshold_behavior", {}).get("synthetic_rows", [])
+    if not isinstance(threshold_rows, list) or not threshold_rows:
+        errors.append("trust_architecture fingerprint threshold behavior must be measured")
+    real_clip = data["fingerprint_registry"].get("real_clip_benchmark", {})
+    if real_clip.get("available") is not True:
+        errors.append("trust_architecture real-clip fingerprint benchmark must be available")
+    if not isinstance(real_clip.get("rows"), list) or not real_clip.get("rows"):
+        errors.append("trust_architecture real-clip fingerprint benchmark must report rows")
+    if data["watermark_receipt"].get("receipt", {}).get("valid") is not True:
+        errors.append("trust_architecture watermark receipt must be valid")
+    transform_rows = data["watermark_receipt"].get("transform_benchmark", {}).get("rows", [])
+    if not isinstance(transform_rows, list) or not transform_rows:
+        errors.append("trust_architecture detector transform benchmark must report rows")
+    if data["attestation"].get("signature_valid") is not True:
+        errors.append("trust_architecture attestation signature must verify")
+    if data["attestation"].get("sidecar_roundtrip_valid") is not True:
+        errors.append("trust_architecture attestation sidecar must roundtrip")
+    if data["zkml_interface"].get("interface_valid") is not True:
+        errors.append("trust_architecture ZKML interface must validate")
+    circuits = data.get("circuits", {})
+    for circuit_name in ("fingerprint_verify", "detector_receipt"):
+        circuit = circuits.get(circuit_name)
+        if not isinstance(circuit, dict):
+            errors.append(f"trust_architecture missing circuit diagnostic for {circuit_name}")
+            continue
+        if circuit.get("compile_ok") is not True:
+            errors.append(f"trust_architecture circuit {circuit_name} must compile")
+        stats = circuit.get("stats", {})
+        if not isinstance(stats, dict) or int(stats.get("non_linear_constraints", 0)) <= 0:
+            errors.append(f"trust_architecture circuit {circuit_name} must report constraints")
+        groth16 = circuit.get("groth16_measurement", {})
+        if not isinstance(groth16, dict) or groth16.get("verified") is not True:
+            errors.append(f"trust_architecture circuit {circuit_name} Groth16 proof must verify")
+        if int(float(groth16.get("prove_time_ms", 0))) <= 0:
+            errors.append(f"trust_architecture circuit {circuit_name} must report prove time")
+    return errors
+
+
 def _schema_errors_for_section(sec_id: int, data_file: Path) -> list[str]:
     data, err = _load_json_file(data_file)
     if err:
@@ -259,6 +399,14 @@ def _schema_errors_for_section(sec_id: int, data_file: Path) -> list[str]:
         return _validate_sec2_schema(data or {})
     if sec_id == 3:
         return _validate_sec3_schema(data or {})
+    if sec_id == 4:
+        return _validate_sec4_schema(data or {})
+    if sec_id == 5:
+        return _validate_sec5_schema(data or {})
+    if sec_id == 6:
+        return _validate_sec6_schema(data or {})
+    if sec_id == 44:
+        return _validate_trust_architecture_schema(data or {})
     if sec_id == 31:
         if not isinstance(data, dict) or "variants" not in data:
             return ["sec3a: missing or invalid 'variants' object"]
@@ -362,6 +510,11 @@ def run_section_safe(sec_id: int, force: bool, timeout: int, fast: bool = False)
         cmd.append("--force")
     if fast and sec_id in FAST_CAPABLE_SECTIONS:
         cmd.append("--fast")
+    if SECTION_CLASS.get(sec_id) == "paper_grade" and sec_id in {1, 2, 6}:
+        cmd.extend(["--sequences", "akiyo_q22_g1"])
+    env = os.environ.copy()
+    if SECTION_CLASS.get(sec_id) == "paper_grade" and sec_id == 1:
+        env["SEC1_USE_REAL_PROOF_PIPELINE"] = "1"
     
     print(f"  [§{sec_id}] Running {SECTIONS[sec_id]} (timeout={timeout}s) ...")
     
@@ -373,6 +526,7 @@ def run_section_safe(sec_id: int, force: bool, timeout: int, fast: bool = False)
             text=True,
             timeout=timeout,
             cwd=BENCHMARK_DIR.parent,
+            env=env,
         )
         elapsed = time.perf_counter() - t0
         
@@ -431,7 +585,7 @@ def validate_results() -> dict:
         valid = len(charts) >= len(spec["charts"]) and len(data) >= len(spec["data"])
 
         schema_errors: list[str] = []
-        if data and sec_id in {1, 2, 3}:
+        if data and sec_id in {1, 2, 3, 4, 5, 6, 44}:
             schema_errors = _schema_errors_for_section(sec_id, Path(data[0]))
 
         validation[sec_id] = {
@@ -445,6 +599,48 @@ def validate_results() -> dict:
         }
     
     return validation
+
+
+def _cmd_output(cmd: list[str], *, cwd: Path | None = None, timeout: int = 10) -> str | None:
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(cwd) if cwd else None,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except Exception:
+        return None
+    text = (result.stdout or result.stderr or "").strip()
+    return text.splitlines()[0].strip() if text else None
+
+
+def collect_environment_metadata() -> dict[str, object]:
+    root = BENCHMARK_DIR.parent
+    git_commit = _cmd_output(["git", "rev-parse", "HEAD"], cwd=root)
+    git_status = _cmd_output(["git", "status", "--short"], cwd=root)
+    snarkjs_version = _cmd_output(["cmd", "/c", "cd circuits && npx snarkjs --version"], cwd=root)
+    return {
+        "python": sys.version.split()[0],
+        "python_executable": sys.executable,
+        "platform": platform.platform(),
+        "git_commit": git_commit,
+        "git_dirty": bool(git_status),
+        "node": _cmd_output(["node", "--version"]),
+        "circom": _cmd_output(["circom", "--version"]),
+        "snarkjs": snarkjs_version,
+        "ffmpeg": _cmd_output(["ffmpeg", "-version"]),
+        "cwd": str(root),
+        "path_has_ffmpeg": shutil.which("ffmpeg") is not None,
+        "env": {
+            "SEC1_USE_REAL_PROOF_PIPELINE": os.environ.get("SEC1_USE_REAL_PROOF_PIPELINE"),
+            "SEC1_FAST_MODE": os.environ.get("SEC1_FAST_MODE"),
+            "SEC2_FAST_MODE": os.environ.get("SEC2_FAST_MODE"),
+        },
+    }
 
 
 def print_summary(results: dict, validation: dict) -> None:
@@ -561,6 +757,7 @@ def main():
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "total_time": round(total_elapsed, 2),
         "sections_run": sections_to_run,
+        "environment": collect_environment_metadata(),
         "results": results,
         "validation": validation,
     }

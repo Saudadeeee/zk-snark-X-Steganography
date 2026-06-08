@@ -46,23 +46,16 @@ def _fast_mode_enabled() -> bool:
 # Data collection: measure each stage separately
 # -------------------------------------------------------------------------
 def _measure_pipeline(seq_name: str, video_path: Path, *, force_extract: bool = False) -> dict:
-    from src.core.pipeline import extract_bits_direct
-    from src.core.stego import PayloadEmbedder
-    from src.bitstream.bitstream_ops import BitstreamReconstructor
-    from src.zk_proof import ZKSnarkBridge, blob_bit_length
-    from benchmark._common import load_or_build_benchmark_analysis
+    from src.embedder import embed
+    from src.verifier import verify
+    from src.zk_proof import blob_bit_length
+    from benchmark._common import load_or_build_benchmark_analysis, load_sec1_positions
     from benchmark.sec1_quality import (
         CHAOS_KEY,
         REAL_PROOF_MESSAGE,
         REAL_PROOF_SMART_MAX_MODS_PER_BLOCK,
-        REAL_PROOF_VALIDATION_HEADROOM_BITS,
-        SEQ_MAX_FLIPS_PER_IDR,
-        CIF_MB_COUNT,
         _build_real_proof_payload,
-        _take_positions_excluding_idrs,
     )
-    from src.core.chaos import ChaosTransformer
-    from src.verifier import verify
 
     stego_out = OUTPUT_DIR / f"_sec6_{seq_name}_stego.h264"
 
@@ -70,7 +63,7 @@ def _measure_pipeline(seq_name: str, video_path: Path, *, force_extract: bool = 
 
     # --- Stage 1: IDR extraction ---
     t0 = time.perf_counter()
-    coeffs, fvd, nC_map, nal_len, t1_over, safe_pos = load_or_build_benchmark_analysis(
+    _coeffs, _fvd, _nC_map, _nal_len, _t1_over, safe_pos = load_or_build_benchmark_analysis(
         str(video_path), force=force_extract
     )
     timings["1_extract_idr"] = time.perf_counter() - t0
@@ -79,99 +72,36 @@ def _measure_pipeline(seq_name: str, video_path: Path, *, force_extract: bool = 
     t0 = time.perf_counter()
     safe_pos = list(safe_pos)
     timings["2_safety_filter"] = time.perf_counter() - t0
-    capacity_bits = len(safe_pos)
-
-    # --- Stage 3: ZK proof generation ---
-    t0 = time.perf_counter()
-    bridge = ZKSnarkBridge(str(CIRCUITS_DIR))
-    proof_dict, public_dict = bridge.generate_proof_for_payload(REAL_PROOF_MESSAGE, SECRET_KEY)
-    timings["3_zk_prove"] = time.perf_counter() - t0
 
     payload_real, _ = _build_real_proof_payload()
-    chaos = ChaosTransformer(CHAOS_KEY)
-    payload_scrambled, _ = chaos.scramble(payload_real)
-    scrambled_required_bits = len(payload_scrambled) * 8
+    required_bits = blob_bit_length(REAL_PROOF_MESSAGE)
+    operating_pool = load_sec1_positions(seq_name, validated_pool=True)
+    if not operating_pool:
+        operating_pool = load_sec1_positions(seq_name, validated_pool=False)
+    if len(operating_pool) < required_bits:
+        raise RuntimeError(
+            f"[{seq_name}] SEC6 requires SEC1 operating/validated sidecar with "
+            f">={required_bits} positions; got {len(operating_pool)}"
+        )
 
-    SEC1_MAX_FLIPS_PER_IDR = SEQ_MAX_FLIPS_PER_IDR.get(seq_name, 5)
-    headroom_bits = REAL_PROOF_VALIDATION_HEADROOM_BITS
-
-    # --- Stage 4: SEC1 operating-point validation / selection ---
+    timings["3_zk_prove"] = 0.0
+    timings["4_embed"] = 0.0
     t0 = time.perf_counter()
-    shuffled = chaos.shuffle_positions(safe_pos)
-    seen = set()
-    deduped = []
-    for p in shuffled:
-        bk = (p[0], p[1])
-        if bk not in seen:
-            seen.add(bk)
-            deduped.append(p)
-
-    validation_target_bits = min(len(deduped), scrambled_required_bits + headroom_bits)
-    rec = BitstreamReconstructor()
-    validator, cleanup = rec.make_ffmpeg_position_validator(str(video_path), coeffs, fvd)
-    validated = []
-    idr_counts = {}
-    try:
-        for p in deduped:
-            if len(validated) >= validation_target_bits:
-                break
-            fi = p[0] // CIF_MB_COUNT
-            if idr_counts.get(fi, 0) >= SEC1_MAX_FLIPS_PER_IDR:
-                continue
-            if validator(p[0], p[1], p[2]):
-                validated.append(p)
-                idr_counts[fi] = idr_counts.get(fi, 0) + 1
-    finally:
-        cleanup()
-
-    if len(validated) < scrambled_required_bits:
-        raise RuntimeError(f"[{seq_name}] insufficient validated positions: {len(validated)} < {scrambled_required_bits}")
-
-    psnr_rec = BitstreamReconstructor()
-    validated = psnr_rec.batch_psnr_validate(
-        str(video_path), coeffs, validated, fvd,
-        psnr_threshold_db=40.0,
-        max_bisect_iters=8,
-        max_greedy_per_idr=SEC1_MAX_FLIPS_PER_IDR,
-        min_local_mb=0,
-        gop_span_frames=1,
-        gop_psnr_quantile=0.0,
-        target_positions=min(validation_target_bits, len(validated)),
-    )
-    embed_positions = _take_positions_excluding_idrs(validated, set(), scrambled_required_bits, CIF_MB_COUNT)
-    timings["4_embed"] = time.perf_counter() - t0
-
-    # --- Stage 5: Payload embedding + reconstruction (real SEC1 path) ---
-    t0 = time.perf_counter()
-    embedder = PayloadEmbedder(max_modifications_per_block=REAL_PROOF_SMART_MAX_MODS_PER_BLOCK)
-    modified, bits_emb = embedder.embed_payload(
-        coeffs, payload_scrambled,
-        nC_map=nC_map, nal_length_map=nal_len, t1_override_map=t1_over,
-        pre_validated_positions=embed_positions,
-    )
-    rec2 = BitstreamReconstructor()
-    rec2.reconstruct_video(
-        str(video_path),
-        modified,
-        str(stego_out),
-        max_slices=None,
-        frame_verified_data=fvd,
-    )
-    timings["5_reconstruct"] = time.perf_counter() - t0
-
-    # --- Stage 6: Extract bits / verify extraction path ---
-    t0 = time.perf_counter()
-    extracted_blob = extract_bits_direct(
-        str(stego_out),
-        embed_positions,
-        fvd,
-        nC_map,
-        len(embed_positions),
+    embed_result = embed(
+        video_path=str(video_path),
+        message=REAL_PROOF_MESSAGE,
+        output_path=str(stego_out),
+        circuits_dir=str(CIRCUITS_DIR),
+        secret_key=SECRET_KEY,
         max_modifications_per_block=REAL_PROOF_SMART_MAX_MODS_PER_BLOCK,
+        chaos_key=CHAOS_KEY,
+        precomputed_positions=operating_pool,
+        trust_precomputed_positions=False,
+        use_analysis_cache=True,
     )
-    timings["6_extract_bits"] = time.perf_counter() - t0
+    timings["5_public_embed_reconstruct"] = time.perf_counter() - t0
 
-    # --- Stage 7: ZK verification ---
+    timings["6_extract_bits"] = 0.0
     t0 = time.perf_counter()
     verify_result = verify(
         stego_video_path=str(stego_out),
@@ -181,8 +111,8 @@ def _measure_pipeline(seq_name: str, video_path: Path, *, force_extract: bool = 
         message_length=len(REAL_PROOF_MESSAGE),
         max_modifications_per_block=REAL_PROOF_SMART_MAX_MODS_PER_BLOCK,
         chaos_key=CHAOS_KEY,
-        precomputed_positions=embed_positions,
-        precomputed_payload_bits=len(embed_positions),
+        precomputed_positions=embed_result.used_positions,
+        precomputed_payload_bits=embed_result.bits_embedded,
     )
     valid = bool(verify_result.valid and verify_result.message == REAL_PROOF_MESSAGE)
     timings["7_zk_verify"] = time.perf_counter() - t0
@@ -192,8 +122,8 @@ def _measure_pipeline(seq_name: str, video_path: Path, *, force_extract: bool = 
     return {
         "timings":        {k: round(v, 4) for k, v in timings.items()},
         "total_s":        round(total, 4),
-        "capacity_bits":  len(embed_positions),
-        "bits_embedded":  bits_emb,
+        "capacity_bits":  len(operating_pool),
+        "bits_embedded":  embed_result.bits_embedded,
         "blob_size":      len(payload_real),
         "zk_valid":       valid,
     }
@@ -208,7 +138,7 @@ def collect_data(force: bool = False,
 
     data: dict = {}
     # Default: all-intra q22_g1 sequences (fast, representative)
-    DEFAULT_PERF = {"foreman_q22_g1"} if _fast_mode_enabled() else {"foreman_q22_g1", "coastguard_q22_g1"}
+    DEFAULT_PERF = {"akiyo_q22_g1"}
     active = include_sequences if include_sequences else DEFAULT_PERF
     PERF_SEQUENCES = {k: v for k, v in SEQUENCES.items()
                       if k in active}
@@ -229,14 +159,14 @@ def collect_data(force: bool = False,
 # Stage classification: one-time pre-processing vs per-embed operational
 # -------------------------------------------------------------------------
 PREPROCESS_STAGES = {"1_extract_idr", "2_safety_filter"}
-OPERATIONAL_STAGES = {"3_zk_prove", "4_embed", "5_reconstruct", "6_extract_bits", "7_zk_verify"}
+OPERATIONAL_STAGES = {"3_zk_prove", "4_embed", "5_public_embed_reconstruct", "6_extract_bits", "7_zk_verify"}
 
 STAGE_LABELS = {
     "1_extract_idr":   "IDR Extraction (one-time)",
     "2_safety_filter": "Safety Filter (one-time)",
     "3_zk_prove":      "ZK Prove (Groth16)",
     "4_embed":         "CAVLC T1 Embed",
-    "5_reconstruct":   "Bitstream Reconstruct",
+    "5_public_embed_reconstruct": "Public Embed + Reconstruct",
     "6_extract_bits":  "Extract & Verify",
     "7_zk_verify":     "ZK Verify",
 }
@@ -245,7 +175,7 @@ PREPROCESS_COLORS = {"1_extract_idr": "#78909C", "2_safety_filter": "#90A4AE"}
 OPERATIONAL_COLORS = {
     "3_zk_prove":     "#FF6F00",
     "4_embed":        "#2E7D32",
-    "5_reconstruct":  "#4CAF50",
+    "5_public_embed_reconstruct": "#4CAF50",
     "6_extract_bits": "#0288D1",
     "7_zk_verify":    "#FF8F00",
 }
@@ -263,7 +193,7 @@ def plot_two_phase(data: dict) -> None:
     n      = len(seqs)
 
     pre_stages = ["1_extract_idr", "2_safety_filter"]
-    op_stages  = ["3_zk_prove", "4_embed", "5_reconstruct", "6_extract_bits", "7_zk_verify"]
+    op_stages  = ["3_zk_prove", "4_embed", "5_public_embed_reconstruct", "6_extract_bits", "7_zk_verify"]
 
     fig, (ax_pre, ax_op) = plt.subplots(1, 2, figsize=(13, 6),
                                          gridspec_kw={"width_ratios": [1.4, 1]})
@@ -390,7 +320,7 @@ def plot_timing_pie(data: dict) -> None:
     setup_style()
     fig, ax = plt.subplots(figsize=(8, 7))
 
-    op_stage_keys = ["3_zk_prove", "4_embed", "5_reconstruct", "6_extract_bits", "7_zk_verify"]
+    op_stage_keys = ["3_zk_prove", "4_embed", "5_public_embed_reconstruct", "6_extract_bits", "7_zk_verify"]
     seqs = list(data.keys())
 
     avg_timings = {

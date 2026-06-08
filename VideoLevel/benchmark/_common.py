@@ -417,6 +417,7 @@ def measure_patchable_usable_bits(
         list(safe_positions),
         frame_verified_data,
         required_bits=target_bits,
+        max_modifications_per_block=max_modifications_per_block,
     )
     usable_positions = _limit_positions_per_block(
         usable_positions,

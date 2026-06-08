@@ -1,0 +1,8 @@
+# Locked Python runtime dependencies for the current audited baseline.
+# Generated from the local environment on 2026-06-08.
+
+numpy==2.2.6
+matplotlib==3.10.8
+scipy==1.17.0
+scikit-image==0.26.0
+cryptography==46.0.5

@@ -19,6 +19,7 @@ LOCKED_CHAOS_KEY = b"sec1_benchmark_chaos_v1"
 LOCKED_MESSAGE = b"ZK-bench-v1.0!"
 
 DEFAULT_PREFERRED_SEQUENCES = [
+    "akiyo_q22_g1",
     "coastguard_q22_g1",
     "deadline_q22_g1",
     "coastguard_q22_g1_1000f",
@@ -54,6 +55,8 @@ def load_best_locked_operating_contract(
         stego_path = OUTPUT_DIR / f"sec1_stego_{seq_name}.h264"
         positions = load_sec1_positions(seq_name, validated_pool=False)
         meta = load_sec1_meta(seq_name) or {}
+        if meta.get("verify_valid") is not True or meta.get("verify_message_match") is not True:
+            continue
         bits_required_now = int(meta.get("bits_required") or len(positions))
         if not positions or not stego_path.exists():
             continue

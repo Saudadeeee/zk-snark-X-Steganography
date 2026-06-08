@@ -27,6 +27,7 @@ from src.embedder import embed
 from src.exceptions import InsufficientCapacityError
 from src.verifier import verify
 from benchmark._common import (
+    load_sec1_positions,
     measure_patchable_usable_bits,
 )
 from benchmark.locked_operating_contract import (
@@ -91,6 +92,16 @@ def _first_embeddable_video(message: bytes) -> str | None:
     return best_video
 
 
+def _validated_pool_for_video(video: str) -> list[tuple[int, int, int]]:
+    required_bits = (4 + len(TEST_MSG) + 129) * 8
+    contract = load_best_locked_operating_contract(required_bits=required_bits)
+    if contract is None:
+        return []
+    if os.path.abspath(contract.video_path) != os.path.abspath(video):
+        return []
+    return load_sec1_positions(contract.sequence_name, validated_pool=True)
+
+
 def _cleanup_output(base_path: str) -> None:
     for path in (
         base_path,
@@ -114,8 +125,7 @@ def t_embed_api_sidecars_exist():
 
     out = get_output("test_p5_api_small.h264")
     try:
-        contract = load_best_locked_operating_contract(required_bits=(4 + len(TEST_MSG) + 129) * 8)
-        operating_positions = contract.positions if contract and contract.video_path == video else []
+        candidate_pool = _validated_pool_for_video(video)
         try:
             result = embed(
                 video_path=video,
@@ -123,8 +133,8 @@ def t_embed_api_sidecars_exist():
                 output_path=out,
                 circuits_dir=CIRCUITS_DIR,
                 secret_key=SECRET_KEY,
-                precomputed_positions=operating_positions or None,
-                trust_precomputed_positions=bool(operating_positions),
+                precomputed_positions=candidate_pool or None,
+                trust_precomputed_positions=False,
                 use_analysis_cache=True,
             )
         except InsufficientCapacityError:
@@ -153,8 +163,7 @@ def t_zk_full_pipeline():
 
     out = get_output("test_p5_zk_api.h264")
     try:
-        contract = load_best_locked_operating_contract(required_bits=(4 + len(TEST_MSG) + 129) * 8)
-        operating_positions = contract.positions if contract and contract.video_path == video else []
+        candidate_pool = _validated_pool_for_video(video)
         try:
             result = embed(
                 video_path=video,
@@ -162,8 +171,8 @@ def t_zk_full_pipeline():
                 output_path=out,
                 circuits_dir=CIRCUITS_DIR,
                 secret_key=SECRET_KEY,
-                precomputed_positions=operating_positions or None,
-                trust_precomputed_positions=bool(operating_positions),
+                precomputed_positions=candidate_pool or None,
+                trust_precomputed_positions=False,
                 use_analysis_cache=True,
             )
         except InsufficientCapacityError:

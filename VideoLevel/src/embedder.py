@@ -55,6 +55,7 @@ def _prune_patchable_positions(
     safe_positions: list[tuple[int, int, int]],
     frame_verified_data: dict,
     required_bits: int,
+    max_modifications_per_block: int = 1,
 ) -> list[tuple[int, int, int]]:
     """
     Keep only positions whose blocks are bitstream-patchable.
@@ -76,6 +77,7 @@ def _prune_patchable_positions(
 
     idr_desc = sorted(frame_verified_data.keys(), reverse=True)
     retained: list[tuple[int, int, int]] = []
+    retained_block_counts: dict[tuple[int, int], int] = {}
     idr_context: dict[int, tuple[dict, dict, bytes]] = {}
 
     for idr_off, (g_off, _g_blk, nal_rbsp) in frame_verified_data.items():
@@ -105,7 +107,15 @@ def _prune_patchable_positions(
         )
         if match is None:
             continue
-        retained.extend(block_to_positions[(mb, blk)])
+        block_count = retained_block_counts.get((mb, blk), 0)
+        for pos in block_to_positions[(mb, blk)]:
+            if block_count >= max_modifications_per_block:
+                break
+            retained.append(pos)
+            block_count += 1
+            if len(retained) >= required_bits:
+                break
+        retained_block_counts[(mb, blk)] = block_count
         if len(retained) >= required_bits:
             break
 
@@ -321,10 +331,13 @@ def embed(
             ffmpeg_validated_bits = len(safe_positions)
 
         # 4d. Keep only positions whose blocks are patchable in the original bitstream.
+        required_positions = len(payload_blob) * 8
+        headroom_positions = max(required_positions + 256, int(required_positions * 1.30))
         safe_positions = _prune_patchable_positions(
             safe_positions,
             frame_verified_data,
-            required_bits=len(payload_blob) * 8,
+            required_bits=headroom_positions,
+            max_modifications_per_block=max_modifications_per_block,
         )
         safe_positions = _limit_positions_per_block(
             safe_positions,
@@ -339,36 +352,7 @@ def embed(
     if requested_position_bits is None:
         requested_position_bits = len(safe_positions)
 
-    # 5. Embed payload using pre-validated (and optionally chaos-shuffled) positions
-    embedder = PayloadEmbedder(max_modifications_per_block=max_modifications_per_block)
-    modified, bits_embedded = embedder.embed_payload(
-        coefficients, payload_blob,
-        nC_map=nC_map,
-        nal_length_map=nal_length_map,
-        t1_override_map=t1_override_map,
-        frame_verified_data=frame_verified_data,
-        ffmpeg_validator=None,          # already pre-validated above
-        pre_validated_positions=safe_positions,
-    )
-
     required_bits = len(payload_blob) * 8
-    if bits_embedded < required_bits:
-        raise InsufficientCapacityError(
-            required_bits=required_bits,
-            available_bits=bits_embedded,
-            stage="pre_reconstruct_embedding",
-            raw_safe_bits=raw_safe_bits,
-            ffmpeg_validated_bits=ffmpeg_validated_bits,
-            patchable_usable_bits=patchable_usable_bits,
-            requested_position_bits=requested_position_bits,
-            trust_precomputed_positions=trust_precomputed_positions,
-            chaos_enabled=bool(chaos is not None),
-        )
-
-    used_positions = [
-        (int(mb), int(blk), int(cidx))
-        for mb, blk, cidx in getattr(embedder, "last_used_safe_positions", [])
-    ]
 
     # 6. Reconstruct stego video
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
@@ -378,34 +362,85 @@ def embed(
         force_refresh=force_analysis_refresh,
         cache_dir=analysis_cache_dir,
     )
-    rec2 = BitstreamReconstructor()
-    reconstruction_stats = rec2.reconstruct_video(
-        video_path, modified, output_path,
-        max_slices=None,
-        frame_verified_data=frame_verified_data,
-        reconstruction_context=reconstruction_context,
-    )
+    blocked_reconstruct_blocks: set[tuple[int, int]] = set()
+    used_positions: list[tuple[int, int, int]] = []
+    bits_embedded = 0
+    applied_position_bits = 0
+    for _attempt in range(12):
+        candidate_positions = [
+            (int(mb), int(blk), int(cidx))
+            for mb, blk, cidx in safe_positions
+            if (int(mb), int(blk)) not in blocked_reconstruct_blocks
+        ]
 
-    if trust_precomputed_positions and precomputed_positions is not None:
-        bits_embedded = len(used_positions)
-        applied_position_bits = len(used_positions)
-    else:
+        embedder = PayloadEmbedder(max_modifications_per_block=max_modifications_per_block)
+        modified, bits_embedded = embedder.embed_payload(
+            coefficients, payload_blob,
+            nC_map=nC_map,
+            nal_length_map=nal_length_map,
+            t1_override_map=t1_override_map,
+            frame_verified_data=frame_verified_data,
+            ffmpeg_validator=None,
+            pre_validated_positions=candidate_positions,
+        )
+
+        if bits_embedded < required_bits:
+            raise InsufficientCapacityError(
+                required_bits=required_bits,
+                available_bits=bits_embedded,
+                stage="pre_reconstruct_embedding",
+                raw_safe_bits=raw_safe_bits,
+                ffmpeg_validated_bits=ffmpeg_validated_bits,
+                patchable_usable_bits=patchable_usable_bits,
+                requested_position_bits=requested_position_bits,
+                trust_precomputed_positions=trust_precomputed_positions,
+                chaos_enabled=bool(chaos is not None),
+            )
+
+        used_positions = [
+            (int(mb), int(blk), int(cidx))
+            for mb, blk, cidx in getattr(embedder, "last_used_safe_positions", [])
+        ]
+        modified_block_keys = {
+            (int(mb), int(blk))
+            for mb, blk, _coeffs in modified
+        }
+
+        rec2 = BitstreamReconstructor()
+        reconstruction_stats = rec2.reconstruct_video(
+            video_path, modified, output_path,
+            max_slices=None,
+            frame_verified_data=frame_verified_data,
+            reconstruction_context=reconstruction_context,
+        )
+
+        if trust_precomputed_positions and precomputed_positions is not None:
+            bits_embedded = len(used_positions)
+            applied_position_bits = len(used_positions)
+            break
+
         applied_block_keys = {
             (int(mb), int(blk))
             for mb, blk in reconstruction_stats.get("applied_block_keys", [])
         }
-        if applied_block_keys:
-            used_positions = [
-                (mb, blk, cidx)
-                for mb, blk, cidx in used_positions
-                if (mb, blk) in applied_block_keys
-            ]
+        filtered_positions = [
+            (mb, blk, cidx)
+            for mb, blk, cidx in used_positions
+            if (mb, blk) not in modified_block_keys or (mb, blk) in applied_block_keys
+        ]
+        missing_modified_blocks = modified_block_keys - applied_block_keys
+        if len(filtered_positions) >= required_bits:
+            used_positions = filtered_positions[:required_bits]
             bits_embedded = len(used_positions)
             applied_position_bits = len(used_positions)
-        else:
-            used_positions = []
-            bits_embedded = 0
-            applied_position_bits = 0
+            break
+
+        blocked_reconstruct_blocks.update(missing_modified_blocks)
+        used_positions = filtered_positions
+        bits_embedded = len(used_positions)
+        applied_position_bits = len(used_positions)
+        if not missing_modified_blocks:
+            break
 
     if bits_embedded < required_bits:
         raise InsufficientCapacityError(

@@ -1,65 +1,43 @@
 {
   "__meta__": {
     "sequence_names": [
-      "coastguard_q22_g1",
-      "deadline_q22_g1"
+      "akiyo_q22_g1"
     ],
     "positions_mtimes": {
-      "coastguard_q22_g1": 1777925079.0644836,
-      "deadline_q22_g1": 1777928954.7993388
+      "akiyo_q22_g1": 1780888356.13312
     }
   },
   "data": {
-    "coastguard_q22_g1": {
-      "raw_safe_bits": 433256,
-      "raw_safe_bytes": 54157,
-      "patchable_usable_bits": 1391,
-      "validated_bits": 1316,
+    "akiyo_q22_g1": {
+      "raw_safe_bits": 413415,
+      "raw_safe_bytes": 51676,
+      "patchable_usable_bits": 2000,
+      "validated_pool_bits": 1449,
       "operating_bits": 1232,
       "ffmpeg_validated_bits": null,
       "requested_position_bits": null,
       "applied_position_bits": null,
-      "validation_mode": "real_proof_allintra_chaos_v5_ffmpeg_validated",
+      "validation_mode": "real_proof_public_api_quality_validated_allintra",
       "zk_blob_bits": 1232,
       "zk_payload_bits": 1176,
-      "utilization_pct": 0.284,
+      "utilization_pct": 0.298,
       "fractions_pct": [
         25,
+        50,
+        75,
         100
       ],
       "bits_at_fraction": [
         304,
+        616,
+        920,
         1232
       ],
       "psnr_at_fraction": [
-        56.46858215332031,
-        50.9745979309082
-      ]
-    },
-    "deadline_q22_g1": {
-      "raw_safe_bits": 1775749,
-      "raw_safe_bytes": 221968,
-      "patchable_usable_bits": 1383,
-      "validated_bits": 1321,
-      "operating_bits": 1232,
-      "ffmpeg_validated_bits": null,
-      "requested_position_bits": null,
-      "applied_position_bits": null,
-      "validation_mode": "real_proof_allintra_chaos_v5_ffmpeg_validated",
-      "zk_blob_bits": 1232,
-      "zk_payload_bits": 1176,
-      "utilization_pct": 0.069,
-      "fractions_pct": [
-        25,
-        100
-      ],
-      "bits_at_fraction": [
-        304,
-        1232
-      ],
-      "psnr_at_fraction": [
-        59.04975891113281,
-        57.123046875
+        56.991729736328125,
+        54.893611907958984,
+        53.57624816894531,
+        52.31272888183594
       ]
     }
   }

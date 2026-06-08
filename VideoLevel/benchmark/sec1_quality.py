@@ -26,6 +26,14 @@ from benchmark._common import (
 )
 
 from benchmark._common import OUTPUT_DIR, CIRCUITS_DIR, RESULTS_DIR
+from src.manifest import (
+    EmbeddingMetadata,
+    PayloadMetadata,
+    ProofMetadata,
+    StegoManifest,
+    VideoMetadata,
+    compute_file_hash,
+)
 
 SECRET_KEY = bytes(range(32))  # Fixed key for reproducibility
 CHAOS_KEY = b"sec1_benchmark_chaos_v1"  # Deterministic chaos key for reproducibility
@@ -326,6 +334,20 @@ def _stego_validated_pool_path(out_path: Path) -> Path:
     return out_path.parent / f"{out_path.name}{SEC1_VALIDATED_POOL_SUFFIX}"
 
 
+def _cleanup_sec1_artifacts(out_path: Path) -> None:
+    for path in (
+        out_path,
+        _stego_meta_path(out_path),
+        _stego_positions_path(out_path),
+        _stego_validated_pool_path(out_path),
+        out_path.parent / f"{out_path.name}.manifest.json",
+    ):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def _read_stego_metadata(meta_path: Path) -> dict | None:
     if not meta_path.exists():
         return None
@@ -347,6 +369,7 @@ def _write_stego_metadata(
     bits_required: int,
     validation_mode: str,
     effective_threshold_db: float | None,
+    verify_info: dict[str, object] | None = None,
 ) -> None:
     try:
         source_video_text = str(video_path.resolve())
@@ -362,6 +385,8 @@ def _write_stego_metadata(
         "validation_threshold_db": QUALITY_TARGET_PSNR_FRAME_MIN_DB if QUALITY_ENFORCE_FRAME_MIN_PSNR else None,
         "validation_threshold_db_effective": effective_threshold_db,
     }
+    if verify_info:
+        payload.update(verify_info)
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=True, indent=2)
 
@@ -389,6 +414,11 @@ def _can_reuse_stego_output(video_path: Path, out_path: Path, meta_path: Path) -
         return False
     if meta.get("cache_fingerprint") != _sec1_cache_fingerprint():
         return False
+    if USE_REAL_PROOF_EMBED_PIPELINE:
+        if meta.get("verify_valid") is not True or meta.get("verify_message_match") is not True:
+            return False
+        if not _stego_positions_path(out_path).exists():
+            return False
     return True
 
 
@@ -478,6 +508,52 @@ def _write_positions_json(path: Path, positions: list[tuple[int, int, int]]) -> 
         )
 
 
+def _write_manifest_json(
+    path: Path,
+    *,
+    video_path: Path,
+    message_length: int,
+    bits_embedded: int,
+    bits_required: int,
+    positions_count: int,
+    proof_size_bytes: int,
+    constraint_count: int,
+    chaos_original_bits: int | None,
+    validation_threshold_db: float | None,
+) -> None:
+    manifest = StegoManifest(
+        payload=PayloadMetadata(
+            message_length=message_length,
+            bits_embedded=bits_embedded,
+            bits_required=bits_required,
+            chaos_enabled=chaos_original_bits is not None,
+            chaos_original_bits=chaos_original_bits,
+            chaos_expansion_factor=(
+                bits_required / chaos_original_bits
+                if chaos_original_bits else 1.0
+            ),
+        ),
+        embedding=EmbeddingMetadata(
+            strategy="t1_sign_flip",
+            max_modifications_per_block=REAL_PROOF_SMART_MAX_MODS_PER_BLOCK,
+            positions_count=positions_count,
+            validation_threshold_db=validation_threshold_db,
+        ),
+        video=VideoMetadata(
+            file_path=str(video_path),
+            file_hash=compute_file_hash(str(video_path)),
+            codec="h264",
+            profile="baseline",
+        ),
+        proof=ProofMetadata(
+            proof_system="groth16",
+            proof_size_bytes=proof_size_bytes,
+            constraint_count=constraint_count,
+        ),
+    )
+    manifest.save(str(path))
+
+
 def _verify_sec1_stego(
     *,
     seq_name: str,
@@ -543,6 +619,7 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
             meta_path.unlink(missing_ok=True)
             positions_path.unlink(missing_ok=True)
             validated_pool_path.unlink(missing_ok=True)
+            (out_path.parent / f"{out_path.name}.manifest.json").unlink(missing_ok=True)
         elif _can_reuse_stego_output(video_path, out_path, meta_path):
             meta = _read_stego_metadata(meta_path) or {}
             return (
@@ -557,6 +634,7 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
             meta_path.unlink(missing_ok=True)
             positions_path.unlink(missing_ok=True)
             validated_pool_path.unlink(missing_ok=True)
+            (out_path.parent / f"{out_path.name}.manifest.json").unlink(missing_ok=True)
 
     payload = PAYLOAD
 
@@ -570,6 +648,175 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
         _is_all_intra = (_gop == 1)
 
         if _is_all_intra:
+            out_path = STEGO_OUTPUTS[seq_name]
+            meta_path = _stego_meta_path(out_path)
+            if out_path.exists():
+                out_path.unlink()
+                meta_path.unlink(missing_ok=True)
+                _stego_positions_path(out_path).unlink(missing_ok=True)
+                _stego_validated_pool_path(out_path).unlink(missing_ok=True)
+                (out_path.parent / f"{out_path.name}.manifest.json").unlink(missing_ok=True)
+
+            from src.core.chaos import ChaosTransformer
+
+            payload_real, real_required_bits = _build_real_proof_payload()
+            chaos = ChaosTransformer(CHAOS_KEY)
+            payload_scrambled, _ = chaos.scramble(payload_real)
+            scrambled_required_bits = len(payload_scrambled) * 8
+            headroom_bits = (
+                REAL_PROOF_VALIDATION_HEADROOM_BITS_QP32
+                if "_q32_g1" in seq_name
+                else REAL_PROOF_VALIDATION_HEADROOM_BITS
+            )
+            headroom_bits = max(headroom_bits, 384)
+            validation_target_bits = scrambled_required_bits + headroom_bits
+
+            coeffs_ai, fvd_ai, _nC_ai, _nal_ai, _t1_ai, safe_pos_ai = load_or_build_benchmark_analysis(
+                video_path,
+                force=force,
+            )
+
+            shuffled_pool = chaos.shuffle_positions(safe_pos_ai)
+            seen_blocks: set[tuple[int, int]] = set()
+            deduped_pool: list[tuple[int, int, int]] = []
+            for pos in shuffled_pool:
+                key = (int(pos[0]), int(pos[1]))
+                if key in seen_blocks:
+                    continue
+                seen_blocks.add(key)
+                deduped_pool.append((int(pos[0]), int(pos[1]), int(pos[2])))
+
+            validator_rec = BitstreamReconstructor()
+            validator, cleanup = validator_rec.make_ffmpeg_position_validator(
+                str(video_path),
+                coeffs_ai,
+                fvd_ai,
+            )
+            candidate_pool: list[tuple[int, int, int]] = []
+            idr_counts: dict[int, int] = {}
+            try:
+                for pos in deduped_pool:
+                    if len(candidate_pool) >= validation_target_bits:
+                        break
+                    frame_idx = int(pos[0]) // CIF_MB_COUNT
+                    if idr_counts.get(frame_idx, 0) >= SEQ_MAX_FLIPS_PER_IDR.get(seq_name, 5):
+                        continue
+                    if validator(pos[0], pos[1], pos[2]):
+                        candidate_pool.append(pos)
+                        idr_counts[frame_idx] = idr_counts.get(frame_idx, 0) + 1
+            finally:
+                cleanup()
+
+            if len(candidate_pool) < scrambled_required_bits:
+                raise RuntimeError(
+                    f"[{seq_name}] FFmpeg-validated public pool under-filled "
+                    f"{len(candidate_pool)}/{scrambled_required_bits} bits"
+                )
+            validation_target_bits = min(validation_target_bits, len(candidate_pool))
+
+            if _fast_mode:
+                print(f"  [{seq_name}] fast mode: skipping public-pool PSNR re-validation")
+            else:
+                print(f"  [{seq_name}] PSNR re-validating public pool {len(candidate_pool)} positions ...")
+                psnr_rec_ai = BitstreamReconstructor()
+                candidate_pool = psnr_rec_ai.batch_psnr_validate(
+                    str(video_path),
+                    coeffs_ai,
+                    candidate_pool,
+                    fvd_ai,
+                    psnr_threshold_db=40.0,
+                    max_bisect_iters=8,
+                    max_greedy_per_idr=SEQ_MAX_FLIPS_PER_IDR.get(seq_name, 5),
+                    min_local_mb=0,
+                    gop_span_frames=1,
+                    gop_psnr_quantile=0.0,
+                    target_positions=validation_target_bits,
+                )
+                if len(candidate_pool) < scrambled_required_bits:
+                    raise RuntimeError(
+                        f"[{seq_name}] PSNR-validated public pool under-filled "
+                        f"{len(candidate_pool)}/{scrambled_required_bits} bits"
+                    )
+
+            result = None
+            blocked_quality_frames: set[int] = set()
+            for quality_retry in range(4):
+                active_pool = [
+                    pos for pos in candidate_pool
+                    if (int(pos[0]) // CIF_MB_COUNT) not in blocked_quality_frames
+                ]
+                if len(active_pool) < scrambled_required_bits:
+                    raise RuntimeError(
+                        f"[{seq_name}] quality pool under-filled after frame removals "
+                        f"{len(active_pool)}/{scrambled_required_bits} bits"
+                    )
+                result = real_embed(
+                    video_path=str(video_path),
+                    message=REAL_PROOF_MESSAGE,
+                    output_path=str(out_path),
+                    circuits_dir=str(CIRCUITS_DIR),
+                    secret_key=SECRET_KEY,
+                    max_modifications_per_block=REAL_PROOF_SMART_MAX_MODS_PER_BLOCK,
+                    chaos_key=CHAOS_KEY,
+                    precomputed_positions=active_pool,
+                    trust_precomputed_positions=False,
+                    use_analysis_cache=True,
+                )
+                if not out_path.exists() or out_path.stat().st_size == 0:
+                    raise RuntimeError(f"Stego video not created: {out_path}")
+                if _fast_mode:
+                    break
+                modified_frames = sorted({
+                    int(mb // CIF_MB_COUNT)
+                    for mb, _, _ in (result.used_positions or [])
+                })
+                qv = compute_quality_subset(
+                    str(video_path),
+                    str(out_path),
+                    modified_frames,
+                    include_ssim=False,
+                )
+                bad_frames = [
+                    frm for frm, psnr_val in zip(qv["frame_indices"], qv["psnr_per_frame"])
+                    if psnr_val < 40.0
+                ]
+                if not bad_frames:
+                    break
+                blocked_quality_frames.update(bad_frames)
+                print(
+                    f"  [{seq_name}] public-pool post-embed PSNR retry {quality_retry + 1}: "
+                    f"removing {len(bad_frames)} IDR frame(s)"
+                )
+            if result is None:
+                raise RuntimeError(f"[{seq_name}] public API embed did not run")
+
+            verify_info = _verify_sec1_stego(
+                seq_name=seq_name,
+                original_video=video_path,
+                stego_video=out_path,
+                operating_positions=result.used_positions,
+            )
+            _write_stego_metadata(
+                meta_path,
+                video_path=video_path,
+                bits_embedded=int(result.bits_embedded),
+                bits_required=scrambled_required_bits,
+                validation_mode="real_proof_public_api_quality_validated_allintra",
+                effective_threshold_db=(
+                    QUALITY_TARGET_PSNR_FRAME_MIN_DB
+                    if QUALITY_ENFORCE_FRAME_MIN_PSNR else None
+                ),
+                verify_info=verify_info,
+            )
+            _write_positions_json(_stego_validated_pool_path(out_path), active_pool)
+            return (
+                out_path,
+                int(result.bits_embedded),
+                scrambled_required_bits,
+                "real_proof_public_api_quality_validated_allintra",
+                QUALITY_TARGET_PSNR_FRAME_MIN_DB if QUALITY_ENFORCE_FRAME_MIN_PSNR else None,
+            )
+
             # All-intra (GOP=1): chaos shuffle + FFmpeg per-position validation.
             # 1. Chaos-shuffle safe positions (temporal distribution across all IDR frames).
             # 2. Deduplicate by (mb, block) to guarantee max_mods_per_block=1 compatibility.
@@ -613,6 +860,40 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
                 if _bk not in _seen_blk_ai:
                     _seen_blk_ai.add(_bk)
                     _deduped_ai.append(_p)
+
+            _patchable_ai: list = []
+            _idr_offsets_ai = sorted(fvd_ai.keys(), reverse=True)
+            _idr_context_ai: dict[int, tuple[dict, dict, bytes]] = {}
+            from src.bitstream.bitstream_ops import BitstreamPatcher
+
+            _bitstream_patcher = BitstreamPatcher()
+            for _idr_off, (_g_off, _g_blk, _nal_rbsp) in fvd_ai.items():
+                _local_offsets = {
+                    (_gmb - _idr_off, _gblk): _od
+                    for (_gmb, _gblk), _od in _g_off.items()
+                    if _gblk < 16 and _od.get("bit_length") not in (None, 0)
+                }
+                _end_to_block = {
+                    _od["end_bit"]: ((_gmb - _idr_off, _gblk), _od)
+                    for (_gmb, _gblk), _od in _g_off.items()
+                    if _gblk < 16 and "end_bit" in _od
+                }
+                _idr_context_ai[_idr_off] = (_local_offsets, _end_to_block, _nal_rbsp)
+
+            for _p in _deduped_ai:
+                _idr_off = next((_off for _off in _idr_offsets_ai if _off <= _p[0]), None)
+                if _idr_off is None:
+                    continue
+                _local_offsets, _end_to_block, _nal_rbsp = _idr_context_ai.get(_idr_off, ({}, {}, b""))
+                _local_key = (_p[0] - _idr_off, _p[1])
+                if _bitstream_patcher.validate_block_patchability(
+                    _nal_rbsp,
+                    _local_key,
+                    _local_offsets.get(_local_key, {}),
+                    _end_to_block,
+                ) is not None:
+                    _patchable_ai.append(_p)
+            _deduped_ai = _patchable_ai
 
             _headroom_bits = (
                 REAL_PROOF_VALIDATION_HEADROOM_BITS_QP32
@@ -688,41 +969,81 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
                 _validated_ai = _psnr_validated
 
             _bad_idr_set: set[int] = set()
-            _embed_positions = _take_positions_excluding_idrs(
-                _validated_ai, _bad_idr_set, scrambled_required_bits, CIF_MB_COUNT
-            )
-            _idr_counts: dict[int, int] = {}
-            for _mb, _, _ in _embed_positions:
-                _fi = _mb // CIF_MB_COUNT
-                _idr_counts[_fi] = _idr_counts.get(_fi, 0) + 1
-            print(f"  [{seq_name}] chaos_v5_ffmpeg_validated: {len(_embed_positions)} bits "
-                  f"across {len(_idr_counts)} IDR frames "
-                  f"(avg {len(_embed_positions) / max(1, len(_idr_counts)):.1f} bits/frame)")
+            _blocked_blocks: set[tuple[int, int]] = set()
+            _embed_positions: list[tuple[int, int, int]] = []
+            bits_embedded_ai = 0
+            for _reconstruct_retry in range(5):
+                _candidate_pool = [
+                    _p for _p in _validated_ai
+                    if (_p[0], _p[1]) not in _blocked_blocks
+                ]
+                _embed_positions = _take_positions_excluding_idrs(
+                    _candidate_pool, _bad_idr_set, scrambled_required_bits, CIF_MB_COUNT
+                )
+                _idr_counts: dict[int, int] = {}
+                for _mb, _, _ in _embed_positions:
+                    _fi = _mb // CIF_MB_COUNT
+                    _idr_counts[_fi] = _idr_counts.get(_fi, 0) + 1
+                print(f"  [{seq_name}] chaos_v5_ffmpeg_validated: {len(_embed_positions)} bits "
+                      f"across {len(_idr_counts)} IDR frames "
+                      f"(avg {len(_embed_positions) / max(1, len(_idr_counts)):.1f} bits/frame)")
 
-            emb_ai = PayloadEmbedder(
-                max_modifications_per_block=REAL_PROOF_SMART_MAX_MODS_PER_BLOCK
-            )
-            modified_ai, bits_embedded_ai = emb_ai.embed_payload(
-                coeffs_ai, payload_scrambled,
-                nC_map=nC_ai, nal_length_map=nal_ai, t1_override_map=t1_ai,
-                ffmpeg_validator=None,
-                pre_validated_positions=_embed_positions,
-            )
-
-            if bits_embedded_ai < _bits_to_embed:
-                raise RuntimeError(
-                    f"[{seq_name}] Only embedded {bits_embedded_ai}/{_bits_to_embed} bits"
+                emb_ai = PayloadEmbedder(
+                    max_modifications_per_block=REAL_PROOF_SMART_MAX_MODS_PER_BLOCK
+                )
+                modified_ai, bits_embedded_ai = emb_ai.embed_payload(
+                    coeffs_ai, payload_scrambled,
+                    nC_map=nC_ai, nal_length_map=nal_ai, t1_override_map=t1_ai,
+                    ffmpeg_validator=None,
+                    pre_validated_positions=_embed_positions,
                 )
 
-            os.makedirs(os.path.dirname(os.path.abspath(str(out_path))), exist_ok=True)
-            _rec_ai2 = BitstreamReconstructor()
-            _rec_ai2.reconstruct_video(
-                str(video_path), modified_ai, str(out_path),
-                frame_verified_data=fvd_ai,
-                max_slices=None,
-            )
-            if not out_path.exists() or out_path.stat().st_size == 0:
-                raise RuntimeError(f"Stego video not created: {out_path}")
+                if bits_embedded_ai < _bits_to_embed:
+                    raise RuntimeError(
+                        f"[{seq_name}] Only embedded {bits_embedded_ai}/{_bits_to_embed} bits"
+                    )
+
+                os.makedirs(os.path.dirname(os.path.abspath(str(out_path))), exist_ok=True)
+                _rec_ai2 = BitstreamReconstructor()
+                _recon_stats_ai = _rec_ai2.reconstruct_video(
+                    str(video_path), modified_ai, str(out_path),
+                    frame_verified_data=fvd_ai,
+                    max_slices=None,
+                )
+                if not out_path.exists() or out_path.stat().st_size == 0:
+                    raise RuntimeError(f"Stego video not created: {out_path}")
+
+                _used_positions_ai = [
+                    (int(_mb), int(_blk), int(_cidx))
+                    for _mb, _blk, _cidx in getattr(emb_ai, "last_used_safe_positions", [])
+                ]
+                _modified_blocks_ai = {
+                    (int(_mb), int(_blk))
+                    for _mb, _blk, _coeffs in modified_ai
+                }
+                _applied_blocks_ai = {
+                    (int(_mb), int(_blk))
+                    for _mb, _blk in _recon_stats_ai.get("applied_block_keys", [])
+                }
+                _filtered_positions_ai = [
+                    (_mb, _blk, _cidx)
+                    for _mb, _blk, _cidx in _used_positions_ai
+                    if (_mb, _blk) not in _modified_blocks_ai or (_mb, _blk) in _applied_blocks_ai
+                ]
+                if len(_filtered_positions_ai) >= scrambled_required_bits:
+                    _embed_positions = _filtered_positions_ai[:scrambled_required_bits]
+                    bits_embedded_ai = len(_embed_positions)
+                    break
+                _missing_blocks_ai = _modified_blocks_ai - _applied_blocks_ai
+                _blocked_blocks.update(_missing_blocks_ai)
+                if not _missing_blocks_ai:
+                    break
+
+            if len(_embed_positions) < scrambled_required_bits:
+                raise RuntimeError(
+                    f"[{seq_name}] reconstruction-aware embed under-filled "
+                    f"{len(_embed_positions)}/{scrambled_required_bits} bits"
+                )
 
             # Post-embed PSNR check: _apply_mod in batch_psnr_validate tests
             # unconditional sign flips, but embed_payload applies conditional
@@ -748,8 +1069,12 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
                     f"  [{seq_name}] post-embed PSNR (iter {_psnr_retry + 1}): "
                     f"frames {_bad_idr_frames} below 40 dB — removing {len(_bad_idr_frames)} IDR(s)"
                 )
+                _candidate_pool = [
+                    _p for _p in _validated_ai
+                    if (_p[0], _p[1]) not in _blocked_blocks
+                ]
                 _embed_positions = _take_positions_excluding_idrs(
-                    _validated_ai, _bad_idr_set, scrambled_required_bits, CIF_MB_COUNT
+                    _candidate_pool, _bad_idr_set, scrambled_required_bits, CIF_MB_COUNT
                 )
                 if len(_embed_positions) < scrambled_required_bits:
                     raise RuntimeError(
@@ -767,15 +1092,43 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
                     pre_validated_positions=_embed_positions,
                 )
                 _rec_r = BitstreamReconstructor()
-                _rec_r.reconstruct_video(
+                _recon_stats_r = _rec_r.reconstruct_video(
                     str(video_path), modified_ai, str(out_path),
                     frame_verified_data=fvd_ai, max_slices=None,
                 )
+                _used_positions_r = [
+                    (int(_mb), int(_blk), int(_cidx))
+                    for _mb, _blk, _cidx in getattr(_emb_r, "last_used_safe_positions", [])
+                ]
+                _modified_blocks_r = {
+                    (int(_mb), int(_blk))
+                    for _mb, _blk, _coeffs in modified_ai
+                }
+                _applied_blocks_r = {
+                    (int(_mb), int(_blk))
+                    for _mb, _blk in _recon_stats_r.get("applied_block_keys", [])
+                }
+                _filtered_positions_r = [
+                    (_mb, _blk, _cidx)
+                    for _mb, _blk, _cidx in _used_positions_r
+                    if (_mb, _blk) not in _modified_blocks_r or (_mb, _blk) in _applied_blocks_r
+                ]
+                if len(_filtered_positions_r) < scrambled_required_bits:
+                    _blocked_blocks.update(_modified_blocks_r - _applied_blocks_r)
+                    continue
+                _embed_positions = _filtered_positions_r[:scrambled_required_bits]
+                bits_embedded_ai = len(_embed_positions)
                 _modified_frames = sorted({int(_mb // CIF_MB_COUNT) for _mb, _, _ in _embed_positions})
 
             mode_ai = "real_proof_allintra_chaos_v5_ffmpeg_validated"
             if _fast_mode:
                 mode_ai += "_fast"
+            verify_info = _verify_sec1_stego(
+                seq_name=seq_name,
+                original_video=video_path,
+                stego_video=out_path,
+                operating_positions=_embed_positions,
+            )
             _write_stego_metadata(
                 meta_path,
                 video_path=video_path,
@@ -783,17 +1136,29 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
                 bits_required=scrambled_required_bits,
                 validation_mode=mode_ai,
                 effective_threshold_db=QUALITY_TARGET_PSNR_FRAME_MIN_DB if QUALITY_ENFORCE_FRAME_MIN_PSNR else None,
+                verify_info=verify_info,
             )
             # Save both the full validated pool and the exact operating positions.
             _write_positions_json(validated_pool_path, _validated_ai)
             _write_positions_json(positions_path, _embed_positions)
+            from src.zk_proof import ZKSnarkBridge
 
-            _verify_sec1_stego(
-                seq_name=seq_name,
-                original_video=video_path,
-                stego_video=out_path,
-                operating_positions=_embed_positions,
+            _write_manifest_json(
+                out_path.parent / f"{out_path.name}.manifest.json",
+                video_path=video_path,
+                message_length=len(REAL_PROOF_MESSAGE),
+                bits_embedded=int(bits_embedded_ai),
+                bits_required=scrambled_required_bits,
+                positions_count=len(_embed_positions),
+                proof_size_bytes=len(payload_real) - 4 - len(REAL_PROOF_MESSAGE),
+                constraint_count=ZKSnarkBridge(str(CIRCUITS_DIR)).get_constraint_count(),
+                chaos_original_bits=real_required_bits,
+                validation_threshold_db=(
+                    QUALITY_TARGET_PSNR_FRAME_MIN_DB
+                    if QUALITY_ENFORCE_FRAME_MIN_PSNR else None
+                ),
             )
+
             return (
                 out_path,
                 int(bits_embedded_ai),
@@ -885,6 +1250,12 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
                     max_modifications_per_block=1,
                     ffmpeg_validate=REAL_PROOF_FFMPEG_VALIDATE,
                 )
+                verify_info = _verify_sec1_stego(
+                    seq_name=seq_name,
+                    original_video=video_path,
+                    stego_video=out_path,
+                    operating_positions=fallback_result.used_positions,
+                )
                 _write_stego_metadata(
                     meta_path,
                     video_path=video_path,
@@ -892,6 +1263,7 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
                     bits_required=real_required_bits,
                     validation_mode=f"{selected_mode}_with_fullproof_fallback",
                     effective_threshold_db=None,
+                    verify_info=verify_info,
                 )
                 return (
                     out_path,
@@ -902,6 +1274,12 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
                 )
 
             mode_name = selected_mode
+            verify_info = _verify_sec1_stego(
+                seq_name=seq_name,
+                original_video=video_path,
+                stego_video=out_path,
+                operating_positions=selected[:real_required_bits],
+            )
             _write_stego_metadata(
                 meta_path,
                 video_path=video_path,
@@ -909,15 +1287,10 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
                 bits_required=real_required_bits,
                 validation_mode=mode_name,
                 effective_threshold_db=None,
+                verify_info=verify_info,
             )
             _write_positions_json(validated_pool_path, selected_pool)
             _write_positions_json(positions_path, selected[:real_required_bits])
-            _verify_sec1_stego(
-                seq_name=seq_name,
-                original_video=video_path,
-                stego_video=out_path,
-                operating_positions=selected[:real_required_bits],
-            )
             return out_path, int(bits_emb), real_required_bits, mode_name, None
 
         _, real_required_bits = _build_real_proof_payload()
@@ -931,6 +1304,12 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
             ffmpeg_validate=REAL_PROOF_FFMPEG_VALIDATE,
         )
         mode_name = f"real_proof_embed_ffmpeg_validate_{REAL_PROOF_FFMPEG_VALIDATE}"
+        verify_info = _verify_sec1_stego(
+            seq_name=seq_name,
+            original_video=video_path,
+            stego_video=out_path,
+            operating_positions=result.used_positions,
+        )
         _write_stego_metadata(
             meta_path,
             video_path=video_path,
@@ -938,12 +1317,7 @@ def _embed_for_benchmark(seq_name: str, video_path: Path, force: bool = False) -
             bits_required=real_required_bits,
             validation_mode=mode_name,
             effective_threshold_db=None,
-        )
-        _verify_sec1_stego(
-            seq_name=seq_name,
-            original_video=video_path,
-            stego_video=out_path,
-            operating_positions=None,
+            verify_info=verify_info,
         )
         return out_path, int(result.bits_embedded), real_required_bits, mode_name, None
 
@@ -1218,6 +1592,7 @@ def collect_data(
         try:
             stego_path, bits_embedded, bits_required, validation_mode, effective_threshold_db = _embed_for_benchmark(seq_name, video_path, force=force)
         except RuntimeError as exc:
+            _cleanup_sec1_artifacts(STEGO_OUTPUTS[seq_name])
             print(f"  [{seq_name}] skipped: {exc}")
             continue
         embed_time = time.perf_counter() - t0

@@ -51,6 +51,8 @@ class VideoMetadata:
     frame_count: Optional[int] = None
     gop_size: Optional[int] = None
     qp_value: Optional[int] = None
+    provenance_uri: Optional[str] = None
+    provenance_root_hash: Optional[str] = None
 
 
 @dataclass
@@ -95,6 +97,21 @@ class StegoManifest:
 
     def to_dict(self) -> dict:
         """Convert manifest to JSON-serializable dict."""
+        video = {
+            "file_path": self.video.file_path,
+            "file_hash": self.video.file_hash,
+            "codec": self.video.codec,
+            "profile": self.video.profile,
+            "width": self.video.width,
+            "height": self.video.height,
+            "frame_count": self.video.frame_count,
+            "gop_size": self.video.gop_size,
+            "qp_value": self.video.qp_value,
+        }
+        if self.video.provenance_uri is not None:
+            video["provenance_uri"] = self.video.provenance_uri
+        if self.video.provenance_root_hash is not None:
+            video["provenance_root_hash"] = self.video.provenance_root_hash
         return {
             "version": self.version,
             "created": self.created,
@@ -112,17 +129,7 @@ class StegoManifest:
                 "positions_count": self.embedding.positions_count,
                 "validation_threshold_db": self.embedding.validation_threshold_db,
             },
-            "video": {
-                "file_path": self.video.file_path,
-                "file_hash": self.video.file_hash,
-                "codec": self.video.codec,
-                "profile": self.video.profile,
-                "width": self.video.width,
-                "height": self.video.height,
-                "frame_count": self.video.frame_count,
-                "gop_size": self.video.gop_size,
-                "qp_value": self.video.qp_value,
-            },
+            "video": video,
             "proof": {
                 "proof_system": self.proof.proof_system,
                 "proof_size_bytes": self.proof.proof_size_bytes,
@@ -164,6 +171,8 @@ class StegoManifest:
                 frame_count=data["video"].get("frame_count"),
                 gop_size=data["video"].get("gop_size"),
                 qp_value=data["video"].get("qp_value"),
+                provenance_uri=data["video"].get("provenance_uri"),
+                provenance_root_hash=data["video"].get("provenance_root_hash"),
             ),
             proof=ProofMetadata(
                 proof_system=data["proof"].get("proof_system", "groth16"),

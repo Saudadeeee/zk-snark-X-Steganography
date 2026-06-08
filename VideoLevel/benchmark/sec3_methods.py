@@ -89,12 +89,10 @@ LITERATURE_OVERHEAD = {
     "F5-H264":              0.0,    # Also length-preserving for T1 class
     "MV-based":             2.1,    # MV delta changes some codes
     "IPM-based":            3.4,    # IPM change may alter slice syntax
-    "LSB pixel":           12.8,    # Re-encode introduces rate change
+    "LSB pixel":           12.8,
 }
 
-# -------------------------------------------------------------------------
-# Real measurement: LSB pixel domain
-# -------------------------------------------------------------------------
+
 def _measure_lsb_psnr(seq_name: str, video_path: Path, n_bytes: int) -> float:
     """
     Measure LSB pixel domain PSNR.

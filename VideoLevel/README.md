@@ -2,9 +2,9 @@
 
 Hide a Groth16 zero-knowledge proof inside H.264 baseline video by modifying CAVLC coefficients in IDR frames.
 
-**Status:** Research prototype with a frozen benchmark-grade core: locked operating-point embedding plus sidecar-assisted near-blind verification  
-**Validated Runtime:** `py -3.12`  
-**Tests:** Phase coverage includes embed/verify, manifest integrity, and near-blind sidecar flows  
+**Status:** Research prototype with a frozen benchmark-grade core: locked operating-point embedding plus sidecar-assisted near-blind verification
+**Validated Runtime:** `py -3.12`
+**Tests:** full suite executes `35/35` passing checks with `0` failed and `0` skipped
 **Benchmark Sections:** SEC1-SEC10 (Quality, Capacity, Methods, Security, Performance, Tradeoff, Real-time, Motion/GOP, Statistical, Audit)
 
 ---
@@ -27,7 +27,7 @@ The system embeds a message-authentication proof into H.264 bitstreams without l
 
 - **Versioned Manifest Schema** (v1.0.0): Structured sidecar files with signing hooks
 - **Near-Blind Verification**: Reduced cover dependency via sidecar-driven extraction
-- **Statistical Benchmarking**: Multi-run error bars for IEEE TIP/TIFS validity (≥3 runs)
+- **Statistical Benchmarking**: Multi-run error bars for IEEE TIP/TIFS validity (3+ runs)
 - **Audit Logging**: SEC1 quality guard tracking with reason logs
 - **Modern Detectors**: WS and SPAM steganalysis features
 - **Optimized Extraction**: Parallel IDR parsing with vectorization
@@ -62,59 +62,71 @@ Private input:
 
 ## Current Benchmark Snapshot
 
-All results below were regenerated on `2026-05-22` using the real proof pipeline and `py -3.12`.
+Current paper-grade artifacts were refreshed on `2026-06-08` for the locked
+`akiyo_q22_g1` operating point and validated with:
 
-### SEC1: Quality at the 1232-bit operating point
+```bash
+py -3.12 src/runtest/run_all.py
+py -3.12 -m benchmark.safe_benchmark_runner --sections 1 2 3 4 5 6
+```
 
-All listed operating points satisfy:
-- Full real-proof embedding: `1232/1232` bits
-- End-to-end proof verification
-- `min_modified_frame_psnr > 40 dB`
+### SEC1: Quality At The Locked 1232-bit Operating Point
 
-| Sequence | Full-video PSNR | Min Modified-Frame PSNR | Avg SSIM | Embedded bits |
-|---|---:|---:|---:|---:|
-| Akiyo QP22 G1 | 53.13 dB | 40.58 dB | 0.9997 | 1232/1232 |
-| Hall Monitor QP22 G1 | 50.38 dB | 40.18 dB | 0.9997 | 1232/1232 |
-| Foreman QP22 G1 | 55.15 dB | 40.67 dB | 0.9998 | 1232/1232 |
-| Container QP22 G1 | 51.70 dB | 40.10 dB | 0.9998 | 1232/1232 |
-| City QP22 G1 | 51.57 dB | 40.07 dB | 0.9998 | 1232/1232 |
-| Coastguard QP22 G1 | 51.23 dB | 40.52 dB | 0.9997 | 1232/1232 |
-| Football QP22 G1 | 52.24 dB | 41.56 dB | 0.9997 | 1232/1232 |
-| Deadline QP22 G1 | 58.55 dB | 40.28 dB | 1.0000 | 1232/1232 |
-| Coastguard QP22 G1 (1000f) | 56.02 dB | 40.22 dB | 0.9999 | 1232/1232 |
-| Deadline QP22 G1 (1000f) | 57.68 dB | 40.26 dB | 0.9999 | 1232/1232 |
-| Coastguard QP22 G1 (3000f) | 60.00 dB | 40.59 dB | 1.0000 | 1232/1232 |
+| Sequence | Full-video PSNR | Min Modified-Frame PSNR | Avg SSIM | Embedded bits | Verify |
+|---|---:|---:|---:|---:|---:|
+| Akiyo QP22 G1 | 53.01 dB | 40.30 dB | 0.9997 | 1232/1232 | true |
 
-**Operating-point success rate:** 11/11 sequences pass strict criterion with proof verification.
+The current frozen paper-grade baseline is a single verified operating
+contract, not a claim that every listed asset has the same fully verified
+contract.
 
 ### SEC2: Capacity
 
-| Sequence | Raw safe positions | Patchable usable bits | Operating positions | Utilization | PSNR @ 1232 bits |
-|---|---:|---:|---:|---:|---:|
-| Foreman QP22 G1 | 286,745 bits | ~1.3k | 1,232 bits | 0.430% | 55.15 dB |
-| Coastguard QP22 G1 | 427,883 bits | ~1.3k | 1,232 bits | 0.288% | 51.23 dB |
-| Football QP22 G1 | 372,266 bits | operating-point locked | 1,232 bits | 0.331% | 52.24 dB |
-| Deadline QP22 G1 | 1,735,622 bits | ~1.3k | 1,232 bits | 0.071% | 58.55 dB |
+SEC2 uses layered capacity accounting from the live `akiyo_q22_g1` artifact:
 
-`Raw safe positions` means positions that pass the structural CAVLC safety filter.
-`Patchable usable bits` is a stronger estimate based on the public API patchability
-flow, while `operating positions` denotes the final benchmark-validated positions
-actually used at the locked operating point.
+| Term | Bits |
+|---|---:|
+| `raw_safe_bits` | 413415 |
+| `patchable_usable_bits` | 2000 |
+| `validated_pool_bits` | 1449 |
+| `operating_bits` | 1232 |
+| `zk_blob_bits` | 1232 |
+
+PSNR sweep at the locked operating point:
+
+| Fraction | Bits | PSNR |
+|---:|---:|---:|
+| 25% | 304 | 56.99 dB |
+| 50% | 616 | 54.89 dB |
+| 75% | 920 | 53.58 dB |
+| 100% | 1232 | 52.31 dB |
+
+Do not collapse raw, patchable, validated, operating, and applied capacity into
+one headline number.
 
 ### SEC4: Steganalysis
 
-- Foreman QP22 G1: `chi-square p = 0.9622` (α=0.05 threshold)
+Current committed SEC4 artifact (`benchmark/results/sec4_security_data.json`) records:
+- chi-square p-value at operating point: `0.9622`
 - SPA at operating point: `0.03762`
 - RS delta: `0.0` (inapplicable to H.264 CAVLC)
-- WS detector: `p ≈ 0.85` (undetectable at α=0.05)
-- SPAM detector: `p ≈ 0.78` (undetectable at α=0.05)
+
+### SEC5: ZKP Overhead
+
+Current committed SEC5 artifact (`benchmark/results/sec5_zkp_data.json`) records:
+- **Groth16 packed proof-bearing payload**: `147 B`
+- **Groth16 prove time**: `1556.58 ms`
+- **Groth16 verify time**: `8.5 ms`
+- Alternative systems remain much larger or slower in the committed comparison artifact
 
 ### SEC6: Performance
 
-- **Pre-processing** (one-time, cacheable): `~1496s` per video
-- **Operational cost** (per-embed): `~57s`
-- ZK proof generation: `2.4s` (competitive)
-- Luma frame decode cached across benchmarks
+Current committed SEC6 artifact (`benchmark/results/sec6_performance_data.json`) records for `akiyo_q22_g1`:
+- **Pre-processing** (one-time, cacheable): `59.0s`
+- **Operational cost** (public embed + verify path): `26.1s`
+- **Total end-to-end time**: `85.0s`
+- **Standalone ZK prove line item**: `0.0s` because proof generation is included inside the combined public embed stage
+- **ZK verify time**: `3.83s`
 
 ### SEC10: GOP Sweep
 
@@ -131,39 +143,39 @@ actually used at the locked operating point.
 
 ```text
 VideoLevel/
-├─ benchmark/
-│  ├─ sec1_quality.py           Quality benchmark (PSNR, SSIM)
-│  ├─ sec2_capacity.py          Capacity sweep
-│  ├─ sec3_methods.py           Method comparison (T1 vs LSB)
-│  ├─ sec4_security.py          Steganalysis (chi, SPA, RS)
-│  ├─ sec4_modern_detectors.py  WS, SPAM modern features
-│  ├─ sec6_performance.py       Timing analysis
-│  ├─ sec6_paper_summary.py     Paper-ready timing text
-│  ├─ sec7_tradeoff.py          QP/GOP tradeoff recommendations
-│  ├─ sec9_motion_gop.py        Motion-aware GOP selection
-│  ├─ sec10_gop_sweep.py        Explicit GOP sweep
-│  ├─ statistical_benchmark.py  Error bars (≥3 runs)
-│  └─ sec1_audit.py             Quality guard audit logging
-├─ circuits/                    Circom circuit + Groth16 keys
-├─ data/
-│  ├─ encoded/                  H.264 benchmark inputs
-│  ├─ output/                   Stego outputs + sidecars
-│  └─ raw/                      Raw source sequences
-├─ src/
-│  ├─ bitstream/                H.264 / CAVLC parsing and patching
-│  ├─ core/
-│  │  ├─ pipeline.py            IDR extraction
-│  │  ├─ pipeline_optimized.py  Parallel/vec optimization
-│  │  ├─ stego.py               Safety filter + embed logic
-│  │  ├─ chaos.py               Arnold Cat + Logistic Map
-│  │  └─ analysis_cache.py      Video analysis caching
-│  ├─ manifest.py               v1.0.0 manifest schema
-│  ├─ embedder.py               Public embed API
-│  ├─ verifier.py               Public verify API
-│  ├─ verifier_blind.py         Near-blind verification
-│  └─ zk_proof.py               Proof packing + snarkjs bridge
-├─ plan.md                      Paper-readiness tracking
-└─ README.md
+|-- benchmark/
+|   |-- sec1_quality.py           Quality benchmark (PSNR, SSIM)
+|   |-- sec2_capacity.py          Capacity sweep
+|   |-- sec3_methods.py           Method comparison (T1 vs LSB)
+|   |-- sec4_security.py          Steganalysis (chi, SPA, RS)
+|   |-- sec4_modern_detectors.py  WS, SPAM modern features
+|   |-- sec6_performance.py       Timing analysis
+|   |-- sec6_paper_summary.py     Paper-ready timing text
+|   |-- sec7_tradeoff.py          QP/GOP tradeoff recommendations
+|   |-- sec9_motion_gop.py        Motion-aware GOP selection
+|   |-- sec10_gop_sweep.py        Explicit GOP sweep
+|   |-- statistical_benchmark.py  Error bars, 3 or more runs
+|   `-- sec1_audit.py             Quality guard audit logging
+|-- circuits/                     Circom circuit + Groth16 keys
+|-- data/
+|   |-- encoded/                  H.264 benchmark inputs
+|   |-- output/                   Stego outputs + sidecars
+|   `-- raw/                      Raw source sequences
+|-- src/
+|   |-- bitstream/                H.264 / CAVLC parsing and patching
+|   |-- core/
+|   |   |-- pipeline.py           IDR extraction
+|   |   |-- pipeline_optimized.py Parallel/vec optimization
+|   |   |-- stego.py              Safety filter + embed logic
+|   |   |-- chaos.py              Arnold Cat + Logistic Map
+|   |   `-- analysis_cache.py     Video analysis caching
+|   |-- manifest.py               v1.0.0 manifest schema
+|   |-- embedder.py               Public embed API
+|   |-- verifier.py               Public verify API
+|   |-- verifier_blind.py         Near-blind verification
+|   `-- zk_proof.py               Proof packing + snarkjs bridge
+|-- plan.md                       Current freeze plan
+`-- README.md
 ```
 
 ---
@@ -173,9 +185,27 @@ VideoLevel/
 ### Requirements
 
 - Python 3.12 recommended
-- Node.js 14+
-- `ffmpeg`
+- Node.js 22.x or compatible
+- `circom` 2.2.x
+- `snarkjs` 0.7.x
+- `ffmpeg` 8.x or compatible
 - Python packages from `requirements.txt`
+
+Current audited Python package set:
+
+- `numpy` 2.2.6
+- `matplotlib` 3.10.8
+- `scipy` 1.17.0
+- `scikit-image` 0.26.0
+- `cryptography` 46.0.5
+
+Observed native toolchain on the current audit machine:
+
+- Python 3.12.10
+- Node.js 22.20.0
+- `circom` 2.2.0
+- `snarkjs` 0.7.6
+- `ffmpeg` 8.0.1
 
 Install:
 
@@ -296,8 +326,29 @@ result = verify_near_blind(
 ### Run tests
 
 ```bash
+py -3.12 src/runtest/run_all.py --quick
+py -3.12 src/runtest/test_phase4_reconstruct.py
+py -3.12 src/runtest/test_phase5_extract_verify.py
+py -3.12 src/runtest/test_phase6_near_blind_manifest.py
+py -3.12 src/runtest/test_phase7_regression_cases.py
 py -3.12 src/runtest/run_all.py
 ```
+
+Test exit codes:
+
+- `0`: all selected tests passed.
+- `1`: at least one selected test failed.
+- `2`: no assertion failed, but at least one required case was skipped, so the
+  phase is incomplete and must not be counted as full evidence.
+
+### Run minimal API demo
+
+```bash
+py -3.12 src/runtest/demo_embed_verify.py
+```
+
+The demo uses the real `embed()` and `verify()` APIs. It exits with code `2`
+when no verified locked SEC1 operating contract is currently available.
 
 ### Run benchmarks
 
@@ -393,11 +444,12 @@ py -3.12 benchmark/sec10_gop_sweep.py --sequences foreman_q22_g1
 
 For IEEE TIP/TIFS submission:
 
-1. **Quality** (SEC1): 11/11 sequences pass >40 dB frame-min guard
-2. **Security** (SEC4): χ²=0.962, WS=0.85, SPAM=0.78 (all >α=0.05)
-3. **Performance** (SEC6): 57s operational, 2.4s ZK prove
-4. **Statistical** (statistical_benchmark.py): 3+ runs with mean±std
-5. **Audit** (sec1_audit.py): Quality guard reason logs
+1. **Quality** (SEC1): locked `akiyo_q22_g1` contract embeds `1232/1232` bits with `53.01 dB` full-video PSNR and `40.30 dB` minimum modified-frame PSNR
+2. **Security** (SEC4): chi-square p-value `0.9622`, SPA `0.03762`, RS `0.0` at operating point
+3. **ZKP Overhead** (SEC5): current committed artifact reports 147 B packed Groth16 payload, 1556.58 ms prove, 8.5 ms verify
+4. **Performance** (SEC6): current committed artifact reports 59.0s pre-processing, 26.1s operational, 85.0s total on `akiyo_q22_g1`
+5. **Statistical** (statistical_benchmark.py): 3+ runs with mean/std
+6. **Audit** (sec1_audit.py): Quality guard reason logs
 
 ---
 
@@ -417,26 +469,29 @@ npm run generate_verification_key
 ## Documentation
 
 ### Project Documentation
-- [`plan.md`](plan.md) — Paper-readiness tracking and roadmap
-- [`COMPLETION.md`](COMPLETION.md) — Completion summary checklist
-- [`OPERATING_ENVELOPE.md`](OPERATING_ENVELOPE.md) — Supported codec/GOP/QP ranges
-- [`ARTIFACT_POLICY.md`](ARTIFACT_POLICY.md) — Cleanup and artifact management
-- [`COMPARATIVE_ANALYSIS.md`](COMPARATIVE_ANALYSIS.md) — Comparison with existing systems
+- [`plan.md`](plan.md) - Paper-readiness tracking and roadmap
+- [`system.txt`](system.txt) - Plain-text current-system design summary
+- [`PAPER_EVIDENCE.md`](PAPER_EVIDENCE.md) - Claim-to-evidence staging notes
+- [`COMPLETION.md`](COMPLETION.md) - Completion summary checklist
+- [`OPERATING_ENVELOPE.md`](OPERATING_ENVELOPE.md) - Supported codec/GOP/QP ranges
+- [`ARTIFACT_POLICY.md`](ARTIFACT_POLICY.md) - Cleanup and artifact management
+- [`COMPARATIVE_ANALYSIS.md`](COMPARATIVE_ANALYSIS.md) - Comparison with existing systems
+- [`doc/system_video_embedding_walkthrough.tex`](doc/system_video_embedding_walkthrough.tex) - Detailed Vietnamese system walkthrough
 
 ### Benchmark Documentation
-- [`benchmark/sec1_quality.py`](benchmark/sec1_quality.py) — Quality benchmark
-- [`benchmark/sec2_capacity.py`](benchmark/sec2_capacity.py) — Capacity analysis
-- [`benchmark/sec3_methods.py`](benchmark/sec3_methods.py) — Method comparison
-- [`benchmark/sec4_security.py`](benchmark/sec4_security.py) — Steganalysis
-- [`benchmark/sec4_modern_detectors.py`](benchmark/sec4_modern_detectors.py) — WS/SPAM detectors
-- [`benchmark/sec6_performance.py`](benchmark/sec6_performance.py) — Performance analysis
-- [`benchmark/sec6_paper_summary.py`](benchmark/sec6_paper_summary.py) — Paper timing text
-- [`benchmark/sec7_tradeoff.py`](benchmark/sec7_tradeoff.py) — QP/GOP tradeoff
-- [`benchmark/sec10_gop_sweep.py`](benchmark/sec10_gop_sweep.py) — GOP sweep
-- [`benchmark/statistical_benchmark.py`](benchmark/statistical_benchmark.py) — Error bars wrapper
-- [`benchmark/sec1_audit.py`](benchmark/sec1_audit.py) — Quality guard audit logging
+- [`benchmark/sec1_quality.py`](benchmark/sec1_quality.py) - Quality benchmark
+- [`benchmark/sec2_capacity.py`](benchmark/sec2_capacity.py) - Capacity analysis
+- [`benchmark/sec3_methods.py`](benchmark/sec3_methods.py) - Method comparison
+- [`benchmark/sec4_security.py`](benchmark/sec4_security.py) - Steganalysis
+- [`benchmark/sec4_modern_detectors.py`](benchmark/sec4_modern_detectors.py) - WS/SPAM detectors
+- [`benchmark/sec6_performance.py`](benchmark/sec6_performance.py) - Performance analysis
+- [`benchmark/sec6_paper_summary.py`](benchmark/sec6_paper_summary.py) - Paper timing text
+- [`benchmark/sec7_tradeoff.py`](benchmark/sec7_tradeoff.py) - QP/GOP tradeoff
+- [`benchmark/sec10_gop_sweep.py`](benchmark/sec10_gop_sweep.py) - GOP sweep
+- [`benchmark/statistical_benchmark.py`](benchmark/statistical_benchmark.py) - Error bars wrapper
+- [`benchmark/sec1_audit.py`](benchmark/sec1_audit.py) - Quality guard audit logging
 
 ### API Documentation
-- [`src/manifest.py`](src/manifest.py) — Manifest schema (v1.0.0)
-- [`src/verifier_blind.py`](src/verifier_blind.py) — Near-blind verification
-- [`src/verify_modes.py`](src/verify_modes.py) — Explicit verifier modes
+- [`src/manifest.py`](src/manifest.py) - Manifest schema (v1.0.0)
+- [`src/verifier_blind.py`](src/verifier_blind.py) - Near-blind verification
+- [`src/verify_modes.py`](src/verify_modes.py) - Explicit verifier modes

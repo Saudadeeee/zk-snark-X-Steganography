@@ -222,21 +222,21 @@ def collect_data(force: bool = False, include_sequences: set[str] | None = None)
         )
 
         data[seq_name] = {
-            "raw_safe_bits":        raw_capacity,
-            "raw_safe_bytes":       raw_capacity // 8,
+            "raw_safe_bits":         raw_capacity,
+            "raw_safe_bytes":        raw_capacity // 8,
             "patchable_usable_bits": patchable_cap or None,
-            "validated_bits":       validated_cap or sweep["validated_positions"],
-            "operating_bits":       operating_cap or None,
+            "validated_pool_bits":   validated_cap or sweep["validated_positions"],
+            "operating_bits":        operating_cap or None,
             "ffmpeg_validated_bits": caps.get("ffmpeg_validated_bits"),
             "requested_position_bits": caps.get("requested_position_bits"),
             "applied_position_bits": caps.get("applied_position_bits"),
-            "validation_mode":      caps.get("validation_mode"),
-            "zk_blob_bits":         zk_blob_bits,
-            "zk_payload_bits":      ZK_PAYLOAD_BITS,
-            "utilization_pct":      round(100.0 * zk_blob_bits / raw_capacity, 3),
-            "fractions_pct":        sweep["fractions_pct"],
-            "bits_at_fraction":     sweep["bits_at_fraction"],
-            "psnr_at_fraction":     sweep["psnr_at_fraction"],
+            "validation_mode":       caps.get("validation_mode"),
+            "zk_blob_bits":          zk_blob_bits,
+            "zk_payload_bits":       ZK_PAYLOAD_BITS,
+            "utilization_pct":       round(100.0 * zk_blob_bits / raw_capacity, 3),
+            "fractions_pct":         sweep["fractions_pct"],
+            "bits_at_fraction":      sweep["bits_at_fraction"],
+            "psnr_at_fraction":      sweep["psnr_at_fraction"],
         }
 
     cache_save(CACHE_KEY, {"__meta__": cache_meta, "data": data})
@@ -303,8 +303,22 @@ def plot_capacity_budget(data: dict) -> None:
 
     raw_bits       = [data[s]["raw_safe_bits"]  for s in seqs]
     patchable_bits = [data[s].get("patchable_usable_bits") or data[s]["raw_safe_bits"] for s in seqs]
-    validated_bits = [data[s]["validated_bits"] for s in seqs]
-    operating_bits = [data[s].get("operating_bits") or data[s]["validated_bits"] for s in seqs]
+    validated_pool_bits = [
+        data[s].get("validated_pool_bits")
+        if "validated_pool_bits" in data[s]
+        else data[s].get("validated_bits")
+        for s in seqs
+    ]
+    operating_bits = [
+        data[s].get("operating_bits")
+        if "operating_bits" in data[s] and data[s].get("operating_bits") is not None
+        else (
+            data[s].get("validated_pool_bits")
+            if "validated_pool_bits" in data[s]
+            else data[s].get("validated_bits")
+        )
+        for s in seqs
+    ]
     zk_blob_bits = data[seqs[0]]["zk_blob_bits"] if seqs else 0
     zk_bits        = [zk_blob_bits] * n
 
@@ -312,7 +326,7 @@ def plot_capacity_budget(data: dict) -> None:
            alpha=0.80, label="Raw safe positions", zorder=3)
     ax.bar(x - 1.0 * w, patchable_bits, width=w, color=PALETTE["bulletproof"],
            alpha=0.85, label="Patchable usable positions", zorder=3)
-    ax.bar(x + 0.0 * w, validated_bits, width=w, color=PALETTE["f5"],
+    ax.bar(x + 0.0 * w, validated_pool_bits, width=w, color=PALETTE["f5"],
            alpha=0.85, label="Validated pool", zorder=3)
     ax.bar(x + 1.0 * w, operating_bits, width=w, color=PALETTE["mv"],
            alpha=0.85, label="SEC1 operating positions", zorder=3)
@@ -338,8 +352,8 @@ def plot_capacity_budget(data: dict) -> None:
                 f"{patchable_bits[i]:,}",
                 ha="center", va="bottom", fontsize=8.5,
                 color=PALETTE["bulletproof"], fontweight="bold")
-        ax.text(x[i] + 0.0 * w, validated_bits[i] * 1.3,
-                f"{validated_bits[i]:,}",
+        ax.text(x[i] + 0.0 * w, validated_pool_bits[i] * 1.3,
+                f"{validated_pool_bits[i]:,}",
                 ha="center", va="bottom", fontsize=8.5,
                 color=PALETTE["f5"], fontweight="bold")
         ax.text(x[i] + 1.0 * w, operating_bits[i] * 1.3,

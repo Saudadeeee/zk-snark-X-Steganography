@@ -1,0 +1,166 @@
+SYSTEM SUMMARY - CURRENT BASELINE
+ZK-SNARK VIDEO STEGANOGRAPHY ON H.264/CAVLC
+
+Last updated: 2026-06-08
+
+This file is a plain-text summary of the current system.
+
+1. Short summary
+================
+
+The system hides a message plus a Groth16 zero-knowledge proof inside an H.264
+baseline CAVLC video. It does not edit pixels directly. It parses the compressed
+H.264 bitstream, finds safe residual-coefficient positions, modifies selected
+coefficient signs or parity bits, reconstructs a valid stego bitstream, extracts
+the payload, and verifies the proof.
+
+Core flow:
+
+  message + secret key
+    -> Groth16 proof
+    -> [4B message length][message][129B proof]
+    -> optional chaos scrambling
+    -> H.264/CAVLC candidate search
+    -> patchability-aware embedding
+    -> stego H.264
+    -> extraction
+    -> Groth16 verification
+
+2. Current supported envelope
+=============================
+
+Strongest current regime:
+
+  H.264 baseline, CAVLC, GOP=1/all-intra, IDR/I-frame heavy streams,
+  locked benchmark-grade operating positions, sidecar-assisted verification.
+
+Not current claims:
+
+  full blind extraction, robust recompression watermarking, arbitrary H.264,
+  CABAC, HEVC/H.265, C2PA/fingerprint/TEE/ZKML trust tiers.
+
+3. What gets modified
+=====================
+
+H.264 stores residual coefficients rather than raw pixels. The system modifies
+carefully selected coefficients in luma 4x4 residual blocks.
+
+Embedding position:
+
+  (macroblock_id, block_id, coefficient_id)
+
+The main compressed-domain idea is to use CAVLC-safe sign/parity changes that
+preserve block structure and bit length.
+
+4. Why patchability matters
+===========================
+
+CAVLC is variable-length coding. A tiny coefficient change can change the number
+of encoded bits. If the length changes, patching the block back into the slice
+can corrupt later bits.
+
+Therefore a candidate is only useful if:
+
+  original encoded block length == modified encoded block length
+
+The system validates patchability before treating a position as usable.
+
+5. ZKP layer
+============
+
+Circuit:
+
+  circuits/payload_verify.circom
+
+Relation:
+
+  commitment = SHA256(SHA256(message) || secret_key)
+
+Public inputs:
+
+  payload_hash[256], commitment[256], payload_length
+
+Private input:
+
+  secret[256]
+
+The secret key is not embedded in the video.
+
+6. Verifier modes
+=================
+
+Strict non-blind:
+
+  src/verifier.py
+  Requires original cover video or trusted positions by default.
+
+Sidecar-assisted near-blind:
+
+  src/verifier_blind.py
+  Does not require original cover video, but requires manifest and positions.
+
+Blind-core:
+
+  Research-only. Not a current system claim.
+
+7. Sidecars
+===========
+
+Embedding writes:
+
+  output.h264.positions.json
+  output.h264.meta.json
+  output.h264.manifest.json
+
+These files carry the exact extraction positions and metadata needed for
+reproducible verification.
+
+8. Capacity discipline
+======================
+
+Do not report raw safe positions as final capacity.
+
+Use layered terms:
+
+  raw_safe_bits
+  patchable_usable_bits
+  validated_pool_bits
+  operating_bits
+  applied_position_bits
+
+9. Paper framing
+================
+
+Best framing:
+
+  proof-verifiable compressed-domain H.264/CAVLC steganography with
+  patchability-aware and reconstruction-aware operating-point discipline.
+
+Avoid framing:
+
+  fully blind steganography, robust watermarking, universal video support, or
+  trust-tier architecture.
+
+10. Current validation status
+=============================
+
+The runtest helper now reports pass, fail, and skip separately.
+
+Exit codes:
+
+  0 = all selected tests passed
+  1 = at least one selected test failed
+  2 = no assertion failed, but required coverage was skipped
+
+Latest local state:
+
+  full suite executed checks: 35/35 passed
+  quick suite: 23/23 passed
+  Phase 4: 5/5 passed
+  Phase 5: 2/2 passed
+  Phase 6: 2/2 passed
+  Phase 7: 3/3 passed
+
+The current locked operating contract is akiyo_q22_g1. SEC1/SEC2/SEC6
+paper-grade artifacts were regenerated for that contract, and benchmark runner
+sections 1 through 6 passed schema validation.

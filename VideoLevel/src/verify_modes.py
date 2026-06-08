@@ -61,7 +61,7 @@ def verify_strict(
     - Highest integrity verification path
     - Suitable for: final verification, security-critical applications
 
-    **Runtime:** ~57s (cached) per embed
+    **Runtime:** depends on cache state and operating-position availability; see SEC6 benchmark artifacts for current measured timings
     """
     return verify(
         stego_video_path=stego_video_path,
@@ -99,7 +99,7 @@ def verify_nearblind(
     - No original video required
     - Suitable for: sidecar-assisted verification at scale
 
-    **Runtime:** ~10s per verification (no full analysis)
+    **Runtime:** typically lower than strict non-blind mode because no original-cover analysis is required
     **Trade-off:** Requires sidecar metadata (but no original video)
 
     **Missing requirements:**
@@ -137,7 +137,7 @@ def verify_benchmark(
     - Reuses cover analysis across multiple runs
     - Suitable for: benchmark iterations, repeated testing
 
-    **Runtime:** ~7s (warm cache) per verification
+    **Runtime:** optimized for repeated benchmark runs with cached cover analysis
 
     **Note:** This is a thin wrapper around verify() with cache defaults.
     For final paper numbers, use verify_strict().

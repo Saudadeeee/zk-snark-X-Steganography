@@ -1,0 +1,42 @@
+{
+  "Groth16 BN128\n(This Work)": {
+    "proof_size_bytes": 147,
+    "prove_time_ms": 1556.5769666650644,
+    "verify_time_ms": 8.5,
+    "trusted_setup": true,
+    "universal_setup": false,
+    "simulated": false
+  },
+  "ZK-Schnorr\n(P-256)": {
+    "proof_size_bytes": 71,
+    "prove_time_ms": 1.0179819993209094,
+    "verify_time_ms": 0.1550519943702966,
+    "trusted_setup": false,
+    "universal_setup": false,
+    "simulated": false
+  },
+  "PLONK (KZG)": {
+    "proof_size_bytes": 768,
+    "prove_time_ms": 85000,
+    "verify_time_ms": 12.0,
+    "trusted_setup": true,
+    "universal_setup": true,
+    "simulated": true
+  },
+  "STARKs (FRI)": {
+    "proof_size_bytes": 45000,
+    "prove_time_ms": 200000,
+    "verify_time_ms": 50.0,
+    "trusted_setup": false,
+    "universal_setup": false,
+    "simulated": true
+  },
+  "Bulletproofs": {
+    "proof_size_bytes": 672,
+    "prove_time_ms": 1200,
+    "verify_time_ms": 900.0,
+    "trusted_setup": false,
+    "universal_setup": false,
+    "simulated": true
+  }
+}

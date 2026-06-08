@@ -1,69 +1,65 @@
-# Completion Summary (2026-05-22)
+# Current-System Completion Summary
 
-All critical and important tasks completed. IEEE-ready.
+Last updated: 2026-06-08
 
-## Completed Tasks ✅
+This file summarizes the current-system completion target. It intentionally does
+not include future architecture work such as robust watermarking, C2PA tiers,
+fingerprint registries, TEE, or ZKML.
 
-### Critical
-- [x] **Symmetric QP sweep dataset** — `foreman_cif_300f.y4m` created, QP18/32 encoded
-- [x] **Third test sequence** — `deadline_q22_g1` integrated
+## Completed Baseline Capabilities
 
-### Important
-- [x] **Runtime manifest / sidecar hardening** — v1.0.0 schema, signing hooks
-- [x] **Near-blind verification mode** — `verifier_blind.py` implemented
-- [x] **Error bars / confidence intervals** — `statistical_benchmark.py` (≥3 runs)
-- [x] **SEC1 auditability gaps** — `sec1_audit.py` with reason logs
-- [x] **SEC6 timing split in text** — `sec6_paper_summary.py` generator
-- [x] **Environment reproducibility** — `requirements.txt`, py-3.12 validated
-- [x] **GOP/QP tradeoff study** — `sec10_gop_sweep.py` added
+- H.264/CAVLC compressed-domain embedding path.
+- Groth16 proof generation and verification bridge.
+- 129-byte compressed proof serialization.
+- Payload packing:
+  `[4B message_length][message][129B proof]`.
+- Patchability-aware candidate filtering.
+- Reconstruction-aware applied-position accounting.
+- Manifest v1.0.0 sidecar.
+- Strict non-blind verifier.
+- Sidecar-assisted near-blind verifier.
+- Benchmark sections for quality, capacity, method comparison, security, ZKP,
+  performance, tradeoff, realtime/motion/GOP, and statistics.
+- Detailed LaTeX walkthrough in `doc/`.
 
-### Minor
-- [x] **SEC4 modern detector** — `sec4_modern_detectors.py` (WS, SPAM)
+## Current Paper Baseline Status
 
-### Additional Improvements
-- [x] **Optimized extraction** — `pipeline_optimized.py` (parallel, vectorized)
-- [x] **GOP sweep benchmarks** — `sec10_gop_sweep.py` implemented
-- [x] **README alignment** — Updated with all new features
-- [x] **Artifact cleanup policy** — `ARTIFACT_POLICY.md` defined
+The current baseline is frozen for paper drafting under the current operating
+contract:
 
-## New Files Created
+- all-intra H.264/CAVLC operating envelope,
+- locked `akiyo_q22_g1` operating-point real-proof embedding,
+- sidecar-assisted near-blind verification,
+- blind-core labeled future work.
 
-### Source Code
-- `src/manifest.py` — v1.0.0 manifest schema with signing
-- `src/verifier_blind.py` — Near-blind verification
-- `src/core/pipeline_optimized.py` — Parallel IDR extraction
+## Freeze Checklist
 
-### Benchmarks
-- `benchmark/statistical_benchmark.py` — Error bars wrapper
-- `benchmark/sec1_audit.py` — Quality guard audit logging
-- `benchmark/sec6_paper_summary.py` — Paper timing text
-- `benchmark/sec4_modern_detectors.py` — WS/SPAM detectors
-- `benchmark/sec10_gop_sweep.py` — GOP sweep
+- [x] Run quick test suite.
+- [x] Run Phase 4 reconstruction test.
+- [x] Fix test skip semantics so skipped E2E cases are not counted as passed.
+- [x] Prevent failed SEC1 runs from publishing contract-looking sidecars.
+- [x] Require verified SEC1 metadata before loading a locked operating contract.
+- [x] Restore Phase 5 public API E2E coverage without skips.
+- [x] Restore Phase 6 near-blind E2E coverage without skips.
+- [x] Restore Phase 7 regression fixture artifacts or rewrite fixtures so they
+      exercise committed assets.
+- [x] Re-run relevant benchmark sections after benchmark code changes.
+- [x] Refresh `PAPER_EVIDENCE.md` wording from current JSON and current
+      committed artifacts.
+- [x] Confirm README links and documentation are consistent after benchmark
+      reruns.
 
-### Documentation
-- `ARTIFACT_POLICY.md` — Cleanup policy definition
+Current validation:
 
-### Data
-- `data/raw/foreman_cif_300f.y4m` — 300-frame foreman (looped)
-- `data/encoded/foreman_cif_q18_g1_300f.h264` — QP18 foreman 300f
-- `data/encoded/foreman_cif_q32_g1_300f.h264` — QP32 foreman 300f
+- full runtime suite: `35/35` passed, `0` failed, `0` skipped.
+- benchmark runner sections `1 2 3 4 5 6`: `6/6` passed with schema validation OK.
 
-## Test Status
+## Not Part Of Current Completion
 
-- Phase 1-5: **32/32 passed** ✅
-- All core fixes (#1-#8) merged
-- SEC1-SEC10 benchmarks IEEE-ready
-
-## IEEE Submission Readiness
-
-| Requirement | Status |
-|-------------|--------|
-| Quality (SEC1) | ✅ >40 dB frame-min, 11/11 sequences |
-| Security (SEC4) | ✅ χ²=0.962, WS=0.85, SPAM=0.78 |
-| Capacity (SEC2) | ✅ 0.029-0.430% utilization |
-| Performance (SEC6) | ✅ 57s operational, 2.4s ZK |
-| Statistical validity | ✅ ≥3 runs with error bars |
-| Auditability | ✅ Quality guard logs |
-| Documentation | ✅ README, plan.md, artifact policy |
-
-**Status: READY FOR IEEE TIP/TIFS SUBMISSION** ✅
+- Robust mode.
+- Full blind verifier.
+- C2PA bridge.
+- Fingerprint registry circuit.
+- ZK watermark receipt circuit.
+- TEE attestation.
+- ZKML.

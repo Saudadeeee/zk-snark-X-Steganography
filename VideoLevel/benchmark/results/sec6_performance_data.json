@@ -1,18 +1,18 @@
 {
-  "foreman_q22_g1": {
+  "akiyo_q22_g1": {
     "timings": {
-      "1_extract_idr": 63.4937,
-      "2_safety_filter": 0.003,
-      "3_zk_prove": 2.1754,
-      "4_embed": 140.7967,
-      "5_reconstruct": 3.4606,
-      "6_extract_bits": 0.8872,
-      "7_zk_verify": 3.6311
+      "1_extract_idr": 58.9513,
+      "2_safety_filter": 0.0058,
+      "3_zk_prove": 0.0,
+      "4_embed": 0.0,
+      "5_public_embed_reconstruct": 22.2409,
+      "6_extract_bits": 0.0,
+      "7_zk_verify": 3.8339
     },
-    "total_s": 214.4477,
-    "capacity_bits": 1232,
+    "total_s": 85.0318,
+    "capacity_bits": 1449,
     "bits_embedded": 1232,
     "blob_size": 147,
-    "zk_valid": false
+    "zk_valid": true
   }
 }

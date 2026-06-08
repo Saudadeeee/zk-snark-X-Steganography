@@ -6,6 +6,7 @@ Usage in every test file:
     setup_path()   # must be called before importing src.*
 """
 
+from dataclasses import dataclass
 import io
 import os
 import shutil
@@ -50,6 +51,22 @@ def node_available() -> bool:
 
 # ── Output helpers ─────────────────────────────────────────────────────── #
 
+@dataclass(frozen=True)
+class TestResult:
+    name: str
+    status: str
+    detail: str = ''
+
+    def __bool__(self) -> bool:
+        return self.status == 'pass'
+
+
+class SkipTest(Exception):
+    def __init__(self, name: str, reason: str = ''):
+        super().__init__(reason)
+        self.name = name
+        self.reason = reason
+
 def section(title: str):
     print(f"\n{'=' * 60}")
     print(f"  {title}")
@@ -72,31 +89,54 @@ def SKIP(name: str, reason: str = ''):
     if reason:
         msg += f"  ({reason})"
     print(msg)
+    raise SkipTest(name, reason)
 
 
 # ── Test runner ─────────────────────────────────────────────────────────── #
 
-def run_test(name: str, fn) -> bool:
+def run_test(name: str, fn) -> TestResult:
     """
-    Execute fn().  Print PASS on success, FAIL with detail on any exception.
-    Returns True if passed, False if failed.
+    Execute fn(). Print PASS/FAIL/SKIP and return a structured result.
     """
     try:
         fn()
         PASS(name)
-        return True
+        return TestResult(name, 'pass')
+    except SkipTest as exc:
+        return TestResult(name, 'skip', exc.reason)
     except AssertionError as exc:
         FAIL(name, str(exc))
-        return False
+        return TestResult(name, 'fail', str(exc))
     except Exception as exc:
         FAIL(name, f"{type(exc).__name__}: {exc}")
-        return False
+        return TestResult(name, 'fail', f"{type(exc).__name__}: {exc}")
 
 
 def summarise(results: list, phase_name: str) -> int:
-    """Print pass/fail summary. Returns exit code (0 = all pass)."""
-    passed = sum(results)
+    """Print pass/fail/skip summary. Returns 0 pass, 1 fail, 2 incomplete."""
+    normalised = []
+    for index, result in enumerate(results):
+        if isinstance(result, TestResult):
+            normalised.append(result)
+        else:
+            status = 'pass' if bool(result) else 'fail'
+            normalised.append(TestResult(f"legacy_{index}", status))
+
+    passed = sum(1 for result in normalised if result.status == 'pass')
+    failed = sum(1 for result in normalised if result.status == 'fail')
+    skipped = sum(1 for result in normalised if result.status == 'skip')
     total = len(results)
-    status = 'OK' if passed == total else 'FAIL'
-    print(f"\n  {phase_name}: {passed}/{total} passed  [{status}]")
-    return 0 if passed == total else 1
+    if failed:
+        status = 'FAIL'
+        exit_code = 1
+    elif skipped:
+        status = 'INCOMPLETE'
+        exit_code = 2
+    else:
+        status = 'OK'
+        exit_code = 0
+    print(
+        f"\n  {phase_name}: {passed}/{total} passed, "
+        f"{failed} failed, {skipped} skipped  [{status}]"
+    )
+    return exit_code

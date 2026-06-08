@@ -1,0 +1,1487 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T5]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage[vietnamese]{babel}
+  \usepackage{lmodern}
+\else
+  \usepackage{fontspec}
+  \usepackage{polyglossia}
+  \setmainlanguage{vietnamese}
+  \setotherlanguage{english}
+  \setmainfont{Times New Roman}
+  \setsansfont{Arial}
+  \setmonofont{Consolas}
+\fi
+
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{colortbl}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,calc,shapes.geometric,shapes.misc,matrix}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{amsmath}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!55!black,
+  urlcolor=blue!55!black,
+  citecolor=blue!55!black
+}
+\setlength{\emergencystretch}{3em}
+
+\definecolor{CoreBlue}{HTML}{1565C0}
+\definecolor{CoreGreen}{HTML}{2E7D32}
+\definecolor{CoreOrange}{HTML}{E65100}
+\definecolor{CoreRed}{HTML}{C62828}
+\definecolor{SoftGray}{HTML}{F5F7FA}
+\definecolor{LineGray}{HTML}{6B7280}
+\definecolor{SoftYellow}{HTML}{FFF7D6}
+
+\tikzset{
+  box/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=LineGray,
+    fill=SoftGray,
+    align=center,
+    minimum height=9mm,
+    text width=33mm,
+    font=\small
+  },
+  widebox/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=LineGray,
+    fill=SoftGray,
+    align=center,
+    minimum height=10mm,
+    text width=52mm,
+    font=\small
+  },
+  smallbox/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=LineGray,
+    fill=SoftGray,
+    align=center,
+    minimum height=7mm,
+    text width=25mm,
+    font=\footnotesize
+  },
+  good/.style={box, draw=CoreGreen, fill=CoreGreen!8},
+  warn/.style={box, draw=CoreOrange, fill=CoreOrange!9},
+  bad/.style={box, draw=CoreRed, fill=CoreRed!8},
+  crypto/.style={box, draw=CoreBlue, fill=CoreBlue!8},
+  highlight/.style={box, draw=CoreOrange, fill=SoftYellow},
+  arrow/.style={-{Latex[length=2.4mm]}, thick, draw=LineGray},
+  dashedarrow/.style={-{Latex[length=2.4mm]}, thick, dashed, draw=LineGray},
+  smallnote/.style={font=\footnotesize, align=center, text=LineGray},
+  layer/.style={rectangle, rounded corners=3pt, draw=LineGray, dashed, inner sep=5pt},
+  coeff/.style={rectangle, draw=LineGray, minimum width=8mm, minimum height=7mm, align=center, font=\small},
+  coeffgood/.style={coeff, fill=CoreGreen!12, draw=CoreGreen},
+  coeffwarn/.style={coeff, fill=SoftYellow, draw=CoreOrange}
+}
+
+\title{\textbf{Giải Thích Chi Tiết Cách Hệ Thống Xử Lý Video Và Nhúng Tin}\\
+\large H.264/CAVLC Patchability-Aware Video Steganography}
+\author{Tài liệu kỹ thuật cho dự án}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Câu Trả Lời Ngắn Gọn Trước}
+
+Nếu nói thật ngắn, hệ thống làm việc như sau:
+
+\begin{center}
+\textit{Nó không sửa pixel của video. Nó sửa một vài dấu của các hệ số nén
+trong H.264, cụ thể là dấu của các trailing-one residual coefficients trong
+các block CAVLC của IDR/I-frame.}
+\end{center}
+
+Một file H.264 được hệ thống nhìn như một cấu trúc nhiều tầng:
+
+\begin{center}
+\texttt{file .h264}
+\(\rightarrow\)
+\texttt{NAL units}
+\(\rightarrow\)
+\texttt{IDR slices}
+\(\rightarrow\)
+\texttt{macroblocks}
+\(\rightarrow\)
+\texttt{4x4 residual blocks}
+\(\rightarrow\)
+\texttt{coefficients}
+\end{center}
+
+Thông tin được nhúng vào tầng cuối cùng: \textbf{coefficient}. Nhưng không phải
+coefficient nào cũng được sửa. Hệ thống chỉ sửa các vị trí đã qua nhiều lớp
+lọc: an toàn về CAVLC, có thể vá lại bitstream, không làm chất lượng giảm quá
+mức, và đọc lại được sau khi tái tạo video.
+
+\section{Codec, H.264 Và Vì Sao Hệ Thống Không Sửa Pixel}
+
+\subsection{Codec là gì?}
+
+Codec là bộ mã hóa/giải mã video. Tên này đến từ:
+
+\begin{center}
+\texttt{coder + decoder = codec}
+\end{center}
+
+Video thô rất lớn. Codec như H.264 nén video thành bitstream nhỏ hơn để lưu,
+truyền, hoặc phát lại. Khi phát video, decoder đọc bitstream đó và dựng lại
+các frame.
+
+\subsection{Sửa pixel và sửa bitstream khác nhau thế nào?}
+
+Một hệ đơn giản có thể làm như sau:
+
+\begin{center}
+\texttt{decode video -> sửa pixel -> encode lại video}
+\end{center}
+
+Đó là cách làm ở \textbf{pixel domain}. Nó dễ hiểu nhưng có một vấn đề lớn:
+khi encode lại, codec có thể thay đổi rất nhiều thứ. Bit nhúng có thể mất,
+artifact có thể xuất hiện, và khó kiểm soát chính xác bitstream cuối cùng.
+
+Hệ thống này đi theo hướng khác:
+
+\begin{center}
+\texttt{parse H.264 bitstream -> sửa coefficient đã nén -> patch lại H.264}
+\end{center}
+
+Đây là cách làm ở \textbf{compressed domain}. Nó gần codec hơn, vì hệ thống
+hiểu một phần cấu trúc H.264 và sửa đúng những chỗ mà codec đang dùng để biểu
+diễn residual.
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=10mm and 12mm]
+  \node[widebox] (pixel0) {Cách pixel-domain\\Decode thành ảnh};
+  \node[widebox, right=of pixel0] (pixel1) {Sửa pixel\\LSB hoặc màu};
+  \node[widebox, right=of pixel1] (pixel2) {Encode lại\\codec có thể đổi nhiều thứ};
+
+  \node[widebox, below=18mm of pixel0] (comp0) {Cách của hệ thống\\Parse H.264};
+  \node[widebox, right=of comp0] (comp1) {Sửa residual coefficient\\trong CAVLC block};
+  \node[widebox, right=of comp1] (comp2) {Patch/reconstruct\\giữ bitstream hợp lệ};
+
+  \draw[arrow] (pixel0) -- (pixel1);
+  \draw[arrow] (pixel1) -- (pixel2);
+  \draw[arrow] (comp0) -- (comp1);
+  \draw[arrow] (comp1) -- (comp2);
+\end{tikzpicture}
+}
+\caption{Khác biệt giữa sửa pixel và sửa dữ liệu nén trong H.264.}
+\label{fig:pixel-vs-compressed}
+\end{figure}
+
+\section{File H.264 Được Hệ Thống Bóc Ra Như Thế Nào?}
+
+Phần này là lõi để nhìn rõ hệ thống. Khi nhận một file \texttt{video.h264}, hệ
+thống không nhìn nó như một chuỗi byte vô nghĩa. Nó bóc file theo các tầng sau.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=8mm]
+  \node[widebox] (bitstream) {File H.264 bitstream\\\texttt{video.h264}};
+  \node[widebox, below=of bitstream] (nal) {NAL units\\đơn vị dữ liệu của H.264};
+  \node[widebox, below=of nal] (slice) {IDR slice / I-frame\\frame ít phụ thuộc frame khác};
+  \node[widebox, below=of slice] (mb) {Macroblock\\vùng 16x16 pixel};
+  \node[widebox, below=of mb] (block) {Luma 4x4 residual block\\block nhỏ bên trong macroblock};
+  \node[widebox, below=of block] (coeff) {Residual coefficients\\các số đã biến đổi/lượng tử hóa};
+  \node[good, below=of coeff] (target) {T1 sign positions\\vị trí nhúng bit};
+
+  \draw[arrow] (bitstream) -- (nal);
+  \draw[arrow] (nal) -- (slice);
+  \draw[arrow] (slice) -- (mb);
+  \draw[arrow] (mb) -- (block);
+  \draw[arrow] (block) -- (coeff);
+  \draw[arrow] (coeff) -- (target);
+\end{tikzpicture}
+\caption{Tầng xử lý từ file H.264 đến vị trí coefficient có thể nhúng.}
+\label{fig:h264-layers}
+\end{figure}
+
+Một vị trí nhúng trong hệ thống có thể ghi gọn là:
+
+\begin{center}
+\texttt{(macroblock\_id, block\_id, coefficient\_id)}
+\end{center}
+
+Ví dụ:
+
+\begin{center}
+\texttt{(496, 7, 1)}
+\end{center}
+
+Nghĩa là:
+
+\begin{itemize}[leftmargin=*]
+  \item macroblock số 496,
+  \item block 4x4 số 7 trong macroblock đó,
+  \item coefficient số 1 trong block đó.
+\end{itemize}
+
+\section{Ví Dụ Đầy Đủ: Một Video H.264 Được Parse Ra Gì?}
+
+Phần này dùng một ví dụ minh họa gần với cách hệ thống làm việc. Đây không phải
+là dump đầy đủ của một file benchmark cụ thể, mà là một mẫu dữ liệu rút gọn để
+nhìn rõ pipeline. Trong code thật, các bước tương ứng nằm ở parser H.264,
+CAVLC parser, safety filter và bitstream reconstructor.
+
+\subsection{File H.264 ban đầu trông như thế nào?}
+
+Một file \texttt{.h264} thô là một chuỗi byte. Trong H.264 Annex B, các NAL unit
+thường bắt đầu bằng start code:
+
+\begin{center}
+\texttt{00 00 00 01}
+\end{center}
+
+Ví dụ một đoạn bitstream rút gọn có thể nhìn như sau:
+
+\begin{center}
+\begin{tabular}{p{0.22\linewidth}p{0.68\linewidth}}
+\toprule
+Offset byte & Dữ liệu minh họa \\
+\midrule
+0x00000000 &
+\texttt{00 00 00 01 67 ...} \\
+0x0000001A &
+\texttt{00 00 00 01 68 ...} \\
+0x00000024 &
+\texttt{00 00 00 01 65 B8 21 ...} \\
+0x00004F10 &
+\texttt{00 00 00 01 65 88 40 ...} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Hệ thống đọc các start code này để tách file thành các NAL unit. Sau đó nó đọc
+header của mỗi NAL để biết NAL đó là SPS, PPS, IDR slice hay loại khác.
+
+\subsection{Kết quả parse NAL mẫu}
+
+Sau bước parse NAL, hệ thống có thể có một bảng nội bộ giống như sau:
+
+\begin{center}
+\begin{tabular}{rcllp{45mm}}
+\toprule
+NAL & Offset & Type & Vai trò & Hệ thống làm gì? \\
+\midrule
+0 & 0x00000000 & 7 & SPS & Đọc kích thước, profile, thông tin frame. \\
+1 & 0x0000001A & 8 & PPS & Đọc entropy mode, CAVLC/CABAC, tham số slice. \\
+2 & 0x00000024 & 5 & IDR slice & Có thể đi vào macroblock và tìm vị trí nhúng. \\
+3 & 0x00004F10 & 5 & IDR slice & Tiếp tục tìm block/coefficient dùng được. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Với baseline hiện tại, hệ thống quan tâm nhất tới NAL type 5, tức IDR slice.
+Các NAL SPS/PPS cần thiết để hiểu stream, nhưng không phải nơi nhúng payload.
+
+\subsection{Từ IDR slice đến macroblock}
+
+Một IDR slice chứa nhiều macroblock. Với video CIF 352x288, mỗi frame có:
+
+\begin{center}
+\texttt{22 macroblock theo chiều ngang} \(\times\)
+\texttt{18 macroblock theo chiều dọc}
+\(= 396\) macroblock/frame.
+\end{center}
+
+Một bảng macroblock rút gọn có thể như sau:
+
+\begin{center}
+\begin{tabular}{rrrrp{46mm}}
+\toprule
+Frame & Macroblock & Hàng/cột MB & Slice-local MB & Ghi chú \\
+\midrule
+12 & 4752 & row 0, col 0 & 0 & IDR frame bắt đầu. \\
+12 & 4753 & row 0, col 1 & 1 & Có luma residual blocks. \\
+12 & 4960 & row 9, col 10 & 208 & Có nhiều T1 candidates. \\
+12 & 5147 & row 17, col 21 & 395 & Macroblock cuối frame. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Trong code, chỉ số macroblock thường được dùng theo dạng global index để các
+frame khác nhau không bị trùng vị trí.
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}
+  \draw[step=0.45cm, LineGray, thin] (0,0) grid (9.9,8.1);
+  \draw[CoreBlue, very thick] (4.5,3.6) rectangle (4.95,4.05);
+  \node[smallnote] at (4.72,4.35) {MB row 9, col 10};
+  \node[smallnote] at (4.95,-0.4) {22 macroblock mỗi hàng};
+  \node[smallnote, rotate=90] at (-0.45,4.05) {18 hàng macroblock};
+\end{tikzpicture}
+}
+\caption{Một frame CIF 352x288 được chia thành lưới 22x18 macroblock. Ô được tô là một macroblock minh họa.}
+\label{fig:macroblock-grid}
+\end{figure}
+
+\subsection{Từ macroblock đến các block 4x4}
+
+Mỗi macroblock luma có thể được nhìn như 16 block 4x4. Hệ thống đánh số các
+block con này và đọc residual coefficients trong từng block.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\matrix[matrix of nodes,
+  nodes={rectangle, draw=LineGray, minimum width=12mm, minimum height=9mm, align=center, font=\small},
+  column sep=-\pgflinewidth,
+  row sep=-\pgflinewidth] {
+0 & 1 & 2 & 3 \\
+4 & 5 & 6 & 7 \\
+8 & 9 & 10 & 11 \\
+12 & 13 & 14 & 15 \\
+};
+\end{tikzpicture}
+\caption{Một macroblock luma có thể được chia thành 16 block 4x4, đánh số 0 đến 15.}
+\label{fig:block-index-grid}
+\end{figure}
+
+Ví dụ, nếu hệ thống nói vị trí:
+
+\begin{center}
+\texttt{(4960, 7, 13)}
+\end{center}
+
+thì có thể hiểu là:
+
+\begin{itemize}[leftmargin=*]
+  \item macroblock global index 4960,
+  \item block 4x4 số 7,
+  \item coefficient index 13 trong block đó.
+\end{itemize}
+
+\subsection{Một block 4x4 sau khi parse trông như thế nào?}
+
+Giả sử block 7 trong macroblock 4960 có coefficients như sau:
+
+\begin{center}
+\begin{tabular}{|c|c|c|c|}
+\hline
+0 & 5 & -4 & 0 \\
+\hline
+6 & -1 & 0 & 0 \\
+\hline
+8 & 0 & -1 & 1 \\
+\hline
+0 & 0 & 0 & -1 \\
+\hline
+\end{tabular}
+\end{center}
+
+Hệ thống cũng lưu thêm metadata CAVLC cho block này:
+
+\begin{center}
+\begin{tabular}{lp{90mm}}
+\toprule
+Trường nội bộ & Giá trị minh họa \\
+\midrule
+\texttt{macroblock\_id} & \texttt{4960} \\
+\texttt{block\_id} & \texttt{7} \\
+\texttt{nC} & \texttt{3}, ngữ cảnh láng giềng dùng khi decode/encode CAVLC. \\
+\texttt{bit\_offset} & \texttt{18422}, vị trí bắt đầu block trong RBSP/slice. \\
+\texttt{bit\_length} & \texttt{21}, độ dài mã CAVLC ban đầu của block. \\
+\texttt{trailing\_ones} & \texttt{2}, số T1 sign flags thật mà block đang có. \\
+\texttt{t1\_positions} & \texttt{[13, 15]}, coefficient index có thể là T1 sign positions. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Sau bước này, hệ thống chưa nhúng gì cả. Nó mới chỉ biết: ``block này có vài
+coefficient có vẻ đáng xem xét''.
+
+\subsection{Bảng candidate positions mẫu}
+
+Từ nhiều macroblock và block, safety filter tạo ra danh sách candidate:
+
+\begin{center}
+\begin{tabular}{rrrrlp{38mm}}
+\toprule
+Candidate & Frame & MB & Block & Coeff & Trạng thái ban đầu \\
+\midrule
+0 & 12 & 4960 & 7 & 13 & T1 sign candidate. \\
+1 & 12 & 4960 & 7 & 15 & T1 sign candidate nhưng cùng block với candidate 0. \\
+2 & 13 & 5356 & 2 & 11 & T1 sign candidate. \\
+3 & 14 & 5752 & 9 & 14 & T1 sign candidate. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Sau đó per-block limit có thể giữ candidate 0 và loại candidate 1, vì cả hai
+nằm trong cùng \texttt{(MB, block)}. Đây là lý do số candidate giảm trước khi
+thành operating positions.
+
+\subsection{Một bước patchability check mẫu}
+
+Với candidate \texttt{(4960, 7, 13)}, hệ thống thử sửa dấu coefficient rồi
+re-encode block bằng CAVLC:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Kiểm tra & Kết quả minh họa & Ý nghĩa \\
+\midrule
+Decode block gốc & pass & Parser đọc được block với nC đúng. \\
+Encode lại block gốc & 21 bit & Khớp độ dài ban đầu. \\
+Sửa coefficient & \(-1 \rightarrow +1\) & Nhúng bit 1. \\
+Encode block mới & 21 bit & Độ dài không đổi, có thể patch. \\
+Forward round-trip & pass & Decode block mới vẫn ra coefficient mong muốn. \\
+Ancestor/retro check & pass & Không làm block trước nuốt nhầm bit của block này. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Nếu mọi dòng đều pass, candidate này mới được xem là patchable. Nếu chỉ một
+dòng fail, hệ thống loại block hoặc vị trí đó khỏi capacity thật.
+
+\subsection{Từ candidate đến operating position}
+
+Sau nhiều bước lọc, danh sách có thể rút lại như sau:
+
+\begin{center}
+\begin{tabular}{lrrrr}
+\toprule
+Tầng & Số vị trí minh họa & Candidate 0 & Candidate 1 & Candidate 2 \\
+\midrule
+Raw safe & 433,256 & giữ & giữ & giữ \\
+Patchable usable & 1,391 & giữ & loại & giữ \\
+Validated pool & 1,316 & giữ & loại & giữ \\
+Operating positions & 1,232 & giữ & loại & giữ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Khi tới operating positions, mỗi vị trí đã đủ điều kiện để mang một bit payload
+trong benchmark-grade path.
+
+\section{Residual Coefficient Là Gì?}
+
+H.264 thường không lưu trực tiếp từng pixel. Nó dự đoán nội dung của một block,
+rồi lưu phần sai khác giữa dự đoán và dữ liệu thật. Phần sai khác này gọi là
+\textbf{residual}. Sau biến đổi và lượng tử hóa, residual trở thành một dãy số
+gọi là \textbf{residual coefficients}.
+
+Ví dụ một block 4x4 có thể có 16 coefficient:
+
+\begin{center}
+\begin{tikzpicture}
+\matrix[matrix of nodes,
+        nodes={coeff},
+        column sep=-\pgflinewidth,
+        row sep=-\pgflinewidth] (m) {
+0 & 5 & -4 & 0 \\
+6 & -1 & 0 & 0 \\
+8 & 0 & -1 & 1 \\
+0 & 0 & 0 & -1 \\
+};
+\end{tikzpicture}
+\end{center}
+
+Hệ thống không sửa tất cả các số này. Nó quan tâm đặc biệt tới các coefficient
+\(\pm1\) ở cuối dãy non-zero của CAVLC, vì các coefficient này có thể được mã
+hóa như \textbf{trailing-one sign flags}.
+
+\section{CAVLC Và Trailing Ones}
+
+\subsection{CAVLC là gì?}
+
+CAVLC là viết tắt của:
+
+\begin{center}
+\textbf{Context-Adaptive Variable Length Coding}
+\end{center}
+
+Đây là cách H.264 baseline mã hóa residual coefficients. Điểm quan trọng là
+\textbf{variable length}: giá trị khác nhau có thể tạo ra chuỗi bit dài ngắn
+khác nhau.
+
+Ví dụ minh họa:
+
+\begin{center}
+\begin{tabular}{ccc}
+\toprule
+Giá trị coefficient & Mã minh họa & Độ dài \\
+\midrule
+1 & \texttt{1} & 1 bit \\
+4 & \texttt{001011} & 6 bit \\
+5 & \texttt{0001110} & 7 bit \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Bảng trên chỉ minh họa ý tưởng, không phải bảng mã H.264 đầy đủ. Ý chính là:
+nếu sửa coefficient bừa bãi, độ dài CAVLC có thể đổi. Khi độ dài đổi, việc vá
+trở lại bitstream trở nên nguy hiểm.
+
+\subsection{Trailing ones là gì?}
+
+Trong CAVLC, tối đa ba coefficient cuối có trị tuyệt đối bằng 1 có thể được mã
+hóa đặc biệt. Chúng được gọi là \textbf{trailing ones}, hay viết tắt là
+\textbf{T1}. Với T1, phần dấu \((+/-)\) được mã hóa bằng các bit dấu riêng.
+
+Điều này rất hợp với nhúng tin:
+
+\begin{center}
+\begin{tabular}{ccc}
+\toprule
+Bit cần nhúng & Hành động trực quan & Coefficient sau cùng \\
+\midrule
+0 & đặt dấu âm & \(-1\) \\
+1 & đặt dấu dương & \(+1\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Nếu coefficient thật sự là T1 sign flag, đổi dấu thường là thay đổi rất nhỏ và
+có thể giữ nguyên độ dài mã. Vì vậy hệ thống tập trung vào \textbf{T1 sign
+embedding}.
+
+\section{Ví Dụ Cụ Thể: Nhúng 4 Bit Vào Một Số Vị Trí}
+
+Giả sử payload có 4 bit đầu:
+
+\begin{center}
+\texttt{1 0 1 1}
+\end{center}
+
+Hệ thống đã chọn được 4 vị trí T1 an toàn:
+
+\begin{center}
+\begin{tabular}{clcc}
+\toprule
+Bit & Vị trí & Coefficient trước & Coefficient sau \\
+\midrule
+1 & \texttt{(12, 496, 1)} & \(-1\) & \(+1\) \\
+0 & \texttt{(13, 892, 1)} & \(+1\) & \(-1\) \\
+1 & \texttt{(14, 1288, 1)} & \(+1\) & \(+1\) \\
+1 & \texttt{(15, 1684, 1)} & \(-1\) & \(+1\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Điều quan trọng là mỗi dòng trong bảng không chỉ là ``sửa một số''. Mỗi sửa đổi
+phải thỏa mãn:
+
+\begin{itemize}[leftmargin=*]
+  \item coefficient đúng là vị trí T1 sign flag;
+  \item block sau khi sửa vẫn mã hóa được bằng CAVLC;
+  \item độ dài bit của block không phá cấu trúc NAL/slice;
+  \item số sửa đổi trong một block không vượt giới hạn;
+  \item video sau tái tạo vẫn decode được;
+  \item bit có thể đọc lại từ stego video.
+\end{itemize}
+
+\section{Pipeline Chọn Vị Trí Nhúng}
+
+Đây là phần quan trọng nhất của hệ thống. Một vị trí chỉ được dùng nếu đi qua
+nhiều cửa kiểm tra.
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=8mm and 8mm]
+  \node[widebox] (parse) {Parse H.264\\lấy coefficients, offsets, nC};
+  \node[widebox, right=of parse] (t1) {Tìm T1 thật\\không nhầm với \(\pm1\) thường};
+  \node[widebox, right=of t1] (safe) {Safety filter\\raw safe positions};
+  \node[widebox, below=of safe] (patch) {Patchability pruning\\block phải vá được};
+  \node[widebox, left=of patch] (limit) {Per-block limit\\thường 1 bit/block};
+  \node[widebox, left=of limit] (validate) {Validation/quality\\PSNR, FFmpeg, SEC1 pool};
+  \node[good, below=of limit] (op) {Operating positions\\vị trí dùng thật};
+
+  \draw[arrow] (parse) -- (t1);
+  \draw[arrow] (t1) -- (safe);
+  \draw[arrow] (safe) -- (patch);
+  \draw[arrow] (patch) -- (limit);
+  \draw[arrow] (limit) -- (validate);
+  \draw[arrow] (validate) -- (op);
+\end{tikzpicture}
+}
+\caption{Pipeline chọn vị trí nhúng từ H.264 bitstream đến operating positions.}
+\label{fig:position-pipeline}
+\end{figure}
+
+\subsection{Safety filter}
+
+Safety filter là lớp lọc đầu tiên. Nó trả lời câu hỏi:
+
+\begin{center}
+\textit{``Vị trí này có vẻ an toàn về mặt cấu trúc CAVLC không?''}
+\end{center}
+
+Nó kiểm tra các yếu tố như:
+
+\begin{itemize}[leftmargin=*]
+  \item vị trí có phải trailing-one sign flag thật không;
+  \item sửa dấu có giữ được kiểu mã hóa mong muốn không;
+  \item block không nằm trong nhóm đã biết là không patchable;
+  \item thay đổi không làm zero/non-zero pattern nguy hiểm;
+  \item magnitude và số sửa đổi không vượt ngưỡng.
+\end{itemize}
+
+\subsection{Patchability-aware embedding}
+
+Patchability-aware embedding nghĩa là:
+
+\begin{center}
+\textit{``Chỉ nhúng vào những vị trí mà sau khi sửa, block vẫn có thể được vá
+lại vào bitstream H.264 hợp lệ.''}
+\end{center}
+
+Đây là một khái niệm rất quan trọng. Trong H.264/CAVLC, sửa một coefficient có
+thể làm block sau khi mã hóa dài hơn hoặc ngắn hơn. Nếu độ dài thay đổi, phần
+bit phía sau trong slice có thể bị lệch. Khi đó video có thể hỏng, parser có
+thể đọc sai, hoặc verifier không đọc lại được payload.
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=7mm and 10mm]
+  \node[widebox] (orig1) {Block gốc\\21 bit CAVLC};
+  \node[widebox, right=of orig1] (mod1) {Block sau sửa\\23 bit CAVLC};
+  \node[bad, right=of mod1] (bad) {Không patchable\\lệch bitstream};
+
+  \node[widebox, below=15mm of orig1] (orig2) {Block gốc\\21 bit CAVLC};
+  \node[widebox, right=of orig2] (mod2) {Block sau sửa\\21 bit CAVLC};
+  \node[good, right=of mod2] (good) {Patchable\\có thể vá lại};
+
+  \draw[arrow] (orig1) -- node[smallnote, above]{sửa coefficient} (mod1);
+  \draw[arrow] (mod1) -- (bad);
+  \draw[arrow] (orig2) -- node[smallnote, above]{sửa T1 sign} (mod2);
+  \draw[arrow] (mod2) -- (good);
+\end{tikzpicture}
+}
+\caption{Patchability: sửa xong phải vá được vào đúng vị trí trong bitstream.}
+\label{fig:patchability}
+\end{figure}
+
+Ảnh hưởng của patchability:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Tăng độ đúng}: video sau cùng ít bị hỏng bitstream.
+  \item \textbf{Tăng khả năng đọc lại}: bit đã nhúng có khả năng sống qua reconstruction.
+  \item \textbf{Giảm capacity}: nhiều vị trí nhìn có vẻ dùng được sẽ bị loại.
+  \item \textbf{Làm claim paper chặt hơn}: capacity được báo gần với khả năng dùng thật.
+\end{itemize}
+
+\subsection{Per-block limit}
+
+Hệ thống thường giới hạn số bit nhúng trong mỗi block, ví dụ:
+
+\begin{center}
+\texttt{max\_modifications\_per\_block = 1}
+\end{center}
+
+Nghĩa là một block 4x4 dù có nhiều vị trí có vẻ dùng được, hệ thống cũng chỉ
+chọn tối đa một vị trí. Điều này giúp giảm méo cục bộ và làm reconstruction ổn
+định hơn. Đổi lại, capacity giảm.
+
+\subsection{Quality guard}
+
+Quality guard đảm bảo video sau nhúng không bị xấu quá mức. Hệ thống dùng các
+metric như PSNR/SSIM, trong đó ngưỡng quan trọng của benchmark hiện tại là:
+
+\begin{center}
+\texttt{min\_modified\_frame\_psnr >= 40 dB}
+\end{center}
+
+Nếu một cấu hình nhúng làm frame tụt dưới ngưỡng, cấu hình đó không được coi là
+operating point mạnh.
+
+\section{Capacity: Vì Sao Không Thể Chỉ Đếm Candidate?}
+
+Một điểm mạnh của hệ thống là nó không nói ``video có bao nhiêu coefficient thì
+có bấy nhiêu bit''. Nó chia capacity thành nhiều lớp.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=8mm]
+  \node[widebox, text width=78mm] (raw) {Raw safe bits\\vị trí qua safety filter};
+  \node[widebox, text width=68mm, below=of raw] (patch) {Patchable usable bits\\vị trí vá được và bị giới hạn theo block};
+  \node[widebox, text width=58mm, below=of patch] (valid) {Validated pool bits\\vị trí qua validation/quality};
+  \node[good, text width=48mm, below=of valid] (op) {Operating bits\\vị trí dùng thật trong benchmark};
+
+  \draw[arrow] (raw) -- node[smallnote, right]{loại block không vá được} (patch);
+  \draw[arrow] (patch) -- node[smallnote, right]{kiểm tra thêm} (valid);
+  \draw[arrow] (valid) -- node[smallnote, right]{khóa operating point} (op);
+\end{tikzpicture}
+\caption{Capacity funnel: càng xuống dưới càng gần capacity thật.}
+\label{fig:capacity-funnel}
+\end{figure}
+
+Ví dụ minh họa:
+
+\begin{center}
+\begin{tabular}{lrp{70mm}}
+\toprule
+Lớp capacity & Số lượng ví dụ & Ý nghĩa \\
+\midrule
+Raw safe bits & 433,256 & Vị trí có vẻ an toàn về cấu trúc CAVLC. \\
+Patchable usable bits & 1,391 & Vị trí còn lại sau khi xét patchability và giới hạn theo block. \\
+Validated pool bits & 1,316 & Vị trí đã qua validation/quality. \\
+Operating bits & 1,232 & Vị trí thật sự dùng ở operating point. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Điểm quan trọng là: \textbf{raw safe bits không phải capacity thật}. Capacity
+thật hơn nằm ở patchable/validated/operating layers.
+
+\section{Payload Được Chuẩn Bị Như Thế Nào?}
+
+Về mặt video, hệ thống chỉ cần một chuỗi bit để nhúng. Chuỗi bit này đến từ
+payload blob:
+
+\begin{center}
+\texttt{[4B message length][message][129B Groth16 proof]}
+\end{center}
+
+Ví dụ message benchmark:
+
+\begin{center}
+\texttt{b"ZK-bench-v1.0!"}
+\end{center}
+
+Nếu message dài 13 byte và proof dài 129 byte, payload chưa chaos là:
+
+\begin{center}
+\texttt{4 + 13 + 129 = 146 bytes = 1168 bits}
+\end{center}
+
+Trong một số benchmark có chaos transform, payload operating có thể mở rộng lên
+khoảng 1232 bit.
+
+\section{Payload Được Nhúng Vào Video Như Thế Nào?}
+
+Sau khi có payload bits và operating positions, hệ thống ghép từng bit với từng
+vị trí:
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=8mm and 9mm]
+  \node[crypto] (payload) {Payload blob\\\texttt{[len][msg][proof]}};
+  \node[widebox, right=of payload] (bits) {Đổi thành bit\\\(b_0,b_1,\ldots,b_n\)};
+  \node[widebox, below=of bits] (positions) {Operating positions\\\(p_0,p_1,\ldots,p_n\)};
+  \node[highlight, right=of bits] (map) {Ánh xạ\\bit \(b_i\) vào vị trí \(p_i\)};
+  \node[widebox, right=of map] (modify) {Sửa T1 sign\\coefficient \(\pm1\)};
+  \node[good, below=of modify] (modmap) {Modified coefficient map};
+
+  \draw[arrow] (payload) -- (bits);
+  \draw[arrow] (bits) -- (map);
+  \draw[arrow] (positions) -- (map);
+  \draw[arrow] (map) -- (modify);
+  \draw[arrow] (modify) -- (modmap);
+\end{tikzpicture}
+}
+\caption{Mỗi payload bit được đưa vào một vị trí coefficient đã chọn.}
+\label{fig:embed-bits}
+\end{figure}
+
+\subsection{Ví dụ ánh xạ payload bits vào positions}
+
+Giả sử payload sau khi pack được đổi thành các bit đầu tiên:
+
+\begin{center}
+\texttt{1 0 1 1 0 0 1 0}
+\end{center}
+
+Và operating positions đầu tiên là:
+
+\begin{center}
+\begin{tabular}{rrrrcc}
+\toprule
+Bit index & Payload bit & Frame & MB & Block & Coeff \\
+\midrule
+0 & 1 & 12 & 4960 & 7 & 13 \\
+1 & 0 & 13 & 5356 & 2 & 11 \\
+2 & 1 & 14 & 5752 & 9 & 14 \\
+3 & 1 & 15 & 6148 & 1 & 15 \\
+4 & 0 & 16 & 6544 & 6 & 12 \\
+5 & 0 & 17 & 6940 & 5 & 13 \\
+6 & 1 & 18 & 7336 & 8 & 15 \\
+7 & 0 & 19 & 7732 & 3 & 11 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Sau đó hệ thống đi từng dòng:
+
+\begin{center}
+\begin{tabular}{rrrrccc}
+\toprule
+Bit & Frame & MB & Block & Coeff & Trước & Sau \\
+\midrule
+1 & 12 & 4960 & 7 & 13 & \(-1\) & \(+1\) \\
+0 & 13 & 5356 & 2 & 11 & \(+1\) & \(-1\) \\
+1 & 14 & 5752 & 9 & 14 & \(+1\) & \(+1\) \\
+1 & 15 & 6148 & 1 & 15 & \(-1\) & \(+1\) \\
+0 & 16 & 6544 & 6 & 12 & \(-1\) & \(-1\) \\
+0 & 17 & 6940 & 5 & 13 & \(+1\) & \(-1\) \\
+1 & 18 & 7336 & 8 & 15 & \(-1\) & \(+1\) \\
+0 & 19 & 7732 & 3 & 11 & \(+1\) & \(-1\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Bảng này là hình ảnh trực quan nhất của quá trình nhúng: payload bit được biến
+thành dấu của một coefficient T1 ở một block cụ thể.
+
+Ở mức một block, có thể hình dung như sau:
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{ccc}
+\toprule
+\textbf{Block trước nhúng} &
+\textbf{Hành động} &
+\textbf{Block sau nhúng} \\
+\midrule
+\begin{tabular}{|c|c|c|c|}
+\hline
+0 & 5 & -4 & 0 \\
+\hline
+6 & -1 & 0 & 0 \\
+\hline
+8 & 0 & -1 & 1 \\
+\hline
+0 & 0 & 0 & \cellcolor{SoftYellow}\(-1\) \\
+\hline
+\end{tabular}
+&
+\begin{tabular}{c}
+Payload bit \(=1\) \\
+chọn T1 sign position \\
+đặt coefficient thành \(+1\)
+\end{tabular}
+&
+\begin{tabular}{|c|c|c|c|}
+\hline
+0 & 5 & -4 & 0 \\
+\hline
+6 & -1 & 0 & 0 \\
+\hline
+8 & 0 & -1 & 1 \\
+\hline
+0 & 0 & 0 & \cellcolor{CoreGreen!12}\(+1\) \\
+\hline
+\end{tabular}
+\\
+\bottomrule
+\end{tabular}
+}
+\caption{Ví dụ trực quan: nhúng một bit bằng cách đổi dấu một coefficient T1.}
+\label{fig:block-example}
+\end{figure}
+
+\section{Reconstruction: Làm Sao Video Sau Nhúng Vẫn Là H.264 Hợp Lệ?}
+
+Sau khi sửa coefficient trong bộ nhớ, hệ thống phải tạo lại file stego H.264.
+Đây là bước reconstruction.
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=8mm and 8mm]
+  \node[widebox] (modcoeff) {Modified coefficients\\trong bộ nhớ};
+  \node[widebox, right=of modcoeff] (context) {Reconstruction context\\offsets, nC, T1 override};
+  \node[widebox, right=of context] (encode) {Re-encode/patch\\CAVLC blocks/slices};
+  \node[widebox, below=of encode] (out) {Stego H.264\\file đầu ra};
+  \node[widebox, left=of out] (stats) {Applied block keys\\block thật sự được vá};
+  \node[good, left=of stats] (ok) {Post-check\\đủ bit thì pass};
+
+  \draw[arrow] (modcoeff) -- (context);
+  \draw[arrow] (context) -- (encode);
+  \draw[arrow] (encode) -- (out);
+  \draw[arrow] (out) -- (stats);
+  \draw[arrow] (stats) -- (ok);
+\end{tikzpicture}
+}
+\caption{Reconstruction biến coefficient đã sửa thành stego H.264 hợp lệ.}
+\label{fig:reconstruction}
+\end{figure}
+
+Sau reconstruction, hệ thống không tin mù rằng mọi bit đều đã được áp dụng.
+Nó kiểm tra lại:
+
+\begin{itemize}[leftmargin=*]
+  \item \texttt{requested\_position\_bits}: số vị trí dự định dùng;
+  \item \texttt{applied\_position\_bits}: số vị trí thật sự được vá vào bitstream;
+  \item \texttt{bits\_required}: số bit payload cần nhúng.
+\end{itemize}
+
+Nếu \texttt{applied\_position\_bits < bits\_required}, hệ thống báo fail ở
+\texttt{post\_reconstruct\_application}. Đây là một điểm rất quan trọng: hệ
+thống đo capacity sau khi bitstream đã được tái tạo, không chỉ trước khi tái
+tạo.
+
+\subsection{Ví dụ artifact sau khi nhúng}
+
+Sau một lượt nhúng thành công, thư mục output thường có các file dạng:
+
+\begin{center}
+\begin{tabular}{lp{88mm}}
+\toprule
+File & Ý nghĩa \\
+\midrule
+\texttt{stego.h264} & Video H.264 đã chứa payload. \\
+\texttt{stego.h264.positions.json} & Danh sách positions đã dùng để nhúng bit. \\
+\texttt{stego.h264.meta.json} & Số bit required/embedded, capacity diagnostics, chaos flag. \\
+\texttt{stego.h264.manifest.json} & Manifest có schema version, payload metadata, video hash, proof metadata. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Một \texttt{positions.json} rút gọn có thể nhìn như sau:
+
+\begin{center}
+\begin{tabular}{rrrr}
+\toprule
+Index & Macroblock & Block & Coefficient \\
+\midrule
+0 & 4960 & 7 & 13 \\
+1 & 5356 & 2 & 11 \\
+2 & 5752 & 9 & 14 \\
+3 & 6148 & 1 & 15 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Một \texttt{meta.json} rút gọn có thể chứa:
+
+\begin{center}
+\begin{tabular}{lr}
+\toprule
+Trường & Giá trị minh họa \\
+\midrule
+\texttt{bits\_required} & 1232 \\
+\texttt{bits\_embedded} & 1232 \\
+\texttt{raw\_safe\_bits} & 433256 \\
+\texttt{patchable\_usable\_bits} & 1391 \\
+\texttt{requested\_position\_bits} & 1232 \\
+\texttt{applied\_position\_bits} & 1232 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Nếu \texttt{applied\_position\_bits} nhỏ hơn \texttt{bits\_required}, điều đó có
+nghĩa là một phần positions đã không sống qua reconstruction, và output đó
+không được xem là operating-point success.
+
+\section{Trích Xuất Payload Diễn Ra Như Thế Nào?}
+
+Trích xuất là pipeline ngược của nhúng.
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=8mm and 8mm]
+  \node[widebox] (stego) {Stego H.264};
+  \node[widebox, right=of stego] (parse) {Parse lại bitstream\\NAL, IDR, block};
+  \node[widebox, right=of parse] (positions) {Lấy positions\\từ sidecar hoặc locked set};
+  \node[widebox, below=of positions] (read) {Đọc T1 signs\\khôi phục bits};
+  \node[widebox, left=of read] (blob) {Ghép lại payload blob};
+  \node[crypto, left=of blob] (unpack) {Unpack\\length, message, proof};
+  \node[crypto, below=of unpack] (verify) {Verify proof\\Groth16};
+
+  \draw[arrow] (stego) -- (parse);
+  \draw[arrow] (parse) -- (positions);
+  \draw[arrow] (positions) -- (read);
+  \draw[arrow] (read) -- (blob);
+  \draw[arrow] (blob) -- (unpack);
+  \draw[arrow] (unpack) -- (verify);
+\end{tikzpicture}
+}
+\caption{Pipeline trích xuất: đọc dấu T1 ở đúng positions để dựng lại payload.}
+\label{fig:extract}
+\end{figure}
+
+\subsection{Ví dụ đọc ngược từ stego video}
+
+Giả sử verifier có \texttt{positions.json} với các dòng đầu:
+
+\begin{center}
+\begin{tabular}{rrrr}
+\toprule
+Index & Macroblock & Block & Coefficient \\
+\midrule
+0 & 4960 & 7 & 13 \\
+1 & 5356 & 2 & 11 \\
+2 & 5752 & 9 & 14 \\
+3 & 6148 & 1 & 15 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Verifier parse \texttt{stego.h264}, đi tới đúng các vị trí đó và đọc dấu của
+coefficient:
+
+\begin{center}
+\begin{tabular}{rrrrcc}
+\toprule
+Index & MB & Block & Coeff & Coefficient đọc được & Bit khôi phục \\
+\midrule
+0 & 4960 & 7 & 13 & \(+1\) & 1 \\
+1 & 5356 & 2 & 11 & \(-1\) & 0 \\
+2 & 5752 & 9 & 14 & \(+1\) & 1 \\
+3 & 6148 & 1 & 15 & \(+1\) & 1 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Các bit này được ghép lại thành payload blob:
+
+\begin{center}
+\texttt{1011...}
+\end{center}
+
+Sau khi đủ số bit, hệ thống đọc 4 byte đầu để biết độ dài message, lấy phần
+message, lấy phần proof, rồi gọi verifier ZKP. Nếu một vài bit đầu header sai,
+toàn bộ quá trình unpack có thể hỏng vì độ dài message bị đọc sai. Đây là lý
+do các thử nghiệm blind-core sau này phải quan tâm rất nhiều tới header
+reliability.
+
+Với verifier hiện tại:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Strict non-blind}: cần cover/original hoặc thông tin vị trí tương đương.
+  \item \textbf{Sidecar-assisted near-blind}: không cần cover gốc nhưng cần sidecar như manifest/positions.
+  \item \textbf{Blind-core}: hướng nghiên cứu, chưa phải claim chính của baseline hiện tại.
+\end{itemize}
+
+\section{Cơ Chế ZKP: Proof Được Sinh Từ Đâu Và Sinh Như Thế Nào?}
+
+ZKP không chọn vị trí nhúng trong video. ZKP tạo ra một proof mật mã để chứng
+minh rằng message được nhúng có liên hệ đúng với một secret key, nhưng không
+tiết lộ secret key đó. Sau đó proof được nén thành bytes và đưa cho video
+embedding core giấu vào H.264 như dữ liệu bình thường.
+
+\subsection{Mệnh đề mà proof chứng minh}
+
+Circuit chính nằm trong:
+
+\begin{center}
+\texttt{circuits/payload\_verify.circom}
+\end{center}
+
+Circuit tên là \texttt{PayloadVerify}. Nó chứng minh quan hệ:
+
+\[
+  \texttt{commitment}
+  =
+  \mathrm{SHA256}(\texttt{payload\_hash} \parallel \texttt{secret})
+\]
+
+Trong đó:
+
+\[
+  \texttt{payload\_hash}
+  =
+  \mathrm{SHA256}(\texttt{message})
+\]
+
+Nói bằng lời:
+
+\begin{center}
+\textit{Người tạo proof biết một secret key sao cho khi ghép secret key đó với
+hash của message, rồi băm SHA256, ta nhận được commitment công khai.}
+\end{center}
+
+Điểm quan trọng là secret key không được nhúng vào video và không xuất hiện
+trong public signals. Secret key chỉ đi vào witness khi tạo proof.
+
+\subsection{Public input và private input}
+
+Circuit có các input sau:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Loại input & Tên & Ý nghĩa \\
+\midrule
+Public & \texttt{payload\_hash[256]} & 256 bit của \(\mathrm{SHA256(message)}\). \\
+Public & \texttt{commitment[256]} & 256 bit commitment mong đợi. \\
+Public & \texttt{payload\_length} & Độ dài message theo byte. \\
+Private & \texttt{secret[256]} & 256 bit secret key, tức 32 byte. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Public input là phần verifier được phép biết. Private input là phần prover biết
+nhưng không lộ ra. Đây là phần ``zero-knowledge'' của hệ thống.
+
+\subsection{Ví dụ dữ liệu trước khi tạo proof}
+
+Giả sử message là:
+
+\begin{center}
+\texttt{b"ZK-bench-v1.0!"}
+\end{center}
+
+và secret key là 32 byte:
+
+\begin{center}
+\texttt{00 01 02 03 ... 1f}
+\end{center}
+
+Python bridge trong \texttt{src/zk\_proof.py} tạo dữ liệu circuit như sau:
+
+\begin{center}
+\begin{tabular}{lp{95mm}}
+\toprule
+Bước & Giá trị tạo ra \\
+\midrule
+1 & \texttt{payload\_hash = SHA256(message)} \\
+2 & \texttt{commitment = SHA256(payload\_hash || secret\_key)} \\
+3 & Chuyển \texttt{payload\_hash} thành 256 bit. \\
+4 & Chuyển \texttt{commitment} thành 256 bit. \\
+5 & Chuyển \texttt{secret\_key} thành 256 bit private input. \\
+6 & Ghi thêm \texttt{payload\_length = len(message)}. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Trong code, logic này tương ứng với hàm
+\texttt{\_build\_circuit\_input(payload\_bytes, secret\_key)}.
+
+\subsection{Workflow sinh proof}
+
+Hệ thống dùng \texttt{snarkjs} và Groth16. Các artifact quan trọng nằm trong
+\texttt{circuits/build/}:
+
+\begin{center}
+\begin{tabular}{lp{88mm}}
+\toprule
+Artifact & Vai trò \\
+\midrule
+\texttt{payload\_verify.wasm} & Chạy circuit để tạo witness từ input. \\
+\texttt{generate\_witness.js} & Script Node.js sinh witness. \\
+\texttt{proving\_key.zkey} & Proving key dùng để tạo Groth16 proof. \\
+\texttt{verification\_key.json} & Verification key dùng để verify proof. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Pipeline tạo proof:
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=8mm and 8mm]
+  \node[crypto] (message) {Message bytes};
+  \node[crypto, right=of message] (secret) {Secret key\\32 bytes};
+  \node[crypto, below=of message] (hash) {\(\mathrm{SHA256(message)}\)\\payload hash};
+  \node[crypto, right=of hash] (commit) {\(\mathrm{SHA256(hash || secret)}\)\\commitment};
+  \node[crypto, below=of hash] (input) {Circuit input JSON\\public + private};
+  \node[crypto, right=of input] (witness) {Witness\\\texttt{witness.wtns}};
+  \node[crypto, right=of witness] (proof) {Groth16 proof\\snarkjs JSON};
+  \node[crypto, below=of proof] (bytes) {Compressed proof\\129 bytes};
+  \node[widebox, left=of bytes] (pack) {Payload blob\\\texttt{[4B len][message][proof]}};
+  \node[widebox, left=of pack] (video) {Embed blob bits\\into H.264};
+
+  \draw[arrow] (message) -- (hash);
+  \draw[arrow] (message) -- (input);
+  \draw[arrow] (secret) -- (commit);
+  \draw[arrow] (hash) -- (commit);
+  \draw[arrow] (hash) -- (input);
+  \draw[arrow] (commit) -- (input);
+  \draw[arrow] (secret) -- (input);
+  \draw[arrow] (input) -- node[smallnote, above]{Node.js WASM} (witness);
+  \draw[arrow] (witness) -- node[smallnote, above]{snarkjs groth16 prove} (proof);
+  \draw[arrow] (proof) -- (bytes);
+  \draw[arrow] (bytes) -- (pack);
+  \draw[arrow] (pack) -- (video);
+\end{tikzpicture}
+}
+\caption{Workflow tạo proof: message và secret tạo witness, witness tạo Groth16 proof, proof được nén rồi nhúng vào video.}
+\label{fig:zkp-proof-generation}
+\end{figure}
+
+\subsection{Witness là gì?}
+
+Witness là tập giá trị làm cho circuit thỏa mãn. Trong hệ thống này, witness
+bao gồm secret key và các giá trị trung gian khi circuit tính:
+
+\[
+  \mathrm{SHA256}(\texttt{payload\_hash} \parallel \texttt{secret})
+\]
+
+Nếu secret không đúng, circuit không thể tạo witness hợp lệ cho commitment đã
+công khai. Nếu witness không hợp lệ, Groth16 proof sẽ không verify.
+
+Trong code, witness được tạo bằng:
+
+\begin{center}
+\texttt{node generate\_witness.js payload\_verify.wasm input.json witness.wtns}
+\end{center}
+
+Sau khi tạo proof, các file tạm chứa secret/witness/proof/public được xóa.
+Điểm này quan trọng vì input JSON có chứa secret key ở dạng bit.
+
+\subsection{Proof JSON và proof bytes khác nhau thế nào?}
+
+\texttt{snarkjs} tạo proof ở dạng JSON, thường có các phần:
+
+\begin{center}
+\begin{tabular}{lp{85mm}}
+\toprule
+Trường proof & Ý nghĩa \\
+\midrule
+\texttt{pi\_a} & Điểm elliptic curve trong group G1. \\
+\texttt{pi\_b} & Điểm elliptic curve trong group G2. \\
+\texttt{pi\_c} & Điểm elliptic curve trong group G1. \\
+\texttt{protocol} & \texttt{groth16}. \\
+\texttt{curve} & \texttt{bn128}. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+JSON này quá dài để nhúng trực tiếp. Vì vậy hệ thống nén proof thành 129 byte:
+
+\begin{center}
+\begin{tabular}{lr}
+\toprule
+Thành phần & Kích thước \\
+\midrule
+\texttt{pi\_a.x} & 32 byte \\
+\texttt{pi\_b.x[0]} & 32 byte \\
+\texttt{pi\_b.x[1]} & 32 byte \\
+\texttt{pi\_c.x} & 32 byte \\
+sign flags cho các tọa độ y & 1 byte \\
+\midrule
+Tổng & 129 byte \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Hàm tương ứng là:
+
+\begin{center}
+\texttt{proof\_to\_bytes(proof\_dict)}
+\end{center}
+
+Khi verify, hệ thống gọi:
+
+\begin{center}
+\texttt{bytes\_to\_proof(proof\_bytes)}
+\end{center}
+
+để dựng lại proof JSON từ 129 byte này.
+
+\subsection{Payload blob cuối cùng được nhúng vào video}
+
+Sau khi có proof bytes, hệ thống pack message và proof thành một blob:
+
+\begin{center}
+\texttt{[4 bytes message length][message bytes][129 bytes proof]}
+\end{center}
+
+Ví dụ:
+
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+Thành phần & Kích thước & Ghi chú \\
+\midrule
+Message length header & 4 byte & Big-endian integer. \\
+Message & 13 byte & Ví dụ \texttt{ZK-bench-v1.0!}. \\
+Compressed proof & 129 byte & Groth16 BN128 proof. \\
+\midrule
+Tổng & 146 byte & 1168 bit trước chaos. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Đây là dữ liệu mà video embedding core thật sự nhìn thấy. Từ góc nhìn của phần
+nhúng video, ZKP proof chỉ là 129 byte cần được giấu và đọc lại chính xác.
+
+\subsection{Verify sau khi extract diễn ra thế nào?}
+
+Sau khi verifier đọc lại payload blob từ stego video, hệ thống làm ngược lại:
+
+\begin{enumerate}[leftmargin=*]
+  \item Đọc 4 byte đầu để biết độ dài message.
+  \item Tách message bytes và 129 proof bytes.
+  \item Dựng lại proof JSON bằng \texttt{bytes\_to\_proof()}.
+  \item Tính lại \texttt{payload\_hash = SHA256(message)}.
+  \item Tính lại \texttt{commitment = SHA256(payload\_hash || secret\_key)}.
+  \item Tạo public signals gồm \texttt{payload\_hash}, \texttt{commitment}, \texttt{payload\_length}.
+  \item Gọi \texttt{snarkjs groth16 verify} với \texttt{verification\_key.json}.
+\end{enumerate}
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=8mm and 8mm]
+  \node[widebox] (stego) {Extracted blob\\from stego H.264};
+  \node[crypto, right=of stego] (unpack) {Unpack blob\\message + proof bytes};
+  \node[crypto, right=of unpack] (reproof) {Rebuild proof JSON\\from 129 bytes};
+  \node[crypto, below=of unpack] (public) {Rebuild public signals\\hash, commitment, length};
+  \node[crypto, right=of public] (verify) {snarkjs\\groth16 verify};
+  \node[good, right=of verify] (ok) {Valid proof};
+
+  \draw[arrow] (stego) -- (unpack);
+  \draw[arrow] (unpack) -- (reproof);
+  \draw[arrow] (unpack) -- (public);
+  \draw[arrow] (reproof) -- (verify);
+  \draw[arrow] (public) -- (verify);
+  \draw[arrow] (verify) -- (ok);
+\end{tikzpicture}
+}
+\caption{Workflow verify: sau khi extract đúng bytes, hệ thống dựng lại proof và public signals rồi gọi Groth16 verifier.}
+\label{fig:zkp-verify}
+\end{figure}
+
+\subsection{ZKP và video embedding chia trách nhiệm thế nào?}
+
+Hai phần này có vai trò khác nhau:
+
+\begin{center}
+\begin{tabular}{p{0.32\linewidth}p{0.58\linewidth}}
+\toprule
+Thành phần & Trách nhiệm \\
+\midrule
+ZKP layer & Chứng minh message có commitment hợp lệ với secret key mà không lộ secret key. \\
+Video embedding core & Giấu chính xác payload bytes vào H.264 và đọc lại đúng payload bytes đó. \\
+Verifier & Kiểm tra rằng bytes đọc lại từ video tạo thành proof hợp lệ. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Nói cách khác:
+
+\begin{center}
+\textbf{ZKP trả lời: payload có quan hệ mật mã hợp lệ không?}\\
+\textbf{Video embedding trả lời: payload có được giấu và đọc lại đúng không?}
+\end{center}
+
+\section{Workflow Thực Tế Khi Gọi \texttt{embed()}}
+
+Khi gọi public API \texttt{embed()}, pipeline thực tế đi qua các bước sau:
+
+\begin{enumerate}[leftmargin=*]
+  \item Kiểm tra input: video tồn tại, \texttt{circuits\_dir} tồn tại, message không rỗng, secret key dài 32 byte.
+  \item Phân tích stream profile: all-intra hay inter-coded. Baseline mạnh nhất hiện tại là all-intra H.264/CAVLC.
+  \item Tạo Groth16 proof cho message và secret key.
+  \item Pack payload thành \texttt{[4B length][message][proof]}.
+  \item Nếu bật chaos, scramble payload bits và shuffle thứ tự positions.
+  \item Parse video H.264 để lấy coefficients, CAVLC offsets, nC map, NAL length map, T1 override map.
+  \item Chạy CAVLC safety filter để lấy raw safe positions.
+  \item Nếu dùng locked operating point, nạp precomputed positions đã được validate.
+  \item Nếu không dùng locked positions, chạy FFmpeg validation tùy chọn, patchability pruning, và per-block limit.
+  \item Nhúng payload bits vào positions bằng T1 sign modification.
+  \item Reconstruct stego H.264.
+  \item Kiểm tra applied positions sau reconstruction.
+  \item Ghi \texttt{positions.json}, \texttt{meta.json}, và \texttt{manifest.json}.
+\end{enumerate}
+
+\section{Tại Sao Hệ Thống Hiện Mạnh Nhất Ở All-Intra H.264/CAVLC?}
+
+All-intra nghĩa là các frame chủ yếu được mã hóa độc lập, giống nhiều I-frame.
+Điều này hợp với hệ thống vì:
+
+\begin{itemize}[leftmargin=*]
+  \item sửa một frame ít gây cascade sang frame khác;
+  \item residual blocks trong IDR/I-frame dễ kiểm soát hơn;
+  \item CAVLC baseline có cấu trúc trailing-one phù hợp với sign-bit embedding;
+  \item benchmark có thể khóa operating point ổn định hơn.
+\end{itemize}
+
+Với GOP lớn hoặc inter-coded video, P-frame/B-frame phụ thuộc dự đoán từ frame
+khác. Một thay đổi nhỏ có thể ảnh hưởng rộng hơn. Vì vậy inter-coded support là
+hướng cần phát triển thêm, không phải path mạnh nhất hiện tại.
+
+\section{Tóm Tắt Vai Trò Của Các Thành Phần}
+
+\begin{center}
+\begin{tabular}{p{0.28\linewidth}p{0.62\linewidth}}
+\toprule
+Thành phần & Vai trò \\
+\midrule
+\texttt{src/embedder.py} &
+Public API. Tạo proof, pack payload, nạp analysis, chọn positions, nhúng, reconstruct, ghi sidecar. \\
+
+\texttt{src/core/stego.py} &
+Safety filter và payload embed/extract logic. Đây là nơi tìm T1 positions và sửa coefficient. \\
+
+\texttt{src/bitstream/cavlc.py} &
+CAVLC encoder/decoder. Dùng để hiểu và tái mã hóa residual blocks. \\
+
+\texttt{src/bitstream/h264.py} &
+H.264 parser. Dùng để bóc NAL, slice, macroblock, block, coefficient. \\
+
+\texttt{src/bitstream/bitstream\_ops.py} &
+Patchability validation và reconstruction. Đây là phần đảm bảo thay đổi có thể sống trong bitstream thật. \\
+
+\texttt{src/zk\_proof.py} &
+Tạo, serialize, pack, unpack, và verify Groth16 proof. \\
+
+\texttt{benchmark/\_common.py} &
+Đo capacity layers và tái dùng analysis cache cho benchmark. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Điểm Cần Nhớ}
+
+Điểm tinh túy của hệ thống không phải là ``đổi coefficient''. Điểm tinh túy là:
+
+\begin{center}
+\textit{Chọn đúng coefficient mà sau khi đổi, H.264 bitstream vẫn vá được, video
+vẫn decode được, chất lượng vẫn đạt, và payload vẫn đọc lại được.}
+\end{center}
+
+Vì thế, các thuật ngữ quan trọng nhất là:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{CAVLC-safe}: vị trí không phá cấu trúc mã hóa coefficient.
+  \item \textbf{Patchable}: block sau sửa có thể vá lại vào bitstream.
+  \item \textbf{Reconstruct-aware}: sau reconstruction vẫn kiểm tra số bit sống thật.
+  \item \textbf{Operating point}: cấu hình đã chạy thật và pass thật.
+  \item \textbf{Capacity decomposition}: không đánh đồng raw candidates với capacity thật.
+\end{itemize}
+
+\section{Kết Luận}
+
+Hệ thống xử lý video theo hướng rất cụ thể:
+
+\begin{center}
+\texttt{H.264 bitstream}
+\(\rightarrow\)
+\texttt{IDR/CAVLC blocks}
+\(\rightarrow\)
+\texttt{T1 sign positions}
+\(\rightarrow\)
+\texttt{payload bits}
+\(\rightarrow\)
+\texttt{patched stego H.264}
+\end{center}
+
+Nó không giấu tin bằng cách sửa pixel. Nó giấu tin bằng cách sửa rất nhỏ dấu
+của một số residual coefficients đã được chọn lọc trong bitstream H.264. Chính
+những lớp lọc như patchability, reconstruction, quality guard, và operating
+capacity mới làm hệ thống khác với một phương pháp nhúng đơn giản.
+
+\end{document}
