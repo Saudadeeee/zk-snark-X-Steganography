@@ -26,6 +26,7 @@ from src.trust import (
     FingerprintRecord,
     FingerprintRegistry,
     FingerprintPreprocessPolicy,
+    KeyedTemplateDetector,
     MockTEESigner,
     TinyThresholdDetector,
     ZKMLInterfaceSpec,
@@ -133,6 +134,24 @@ def t_calibrated_detector_selects_threshold():
     assert calibration.false_accept_rate == 0.0
 
 
+def t_keyed_template_detector_separates_embedded_clip():
+    base = np.stack(
+        [
+            np.tile(np.linspace(32 + i * 6, 220 + i * 6, 32, dtype=np.float32), (32, 1))
+            for i in range(4)
+        ]
+    )
+    detector = KeyedTemplateDetector(b"unit-test-key", frame_shape=(32, 32), grid_size=8)
+    embedded = detector.embed(base, strength=9.0)
+    calibration = detector.calibrate(positive_clips=[embedded], negative_clips=[base])
+    receipt = detector.receipt(embedded, threshold=calibration.threshold)
+    assert detector.score(embedded) > detector.score(base)
+    assert receipt.valid
+    assert calibration.true_accept_rate == 1.0
+    assert calibration.false_accept_rate == 0.0
+    assert b"unit-test-key".hex() not in detector.commitment
+
+
 def t_mock_tee_attestation_signature():
     bundle = AttestationBundle(
         video_hash="aa" * 32,
@@ -194,6 +213,7 @@ def main():
         run_test("watermark_receipt_threshold", t_watermark_receipt_threshold),
         run_test("tiny_video_features_are_circuit_sized", t_tiny_video_features_are_circuit_sized),
         run_test("calibrated_detector_selects_threshold", t_calibrated_detector_selects_threshold),
+        run_test("keyed_template_detector_separates_embedded_clip", t_keyed_template_detector_separates_embedded_clip),
         run_test("mock_tee_attestation_signature", t_mock_tee_attestation_signature),
         run_test("attestation_sidecar_roundtrip", t_attestation_sidecar_roundtrip),
         run_test("zkml_interface_is_explicit_stub", t_zkml_interface_is_explicit_stub),

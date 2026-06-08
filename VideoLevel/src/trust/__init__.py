@@ -19,6 +19,7 @@ from .watermark_receipt import (
     CalibratedThresholdDetector,
     DetectorCalibration,
     DetectorReceipt,
+    KeyedTemplateDetector,
     TinyThresholdDetector,
     extract_tiny_video_features,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "DetectorReceipt",
     "DetectorCalibration",
     "CalibratedThresholdDetector",
+    "KeyedTemplateDetector",
     "TinyThresholdDetector",
     "extract_tiny_video_features",
     "AttestationBundle",

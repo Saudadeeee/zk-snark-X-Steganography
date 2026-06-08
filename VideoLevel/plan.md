@@ -283,7 +283,7 @@ Current implementation status:
 
 Current diagnostic status on 2026-06-09:
 
-- Future trust interface tests now pass `12/12`.
+- Future trust interface tests now pass `13/13`.
 - Section `44`: passed with schema validation OK.
 - `fingerprint_verify.circom`: compiled and proved, `606` non-linear
   constraints, `842` linear constraints, Groth16 verify passed.
@@ -301,6 +301,14 @@ Current diagnostic status on 2026-06-09:
 - Current calibrated detector candidate: threshold `0.2107`,
   `true_accept_rate=1.0`, `false_accept_rate=0.0`, `accuracy=1.0` on the
   committed diagnostic transform set.
+- Current keyed-template detector candidate: threshold `0.3231`,
+  score margin `0.1053`, `positive_accept_rate=1.0`,
+  `false_accept_rate=0.0`, `accuracy=1.0` on 8 positive and 5 negative
+  synthetic controls.
+- Keyed-template claim scope currently covers brightness, contrast, mild noise,
+  nearest-neighbor down/up sampling, box blur, temporal reversal, and frame
+  dropping. Crop resynchronization, geometric flips, screen recording, and
+  heavy re-encoding remain out of scope.
 
 ### 5.1 ZK + C2PA Provenance Root
 
@@ -457,8 +465,10 @@ Future tasks:
       transform set.
 - [x] Replace fixed-threshold toy behavior with deterministic calibrated
       threshold selection.
-- [ ] Replace the calibrated toy detector with a learned or hand-designed
+- [x] Replace the calibrated toy detector with a hand-designed keyed-template
       robust-video detector candidate.
+- [ ] Stress the keyed-template detector under real re-encoding, crop/scale,
+      and screen-recording style transforms before promotion.
 
 Implementation sequence:
 

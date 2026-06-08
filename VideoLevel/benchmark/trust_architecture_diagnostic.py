@@ -30,6 +30,7 @@ from src.trust import (
     FingerprintPreprocessPolicy,
     FingerprintRecord,
     FingerprintRegistry,
+    KeyedTemplateDetector,
     MockTEESigner,
     TinyThresholdDetector,
     ZKMLInterfaceSpec,
@@ -567,6 +568,105 @@ def _detector_transform_benchmark() -> dict[str, object]:
     }
 
 
+def _keyed_template_detector_benchmark() -> dict[str, object]:
+    base = np.stack(
+        [
+            np.tile(np.linspace(32 + i * 8, 220 + i * 8, 64, dtype=np.float32), (64, 1))
+            for i in range(8)
+        ]
+    )
+    detector = KeyedTemplateDetector(b"upgrade-v2-watermark-key", frame_shape=(64, 64), grid_size=8)
+    wrong_key_detector = KeyedTemplateDetector(b"upgrade-v2-wrong-key", frame_shape=(64, 64), grid_size=8)
+    embedded = detector.embed(base, strength=8.0)
+    transformed = {
+        "embedded": embedded,
+        "brightness_shift": np.clip(embedded + 12.0, 0, 255),
+        "contrast_scale": np.clip((embedded - 128.0) * 1.12 + 128.0, 0, 255),
+        "mild_noise": np.clip(
+            embedded + np.random.default_rng(7).normal(0, 4, embedded.shape),
+            0,
+            255,
+        ).astype(np.float32),
+        "down_up_nearest": _down_up_nearest(embedded),
+        "box_blur": _box_blur(embedded),
+        "temporal_reverse": embedded[::-1],
+        "frame_drop": embedded[::2],
+    }
+    negative_controls = {
+        "clean_cover": base,
+        "wrong_key_watermark": wrong_key_detector.embed(base, strength=8.0),
+        "dark_flat": np.zeros_like(base) + 8,
+        "low_motion_gray": np.zeros_like(base) + 64,
+        "seeded_noise": np.random.default_rng(99).normal(127, 35, base.shape).clip(0, 255).astype(np.float32),
+    }
+    calibration = detector.calibrate(list(transformed.values()), list(negative_controls.values()))
+
+    rows = []
+    for name, frames in transformed.items():
+        receipt = detector.receipt(frames, threshold=calibration.threshold)
+        rows.append(
+            {
+                "transform": name,
+                "score": receipt.score,
+                "threshold": calibration.threshold,
+                "expected": True,
+                "accepted": receipt.valid,
+                "correct": receipt.valid is True,
+            }
+        )
+    for name, frames in negative_controls.items():
+        receipt = detector.receipt(frames, threshold=calibration.threshold)
+        rows.append(
+            {
+                "transform": name,
+                "score": receipt.score,
+                "threshold": calibration.threshold,
+                "expected": False,
+                "accepted": receipt.valid,
+                "correct": receipt.valid is False,
+            }
+        )
+
+    positive_scores = [float(row["score"]) for row in rows if row["expected"] is True]
+    negative_scores = [float(row["score"]) for row in rows if row["expected"] is False]
+    positives = [bool(row["accepted"]) for row in rows if row["expected"] is True]
+    negatives = [bool(row["accepted"]) for row in rows if row["expected"] is False]
+    min_positive_score = min(positive_scores)
+    max_negative_score = max(negative_scores)
+    return {
+        "detector_commitment": detector.commitment,
+        "public_config": detector.public_config(),
+        "calibration": calibration.to_dict(),
+        "threshold": calibration.threshold,
+        "score_margin": min_positive_score - max_negative_score,
+        "rows": rows,
+        "summary": {
+            "positive_count": len(positives),
+            "negative_count": len(negatives),
+            "positive_accept_rate": sum(positives) / len(positives),
+            "false_accept_rate": sum(negatives) / len(negatives),
+            "accuracy": sum(row["correct"] for row in rows) / len(rows),
+            "min_positive_score": min_positive_score,
+            "max_negative_score": max_negative_score,
+        },
+        "claim_scope": [
+            "brightness_shift",
+            "contrast_scale",
+            "mild_noise",
+            "down_up_nearest",
+            "box_blur",
+            "temporal_reverse",
+            "frame_drop",
+        ],
+        "out_of_scope": [
+            "crop_with_resynchronization",
+            "geometric_flip",
+            "screen_recording",
+            "heavy_reencoding",
+        ],
+    }
+
+
 def _synthetic_manifest() -> dict[str, object]:
     return {
         "claim_generator": "zk-stego-future-branch",
@@ -682,6 +782,7 @@ def run_diagnostic() -> dict[str, object]:
             "receipt": receipt.to_dict(),
             "receipt_commitment": receipt.commitment(),
             "transform_benchmark": _detector_transform_benchmark(),
+            "keyed_template_benchmark": _keyed_template_detector_benchmark(),
         },
         "attestation": {
             "statement_hash": bundle.statement_hash(),

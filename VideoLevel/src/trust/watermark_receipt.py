@@ -7,6 +7,7 @@ CAVLC embedding path and does not claim real detector parity.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
@@ -181,3 +182,158 @@ class CalibratedThresholdDetector(TinyThresholdDetector):
         if best is None:
             raise RuntimeError("calibration failed")
         return best
+
+
+class KeyedTemplateDetector:
+    """Hand-designed robust-video detector candidate.
+
+    The detector uses a private keyed low-frequency template. Detection is a
+    normalized spatial correlation, so global brightness and contrast changes
+    have less impact than they do on raw pixel thresholds.
+    """
+
+    def __init__(
+        self,
+        key: bytes | str,
+        *,
+        frame_shape: tuple[int, int],
+        grid_size: int = 8,
+        detector_id: str = "keyed-template-v1",
+    ):
+        if isinstance(key, str):
+            key = key.encode("utf-8")
+        if not key:
+            raise ValueError("key must be non-empty")
+        if len(frame_shape) != 2 or frame_shape[0] <= 0 or frame_shape[1] <= 0:
+            raise ValueError("frame_shape must be a positive H,W tuple")
+        if grid_size <= 1:
+            raise ValueError("grid_size must be greater than one")
+        if frame_shape[0] < grid_size or frame_shape[1] < grid_size:
+            raise ValueError("grid_size must fit inside frame_shape")
+
+        self._key = bytes(key)
+        self.frame_shape = (int(frame_shape[0]), int(frame_shape[1]))
+        self.grid_size = int(grid_size)
+        self.detector_id = detector_id
+        self._template = self._build_template()
+
+    @property
+    def key_commitment(self) -> str:
+        return hashlib.sha256(self._key).hexdigest()
+
+    @property
+    def template_digest(self) -> str:
+        return hashlib.sha256(np.round(self._template, 6).astype(np.float32).tobytes()).hexdigest()
+
+    @property
+    def commitment(self) -> str:
+        return canonical_json_hash(self.public_config())
+
+    def public_config(self) -> dict[str, object]:
+        return {
+            "detector_id": self.detector_id,
+            "frame_shape": list(self.frame_shape),
+            "grid_size": self.grid_size,
+            "key_commitment": self.key_commitment,
+            "template_digest": self.template_digest,
+        }
+
+    def _build_template(self) -> np.ndarray:
+        seed = int.from_bytes(hashlib.sha256(self._key + b":template").digest()[:8], "big", signed=False)
+        rng = np.random.default_rng(seed)
+        coarse = rng.choice(np.array([-1.0, 1.0], dtype=np.float32), size=(self.grid_size, self.grid_size))
+        y_edges = np.linspace(0, self.grid_size, self.frame_shape[0], endpoint=False, dtype=int)
+        x_edges = np.linspace(0, self.grid_size, self.frame_shape[1], endpoint=False, dtype=int)
+        template = coarse[y_edges[:, None], x_edges[None, :]].astype(np.float32)
+        template -= float(template.mean())
+        norm = float(np.sqrt(np.mean(template * template)))
+        if norm <= 1e-12:
+            raise RuntimeError("template normalization failed")
+        return template / norm
+
+    def embed(self, frames: Sequence[np.ndarray] | np.ndarray, *, strength: float = 8.0) -> np.ndarray:
+        arr = self._coerce_frames(frames)
+        watermarked = np.clip(arr + self._template[None, :, :] * float(strength), 0, 255)
+        return watermarked.astype(np.float32)
+
+    def score(self, frames: Sequence[np.ndarray] | np.ndarray) -> float:
+        arr = self._coerce_frames(frames)
+        centered = arr - arr.mean(axis=(1, 2), keepdims=True)
+        scale = arr.std(axis=(1, 2), keepdims=True) + 1e-6
+        normalized = centered / scale
+        per_frame = np.mean(normalized * self._template[None, :, :], axis=(1, 2))
+        return float(np.mean(per_frame))
+
+    def receipt(
+        self,
+        frames: Sequence[np.ndarray] | np.ndarray,
+        *,
+        threshold: float,
+        payload_commitment: str | None = None,
+    ) -> DetectorReceipt:
+        score = self.score(frames)
+        return DetectorReceipt(
+            detector_id=self.detector_id,
+            score=score,
+            threshold=threshold,
+            valid=score >= threshold,
+            payload_commitment=payload_commitment,
+            detector_commitment=self.commitment,
+        )
+
+    def calibrate(
+        self,
+        positive_clips: Sequence[Sequence[np.ndarray] | np.ndarray],
+        negative_clips: Sequence[Sequence[np.ndarray] | np.ndarray],
+    ) -> DetectorCalibration:
+        positive_scores = [self.score(frames) for frames in positive_clips]
+        negative_scores = [self.score(frames) for frames in negative_clips]
+        if not positive_scores:
+            raise ValueError("positive_clips must be non-empty")
+        if not negative_scores:
+            raise ValueError("negative_clips must be non-empty")
+        candidates = sorted(set(positive_scores + negative_scores))
+        if len(candidates) == 1:
+            thresholds = candidates
+        else:
+            thresholds = [candidates[0] - 1e-9]
+            thresholds.extend((a + b) / 2.0 for a, b in zip(candidates, candidates[1:]))
+            thresholds.append(candidates[-1] + 1e-9)
+
+        best: DetectorCalibration | None = None
+        for threshold in thresholds:
+            true_accept = sum(score >= threshold for score in positive_scores)
+            false_accept = sum(score >= threshold for score in negative_scores)
+            true_accept_rate = true_accept / len(positive_scores)
+            false_accept_rate = false_accept / len(negative_scores)
+            accuracy = (true_accept + (len(negative_scores) - false_accept)) / (
+                len(positive_scores) + len(negative_scores)
+            )
+            candidate = DetectorCalibration(
+                detector_id=self.detector_id,
+                threshold=float(threshold),
+                positive_count=len(positive_scores),
+                negative_count=len(negative_scores),
+                true_accept_rate=float(true_accept_rate),
+                false_accept_rate=float(false_accept_rate),
+                accuracy=float(accuracy),
+            )
+            if best is None or (candidate.accuracy, candidate.true_accept_rate, -candidate.false_accept_rate) > (
+                best.accuracy,
+                best.true_accept_rate,
+                -best.false_accept_rate,
+            ):
+                best = candidate
+        if best is None:
+            raise RuntimeError("calibration failed")
+        return best
+
+    def _coerce_frames(self, frames: Sequence[np.ndarray] | np.ndarray) -> np.ndarray:
+        arr = np.asarray(frames, dtype=np.float32)
+        if arr.ndim != 3:
+            raise ValueError("frames must have shape T,H,W")
+        if arr.shape[0] == 0:
+            raise ValueError("at least one frame is required")
+        if tuple(arr.shape[1:]) != self.frame_shape:
+            raise ValueError("frame shape does not match detector frame_shape")
+        return arr

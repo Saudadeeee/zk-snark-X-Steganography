@@ -616,6 +616,160 @@
         "accuracy": 1.0
       },
       "proof_overhead_reference": "detector_receipt.circom Groth16 measurement"
+    },
+    "keyed_template_benchmark": {
+      "detector_commitment": "7f9d9edd947c685cbf1eac60265c848802a89541d5f49479b44d6d98a3b405b1",
+      "public_config": {
+        "detector_id": "keyed-template-v1",
+        "frame_shape": [
+          64,
+          64
+        ],
+        "grid_size": 8,
+        "key_commitment": "4fe15775e94b852570b4098b81b52a0fe99ed5116ff6c51840d75dda3a5877b4",
+        "template_digest": "7f4adeef035daba25edb01f03996e2461560308b14c2f84e43cd7e2297907d8c"
+      },
+      "calibration": {
+        "detector_id": "keyed-template-v1",
+        "threshold": 0.32310818135738373,
+        "positive_count": 8,
+        "negative_count": 5,
+        "true_accept_rate": 1.0,
+        "false_accept_rate": 0.0,
+        "accuracy": 1.0
+      },
+      "threshold": 0.32310818135738373,
+      "score_margin": 0.105317622423172,
+      "rows": [
+        {
+          "transform": "embedded",
+          "score": 0.395501971244812,
+          "threshold": 0.32310818135738373,
+          "expected": true,
+          "accepted": true,
+          "correct": true
+        },
+        {
+          "transform": "brightness_shift",
+          "score": 0.3950555920600891,
+          "threshold": 0.32310818135738373,
+          "expected": true,
+          "accepted": true,
+          "correct": true
+        },
+        {
+          "transform": "contrast_scale",
+          "score": 0.3950285315513611,
+          "threshold": 0.32310818135738373,
+          "expected": true,
+          "accepted": true,
+          "correct": true
+        },
+        {
+          "transform": "mild_noise",
+          "score": 0.39435380697250366,
+          "threshold": 0.32310818135738373,
+          "expected": true,
+          "accepted": true,
+          "correct": true
+        },
+        {
+          "transform": "down_up_nearest",
+          "score": 0.3956899642944336,
+          "threshold": 0.32310818135738373,
+          "expected": true,
+          "accepted": true,
+          "correct": true
+        },
+        {
+          "transform": "box_blur",
+          "score": 0.3757669925689697,
+          "threshold": 0.32310818135738373,
+          "expected": true,
+          "accepted": true,
+          "correct": true
+        },
+        {
+          "transform": "temporal_reverse",
+          "score": 0.395501971244812,
+          "threshold": 0.32310818135738373,
+          "expected": true,
+          "accepted": true,
+          "correct": true
+        },
+        {
+          "transform": "frame_drop",
+          "score": 0.39567136764526367,
+          "threshold": 0.32310818135738373,
+          "expected": true,
+          "accepted": true,
+          "correct": true
+        },
+        {
+          "transform": "clean_cover",
+          "score": 0.27044937014579773,
+          "threshold": 0.32310818135738373,
+          "expected": false,
+          "accepted": false,
+          "correct": true
+        },
+        {
+          "transform": "wrong_key_watermark",
+          "score": 0.24571210145950317,
+          "threshold": 0.32310818135738373,
+          "expected": false,
+          "accepted": false,
+          "correct": true
+        },
+        {
+          "transform": "dark_flat",
+          "score": 0.0,
+          "threshold": 0.32310818135738373,
+          "expected": false,
+          "accepted": false,
+          "correct": true
+        },
+        {
+          "transform": "low_motion_gray",
+          "score": 0.0,
+          "threshold": 0.32310818135738373,
+          "expected": false,
+          "accepted": false,
+          "correct": true
+        },
+        {
+          "transform": "seeded_noise",
+          "score": -0.003758466336876154,
+          "threshold": 0.32310818135738373,
+          "expected": false,
+          "accepted": false,
+          "correct": true
+        }
+      ],
+      "summary": {
+        "positive_count": 8,
+        "negative_count": 5,
+        "positive_accept_rate": 1.0,
+        "false_accept_rate": 0.0,
+        "accuracy": 1.0,
+        "min_positive_score": 0.3757669925689697,
+        "max_negative_score": 0.27044937014579773
+      },
+      "claim_scope": [
+        "brightness_shift",
+        "contrast_scale",
+        "mild_noise",
+        "down_up_nearest",
+        "box_blur",
+        "temporal_reverse",
+        "frame_drop"
+      ],
+      "out_of_scope": [
+        "crop_with_resynchronization",
+        "geometric_flip",
+        "screen_recording",
+        "heavy_reencoding"
+      ]
     }
   },
   "attestation": {
@@ -671,9 +825,9 @@
         "verified": true,
         "setup_ran": false,
         "setup_time_ms": 0.0,
-        "witness_time_ms": 140.56,
-        "prove_time_ms": 1102.01,
-        "verify_time_ms": 998.44,
+        "witness_time_ms": 119.65,
+        "prove_time_ms": 1165.12,
+        "verify_time_ms": 1003.26,
         "proof_json_size_bytes": 805,
         "public_signal_count": 67,
         "public_signals": [
@@ -766,10 +920,10 @@
         "verified": true,
         "setup_ran": false,
         "setup_time_ms": 0.0,
-        "witness_time_ms": 92.61,
-        "prove_time_ms": 1038.53,
-        "verify_time_ms": 965.74,
-        "proof_json_size_bytes": 804,
+        "witness_time_ms": 101.34,
+        "prove_time_ms": 1138.56,
+        "verify_time_ms": 987.04,
+        "proof_json_size_bytes": 806,
         "public_signal_count": 7,
         "public_signals": [
           "1",

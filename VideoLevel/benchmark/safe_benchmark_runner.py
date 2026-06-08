@@ -379,6 +379,22 @@ def _validate_trust_architecture_schema(data: dict) -> list[str]:
         errors.append("trust_architecture detector calibration must report accuracy")
     if "false_accept_rate" not in calibration:
         errors.append("trust_architecture detector calibration must report false_accept_rate")
+    keyed = data["watermark_receipt"].get("keyed_template_benchmark", {})
+    keyed_rows = keyed.get("rows", [])
+    if not isinstance(keyed_rows, list) or not keyed_rows:
+        errors.append("trust_architecture keyed template detector must report rows")
+    keyed_summary = keyed.get("summary", {})
+    if not isinstance(keyed_summary, dict) or keyed_summary.get("positive_count", 0) <= 0:
+        errors.append("trust_architecture keyed template detector must report positive controls")
+    if not isinstance(keyed_summary, dict) or keyed_summary.get("negative_count", 0) <= 0:
+        errors.append("trust_architecture keyed template detector must report negative controls")
+    if keyed_summary.get("false_accept_rate", 1) > 0:
+        errors.append("trust_architecture keyed template detector false_accept_rate must be zero")
+    if keyed.get("score_margin", 0) <= 0:
+        errors.append("trust_architecture keyed template detector must report positive score margin")
+    keyed_calibration = keyed.get("calibration", {})
+    if not isinstance(keyed_calibration, dict) or keyed_calibration.get("accuracy", 0) <= 0:
+        errors.append("trust_architecture keyed template detector calibration must report accuracy")
     if data["attestation"].get("signature_valid") is not True:
         errors.append("trust_architecture attestation signature must verify")
     if data["attestation"].get("sidecar_roundtrip_valid") is not True:
