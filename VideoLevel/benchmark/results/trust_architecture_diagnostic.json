@@ -186,8 +186,9 @@
         "resize_mode": "block_mean",
         "aggregate_mode": "majority_vote"
       },
+      "corpus_scope": "all registered local H.264 assets in benchmark._common.SEQUENCES",
       "registry_record": "akiyo_q22_g1",
-      "clip_count": 8,
+      "clip_count": 22,
       "fingerprints": {
         "akiyo_q22_g1": {
           "fingerprint_hex": "00c6ce1e183e7e7e",
@@ -235,7 +236,145 @@
             "aggregate_mode": "majority_vote"
           }
         },
+        "coastguard_g8_300f_b800k": {
+          "fingerprint_hex": "00000002efffffff",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "00000002efffffff",
+            "00000002efffffff",
+            "00000002efffffff",
+            "00000002efffffff"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
+        "coastguard_q18_g1_150f": {
+          "fingerprint_hex": "00000002efffffff",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "00000002efffffff",
+            "00000002efffffff",
+            "00000002efffffff",
+            "00000002efffffff"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
         "coastguard_q22_g1": {
+          "fingerprint_hex": "00000002efffffff",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "00000002efffffff",
+            "00000002efffffff",
+            "00000002efffffff",
+            "00000002efffffff"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
+        "coastguard_q22_g1_1000f": {
+          "fingerprint_hex": "00000002efffffff",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "00000002efffffff",
+            "00000002efffffff",
+            "00000002efffffff",
+            "00000002efffffff"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
+        "coastguard_q22_g1_3000f": {
+          "fingerprint_hex": "00000002efffffff",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "00000002efffffff",
+            "00000002efffffff",
+            "00000002efffffff",
+            "00000002efffffff"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
+        "coastguard_q22_g1_600f": {
+          "fingerprint_hex": "00000002efffffff",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "00000002efffffff",
+            "00000002efffffff",
+            "00000002efffffff",
+            "00000002efffffff"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
+        "coastguard_q28_g1_300f": {
           "fingerprint_hex": "00000002efffffff",
           "bit_count": 64,
           "sample_indices": [
@@ -281,7 +420,122 @@
             "aggregate_mode": "majority_vote"
           }
         },
+        "deadline_g8_300f_b800k": {
+          "fingerprint_hex": "ffffe81f1f090c00",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "ffffe81e1e090810",
+            "ffffe81f1e090800",
+            "fff7e01f1f090c00",
+            "fff7e01f1f090c00"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
+        "deadline_q18_g1_150f": {
+          "fingerprint_hex": "ffffe81f1f090c00",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "ffffe81e1e090810",
+            "ffffe81f1e090800",
+            "fff7e01f1f090c00",
+            "fff7e01f1f090c00"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
         "deadline_q22_g1": {
+          "fingerprint_hex": "ffffe81f1f090c00",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "ffffe81e1e090810",
+            "ffffe81f1e090800",
+            "fff7e01f1f090c00",
+            "fff7e01f1f090c00"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
+        "deadline_q22_g1_1000f": {
+          "fingerprint_hex": "ffffe81f1f090c00",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "ffffe81e1e090810",
+            "ffffe81f1e090800",
+            "fff7e01f1f090c00",
+            "fff7e01f1f090c00"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
+        "deadline_q22_g1_600f": {
+          "fingerprint_hex": "ffffe81f1f090c00",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "ffffe81e1e090810",
+            "ffffe81f1e090800",
+            "fff7e01f1f090c00",
+            "fff7e01f1f090c00"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
+        "deadline_q28_g1_300f": {
           "fingerprint_hex": "ffffe81f1f090c00",
           "bit_count": 64,
           "sample_indices": [
@@ -327,7 +581,76 @@
             "aggregate_mode": "majority_vote"
           }
         },
+        "foreman_g8_300f_b800k": {
+          "fingerprint_hex": "3333333333333333",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "3373333133333333",
+            "3333733333313333",
+            "3333333373333331",
+            "3333333333337133"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
+        "foreman_q18_g1_150f": {
+          "fingerprint_hex": "3333333333333333",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "3373333133333333",
+            "3333733333313333",
+            "3333333373333331",
+            "3333333333337133"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
         "foreman_q22_g1": {
+          "fingerprint_hex": "3333333333333333",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "3373333133333333",
+            "3333733333313333",
+            "3333333373333331",
+            "3333333333337133"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        },
+        "foreman_q28_g1_300f": {
           "fingerprint_hex": "3333333333333333",
           "bit_count": 64,
           "sample_indices": [
@@ -379,25 +702,37 @@
           "threshold": 0,
           "true_accept_rate": 1.0,
           "false_accept_rate": 0.0,
-          "negative_count": 7
+          "negative_count": 21
         },
         {
           "threshold": 4,
           "true_accept_rate": 1.0,
           "false_accept_rate": 0.0,
-          "negative_count": 7
+          "negative_count": 21
         },
         {
           "threshold": 8,
           "true_accept_rate": 1.0,
           "false_accept_rate": 0.0,
-          "negative_count": 7
+          "negative_count": 21
         },
         {
           "threshold": 16,
           "true_accept_rate": 1.0,
           "false_accept_rate": 0.0,
-          "negative_count": 7
+          "negative_count": 21
+        },
+        {
+          "threshold": 24,
+          "true_accept_rate": 1.0,
+          "false_accept_rate": 0.0,
+          "negative_count": 21
+        },
+        {
+          "threshold": 32,
+          "true_accept_rate": 1.0,
+          "false_accept_rate": 0.38095238095238093,
+          "negative_count": 21
         }
       ]
     }
@@ -675,7 +1010,7 @@
         },
         {
           "transform": "down_up_nearest",
-          "score": 0.3956899642944336,
+          "score": 0.395689994096756,
           "threshold": 0.32310818135738373,
           "expected": true,
           "accepted": true,
@@ -770,6 +1105,84 @@
         "screen_recording",
         "heavy_reencoding"
       ]
+    },
+    "keyed_template_stress_benchmark": {
+      "detector_commitment": "7f9d9edd947c685cbf1eac60265c848802a89541d5f49479b44d6d98a3b405b1",
+      "calibration": {
+        "detector_id": "keyed-template-v1",
+        "threshold": 0.32310818135738373,
+        "positive_count": 8,
+        "negative_count": 5,
+        "true_accept_rate": 1.0,
+        "false_accept_rate": 0.0,
+        "accuracy": 1.0
+      },
+      "threshold_source": "keyed_template_benchmark calibration set",
+      "rows": [
+        {
+          "transform": "crop4_resize",
+          "available": true,
+          "score": 0.3487306833267212,
+          "threshold": 0.32310818135738373,
+          "accepted": true,
+          "correct": true
+        },
+        {
+          "transform": "crop8_resize",
+          "available": true,
+          "score": 0.31060969829559326,
+          "threshold": 0.32310818135738373,
+          "accepted": false,
+          "correct": false
+        },
+        {
+          "transform": "scale_48_64",
+          "available": true,
+          "score": 0.39589715003967285,
+          "threshold": 0.32310818135738373,
+          "accepted": true,
+          "correct": true
+        },
+        {
+          "transform": "heavy_noise",
+          "available": true,
+          "score": 0.3881245255470276,
+          "threshold": 0.32310818135738373,
+          "accepted": true,
+          "correct": true
+        },
+        {
+          "transform": "screen_recording_like",
+          "available": true,
+          "score": 0.3465406894683838,
+          "threshold": 0.32310818135738373,
+          "accepted": true,
+          "correct": true
+        },
+        {
+          "transform": "ffmpeg_h264_crf28",
+          "available": true,
+          "score": 0.3753206729888916,
+          "threshold": 0.32310818135738373,
+          "accepted": true,
+          "correct": true
+        },
+        {
+          "transform": "ffmpeg_h264_crf35",
+          "available": true,
+          "score": 0.3498522937297821,
+          "threshold": 0.32310818135738373,
+          "accepted": true,
+          "correct": true
+        }
+      ],
+      "summary": {
+        "available_count": 7,
+        "transform_count": 7,
+        "accept_rate": 0.8571428571428571,
+        "failure_count": 1,
+        "unavailable_count": 0
+      }
     }
   },
   "attestation": {
@@ -825,10 +1238,10 @@
         "verified": true,
         "setup_ran": false,
         "setup_time_ms": 0.0,
-        "witness_time_ms": 119.65,
-        "prove_time_ms": 1165.12,
-        "verify_time_ms": 1003.26,
-        "proof_json_size_bytes": 805,
+        "witness_time_ms": 125.1,
+        "prove_time_ms": 1039.41,
+        "verify_time_ms": 919.06,
+        "proof_json_size_bytes": 807,
         "public_signal_count": 67,
         "public_signals": [
           "1",
@@ -920,10 +1333,10 @@
         "verified": true,
         "setup_ran": false,
         "setup_time_ms": 0.0,
-        "witness_time_ms": 101.34,
-        "prove_time_ms": 1138.56,
-        "verify_time_ms": 987.04,
-        "proof_json_size_bytes": 806,
+        "witness_time_ms": 108.14,
+        "prove_time_ms": 1097.54,
+        "verify_time_ms": 945.95,
+        "proof_json_size_bytes": 803,
         "public_signal_count": 7,
         "public_signals": [
           "1",

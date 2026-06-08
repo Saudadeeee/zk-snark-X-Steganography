@@ -364,6 +364,8 @@ def _validate_trust_architecture_schema(data: dict) -> list[str]:
         errors.append("trust_architecture real-clip fingerprint benchmark must be available")
     if not isinstance(real_clip.get("rows"), list) or not real_clip.get("rows"):
         errors.append("trust_architecture real-clip fingerprint benchmark must report rows")
+    if int(real_clip.get("clip_count", 0)) < 8:
+        errors.append("trust_architecture real-clip fingerprint benchmark must cover local corpus")
     if data["watermark_receipt"].get("receipt", {}).get("valid") is not True:
         errors.append("trust_architecture watermark receipt must be valid")
     transform_rows = data["watermark_receipt"].get("transform_benchmark", {}).get("rows", [])
@@ -395,6 +397,15 @@ def _validate_trust_architecture_schema(data: dict) -> list[str]:
     keyed_calibration = keyed.get("calibration", {})
     if not isinstance(keyed_calibration, dict) or keyed_calibration.get("accuracy", 0) <= 0:
         errors.append("trust_architecture keyed template detector calibration must report accuracy")
+    stress = data["watermark_receipt"].get("keyed_template_stress_benchmark", {})
+    stress_rows = stress.get("rows", [])
+    if not isinstance(stress_rows, list) or not stress_rows:
+        errors.append("trust_architecture keyed template stress benchmark must report rows")
+    stress_summary = stress.get("summary", {})
+    if not isinstance(stress_summary, dict) or stress_summary.get("available_count", 0) <= 0:
+        errors.append("trust_architecture keyed template stress benchmark must report available transforms")
+    if "accept_rate" not in stress_summary:
+        errors.append("trust_architecture keyed template stress benchmark must report accept_rate")
     if data["attestation"].get("signature_valid") is not True:
         errors.append("trust_architecture attestation signature must verify")
     if data["attestation"].get("sidecar_roundtrip_valid") is not True:

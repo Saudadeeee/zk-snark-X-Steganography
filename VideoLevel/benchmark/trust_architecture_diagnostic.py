@@ -433,7 +433,7 @@ def _committed_synthetic_fingerprint_benchmark() -> dict[str, object]:
 
 def _real_clip_fingerprint_benchmark() -> dict[str, object]:
     policy = FingerprintPreprocessPolicy(sample_count=4, hash_size=8)
-    sequence_names = sorted(name for name in SEQUENCES if name.endswith("_q22_g1"))
+    sequence_names = sorted(name for name, path in SEQUENCES.items() if path.exists())
     fingerprints: dict[str, Any] = {}
     for name in sequence_names:
         path = SEQUENCES.get(name)
@@ -460,7 +460,7 @@ def _real_clip_fingerprint_benchmark() -> dict[str, object]:
         ]
     )
     rows = []
-    for threshold in (0, 4, 8, 16):
+    for threshold in (0, 4, 8, 16, 24, 32):
         positives = [
             registry.lookup(fingerprints[first_name].fingerprint_hex, threshold=threshold).matched,
         ]
@@ -480,6 +480,7 @@ def _real_clip_fingerprint_benchmark() -> dict[str, object]:
     return {
         "available": True,
         "policy": policy.to_dict(),
+        "corpus_scope": "all registered local H.264 assets in benchmark._common.SEQUENCES",
         "registry_record": first_name,
         "clip_count": len(fingerprints),
         "fingerprints": {name: fp.to_dict() for name, fp in fingerprints.items()},
@@ -488,8 +489,120 @@ def _real_clip_fingerprint_benchmark() -> dict[str, object]:
 
 
 def _down_up_nearest(frames: np.ndarray) -> np.ndarray:
-    down = frames[:, ::2, ::2]
-    return np.repeat(np.repeat(down, 2, axis=1), 2, axis=2)[:, : frames.shape[1], : frames.shape[2]]
+    down = _resize_nearest_frames(frames, frames.shape[1] // 2, frames.shape[2] // 2)
+    return _resize_nearest_frames(down, frames.shape[1], frames.shape[2])
+
+
+def _resize_nearest_frames(frames: np.ndarray, height: int, width: int) -> np.ndarray:
+    arr = np.asarray(frames, dtype=np.float32)
+    y_idx = (np.arange(height) * arr.shape[1] / height).astype(int)
+    x_idx = (np.arange(width) * arr.shape[2] / width).astype(int)
+    return arr[:, y_idx[:, None], x_idx[None, :]].astype(np.float32)
+
+
+def _center_crop_resize(frames: np.ndarray, margin: int) -> np.ndarray:
+    if margin <= 0:
+        return np.asarray(frames, dtype=np.float32)
+    if margin * 2 >= min(frames.shape[1], frames.shape[2]):
+        raise ValueError("crop margin is too large")
+    cropped = frames[:, margin : frames.shape[1] - margin, margin : frames.shape[2] - margin]
+    return _resize_nearest_frames(cropped, frames.shape[1], frames.shape[2])
+
+
+def _luma_to_yuv420p_bytes(frames: np.ndarray) -> bytes:
+    y = np.clip(np.rint(frames), 0, 255).astype(np.uint8)
+    n, h, w = y.shape
+    uv = np.full((n, h // 2, w // 2), 128, dtype=np.uint8)
+    chunks = []
+    for idx in range(n):
+        chunks.append(y[idx].tobytes())
+        chunks.append(uv[idx].tobytes())
+        chunks.append(uv[idx].tobytes())
+    return b"".join(chunks)
+
+
+def _decode_yuv420p_luma(raw: bytes, *, frame_count: int, height: int, width: int) -> np.ndarray:
+    frame_size = width * height * 3 // 2
+    available = min(frame_count, len(raw) // frame_size)
+    frames = np.empty((available, height, width), dtype=np.float32)
+    for idx in range(available):
+        offset = idx * frame_size
+        frames[idx] = np.frombuffer(raw[offset : offset + width * height], dtype=np.uint8).reshape(height, width)
+    return frames
+
+
+def _ffmpeg_h264_roundtrip_luma(frames: np.ndarray, *, crf: int) -> np.ndarray | None:
+    if shutil.which("ffmpeg") is None:
+        return None
+    arr = np.asarray(frames, dtype=np.float32)
+    if arr.ndim != 3 or arr.shape[1] % 2 or arr.shape[2] % 2:
+        raise ValueError("frames must be T,H,W with even H,W for yuv420p roundtrip")
+    n, h, w = arr.shape
+    encode_cmd = [
+        "ffmpeg",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "yuv420p",
+        "-s",
+        f"{w}x{h}",
+        "-r",
+        "30",
+        "-i",
+        "pipe:0",
+        "-frames:v",
+        str(n),
+        "-c:v",
+        "libx264",
+        "-profile:v",
+        "baseline",
+        "-preset",
+        "veryfast",
+        "-crf",
+        str(int(crf)),
+        "-f",
+        "h264",
+        "pipe:1",
+        "-loglevel",
+        "error",
+    ]
+    encoded = subprocess.run(
+        encode_cmd,
+        input=_luma_to_yuv420p_bytes(arr),
+        capture_output=True,
+        check=False,
+        timeout=60,
+    )
+    if encoded.returncode != 0:
+        return None
+
+    decode_cmd = [
+        "ffmpeg",
+        "-i",
+        "pipe:0",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "yuv420p",
+        "-vf",
+        f"scale={w}:{h}",
+        "pipe:1",
+        "-loglevel",
+        "error",
+    ]
+    decoded = subprocess.run(
+        decode_cmd,
+        input=encoded.stdout,
+        capture_output=True,
+        check=False,
+        timeout=60,
+    )
+    if decoded.returncode != 0:
+        return None
+    out = _decode_yuv420p_luma(decoded.stdout, frame_count=n, height=h, width=w)
+    if len(out) == 0:
+        return None
+    return out
 
 
 def _detector_transform_benchmark() -> dict[str, object]:
@@ -569,36 +682,12 @@ def _detector_transform_benchmark() -> dict[str, object]:
 
 
 def _keyed_template_detector_benchmark() -> dict[str, object]:
-    base = np.stack(
-        [
-            np.tile(np.linspace(32 + i * 8, 220 + i * 8, 64, dtype=np.float32), (64, 1))
-            for i in range(8)
-        ]
-    )
+    base = _keyed_template_base_clip()
     detector = KeyedTemplateDetector(b"upgrade-v2-watermark-key", frame_shape=(64, 64), grid_size=8)
     wrong_key_detector = KeyedTemplateDetector(b"upgrade-v2-wrong-key", frame_shape=(64, 64), grid_size=8)
     embedded = detector.embed(base, strength=8.0)
-    transformed = {
-        "embedded": embedded,
-        "brightness_shift": np.clip(embedded + 12.0, 0, 255),
-        "contrast_scale": np.clip((embedded - 128.0) * 1.12 + 128.0, 0, 255),
-        "mild_noise": np.clip(
-            embedded + np.random.default_rng(7).normal(0, 4, embedded.shape),
-            0,
-            255,
-        ).astype(np.float32),
-        "down_up_nearest": _down_up_nearest(embedded),
-        "box_blur": _box_blur(embedded),
-        "temporal_reverse": embedded[::-1],
-        "frame_drop": embedded[::2],
-    }
-    negative_controls = {
-        "clean_cover": base,
-        "wrong_key_watermark": wrong_key_detector.embed(base, strength=8.0),
-        "dark_flat": np.zeros_like(base) + 8,
-        "low_motion_gray": np.zeros_like(base) + 64,
-        "seeded_noise": np.random.default_rng(99).normal(127, 35, base.shape).clip(0, 255).astype(np.float32),
-    }
+    transformed = _keyed_template_positive_transforms(embedded)
+    negative_controls = _keyed_template_negative_controls(base, wrong_key_detector)
     calibration = detector.calibrate(list(transformed.values()), list(negative_controls.values()))
 
     rows = []
@@ -664,6 +753,118 @@ def _keyed_template_detector_benchmark() -> dict[str, object]:
             "screen_recording",
             "heavy_reencoding",
         ],
+    }
+
+
+def _keyed_template_base_clip() -> np.ndarray:
+    return np.stack(
+        [
+            np.tile(np.linspace(32 + i * 8, 220 + i * 8, 64, dtype=np.float32), (64, 1))
+            for i in range(8)
+        ]
+    )
+
+
+def _keyed_template_positive_transforms(embedded: np.ndarray) -> dict[str, np.ndarray]:
+    return {
+        "embedded": embedded,
+        "brightness_shift": np.clip(embedded + 12.0, 0, 255),
+        "contrast_scale": np.clip((embedded - 128.0) * 1.12 + 128.0, 0, 255),
+        "mild_noise": np.clip(
+            embedded + np.random.default_rng(7).normal(0, 4, embedded.shape),
+            0,
+            255,
+        ).astype(np.float32),
+        "down_up_nearest": _down_up_nearest(embedded),
+        "box_blur": _box_blur(embedded),
+        "temporal_reverse": embedded[::-1],
+        "frame_drop": embedded[::2],
+    }
+
+
+def _keyed_template_negative_controls(base: np.ndarray, wrong_key_detector: KeyedTemplateDetector) -> dict[str, np.ndarray]:
+    return {
+        "clean_cover": base,
+        "wrong_key_watermark": wrong_key_detector.embed(base, strength=8.0),
+        "dark_flat": np.zeros_like(base) + 8,
+        "low_motion_gray": np.zeros_like(base) + 64,
+        "seeded_noise": np.random.default_rng(99).normal(127, 35, base.shape).clip(0, 255).astype(np.float32),
+    }
+
+
+def _keyed_template_detector_stress_benchmark() -> dict[str, object]:
+    base = _keyed_template_base_clip()
+    detector = KeyedTemplateDetector(b"upgrade-v2-watermark-key", frame_shape=(64, 64), grid_size=8)
+    wrong_key_detector = KeyedTemplateDetector(b"upgrade-v2-wrong-key", frame_shape=(64, 64), grid_size=8)
+    embedded = detector.embed(base, strength=8.0)
+    calibration = detector.calibrate(
+        list(_keyed_template_positive_transforms(embedded).values()),
+        list(_keyed_template_negative_controls(base, wrong_key_detector).values()),
+    )
+
+    screen_recording_like = _box_blur(_center_crop_resize(embedded, 4))
+    screen_recording_like = np.clip(
+        (screen_recording_like - 128.0) * 0.95
+        + 128.0
+        + np.random.default_rng(42).normal(0, 3, screen_recording_like.shape),
+        0,
+        255,
+    ).astype(np.float32)[::2]
+
+    transforms: dict[str, np.ndarray | None] = {
+        "crop4_resize": _center_crop_resize(embedded, 4),
+        "crop8_resize": _center_crop_resize(embedded, 8),
+        "scale_48_64": _resize_nearest_frames(_resize_nearest_frames(embedded, 48, 48), 64, 64),
+        "heavy_noise": np.clip(
+            embedded + np.random.default_rng(8).normal(0, 12, embedded.shape),
+            0,
+            255,
+        ).astype(np.float32),
+        "screen_recording_like": screen_recording_like,
+        "ffmpeg_h264_crf28": _ffmpeg_h264_roundtrip_luma(embedded, crf=28),
+        "ffmpeg_h264_crf35": _ffmpeg_h264_roundtrip_luma(embedded, crf=35),
+    }
+
+    rows = []
+    for name, frames in transforms.items():
+        if frames is None:
+            rows.append(
+                {
+                    "transform": name,
+                    "available": False,
+                    "reason": "ffmpeg roundtrip unavailable",
+                    "threshold": calibration.threshold,
+                    "accepted": None,
+                    "correct": None,
+                }
+            )
+            continue
+        receipt = detector.receipt(frames, threshold=calibration.threshold)
+        rows.append(
+            {
+                "transform": name,
+                "available": True,
+                "score": receipt.score,
+                "threshold": calibration.threshold,
+                "accepted": receipt.valid,
+                "correct": receipt.valid is True,
+            }
+        )
+
+    available = [row for row in rows if row.get("available") is True]
+    accepted = [bool(row["accepted"]) for row in available]
+    return {
+        "detector_commitment": detector.commitment,
+        "calibration": calibration.to_dict(),
+        "threshold_source": "keyed_template_benchmark calibration set",
+        "rows": rows,
+        "summary": {
+            "available_count": len(available),
+            "transform_count": len(rows),
+            "accept_rate": sum(accepted) / len(accepted) if accepted else 0.0,
+            "failure_count": sum(1 for ok in accepted if not ok),
+            "unavailable_count": len(rows) - len(available),
+        },
     }
 
 
@@ -783,6 +984,7 @@ def run_diagnostic() -> dict[str, object]:
             "receipt_commitment": receipt.commitment(),
             "transform_benchmark": _detector_transform_benchmark(),
             "keyed_template_benchmark": _keyed_template_detector_benchmark(),
+            "keyed_template_stress_benchmark": _keyed_template_detector_stress_benchmark(),
         },
         "attestation": {
             "statement_hash": bundle.statement_hash(),

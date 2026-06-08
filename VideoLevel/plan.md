@@ -305,10 +305,12 @@ Current diagnostic status on 2026-06-09:
   score margin `0.1053`, `positive_accept_rate=1.0`,
   `false_accept_rate=0.0`, `accuracy=1.0` on 8 positive and 5 negative
   synthetic controls.
-- Keyed-template claim scope currently covers brightness, contrast, mild noise,
-  nearest-neighbor down/up sampling, box blur, temporal reversal, and frame
-  dropping. Crop resynchronization, geometric flips, screen recording, and
-  heavy re-encoding remain out of scope.
+- Real-clip fingerprint diagnostics now cover 22 registered local H.264 assets.
+  Thresholds `0-24` keep `true_accept_rate=1.0` and `false_accept_rate=0.0`;
+  threshold `32` increases `false_accept_rate` to `0.3810`.
+- Keyed-template stress diagnostics now pass 6/7 available transforms
+  (`accept_rate=0.8571`). H.264 ffmpeg roundtrip at CRF28 and CRF35 passes;
+  `crop8_resize` currently fails against the calibrated threshold.
 
 ### 5.1 ZK + C2PA Provenance Root
 
@@ -395,7 +397,9 @@ Future tasks:
 - [x] Measure Groth16 proving time for `fingerprint_verify.circom`.
 - [x] Add a local-clip fingerprint benchmark over available H.264 assets.
 - [x] Benchmark false accept/reject behavior on a committed synthetic clip set.
-- [ ] Expand false accept/reject behavior to a larger real-video corpus.
+- [x] Expand false accept/reject behavior to the registered local H.264 corpus.
+- [ ] Add a non-local or externally curated real-video corpus before making
+      broad public-dataset claims.
 
 Implementation sequence:
 
@@ -467,8 +471,10 @@ Future tasks:
       threshold selection.
 - [x] Replace the calibrated toy detector with a hand-designed keyed-template
       robust-video detector candidate.
-- [ ] Stress the keyed-template detector under real re-encoding, crop/scale,
-      and screen-recording style transforms before promotion.
+- [x] Stress the keyed-template detector under real re-encoding, crop/scale,
+      and screen-recording style transforms.
+- [ ] Add crop-resynchronization or multi-template search before promoting the
+      keyed-template detector beyond diagnostic-grade evidence.
 
 Implementation sequence:
 
