@@ -10,6 +10,7 @@ from .fingerprint import (
     FingerprintPreprocessPolicy,
     FingerprintRecord,
     FingerprintRegistry,
+    RegistryMatch,
     VideoFingerprint,
     compute_framehash,
     compute_video_fingerprint,
@@ -41,6 +42,7 @@ __all__ = [
     "FingerprintRecord",
     "FingerprintPreprocessPolicy",
     "FingerprintRegistry",
+    "RegistryMatch",
     "VideoFingerprint",
     "compute_framehash",
     "compute_video_fingerprint",
@@ -59,4 +61,30 @@ __all__ = [
     "ZKMLInterfaceSpec",
     "load_attestation_sidecar",
     "save_attestation_sidecar",
+    "ProvenanceWorkflowResult",
+    "FingerprintWorkflowResult",
+    "WatermarkWorkflowResult",
+    "AttestationWorkflowResult",
+    "provenance_workflow",
+    "fingerprint_workflow",
+    "watermark_workflow",
+    "attestation_workflow",
 ]
+
+
+def __getattr__(name: str):
+    workflow_exports = {
+        "ProvenanceWorkflowResult",
+        "FingerprintWorkflowResult",
+        "WatermarkWorkflowResult",
+        "AttestationWorkflowResult",
+        "provenance_workflow",
+        "fingerprint_workflow",
+        "watermark_workflow",
+        "attestation_workflow",
+    }
+    if name in workflow_exports:
+        from . import workflows
+
+        return getattr(workflows, name)
+    raise AttributeError(f"module 'src.trust' has no attribute {name!r}")

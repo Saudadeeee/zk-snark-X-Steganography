@@ -275,6 +275,7 @@ Rules:
 Current implementation status:
 
 - [x] Add experimental trust-plane package under `src/trust`.
+- [x] Add ready-to-use workflow facade `src/trust/workflows.py`.
 - [x] Add diagnostic runner `benchmark/trust_architecture_diagnostic.py`.
 - [x] Add interface tests in `src/runtest/test_future_trust_architecture.py`.
 - [x] Register diagnostic-grade runner section `44`.
@@ -287,7 +288,7 @@ Current implementation status:
 
 Current diagnostic status on 2026-06-09:
 
-- Future trust interface tests now pass `14/14`.
+- Future trust interface tests now pass `15/15`.
 - Section `44`: passed with schema validation OK.
 - `fingerprint_verify.circom`: compiled and proved, `606` non-linear
   constraints, `842` linear constraints, Groth16 verify passed.
@@ -316,7 +317,10 @@ Current diagnostic status on 2026-06-09:
   transforms (`fixed_accept_rate=0.8571`). Resynchronized detector scoring
   passes 7/7 (`resynchronized_accept_rate=1.0`), including `crop8_resize`.
   H.264 ffmpeg roundtrip at CRF28 and CRF35 passes.
-- Section `45` claim gates pass `5/5`, but `promotion_ready=false` because no
+- Ready-to-use trust workflow facade is covered in section `44` and section
+  `45`: provenance, fingerprint registry, watermark receipt, and attestation
+  workflows validate through `src.trust.workflows`.
+- Section `45` claim gates pass `6/6`, but `promotion_ready=false` because no
   non-local or externally curated real-video corpus is registered.
 - Section `45` artifacts are
   `benchmark/results/sec45_trust_evidence_data.json` and

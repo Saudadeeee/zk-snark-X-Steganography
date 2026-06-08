@@ -92,6 +92,16 @@ def collect_data() -> dict[str, Any]:
                 and diagnostic["attestation"]["sidecar_roundtrip_valid"]
             ),
         },
+        "ready_workflows": {
+            "status": "ready_to_use_api_surface",
+            "evidence": "src.trust.workflows facade covers provenance, fingerprint, watermark, and attestation",
+            "passed": bool(
+                diagnostic["ready_workflows"]["provenance_valid"]
+                and diagnostic["ready_workflows"]["fingerprint_match"]["matched"]
+                and diagnostic["ready_workflows"]["watermark_valid"]
+                and diagnostic["ready_workflows"]["attestation_valid"]
+            ),
+        },
         "zk_circuits": {
             "status": "supported_for_toy_relations",
             "evidence": "fingerprint and detector receipt circuits compile and Groth16 verify",
@@ -137,6 +147,7 @@ def collect_data() -> dict[str, Any]:
             "watermark_resynchronized_accept_rate": float(stress["summary"]["resynchronized_accept_rate"]),
             "fingerprint_groth16_verified": bool(circuits["fingerprint_verify"]["groth16_measurement"]["verified"]),
             "detector_groth16_verified": bool(circuits["detector_receipt"]["groth16_measurement"]["verified"]),
+            "ready_workflows_valid": bool(claim_gates["ready_workflows"]["passed"]),
         },
     }
     OUTPUT_PATH.write_text(json.dumps(output, ensure_ascii=True, indent=2), encoding="utf-8")

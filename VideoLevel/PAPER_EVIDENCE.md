@@ -150,13 +150,15 @@ sections:
 
 Latest local Section 45 replay reports:
 
-- claim gates: `5/5` passed,
+- claim gates: `6/6` passed,
 - `promotion_ready=false`,
 - blocker: no non-local or externally curated real-video corpus is registered.
 
 This supports branch-level development claims for C2PA anchoring, local-corpus
 fingerprint lookup, keyed-template watermark receipt, mock TEE attestation, and
-toy ZK receipt circuits. It must not be folded into the frozen current-system
+toy ZK receipt circuits. The ready-to-use API surface is `src.trust.workflows`
+and covers provenance, fingerprint registry, watermark receipt, and
+attestation workflows. It must not be folded into the frozen current-system
 paper baseline until the corpus blocker is resolved and the trust plane is
 explicitly promoted with separate claim language.
 

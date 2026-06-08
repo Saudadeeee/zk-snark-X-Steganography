@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -34,13 +35,17 @@ from src.trust import (
     MockTEESigner,
     TinyThresholdDetector,
     ZKMLInterfaceSpec,
+    attestation_workflow,
     build_provenance_root,
     compute_framehash,
     compute_video_fingerprint,
     extract_tiny_video_features,
+    fingerprint_workflow,
     load_attestation_sidecar,
+    provenance_workflow,
     save_attestation_sidecar,
     verify_provenance_root,
+    watermark_workflow,
 )
 from src.trust.canonical import canonical_json_hash
 from benchmark._common import SEQUENCES, decode_luma_frames
@@ -888,6 +893,72 @@ def _synthetic_manifest() -> dict[str, object]:
     }
 
 
+def _workflow_facade_diagnostic(manifest: dict[str, object]) -> dict[str, object]:
+    base = _keyed_template_base_clip()
+    detector = KeyedTemplateDetector(b"upgrade-v2-watermark-key", frame_shape=(64, 64), grid_size=8)
+    embedded = detector.embed(base, strength=8.0)
+    fingerprint_policy = FingerprintPreprocessPolicy(sample_count=4, hash_size=8)
+    video_fp = compute_video_fingerprint(base, policy=fingerprint_policy)
+    record = FingerprintRecord(
+        record_id="workflow-canonical-asset",
+        fingerprint_hex=video_fp.fingerprint_hex,
+        bit_count=video_fp.bit_count,
+        metadata_hash=canonical_json_hash({"scope": "workflow-facade"}),
+    )
+
+    with tempfile.TemporaryDirectory(prefix="zkstego_trust_workflow_") as tmp:
+        tmp_path = Path(tmp)
+        video_path = tmp_path / "video.bin"
+        model_config_path = tmp_path / "model_config.json"
+        model_binary_path = tmp_path / "model.bin"
+        c2pa_path = tmp_path / "c2pa.json"
+        attestation_path = tmp_path / "attestation.json"
+        video_path.write_bytes(b"workflow-video")
+        model_config_path.write_text('{"model":"workflow"}', encoding="utf-8")
+        model_binary_path.write_bytes(b"workflow-model")
+
+        provenance = provenance_workflow(
+            manifest,
+            registry_uri="registry://workflow/manifest/1",
+            media_path=video_path,
+            stego_manifest=StegoManifest(video=VideoMetadata(file_path="workflow.h264", file_hash="00" * 32)),
+            sidecar_path=c2pa_path,
+        )
+        fingerprint = fingerprint_workflow(base, [record], policy=fingerprint_policy, threshold=0)
+        watermark = watermark_workflow(
+            embedded,
+            key=b"upgrade-v2-watermark-key",
+            frame_shape=(64, 64),
+            positive_clips=[embedded],
+            negative_clips=[base],
+            payload_commitment=provenance.root.manifest_root_hash,
+        )
+        attestation = attestation_workflow(
+            signer=MockTEESigner(b"workflow-key"),
+            video_path=video_path,
+            model_config_path=model_config_path,
+            model_binary_path=model_binary_path,
+            policy_id="workflow-policy-v1",
+            timestamp="2026-06-09T00:00:00Z",
+            provenance_root_hash=provenance.root.manifest_root_hash,
+            sidecar_path=attestation_path,
+        )
+
+    return {
+        "api": "src.trust.workflows",
+        "provenance_valid": provenance.verified and bool(provenance.sidecar_roundtrip_valid),
+        "fingerprint_match": fingerprint.match.to_dict(),
+        "watermark_valid": watermark.resynchronized_receipt.valid,
+        "watermark_alignment": watermark.resynchronized_alignment.to_dict(),
+        "attestation_valid": attestation.signature_valid and bool(attestation.sidecar_roundtrip_valid),
+        "claims": {
+            "fingerprint": "matches canonical registry asset; not an anti-deepfake claim",
+            "watermark": "detector score/decision receipt over committed detector/key material",
+            "attestation": "mock TEE/model binding interface; not hardware-backed yet",
+        },
+    }
+
+
 def run_diagnostic() -> dict[str, object]:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1007,6 +1078,7 @@ def run_diagnostic() -> dict[str, object]:
             "spec": zkml.to_dict(),
             "interface_valid": zkml.validate_interface_only(),
         },
+        "ready_workflows": _workflow_facade_diagnostic(manifest),
         "circuits": {},
     }
     for circuit_name in ("fingerprint_verify", "detector_receipt"):
@@ -1031,6 +1103,10 @@ def main() -> None:
         result["attestation"]["signature_valid"],
         result["attestation"]["sidecar_roundtrip_valid"],
         result["zkml_interface"]["interface_valid"],
+        result["ready_workflows"]["provenance_valid"],
+        result["ready_workflows"]["fingerprint_match"]["matched"],
+        result["ready_workflows"]["watermark_valid"],
+        result["ready_workflows"]["attestation_valid"],
         result["circuits"]["fingerprint_verify"]["compile_ok"],
         result["circuits"]["detector_receipt"]["compile_ok"],
         result["circuits"]["fingerprint_verify"]["groth16_measurement"]["verified"],

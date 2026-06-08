@@ -55,6 +55,11 @@
       "evidence": "canonical bundle signing and sidecar roundtrip",
       "passed": true
     },
+    "ready_workflows": {
+      "status": "ready_to_use_api_surface",
+      "evidence": "src.trust.workflows facade covers provenance, fingerprint, watermark, and attestation",
+      "passed": true
+    },
     "zk_circuits": {
       "status": "supported_for_toy_relations",
       "evidence": "fingerprint and detector receipt circuits compile and Groth16 verify",
@@ -71,6 +76,7 @@
     "watermark_fixed_accept_rate": 0.8571428571428571,
     "watermark_resynchronized_accept_rate": 1.0,
     "fingerprint_groth16_verified": true,
-    "detector_groth16_verified": true
+    "detector_groth16_verified": true,
+    "ready_workflows_valid": true
   }
 }

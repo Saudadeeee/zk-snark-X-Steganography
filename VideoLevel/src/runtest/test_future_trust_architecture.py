@@ -30,14 +30,18 @@ from src.trust import (
     MockTEESigner,
     TinyThresholdDetector,
     ZKMLInterfaceSpec,
+    attestation_workflow,
     build_provenance_root,
     compute_framehash,
     compute_video_fingerprint,
     extract_tiny_video_features,
+    fingerprint_workflow,
     load_attestation_sidecar,
+    provenance_workflow,
     sample_frame_indices,
     save_attestation_sidecar,
     verify_provenance_root,
+    watermark_workflow,
 )
 from src.manifest import StegoManifest, VideoMetadata
 
@@ -220,6 +224,98 @@ def t_zkml_interface_is_explicit_stub():
     assert spec.status == "interface_only", "ZKML must not imply implementation"
 
 
+def t_ready_to_use_trust_workflows():
+    root_dir = os.path.join(os.path.dirname(__file__), "..", "..")
+    out_dir = os.path.join(root_dir, "data", "output")
+    manifest = {
+        "claim_generator": "workflow-test",
+        "assertions": [{"label": "canonical_asset", "value": "asset-1"}],
+    }
+    stego_manifest = StegoManifest(video=VideoMetadata(file_path="input.h264", file_hash="00" * 32))
+    c2pa_path = os.path.join(out_dir, "_test_workflow_c2pa.json")
+    registry_path = os.path.join(out_dir, "_test_workflow_registry.json")
+    receipt_path = os.path.join(out_dir, "_test_workflow_receipt.json")
+    attestation_path = os.path.join(out_dir, "_test_workflow_attestation.json")
+    model_config_path = os.path.join(out_dir, "_test_model_config.json")
+    model_binary_path = os.path.join(out_dir, "_test_model.bin")
+    video_path = os.path.join(out_dir, "_test_video.bin")
+    try:
+        provenance = provenance_workflow(
+            manifest,
+            registry_uri="registry://workflow/asset-1",
+            stego_manifest=stego_manifest,
+            sidecar_path=c2pa_path,
+        )
+        assert provenance.verified
+        assert provenance.embedded_payload_tamper_detected
+        assert provenance.manifest_tamper_detected
+        assert provenance.attached_manifest.video.provenance_root_hash == provenance.root.manifest_root_hash
+        assert provenance.sidecar_roundtrip_valid
+
+        frames = np.stack([np.full((32, 32), i, dtype=np.float32) for i in range(6)])
+        policy = FingerprintPreprocessPolicy(sample_count=3, hash_size=8)
+        fp = compute_video_fingerprint(frames, policy=policy)
+        record = FingerprintRecord("canonical-asset-1", fp.fingerprint_hex, bit_count=fp.bit_count)
+        fingerprint = fingerprint_workflow(frames, [record], policy=policy, threshold=0)
+        assert fingerprint.match.matched
+        assert fingerprint.match.record_id == "canonical-asset-1"
+        fingerprint.registry.save(registry_path)
+        loaded_registry = FingerprintRegistry.load(registry_path)
+        assert loaded_registry.commitment() == fingerprint.registry.commitment()
+
+        base = np.stack(
+            [
+                np.tile(np.linspace(32 + i * 8, 220 + i * 8, 64, dtype=np.float32), (64, 1))
+                for i in range(8)
+            ]
+        )
+        detector = KeyedTemplateDetector(b"upgrade-v2-watermark-key", frame_shape=(64, 64), grid_size=8)
+        embedded = detector.embed(base, strength=8.0)
+        watermark = watermark_workflow(
+            embedded,
+            key=b"upgrade-v2-watermark-key",
+            frame_shape=(64, 64),
+            positive_clips=[embedded],
+            negative_clips=[base],
+            payload_commitment=provenance.root.manifest_root_hash,
+        )
+        assert watermark.resynchronized_receipt.valid
+        watermark.resynchronized_receipt.save(receipt_path)
+        loaded_receipt = watermark.resynchronized_receipt.load(receipt_path)
+        assert loaded_receipt.commitment() == watermark.resynchronized_receipt.commitment()
+
+        with open(video_path, "wb") as f:
+            f.write(b"video-bytes")
+        with open(model_config_path, "w", encoding="utf-8") as f:
+            f.write('{"model":"unit"}')
+        with open(model_binary_path, "wb") as f:
+            f.write(b"model-bytes")
+        attestation = attestation_workflow(
+            signer=MockTEESigner(b"workflow-key"),
+            video_path=video_path,
+            model_config_path=model_config_path,
+            model_binary_path=model_binary_path,
+            policy_id="workflow-policy-v1",
+            timestamp="2026-06-09T00:00:00Z",
+            provenance_root_hash=provenance.root.manifest_root_hash,
+            sidecar_path=attestation_path,
+        )
+        assert attestation.signature_valid
+        assert attestation.sidecar_roundtrip_valid
+    finally:
+        for path in (
+            c2pa_path,
+            registry_path,
+            receipt_path,
+            attestation_path,
+            model_config_path,
+            model_binary_path,
+            video_path,
+        ):
+            if os.path.exists(path):
+                os.remove(path)
+
+
 def main():
     section("Future Trust Architecture Interfaces")
     results = [
@@ -240,6 +336,7 @@ def main():
         run_test("mock_tee_attestation_signature", t_mock_tee_attestation_signature),
         run_test("attestation_sidecar_roundtrip", t_attestation_sidecar_roundtrip),
         run_test("zkml_interface_is_explicit_stub", t_zkml_interface_is_explicit_stub),
+        run_test("ready_to_use_trust_workflows", t_ready_to_use_trust_workflows),
     ]
     sys.exit(summarise(results, "Future Trust Architecture"))
 

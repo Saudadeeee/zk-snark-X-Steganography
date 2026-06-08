@@ -7,7 +7,9 @@ paper-grade CAVLC embedding claim.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable, Sequence
 
 import numpy as np
@@ -172,6 +174,23 @@ class FingerprintRecord:
     bit_count: int = 64
     metadata_hash: str | None = None
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "record_id": self.record_id,
+            "fingerprint_hex": self.fingerprint_hex,
+            "bit_count": self.bit_count,
+            "metadata_hash": self.metadata_hash,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> "FingerprintRecord":
+        return cls(
+            record_id=str(data["record_id"]),
+            fingerprint_hex=str(data["fingerprint_hex"]),
+            bit_count=int(data.get("bit_count", 64)),
+            metadata_hash=data.get("metadata_hash") if data.get("metadata_hash") is None else str(data["metadata_hash"]),
+        )
+
     def to_public_commitment(self) -> str:
         """Commit to a record without exposing raw metadata."""
         return canonical_json_hash(
@@ -194,6 +213,15 @@ class RegistryMatch:
     threshold: int
     registry_commitment: str
 
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "matched": self.matched,
+            "record_id": self.record_id,
+            "distance": self.distance,
+            "threshold": self.threshold,
+            "registry_commitment": self.registry_commitment,
+        }
+
 
 class FingerprintRegistry:
     """Small deterministic registry with Hamming-threshold lookup."""
@@ -207,6 +235,34 @@ class FingerprintRegistry:
 
     def add(self, record: FingerprintRecord) -> None:
         self._records.append(record)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema": "zk-stego-fingerprint-registry-v1",
+            "commitment": self.commitment(),
+            "records": [record.to_dict() for record in self._records],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> "FingerprintRegistry":
+        raw_records = data.get("records", [])
+        if not isinstance(raw_records, list):
+            raise ValueError("fingerprint registry records must be a list")
+        registry = cls(FingerprintRecord.from_dict(record) for record in raw_records)
+        expected_commitment = data.get("commitment")
+        if expected_commitment is not None and str(expected_commitment) != registry.commitment():
+            raise ValueError("fingerprint registry commitment mismatch")
+        return registry
+
+    def save(self, path: str | Path) -> None:
+        Path(path).write_text(json.dumps(self.to_dict(), indent=2, ensure_ascii=True), encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: str | Path) -> "FingerprintRegistry":
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("fingerprint registry must be a JSON object")
+        return cls.from_dict(data)
 
     def commitment(self) -> str:
         """Commit to the registry set without exposing an external DB."""

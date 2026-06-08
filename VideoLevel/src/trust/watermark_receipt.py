@@ -8,7 +8,9 @@ CAVLC embedding path and does not claim real detector parity.
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable, Sequence
 
 import numpy as np
@@ -79,6 +81,31 @@ class DetectorReceipt:
 
     def commitment(self) -> str:
         return canonical_json_hash(self.to_dict())
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> "DetectorReceipt":
+        return cls(
+            detector_id=str(data["detector_id"]),
+            score=float(data["score"]),
+            threshold=float(data["threshold"]),
+            valid=bool(data["valid"]),
+            payload_commitment=data.get("payload_commitment")
+            if data.get("payload_commitment") is None
+            else str(data["payload_commitment"]),
+            detector_commitment=data.get("detector_commitment")
+            if data.get("detector_commitment") is None
+            else str(data["detector_commitment"]),
+        )
+
+    def save(self, path: str | Path) -> None:
+        Path(path).write_text(json.dumps(self.to_dict(), indent=2, ensure_ascii=True), encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: str | Path) -> "DetectorReceipt":
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("detector receipt must be a JSON object")
+        return cls.from_dict(data)
 
 
 def extract_tiny_video_features(frames: Sequence[np.ndarray] | np.ndarray) -> list[float]:

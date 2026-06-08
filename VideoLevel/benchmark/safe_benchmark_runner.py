@@ -327,6 +327,7 @@ def _validate_trust_architecture_schema(data: dict) -> list[str]:
         "watermark_receipt",
         "attestation",
         "zkml_interface",
+        "ready_workflows",
         "circuits",
     }
     missing = sorted(required - set(data.keys()))
@@ -420,6 +421,18 @@ def _validate_trust_architecture_schema(data: dict) -> list[str]:
         errors.append("trust_architecture attestation sidecar must roundtrip")
     if data["zkml_interface"].get("interface_valid") is not True:
         errors.append("trust_architecture ZKML interface must validate")
+    workflows = data.get("ready_workflows", {})
+    if not isinstance(workflows, dict):
+        errors.append("trust_architecture ready workflows must be an object")
+    else:
+        if workflows.get("provenance_valid") is not True:
+            errors.append("trust_architecture ready provenance workflow must verify")
+        if workflows.get("fingerprint_match", {}).get("matched") is not True:
+            errors.append("trust_architecture ready fingerprint workflow must match")
+        if workflows.get("watermark_valid") is not True:
+            errors.append("trust_architecture ready watermark workflow must validate")
+        if workflows.get("attestation_valid") is not True:
+            errors.append("trust_architecture ready attestation workflow must validate")
     circuits = data.get("circuits", {})
     for circuit_name in ("fingerprint_verify", "detector_receipt"):
         circuit = circuits.get(circuit_name)
@@ -451,7 +464,14 @@ def _validate_sec45_trust_evidence_schema(data: dict) -> list[str]:
     if not isinstance(claim_gates, dict) or not claim_gates:
         errors.append("sec45 claim_gates must be a non-empty object")
     else:
-        expected = {"c2pa_anchor", "fingerprint_local_registry", "watermark_receipt", "tee_attestation", "zk_circuits"}
+        expected = {
+            "c2pa_anchor",
+            "fingerprint_local_registry",
+            "watermark_receipt",
+            "tee_attestation",
+            "ready_workflows",
+            "zk_circuits",
+        }
         missing_gates = sorted(expected - set(claim_gates.keys()))
         if missing_gates:
             errors.append(f"sec45 missing claim gates: {', '.join(missing_gates)}")
@@ -471,6 +491,7 @@ def _validate_sec45_trust_evidence_schema(data: dict) -> list[str]:
             "watermark_resynchronized_accept_rate",
             "fingerprint_groth16_verified",
             "detector_groth16_verified",
+            "ready_workflows_valid",
         ):
             if key not in metrics:
                 errors.append(f"sec45 metrics missing {key}")

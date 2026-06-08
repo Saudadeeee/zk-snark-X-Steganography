@@ -12,6 +12,7 @@ and which files are rebuildable diagnostics or local cache.
 - `src/**`
 - `benchmark/*.py`
 - `src/trust/**`
+- `src/trust/workflows.py`
 - `src/provenance/**`
 - `src/runtest/test_future_trust_architecture.py`
 - `benchmark/trust_architecture_diagnostic.py`

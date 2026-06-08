@@ -1248,6 +1248,29 @@
     },
     "interface_valid": true
   },
+  "ready_workflows": {
+    "api": "src.trust.workflows",
+    "provenance_valid": true,
+    "fingerprint_match": {
+      "matched": true,
+      "record_id": "workflow-canonical-asset",
+      "distance": 0,
+      "threshold": 0,
+      "registry_commitment": "603615d3d7c9fad0c13b900e17e66a925e4b1e317ca3030a920d229c5a7aba50"
+    },
+    "watermark_valid": true,
+    "watermark_alignment": {
+      "score": 0.4020051956176758,
+      "alignment": "center_crop_resize_margin_12",
+      "candidate_count": 4
+    },
+    "attestation_valid": true,
+    "claims": {
+      "fingerprint": "matches canonical registry asset; not an anti-deepfake claim",
+      "watermark": "detector score/decision receipt over committed detector/key material",
+      "attestation": "mock TEE/model binding interface; not hardware-backed yet"
+    }
+  },
   "circuits": {
     "fingerprint_verify": {
       "exists": true,
@@ -1268,10 +1291,10 @@
         "verified": true,
         "setup_ran": false,
         "setup_time_ms": 0.0,
-        "witness_time_ms": 325.39,
-        "prove_time_ms": 2275.18,
-        "verify_time_ms": 1316.73,
-        "proof_json_size_bytes": 803,
+        "witness_time_ms": 103.94,
+        "prove_time_ms": 1050.3,
+        "verify_time_ms": 962.0,
+        "proof_json_size_bytes": 806,
         "public_signal_count": 67,
         "public_signals": [
           "1",
@@ -1363,10 +1386,10 @@
         "verified": true,
         "setup_ran": false,
         "setup_time_ms": 0.0,
-        "witness_time_ms": 108.12,
-        "prove_time_ms": 1157.49,
-        "verify_time_ms": 1121.83,
-        "proof_json_size_bytes": 805,
+        "witness_time_ms": 90.68,
+        "prove_time_ms": 1056.2,
+        "verify_time_ms": 940.73,
+        "proof_json_size_bytes": 804,
         "public_signal_count": 7,
         "public_signals": [
           "1",

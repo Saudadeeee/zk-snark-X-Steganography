@@ -373,6 +373,10 @@ py -3.12 benchmark/sec10_gop_sweep.py --sequences foreman_q22_g1
 py -3.12 -m benchmark.safe_benchmark_runner --sections 44 45
 ```
 
+Upgrade-v2 application-level trust workflows are exposed through
+`src.trust.workflows` for provenance anchoring, fingerprint registry lookup,
+watermark receipt, and model/device attestation.
+
 ---
 
 ## How The Embedding Works
