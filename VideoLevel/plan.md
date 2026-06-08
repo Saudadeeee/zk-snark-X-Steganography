@@ -1,12 +1,12 @@
 # ZK-Stego VideoLevel Plan
 
-Last updated: 2026-06-08
-Branch: `main`
+Last updated: 2026-06-09
+Branch: `Upgrade-v2`
 
-This plan reflects the repository as it exists now. The current `main` branch is
-for finishing the frozen H.264/CAVLC + Groth16 baseline. The broader
-cryptographic trust architecture is valuable, but it belongs on a later branch
-after the current system is stable, tested, and documented.
+This plan reflects the repository as it exists now. The frozen H.264/CAVLC +
+Groth16 baseline is preserved on `main` at commit `053ce2b` (`8/6`). The active
+branch is now `Upgrade-v2`, which is for the broader cryptographic trust
+architecture and robustness-oriented diagnostics.
 
 ---
 
@@ -246,10 +246,11 @@ Avoid these claims on `main`:
 
 ---
 
-## 5. Future Branch: Cryptographic Trust Architecture
+## 5. Upgrade-v2: Cryptographic Trust Architecture
 
-This section records the next architecture direction, but it must be implemented
-on a separate branch after the current baseline is frozen.
+This section records the active upgrade direction. Keep these results separate
+from the frozen baseline until they are promoted with their own benchmark family
+and claim language.
 
 The strategic goal is to evolve from a fragile compressed-domain steganography
 prototype into a broader video provenance and attestation framework.
@@ -280,9 +281,8 @@ Current implementation status:
 - [x] Validate section `44` through `safe_benchmark_runner.py`.
 - [ ] Promote any future trust plane into paper-grade benchmark evidence.
 
-Current diagnostic status on 2026-06-08:
+Current diagnostic status on 2026-06-09:
 
-- Future trust interface tests: `10/10` passed.
 - Future trust interface tests now pass `11/11`.
 - Section `44`: passed with schema validation OK.
 - `fingerprint_verify.circom`: compiled and proved, `606` non-linear
@@ -291,7 +291,13 @@ Current diagnostic status on 2026-06-08:
   constraints, `448` linear constraints, Groth16 verify passed.
 - The diagnostic JSON is `benchmark/results/trust_architecture_diagnostic.json`.
 - Real-clip fingerprint diagnostics now run on local H.264 assets.
-- Detector transform diagnostics now run on synthetic transforms.
+- Committed synthetic fingerprint diagnostics now include positive and negative
+  controls.
+- Detector transform diagnostics now include positive and negative controls.
+- Current synthetic fingerprint sweet spot: thresholds `8-16` reach
+  `true_accept_rate=1.0` and `false_accept_rate=0.0`.
+- Current detector transform diagnostic: `accuracy=1.0`,
+  `positive_accept_rate=1.0`, `false_accept_rate=0.0`.
 
 ### 5.1 ZK + C2PA Provenance Root
 
@@ -377,7 +383,8 @@ Future tasks:
 - [x] Add synthetic threshold behavior rows for false-accept/true-accept sanity.
 - [x] Measure Groth16 proving time for `fingerprint_verify.circom`.
 - [x] Add a local-clip fingerprint benchmark over available H.264 assets.
-- [ ] Benchmark false accept/reject behavior on a broader committed clip set.
+- [x] Benchmark false accept/reject behavior on a committed synthetic clip set.
+- [ ] Expand false accept/reject behavior to a larger real-video corpus.
 
 Implementation sequence:
 
@@ -443,7 +450,9 @@ Future tasks:
 - [x] Measure circuit constraint count through section `44`.
 - [x] Measure Groth16 proving time for `detector_receipt.circom`.
 - [x] Benchmark detector behavior under a small transform matrix.
-- [ ] Benchmark detector accuracy and proof overhead on a broader transform set.
+- [x] Benchmark detector accuracy and proof overhead on a broader synthetic
+      transform set.
+- [ ] Replace the toy detector with a stronger robust-video detector candidate.
 
 Implementation sequence:
 

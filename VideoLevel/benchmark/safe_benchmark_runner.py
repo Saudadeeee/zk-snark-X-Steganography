@@ -352,6 +352,13 @@ def _validate_trust_architecture_schema(data: dict) -> list[str]:
     threshold_rows = data["fingerprint_registry"].get("threshold_behavior", {}).get("synthetic_rows", [])
     if not isinstance(threshold_rows, list) or not threshold_rows:
         errors.append("trust_architecture fingerprint threshold behavior must be measured")
+    committed_fp = data["fingerprint_registry"].get("committed_synthetic_benchmark", {})
+    if committed_fp.get("available") is not True:
+        errors.append("trust_architecture committed synthetic fingerprint benchmark must be available")
+    if not isinstance(committed_fp.get("rows"), list) or not committed_fp.get("rows"):
+        errors.append("trust_architecture committed synthetic fingerprint benchmark must report rows")
+    if not committed_fp.get("positive_distances") or not committed_fp.get("negative_distances"):
+        errors.append("trust_architecture committed synthetic fingerprint benchmark must report distances")
     real_clip = data["fingerprint_registry"].get("real_clip_benchmark", {})
     if real_clip.get("available") is not True:
         errors.append("trust_architecture real-clip fingerprint benchmark must be available")
@@ -362,6 +369,11 @@ def _validate_trust_architecture_schema(data: dict) -> list[str]:
     transform_rows = data["watermark_receipt"].get("transform_benchmark", {}).get("rows", [])
     if not isinstance(transform_rows, list) or not transform_rows:
         errors.append("trust_architecture detector transform benchmark must report rows")
+    transform_summary = data["watermark_receipt"].get("transform_benchmark", {}).get("summary", {})
+    if not isinstance(transform_summary, dict) or transform_summary.get("positive_count", 0) <= 0:
+        errors.append("trust_architecture detector transform benchmark must report positive controls")
+    if not isinstance(transform_summary, dict) or transform_summary.get("negative_count", 0) <= 0:
+        errors.append("trust_architecture detector transform benchmark must report negative controls")
     if data["attestation"].get("signature_valid") is not True:
         errors.append("trust_architecture attestation signature must verify")
     if data["attestation"].get("sidecar_roundtrip_valid") is not True:

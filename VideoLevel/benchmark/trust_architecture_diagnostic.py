@@ -323,9 +323,115 @@ def _synthetic_fingerprint_rates(registry: FingerprintRegistry, base_fingerprint
     }
 
 
+def _synthetic_clip_suite(frame_count: int = 8, size: int = 64) -> dict[str, np.ndarray]:
+    x = np.linspace(0, 255, size, dtype=np.float32)
+    y = np.linspace(0, 255, size, dtype=np.float32)
+    xx, yy = np.meshgrid(x, y)
+    rng = np.random.default_rng(20260609)
+
+    gradient_motion = np.stack([np.tile(np.roll(x, i * 2), (size, 1)) for i in range(frame_count)])
+    vertical_motion = np.stack([np.tile(np.roll(y, i * 2), (size, 1)).T for i in range(frame_count)])
+    checker = (((np.indices((size, size)).sum(axis=0) // 8) % 2) * 255).astype(np.float32)
+    checker_motion = np.stack([np.roll(checker, i, axis=1) for i in range(frame_count)])
+    bar_motion = np.zeros((frame_count, size, size), dtype=np.float32)
+    for i in range(frame_count):
+        start = (i * 5) % (size - 10)
+        bar_motion[i, :, start : start + 10] = 230
+        bar_motion[i] += 20
+    radial = np.sqrt((xx - 127.5) ** 2 + (yy - 127.5) ** 2)
+    radial = np.clip(255 - radial * 2.0, 0, 255).astype(np.float32)
+    radial_motion = np.stack([np.roll(radial, i, axis=0) for i in range(frame_count)])
+    noise = rng.integers(0, 256, size=(frame_count, size, size), dtype=np.uint8).astype(np.float32)
+
+    return {
+        "gradient_motion": gradient_motion.astype(np.float32),
+        "vertical_motion": vertical_motion.astype(np.float32),
+        "checker_motion": checker_motion.astype(np.float32),
+        "bar_motion": bar_motion.astype(np.float32),
+        "radial_motion": radial_motion.astype(np.float32),
+        "seeded_noise": noise,
+    }
+
+
+def _box_blur(frames: np.ndarray) -> np.ndarray:
+    padded = np.pad(frames, ((0, 0), (1, 1), (1, 1)), mode="edge")
+    acc = np.zeros_like(frames, dtype=np.float32)
+    for dy in range(3):
+        for dx in range(3):
+            acc += padded[:, dy : dy + frames.shape[1], dx : dx + frames.shape[2]]
+    return acc / 9.0
+
+
+def _fingerprint_positive_variants(base: np.ndarray) -> dict[str, np.ndarray]:
+    rng = np.random.default_rng(4242)
+    return {
+        "original": base,
+        "brightness_shift": np.clip(base + 10.0, 0, 255),
+        "contrast_scale": np.clip((base - 128.0) * 1.08 + 128.0, 0, 255),
+        "mild_noise": np.clip(base + rng.normal(0.0, 3.0, size=base.shape), 0, 255).astype(np.float32),
+        "down_up_nearest": _down_up_nearest(base),
+        "box_blur": _box_blur(base),
+        "frame_drop": base[::2],
+    }
+
+
+def _committed_synthetic_fingerprint_benchmark() -> dict[str, object]:
+    policy = FingerprintPreprocessPolicy(sample_count=4, hash_size=8)
+    clips = _synthetic_clip_suite()
+    base_name = "gradient_motion"
+    base_fp = compute_video_fingerprint(clips[base_name], policy=policy)
+    registry = FingerprintRegistry(
+        [
+            FingerprintRecord(
+                record_id=base_name,
+                fingerprint_hex=base_fp.fingerprint_hex,
+                metadata_hash=canonical_json_hash({"source": "committed-synthetic-suite"}),
+            )
+        ]
+    )
+
+    positives = {
+        name: compute_video_fingerprint(frames, policy=policy)
+        for name, frames in _fingerprint_positive_variants(clips[base_name]).items()
+    }
+    negatives = {
+        name: compute_video_fingerprint(frames, policy=policy)
+        for name, frames in clips.items()
+        if name != base_name
+    }
+
+    rows = []
+    for threshold in (0, 2, 4, 8, 12, 16, 24):
+        positive_matches = [registry.lookup(fp.fingerprint_hex, threshold=threshold).matched for fp in positives.values()]
+        negative_matches = [registry.lookup(fp.fingerprint_hex, threshold=threshold).matched for fp in negatives.values()]
+        rows.append(
+            {
+                "threshold": threshold,
+                "positive_count": len(positive_matches),
+                "negative_count": len(negative_matches),
+                "true_accept_rate": sum(positive_matches) / len(positive_matches),
+                "false_reject_rate": 1.0 - (sum(positive_matches) / len(positive_matches)),
+                "false_accept_rate": sum(negative_matches) / len(negative_matches),
+            }
+        )
+
+    return {
+        "available": True,
+        "policy": policy.to_dict(),
+        "registry_record": base_name,
+        "positive_distances": {
+            name: registry.lookup(fp.fingerprint_hex, threshold=64).distance for name, fp in positives.items()
+        },
+        "negative_distances": {
+            name: registry.lookup(fp.fingerprint_hex, threshold=64).distance for name, fp in negatives.items()
+        },
+        "rows": rows,
+    }
+
+
 def _real_clip_fingerprint_benchmark() -> dict[str, object]:
     policy = FingerprintPreprocessPolicy(sample_count=4, hash_size=8)
-    sequence_names = ["akiyo_q22_g1", "foreman_q22_g1", "coastguard_q22_g1", "deadline_q22_g1"]
+    sequence_names = sorted(name for name in SEQUENCES if name.endswith("_q22_g1"))
     fingerprints: dict[str, Any] = {}
     for name in sequence_names:
         path = SEQUENCES.get(name)
@@ -394,9 +500,19 @@ def _detector_transform_benchmark() -> dict[str, object]:
     transformed = {
         "original": base,
         "brightness_shift": np.clip(base + 12.0, 0, 255),
+        "contrast_scale": np.clip((base - 128.0) * 1.12 + 128.0, 0, 255),
+        "mild_noise": np.clip(base + np.random.default_rng(7).normal(0, 4, base.shape), 0, 255).astype(np.float32),
         "down_up_nearest": _down_up_nearest(base),
+        "box_blur": _box_blur(base),
         "center_crop_padded": np.pad(base[:, 8:56, 8:56], ((0, 0), (8, 8), (8, 8)), mode="edge"),
+        "horizontal_flip": base[:, :, ::-1],
+        "temporal_reverse": base[::-1],
         "frame_drop": base[::2],
+    }
+    negative_controls = {
+        "dark_flat": np.zeros_like(base) + 8,
+        "low_motion_gray": np.zeros_like(base) + 64,
+        "dark_noise": np.random.default_rng(99).normal(16, 2, base.shape).clip(0, 255).astype(np.float32),
     }
     detector = TinyThresholdDetector([0.35, 0.35, 0.2, 0.1])
     original_score = detector.score(extract_tiny_video_features(base))
@@ -411,15 +527,38 @@ def _detector_transform_benchmark() -> dict[str, object]:
                 "features": features,
                 "score": receipt.score,
                 "threshold": threshold,
+                "expected": True,
                 "accepted": receipt.valid,
+                "correct": receipt.valid is True,
             }
         )
-    positives = [row["accepted"] for row in rows]
+    for name, frames in negative_controls.items():
+        features = extract_tiny_video_features(frames)
+        receipt = detector.receipt(features, threshold=threshold)
+        rows.append(
+            {
+                "transform": name,
+                "features": features,
+                "score": receipt.score,
+                "threshold": threshold,
+                "expected": False,
+                "accepted": receipt.valid,
+                "correct": receipt.valid is False,
+            }
+        )
+    positives = [row["accepted"] for row in rows if row["expected"] is True]
+    negatives = [row["accepted"] for row in rows if row["expected"] is False]
     return {
         "detector_commitment": detector.commitment,
         "threshold": threshold,
         "rows": rows,
-        "accept_rate": sum(positives) / len(positives),
+        "summary": {
+            "positive_count": len(positives),
+            "negative_count": len(negatives),
+            "positive_accept_rate": sum(positives) / len(positives),
+            "false_accept_rate": sum(negatives) / len(negatives),
+            "accuracy": sum(row["correct"] for row in rows) / len(rows),
+        },
         "proof_overhead_reference": "detector_receipt.circom Groth16 measurement",
     }
 
@@ -532,6 +671,7 @@ def run_diagnostic() -> dict[str, object]:
             "distance": match.distance,
             "threshold": match.threshold,
             "threshold_behavior": _synthetic_fingerprint_rates(registry, fp),
+            "committed_synthetic_benchmark": _committed_synthetic_fingerprint_benchmark(),
             "real_clip_benchmark": _real_clip_fingerprint_benchmark(),
         },
         "watermark_receipt": {
