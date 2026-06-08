@@ -279,6 +279,7 @@ Current implementation status:
 - [x] Add interface tests in `src/runtest/test_future_trust_architecture.py`.
 - [x] Register diagnostic-grade runner section `44`.
 - [x] Validate section `44` through `safe_benchmark_runner.py`.
+- [x] Add corpus contract `benchmark/trust_corpus_manifest.json`.
 - [x] Add claim-gated evidence runner section `45`.
 - [x] Validate section `45` through `safe_benchmark_runner.py`.
 - [ ] Promote a future trust plane into paper-grade benchmark evidence only
@@ -317,6 +318,11 @@ Current diagnostic status on 2026-06-09:
   H.264 ffmpeg roundtrip at CRF28 and CRF35 passes.
 - Section `45` claim gates pass `5/5`, but `promotion_ready=false` because no
   non-local or externally curated real-video corpus is registered.
+- Section `45` artifacts are
+  `benchmark/results/sec45_trust_evidence_data.json` and
+  `benchmark/results/sec45_trust_evidence_summary.png`.
+- Upgrade-v2 trust replay command:
+  `py -3.12 -m benchmark.safe_benchmark_runner --sections 44 45`.
 
 ### 5.1 ZK + C2PA Provenance Root
 
