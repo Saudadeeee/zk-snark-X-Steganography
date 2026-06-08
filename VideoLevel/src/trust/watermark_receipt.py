@@ -16,6 +16,30 @@ from .canonical import canonical_json_hash
 
 
 @dataclass(frozen=True)
+class DetectorCalibration:
+    """Threshold calibration summary for a small detector candidate."""
+
+    detector_id: str
+    threshold: float
+    positive_count: int
+    negative_count: int
+    true_accept_rate: float
+    false_accept_rate: float
+    accuracy: float
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "detector_id": self.detector_id,
+            "threshold": self.threshold,
+            "positive_count": self.positive_count,
+            "negative_count": self.negative_count,
+            "true_accept_rate": self.true_accept_rate,
+            "false_accept_rate": self.false_accept_rate,
+            "accuracy": self.accuracy,
+        }
+
+
+@dataclass(frozen=True)
 class DetectorReceipt:
     """Public output of a detector wrapped in a trust receipt."""
 
@@ -103,3 +127,57 @@ class TinyThresholdDetector:
             payload_commitment=payload_commitment,
             detector_commitment=self.commitment,
         )
+
+
+class CalibratedThresholdDetector(TinyThresholdDetector):
+    """Tiny detector with deterministic threshold calibration."""
+
+    def __init__(self, weights: Iterable[float], *, detector_id: str = "calibrated-threshold-v1"):
+        super().__init__(weights, detector_id=detector_id)
+
+    def calibrate(
+        self,
+        positive_features: Sequence[Iterable[float]],
+        negative_features: Sequence[Iterable[float]],
+    ) -> DetectorCalibration:
+        positive_scores = [self.score(features) for features in positive_features]
+        negative_scores = [self.score(features) for features in negative_features]
+        if not positive_scores:
+            raise ValueError("positive_features must be non-empty")
+        if not negative_scores:
+            raise ValueError("negative_features must be non-empty")
+        candidates = sorted(set(positive_scores + negative_scores))
+        if len(candidates) == 1:
+            thresholds = candidates
+        else:
+            thresholds = [candidates[0] - 1e-9]
+            thresholds.extend((a + b) / 2.0 for a, b in zip(candidates, candidates[1:]))
+            thresholds.append(candidates[-1] + 1e-9)
+
+        best: DetectorCalibration | None = None
+        for threshold in thresholds:
+            true_accept = sum(score >= threshold for score in positive_scores)
+            false_accept = sum(score >= threshold for score in negative_scores)
+            true_accept_rate = true_accept / len(positive_scores)
+            false_accept_rate = false_accept / len(negative_scores)
+            accuracy = (true_accept + (len(negative_scores) - false_accept)) / (
+                len(positive_scores) + len(negative_scores)
+            )
+            candidate = DetectorCalibration(
+                detector_id=self.detector_id,
+                threshold=float(threshold),
+                positive_count=len(positive_scores),
+                negative_count=len(negative_scores),
+                true_accept_rate=float(true_accept_rate),
+                false_accept_rate=float(false_accept_rate),
+                accuracy=float(accuracy),
+            )
+            if best is None or (candidate.accuracy, candidate.true_accept_rate, -candidate.false_accept_rate) > (
+                best.accuracy,
+                best.true_accept_rate,
+                -best.false_accept_rate,
+            ):
+                best = candidate
+        if best is None:
+            raise RuntimeError("calibration failed")
+        return best

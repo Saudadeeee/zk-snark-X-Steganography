@@ -26,6 +26,7 @@ from src.provenance import attach_anchor_to_manifest, build_c2pa_anchor, verify_
 from src.trust import (
     AttestationBundle,
     AttestationSidecar,
+    CalibratedThresholdDetector,
     FingerprintPreprocessPolicy,
     FingerprintRecord,
     FingerprintRegistry,
@@ -514,9 +515,11 @@ def _detector_transform_benchmark() -> dict[str, object]:
         "low_motion_gray": np.zeros_like(base) + 64,
         "dark_noise": np.random.default_rng(99).normal(16, 2, base.shape).clip(0, 255).astype(np.float32),
     }
-    detector = TinyThresholdDetector([0.35, 0.35, 0.2, 0.1])
-    original_score = detector.score(extract_tiny_video_features(base))
-    threshold = original_score * 0.8
+    detector = CalibratedThresholdDetector([0.35, 0.35, 0.2, 0.1])
+    positive_features = [extract_tiny_video_features(frames) for frames in transformed.values()]
+    negative_features = [extract_tiny_video_features(frames) for frames in negative_controls.values()]
+    calibration = detector.calibrate(positive_features, negative_features)
+    threshold = calibration.threshold
     rows = []
     for name, frames in transformed.items():
         features = extract_tiny_video_features(frames)
@@ -550,6 +553,7 @@ def _detector_transform_benchmark() -> dict[str, object]:
     negatives = [row["accepted"] for row in rows if row["expected"] is False]
     return {
         "detector_commitment": detector.commitment,
+        "calibration": calibration.to_dict(),
         "threshold": threshold,
         "rows": rows,
         "summary": {

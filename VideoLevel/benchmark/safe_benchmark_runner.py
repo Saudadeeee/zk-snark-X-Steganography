@@ -374,6 +374,11 @@ def _validate_trust_architecture_schema(data: dict) -> list[str]:
         errors.append("trust_architecture detector transform benchmark must report positive controls")
     if not isinstance(transform_summary, dict) or transform_summary.get("negative_count", 0) <= 0:
         errors.append("trust_architecture detector transform benchmark must report negative controls")
+    calibration = data["watermark_receipt"].get("transform_benchmark", {}).get("calibration", {})
+    if not isinstance(calibration, dict) or calibration.get("accuracy", 0) <= 0:
+        errors.append("trust_architecture detector calibration must report accuracy")
+    if "false_accept_rate" not in calibration:
+        errors.append("trust_architecture detector calibration must report false_accept_rate")
     if data["attestation"].get("signature_valid") is not True:
         errors.append("trust_architecture attestation signature must verify")
     if data["attestation"].get("sidecar_roundtrip_valid") is not True:

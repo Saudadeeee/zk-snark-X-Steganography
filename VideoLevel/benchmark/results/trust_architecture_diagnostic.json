@@ -413,8 +413,17 @@
     },
     "receipt_commitment": "cd04097de638be3656621bcf0ee12d85c846f16b396d69cc798b4e7f41d62113",
     "transform_benchmark": {
-      "detector_commitment": "ee0dbf60ef896a57c21099db7aa7ed456dec969ac26bc2a64f131dd13f7d667e",
-      "threshold": 0.278075909614563,
+      "detector_commitment": "45a7af2dc57a4621c3dc1bcaff647a03ec3a21cab7127c4ae831a96873ef3840",
+      "calibration": {
+        "detector_id": "calibrated-threshold-v1",
+        "threshold": 0.21066440269351006,
+        "positive_count": 10,
+        "negative_count": 3,
+        "true_accept_rate": 1.0,
+        "false_accept_rate": 0.0,
+        "accuracy": 1.0
+      },
+      "threshold": 0.21066440269351006,
       "rows": [
         {
           "transform": "original",
@@ -425,7 +434,7 @@
             0.0313725508749485
           ],
           "score": 0.34759488701820374,
-          "threshold": 0.278075909614563,
+          "threshold": 0.21066440269351006,
           "expected": true,
           "accepted": true,
           "correct": true
@@ -439,7 +448,7 @@
             0.031352125108242035
           ],
           "score": 0.3640348017215729,
-          "threshold": 0.278075909614563,
+          "threshold": 0.21066440269351006,
           "expected": true,
           "accepted": true,
           "correct": true
@@ -453,7 +462,7 @@
             0.035077616572380066
           ],
           "score": 0.3681347370147705,
-          "threshold": 0.278075909614563,
+          "threshold": 0.21066440269351006,
           "expected": true,
           "accepted": true,
           "correct": true
@@ -467,7 +476,7 @@
             0.033049535006284714
           ],
           "score": 0.3532904386520386,
-          "threshold": 0.278075909614563,
+          "threshold": 0.21066440269351006,
           "expected": true,
           "accepted": true,
           "correct": true
@@ -481,7 +490,7 @@
             0.0313725508749485
           ],
           "score": 0.3454552888870239,
-          "threshold": 0.278075909614563,
+          "threshold": 0.21066440269351006,
           "expected": true,
           "accepted": true,
           "correct": true
@@ -495,7 +504,7 @@
             0.0313725508749485
           ],
           "score": 0.34742775559425354,
-          "threshold": 0.278075909614563,
+          "threshold": 0.21066440269351006,
           "expected": true,
           "accepted": true,
           "correct": true
@@ -509,7 +518,7 @@
             0.0313725508749485
           ],
           "score": 0.3334856629371643,
-          "threshold": 0.278075909614563,
+          "threshold": 0.21066440269351006,
           "expected": true,
           "accepted": true,
           "correct": true
@@ -523,7 +532,7 @@
             0.0313725508749485
           ],
           "score": 0.34759488701820374,
-          "threshold": 0.278075909614563,
+          "threshold": 0.21066440269351006,
           "expected": true,
           "accepted": true,
           "correct": true
@@ -537,7 +546,7 @@
             0.0313725508749485
           ],
           "score": 0.34759488701820374,
-          "threshold": 0.278075909614563,
+          "threshold": 0.21066440269351006,
           "expected": true,
           "accepted": true,
           "correct": true
@@ -551,7 +560,7 @@
             0.062745101749897
           ],
           "score": 0.34484976530075073,
-          "threshold": 0.278075909614563,
+          "threshold": 0.21066440269351006,
           "expected": true,
           "accepted": true,
           "correct": true
@@ -565,7 +574,7 @@
             0.0
           ],
           "score": 0.010980392806231976,
-          "threshold": 0.278075909614563,
+          "threshold": 0.21066440269351006,
           "expected": false,
           "accepted": false,
           "correct": true
@@ -579,7 +588,7 @@
             0.0
           ],
           "score": 0.0878431424498558,
-          "threshold": 0.278075909614563,
+          "threshold": 0.21066440269351006,
           "expected": false,
           "accepted": false,
           "correct": true
@@ -593,7 +602,7 @@
             0.008840355090796947
           ],
           "score": 0.03183577209711075,
-          "threshold": 0.278075909614563,
+          "threshold": 0.21066440269351006,
           "expected": false,
           "accepted": false,
           "correct": true
@@ -662,10 +671,10 @@
         "verified": true,
         "setup_ran": false,
         "setup_time_ms": 0.0,
-        "witness_time_ms": 234.83,
-        "prove_time_ms": 2270.86,
-        "verify_time_ms": 1984.3,
-        "proof_json_size_bytes": 807,
+        "witness_time_ms": 140.56,
+        "prove_time_ms": 1102.01,
+        "verify_time_ms": 998.44,
+        "proof_json_size_bytes": 805,
         "public_signal_count": 67,
         "public_signals": [
           "1",
@@ -757,10 +766,10 @@
         "verified": true,
         "setup_ran": false,
         "setup_time_ms": 0.0,
-        "witness_time_ms": 238.48,
-        "prove_time_ms": 2295.68,
-        "verify_time_ms": 2155.0,
-        "proof_json_size_bytes": 805,
+        "witness_time_ms": 92.61,
+        "prove_time_ms": 1038.53,
+        "verify_time_ms": 965.74,
+        "proof_json_size_bytes": 804,
         "public_signal_count": 7,
         "public_signals": [
           "1",

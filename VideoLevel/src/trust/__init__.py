@@ -15,7 +15,13 @@ from .fingerprint import (
     compute_video_fingerprint,
     sample_frame_indices,
 )
-from .watermark_receipt import DetectorReceipt, TinyThresholdDetector, extract_tiny_video_features
+from .watermark_receipt import (
+    CalibratedThresholdDetector,
+    DetectorCalibration,
+    DetectorReceipt,
+    TinyThresholdDetector,
+    extract_tiny_video_features,
+)
 from .attestation import (
     AttestationBundle,
     AttestationSidecar,
@@ -38,6 +44,8 @@ __all__ = [
     "compute_video_fingerprint",
     "sample_frame_indices",
     "DetectorReceipt",
+    "DetectorCalibration",
+    "CalibratedThresholdDetector",
     "TinyThresholdDetector",
     "extract_tiny_video_features",
     "AttestationBundle",

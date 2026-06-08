@@ -283,7 +283,7 @@ Current implementation status:
 
 Current diagnostic status on 2026-06-09:
 
-- Future trust interface tests now pass `11/11`.
+- Future trust interface tests now pass `12/12`.
 - Section `44`: passed with schema validation OK.
 - `fingerprint_verify.circom`: compiled and proved, `606` non-linear
   constraints, `842` linear constraints, Groth16 verify passed.
@@ -298,6 +298,9 @@ Current diagnostic status on 2026-06-09:
   `true_accept_rate=1.0` and `false_accept_rate=0.0`.
 - Current detector transform diagnostic: `accuracy=1.0`,
   `positive_accept_rate=1.0`, `false_accept_rate=0.0`.
+- Current calibrated detector candidate: threshold `0.2107`,
+  `true_accept_rate=1.0`, `false_accept_rate=0.0`, `accuracy=1.0` on the
+  committed diagnostic transform set.
 
 ### 5.1 ZK + C2PA Provenance Root
 
@@ -452,7 +455,10 @@ Future tasks:
 - [x] Benchmark detector behavior under a small transform matrix.
 - [x] Benchmark detector accuracy and proof overhead on a broader synthetic
       transform set.
-- [ ] Replace the toy detector with a stronger robust-video detector candidate.
+- [x] Replace fixed-threshold toy behavior with deterministic calibrated
+      threshold selection.
+- [ ] Replace the calibrated toy detector with a learned or hand-designed
+      robust-video detector candidate.
 
 Implementation sequence:
 

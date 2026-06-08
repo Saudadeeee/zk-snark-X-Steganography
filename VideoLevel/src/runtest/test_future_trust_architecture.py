@@ -22,6 +22,7 @@ from src.runtest._helpers import run_test, section, summarise
 from src.trust import (
     AttestationBundle,
     AttestationSidecar,
+    CalibratedThresholdDetector,
     FingerprintRecord,
     FingerprintRegistry,
     FingerprintPreprocessPolicy,
@@ -121,6 +122,17 @@ def t_tiny_video_features_are_circuit_sized():
     assert all(value >= 0.0 for value in features)
 
 
+def t_calibrated_detector_selects_threshold():
+    detector = CalibratedThresholdDetector([1.0, 1.0])
+    calibration = detector.calibrate(
+        positive_features=[[0.7, 0.7], [0.8, 0.6]],
+        negative_features=[[0.1, 0.2], [0.2, 0.2]],
+    )
+    assert calibration.accuracy == 1.0
+    assert calibration.true_accept_rate == 1.0
+    assert calibration.false_accept_rate == 0.0
+
+
 def t_mock_tee_attestation_signature():
     bundle = AttestationBundle(
         video_hash="aa" * 32,
@@ -181,6 +193,7 @@ def main():
         run_test("video_fingerprint_policy_is_deterministic", t_video_fingerprint_policy_is_deterministic),
         run_test("watermark_receipt_threshold", t_watermark_receipt_threshold),
         run_test("tiny_video_features_are_circuit_sized", t_tiny_video_features_are_circuit_sized),
+        run_test("calibrated_detector_selects_threshold", t_calibrated_detector_selects_threshold),
         run_test("mock_tee_attestation_signature", t_mock_tee_attestation_signature),
         run_test("attestation_sidecar_roundtrip", t_attestation_sidecar_roundtrip),
         run_test("zkml_interface_is_explicit_stub", t_zkml_interface_is_explicit_stub),
