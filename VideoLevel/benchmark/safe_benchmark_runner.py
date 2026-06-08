@@ -49,12 +49,13 @@ SECTIONS = {
     42: "blind_partial_payload_contract",
     43: "blind_real_proof_header_diagnostic",
     44: "trust_architecture_diagnostic",
+    45: "sec45_trust_evidence",
 }
 
 DEFAULT_TIMEOUT = 180  # 3 minutes per section
-FAST_CAPABLE_SECTIONS = {1, 2, 3, 4, 6, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44}
+FAST_CAPABLE_SECTIONS = {1, 2, 3, 4, 6, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45}
 PAPER_GRADE_DEFAULT = [1, 2, 3, 4, 5, 6]
-DIAGNOSTIC_DEFAULT = [31, 32, 44]
+DIAGNOSTIC_DEFAULT = [31, 32, 44, 45]
 SECTION_CLASS = {
     1: "paper_grade",
     2: "paper_grade",
@@ -76,6 +77,7 @@ SECTION_CLASS = {
     42: "diagnostic_grade",
     43: "diagnostic_grade",
     44: "diagnostic_grade",
+    45: "claim_gated_evidence",
 }
 ARTIFACT_SPEC = {
     1: {
@@ -157,6 +159,10 @@ ARTIFACT_SPEC = {
     44: {
         "charts": [],
         "data": ["trust_architecture_diagnostic.json"],
+    },
+    45: {
+        "charts": ["sec45_trust_evidence_summary.png"],
+        "data": ["sec45_trust_evidence_data.json"],
     },
 }
 
@@ -433,6 +439,49 @@ def _validate_trust_architecture_schema(data: dict) -> list[str]:
     return errors
 
 
+def _validate_sec45_trust_evidence_schema(data: dict) -> list[str]:
+    required = {"tier", "source_tier", "promotion_ready", "blockers", "claim_gates", "metrics"}
+    missing = sorted(required - set(data.keys()))
+    if missing:
+        return [f"sec45 missing keys: {', '.join(missing)}"]
+    errors: list[str] = []
+    if data.get("tier") != "claim_gated_evidence":
+        errors.append("sec45 tier must be claim_gated_evidence")
+    claim_gates = data.get("claim_gates")
+    if not isinstance(claim_gates, dict) or not claim_gates:
+        errors.append("sec45 claim_gates must be a non-empty object")
+    else:
+        expected = {"c2pa_anchor", "fingerprint_local_registry", "watermark_receipt", "tee_attestation", "zk_circuits"}
+        missing_gates = sorted(expected - set(claim_gates.keys()))
+        if missing_gates:
+            errors.append(f"sec45 missing claim gates: {', '.join(missing_gates)}")
+        for name, gate in claim_gates.items():
+            if not isinstance(gate, dict):
+                errors.append(f"sec45 gate {name} must be object")
+                continue
+            if "passed" not in gate or "status" not in gate or "evidence" not in gate:
+                errors.append(f"sec45 gate {name} missing passed/status/evidence")
+    metrics = data.get("metrics")
+    if not isinstance(metrics, dict):
+        errors.append("sec45 metrics must be object")
+    else:
+        for key in (
+            "fingerprint_clip_count",
+            "watermark_fixed_accept_rate",
+            "watermark_resynchronized_accept_rate",
+            "fingerprint_groth16_verified",
+            "detector_groth16_verified",
+        ):
+            if key not in metrics:
+                errors.append(f"sec45 metrics missing {key}")
+    blockers = data.get("blockers")
+    if not isinstance(blockers, list):
+        errors.append("sec45 blockers must be list")
+    if data.get("promotion_ready") is False and not blockers:
+        errors.append("sec45 must explain blockers when promotion_ready is false")
+    return errors
+
+
 def _schema_errors_for_section(sec_id: int, data_file: Path) -> list[str]:
     data, err = _load_json_file(data_file)
     if err:
@@ -453,6 +502,8 @@ def _schema_errors_for_section(sec_id: int, data_file: Path) -> list[str]:
         return _validate_sec6_schema(data or {})
     if sec_id == 44:
         return _validate_trust_architecture_schema(data or {})
+    if sec_id == 45:
+        return _validate_sec45_trust_evidence_schema(data or {})
     if sec_id == 31:
         if not isinstance(data, dict) or "variants" not in data:
             return ["sec3a: missing or invalid 'variants' object"]
@@ -541,6 +592,8 @@ def _default_timeout_for_section(sec_id: int) -> int:
     if sec_id == 6:
         return 600
     if sec_id in {31, 32}:
+        return 300
+    if sec_id in {44, 45}:
         return 300
     return DEFAULT_TIMEOUT
 
@@ -631,7 +684,7 @@ def validate_results() -> dict:
         valid = len(charts) >= len(spec["charts"]) and len(data) >= len(spec["data"])
 
         schema_errors: list[str] = []
-        if data and sec_id in {1, 2, 3, 4, 5, 6, 44}:
+        if data and sec_id in {1, 2, 3, 4, 5, 6, 44, 45}:
             schema_errors = _schema_errors_for_section(sec_id, Path(data[0]))
 
         validation[sec_id] = {

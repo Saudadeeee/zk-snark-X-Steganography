@@ -368,6 +368,9 @@ py -3.12 benchmark/statistical_benchmark.py --section sec1 --runs 3
 
 # GOP sweep
 py -3.12 benchmark/sec10_gop_sweep.py --sequences foreman_q22_g1
+
+# Upgrade-v2 trust architecture diagnostics and claim-gated evidence
+py -3.12 -m benchmark.safe_benchmark_runner --sections 44 45
 ```
 
 ---

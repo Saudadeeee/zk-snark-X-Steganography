@@ -140,6 +140,26 @@ contract-looking sidecars behind.
 - CABAC/HEVC support.
 - C2PA/fingerprint/TEE/ZKML trust architecture.
 
+## Upgrade-v2 Trust Evidence Gate
+
+The `Upgrade-v2` branch now keeps future trust-plane results in separate
+sections:
+
+- Section 44: diagnostic trust architecture replay.
+- Section 45: claim-gated trust evidence distilled from Section 44.
+
+Latest local Section 45 replay reports:
+
+- claim gates: `5/5` passed,
+- `promotion_ready=false`,
+- blocker: no non-local or externally curated real-video corpus is registered.
+
+This supports branch-level development claims for C2PA anchoring, local-corpus
+fingerprint lookup, keyed-template watermark receipt, mock TEE attestation, and
+toy ZK receipt circuits. It must not be folded into the frozen current-system
+paper baseline until the corpus blocker is resolved and the trust plane is
+explicitly promoted with separate claim language.
+
 ## Final Paper Checklist
 
 - [x] Re-run paper-grade benchmarks after final code freeze.

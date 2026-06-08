@@ -1,0 +1,76 @@
+{
+  "tier": "claim_gated_evidence",
+  "source": "D:\\Code\\SourceCode\\Project\\zk-snark-X-Steganography\\VideoLevel\\benchmark\\results\\trust_architecture_diagnostic.json",
+  "source_tier": "diagnostic_grade",
+  "corpus_manifest": {
+    "schema": "trust-corpus-manifest-v1",
+    "status": "local_curated",
+    "description": "Curated corpus contract for Upgrade-v2 trust architecture evidence. The current entries point to registered local H.264 assets; external public-dataset entries can be added without changing benchmark code.",
+    "claim_scope": "local H.264 corpus only",
+    "external_public_dataset": false,
+    "entries": [
+      {
+        "group": "registered_local_h264",
+        "source": "benchmark._common.SEQUENCES",
+        "selection": "all existing registered local H.264 assets",
+        "use": [
+          "fingerprint threshold sweep",
+          "local content-diversity sanity check"
+        ]
+      }
+    ],
+    "promotion_requirements": [
+      "Add non-local or externally curated real-video assets.",
+      "Record source, license, codec/container, resolution, frame count, and hash for every external asset.",
+      "Keep local, synthetic, and external-public metrics separated in output JSON.",
+      "Do not claim broad public-dataset robustness until external_public_dataset is true and section 45 gates pass."
+    ]
+  },
+  "promotion_ready": false,
+  "blockers": [
+    "No non-local or externally curated real-video corpus is registered."
+  ],
+  "claim_gates": {
+    "c2pa_anchor": {
+      "status": "supported",
+      "evidence": "32-byte manifest root payload roundtrip and tamper detection",
+      "passed": true
+    },
+    "fingerprint_local_registry": {
+      "status": "supported_local_corpus",
+      "evidence": "registered local H.264 corpus threshold sweep",
+      "passed": true,
+      "clip_count": 22,
+      "best_zero_far_threshold": 24
+    },
+    "watermark_receipt": {
+      "status": "supported_synthetic_stress",
+      "evidence": "keyed-template detector with resynchronized stress matrix",
+      "passed": true,
+      "fixed_accept_rate": 0.8571428571428571,
+      "resynchronized_accept_rate": 1.0
+    },
+    "tee_attestation": {
+      "status": "interface_supported_mock_signer",
+      "evidence": "canonical bundle signing and sidecar roundtrip",
+      "passed": true
+    },
+    "zk_circuits": {
+      "status": "supported_for_toy_relations",
+      "evidence": "fingerprint and detector receipt circuits compile and Groth16 verify",
+      "passed": true,
+      "fingerprint_non_linear_constraints": 606,
+      "detector_non_linear_constraints": 465
+    }
+  },
+  "metrics": {
+    "fingerprint_clip_count": 22,
+    "fingerprint_best_zero_far_threshold": 24,
+    "keyed_template_threshold": 0.32310818135738373,
+    "keyed_template_score_margin": 0.105317622423172,
+    "watermark_fixed_accept_rate": 0.8571428571428571,
+    "watermark_resynchronized_accept_rate": 1.0,
+    "fingerprint_groth16_verified": true,
+    "detector_groth16_verified": true
+  }
+}

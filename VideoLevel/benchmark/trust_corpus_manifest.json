@@ -1,0 +1,24 @@
+{
+  "schema": "trust-corpus-manifest-v1",
+  "status": "local_curated",
+  "description": "Curated corpus contract for Upgrade-v2 trust architecture evidence. The current entries point to registered local H.264 assets; external public-dataset entries can be added without changing benchmark code.",
+  "claim_scope": "local H.264 corpus only",
+  "external_public_dataset": false,
+  "entries": [
+    {
+      "group": "registered_local_h264",
+      "source": "benchmark._common.SEQUENCES",
+      "selection": "all existing registered local H.264 assets",
+      "use": [
+        "fingerprint threshold sweep",
+        "local content-diversity sanity check"
+      ]
+    }
+  ],
+  "promotion_requirements": [
+    "Add non-local or externally curated real-video assets.",
+    "Record source, license, codec/container, resolution, frame count, and hash for every external asset.",
+    "Keep local, synthetic, and external-public metrics separated in output JSON.",
+    "Do not claim broad public-dataset robustness until external_public_dataset is true and section 45 gates pass."
+  ]
+}

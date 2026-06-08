@@ -279,7 +279,10 @@ Current implementation status:
 - [x] Add interface tests in `src/runtest/test_future_trust_architecture.py`.
 - [x] Register diagnostic-grade runner section `44`.
 - [x] Validate section `44` through `safe_benchmark_runner.py`.
-- [ ] Promote any future trust plane into paper-grade benchmark evidence.
+- [x] Add claim-gated evidence runner section `45`.
+- [x] Validate section `45` through `safe_benchmark_runner.py`.
+- [ ] Promote a future trust plane into paper-grade benchmark evidence only
+      after the corpus and claim-language blockers are resolved.
 
 Current diagnostic status on 2026-06-09:
 
@@ -312,6 +315,8 @@ Current diagnostic status on 2026-06-09:
   transforms (`fixed_accept_rate=0.8571`). Resynchronized detector scoring
   passes 7/7 (`resynchronized_accept_rate=1.0`), including `crop8_resize`.
   H.264 ffmpeg roundtrip at CRF28 and CRF35 passes.
+- Section `45` claim gates pass `5/5`, but `promotion_ready=false` because no
+  non-local or externally curated real-video corpus is registered.
 
 ### 5.1 ZK + C2PA Provenance Root
 

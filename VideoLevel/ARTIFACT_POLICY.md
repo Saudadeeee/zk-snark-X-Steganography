@@ -15,6 +15,8 @@ and which files are rebuildable diagnostics or local cache.
 - `src/provenance/**`
 - `src/runtest/test_future_trust_architecture.py`
 - `benchmark/trust_architecture_diagnostic.py`
+- `benchmark/sec45_trust_evidence.py`
+- `benchmark/trust_corpus_manifest.json`
 - `circuits/payload_verify.circom`
 - `circuits/package.json`
 - `requirements.txt`
@@ -52,6 +54,8 @@ Keep benchmark outputs that are directly referenced by paper evidence:
 - `benchmark/results/sec7_*.json`
 - `benchmark/results/sec7_*.png`
 - `benchmark/results/trust_architecture_diagnostic.json`
+- `benchmark/results/sec45_trust_evidence_data.json`
+- `benchmark/results/sec45_trust_evidence_summary.png`
 
 ## Rebuildable Or Local Only
 
@@ -100,7 +104,9 @@ Remove-Item -Recurse -Force .cache
 ## Policy Notes
 
 - Do not mix blind-core diagnostics into paper-grade evidence.
-- Do not mix future trust architecture diagnostics into paper-grade evidence.
+- Do not mix future trust architecture diagnostics into the frozen baseline
+  paper-grade evidence. On `Upgrade-v2`, use section `45` as a claim-gated
+  evidence layer and keep promotion blockers explicit.
 - Do not use raw safe-position counts as final capacity evidence.
 - Keep sidecar files only when they are needed to reproduce a specific
   operating-point artifact.
