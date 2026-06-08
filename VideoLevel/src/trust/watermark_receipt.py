@@ -41,6 +41,22 @@ class DetectorCalibration:
 
 
 @dataclass(frozen=True)
+class DetectorAlignmentScore:
+    """Best score found by a small detector alignment search."""
+
+    score: float
+    alignment: str
+    candidate_count: int
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "score": self.score,
+            "alignment": self.alignment,
+            "candidate_count": self.candidate_count,
+        }
+
+
+@dataclass(frozen=True)
 class DetectorReceipt:
     """Public output of a detector wrapped in a trust receipt."""
 
@@ -215,7 +231,7 @@ class KeyedTemplateDetector:
         self.frame_shape = (int(frame_shape[0]), int(frame_shape[1]))
         self.grid_size = int(grid_size)
         self.detector_id = detector_id
-        self._template = self._build_template()
+        self._template = self._normalize_template(self._build_template())
 
     @property
     def key_commitment(self) -> str:
@@ -244,12 +260,29 @@ class KeyedTemplateDetector:
         coarse = rng.choice(np.array([-1.0, 1.0], dtype=np.float32), size=(self.grid_size, self.grid_size))
         y_edges = np.linspace(0, self.grid_size, self.frame_shape[0], endpoint=False, dtype=int)
         x_edges = np.linspace(0, self.grid_size, self.frame_shape[1], endpoint=False, dtype=int)
-        template = coarse[y_edges[:, None], x_edges[None, :]].astype(np.float32)
+        return coarse[y_edges[:, None], x_edges[None, :]].astype(np.float32)
+
+    def _normalize_template(self, template: np.ndarray) -> np.ndarray:
+        template = np.asarray(template, dtype=np.float32)
         template -= float(template.mean())
         norm = float(np.sqrt(np.mean(template * template)))
         if norm <= 1e-12:
             raise RuntimeError("template normalization failed")
         return template / norm
+
+    def _resize_nearest_template(self, template: np.ndarray, height: int, width: int) -> np.ndarray:
+        y_idx = (np.arange(height) * template.shape[0] / height).astype(int)
+        x_idx = (np.arange(width) * template.shape[1] / width).astype(int)
+        return template[y_idx[:, None], x_idx[None, :]].astype(np.float32)
+
+    def _center_crop_resize_template(self, margin: int) -> np.ndarray:
+        h, w = self.frame_shape
+        if margin <= 0:
+            return self._template
+        if margin * 2 >= min(h, w):
+            raise ValueError("crop margin is too large")
+        cropped = self._template[margin : h - margin, margin : w - margin]
+        return self._normalize_template(self._resize_nearest_template(cropped, h, w))
 
     def embed(self, frames: Sequence[np.ndarray] | np.ndarray, *, strength: float = 8.0) -> np.ndarray:
         arr = self._coerce_frames(frames)
@@ -258,10 +291,36 @@ class KeyedTemplateDetector:
 
     def score(self, frames: Sequence[np.ndarray] | np.ndarray) -> float:
         arr = self._coerce_frames(frames)
+        return self._score_with_template(arr, self._template)
+
+    def score_resynchronized(
+        self,
+        frames: Sequence[np.ndarray] | np.ndarray,
+        *,
+        crop_margins: Sequence[int] = (0, 4, 8),
+    ) -> DetectorAlignmentScore:
+        arr = self._coerce_frames(frames)
+        best_score = float("-inf")
+        best_alignment = ""
+        candidate_count = 0
+        for margin in sorted({int(value) for value in crop_margins}):
+            template = self._center_crop_resize_template(margin)
+            score = self._score_with_template(arr, template)
+            candidate_count += 1
+            if score > best_score:
+                best_score = score
+                best_alignment = f"center_crop_resize_margin_{margin}"
+        return DetectorAlignmentScore(
+            score=float(best_score),
+            alignment=best_alignment,
+            candidate_count=candidate_count,
+        )
+
+    def _score_with_template(self, arr: np.ndarray, template: np.ndarray) -> float:
         centered = arr - arr.mean(axis=(1, 2), keepdims=True)
         scale = arr.std(axis=(1, 2), keepdims=True) + 1e-6
         normalized = centered / scale
-        per_frame = np.mean(normalized * self._template[None, :, :], axis=(1, 2))
+        per_frame = np.mean(normalized * template[None, :, :], axis=(1, 2))
         return float(np.mean(per_frame))
 
     def receipt(
@@ -281,6 +340,24 @@ class KeyedTemplateDetector:
             detector_commitment=self.commitment,
         )
 
+    def receipt_resynchronized(
+        self,
+        frames: Sequence[np.ndarray] | np.ndarray,
+        *,
+        threshold: float,
+        payload_commitment: str | None = None,
+        crop_margins: Sequence[int] = (0, 4, 8),
+    ) -> DetectorReceipt:
+        aligned = self.score_resynchronized(frames, crop_margins=crop_margins)
+        return DetectorReceipt(
+            detector_id=self.detector_id,
+            score=aligned.score,
+            threshold=threshold,
+            valid=aligned.score >= threshold,
+            payload_commitment=payload_commitment,
+            detector_commitment=self.commitment,
+        )
+
     def calibrate(
         self,
         positive_clips: Sequence[Sequence[np.ndarray] | np.ndarray],
@@ -288,6 +365,55 @@ class KeyedTemplateDetector:
     ) -> DetectorCalibration:
         positive_scores = [self.score(frames) for frames in positive_clips]
         negative_scores = [self.score(frames) for frames in negative_clips]
+        if not positive_scores:
+            raise ValueError("positive_clips must be non-empty")
+        if not negative_scores:
+            raise ValueError("negative_clips must be non-empty")
+        candidates = sorted(set(positive_scores + negative_scores))
+        if len(candidates) == 1:
+            thresholds = candidates
+        else:
+            thresholds = [candidates[0] - 1e-9]
+            thresholds.extend((a + b) / 2.0 for a, b in zip(candidates, candidates[1:]))
+            thresholds.append(candidates[-1] + 1e-9)
+
+        best: DetectorCalibration | None = None
+        for threshold in thresholds:
+            true_accept = sum(score >= threshold for score in positive_scores)
+            false_accept = sum(score >= threshold for score in negative_scores)
+            true_accept_rate = true_accept / len(positive_scores)
+            false_accept_rate = false_accept / len(negative_scores)
+            accuracy = (true_accept + (len(negative_scores) - false_accept)) / (
+                len(positive_scores) + len(negative_scores)
+            )
+            candidate = DetectorCalibration(
+                detector_id=self.detector_id,
+                threshold=float(threshold),
+                positive_count=len(positive_scores),
+                negative_count=len(negative_scores),
+                true_accept_rate=float(true_accept_rate),
+                false_accept_rate=float(false_accept_rate),
+                accuracy=float(accuracy),
+            )
+            if best is None or (candidate.accuracy, candidate.true_accept_rate, -candidate.false_accept_rate) > (
+                best.accuracy,
+                best.true_accept_rate,
+                -best.false_accept_rate,
+            ):
+                best = candidate
+        if best is None:
+            raise RuntimeError("calibration failed")
+        return best
+
+    def calibrate_resynchronized(
+        self,
+        positive_clips: Sequence[Sequence[np.ndarray] | np.ndarray],
+        negative_clips: Sequence[Sequence[np.ndarray] | np.ndarray],
+        *,
+        crop_margins: Sequence[int] = (0, 4, 8),
+    ) -> DetectorCalibration:
+        positive_scores = [self.score_resynchronized(frames, crop_margins=crop_margins).score for frames in positive_clips]
+        negative_scores = [self.score_resynchronized(frames, crop_margins=crop_margins).score for frames in negative_clips]
         if not positive_scores:
             raise ValueError("positive_clips must be non-empty")
         if not negative_scores:

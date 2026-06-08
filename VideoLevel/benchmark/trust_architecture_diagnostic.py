@@ -835,24 +835,32 @@ def _keyed_template_detector_stress_benchmark() -> dict[str, object]:
                     "reason": "ffmpeg roundtrip unavailable",
                     "threshold": calibration.threshold,
                     "accepted": None,
+                    "resynchronized": None,
                     "correct": None,
                 }
             )
             continue
-        receipt = detector.receipt(frames, threshold=calibration.threshold)
+        fixed_receipt = detector.receipt(frames, threshold=calibration.threshold)
+        aligned = detector.score_resynchronized(frames, crop_margins=(0, 4, 8, 12))
+        resynchronized_accept = aligned.score >= calibration.threshold
         rows.append(
             {
                 "transform": name,
                 "available": True,
-                "score": receipt.score,
+                "score": fixed_receipt.score,
+                "resynchronized_score": aligned.score,
+                "resynchronized_alignment": aligned.alignment,
+                "resynchronized_candidate_count": aligned.candidate_count,
                 "threshold": calibration.threshold,
-                "accepted": receipt.valid,
-                "correct": receipt.valid is True,
+                "accepted": fixed_receipt.valid,
+                "resynchronized": resynchronized_accept,
+                "correct": resynchronized_accept is True,
             }
         )
 
     available = [row for row in rows if row.get("available") is True]
-    accepted = [bool(row["accepted"]) for row in available]
+    fixed_accepted = [bool(row["accepted"]) for row in available]
+    resynchronized = [bool(row["resynchronized"]) for row in available]
     return {
         "detector_commitment": detector.commitment,
         "calibration": calibration.to_dict(),
@@ -861,8 +869,10 @@ def _keyed_template_detector_stress_benchmark() -> dict[str, object]:
         "summary": {
             "available_count": len(available),
             "transform_count": len(rows),
-            "accept_rate": sum(accepted) / len(accepted) if accepted else 0.0,
-            "failure_count": sum(1 for ok in accepted if not ok),
+            "fixed_accept_rate": sum(fixed_accepted) / len(fixed_accepted) if fixed_accepted else 0.0,
+            "resynchronized_accept_rate": sum(resynchronized) / len(resynchronized) if resynchronized else 0.0,
+            "fixed_failure_count": sum(1 for ok in fixed_accepted if not ok),
+            "resynchronized_failure_count": sum(1 for ok in resynchronized if not ok),
             "unavailable_count": len(rows) - len(available),
         },
     }

@@ -283,7 +283,7 @@ Current implementation status:
 
 Current diagnostic status on 2026-06-09:
 
-- Future trust interface tests now pass `13/13`.
+- Future trust interface tests now pass `14/14`.
 - Section `44`: passed with schema validation OK.
 - `fingerprint_verify.circom`: compiled and proved, `606` non-linear
   constraints, `842` linear constraints, Groth16 verify passed.
@@ -308,9 +308,10 @@ Current diagnostic status on 2026-06-09:
 - Real-clip fingerprint diagnostics now cover 22 registered local H.264 assets.
   Thresholds `0-24` keep `true_accept_rate=1.0` and `false_accept_rate=0.0`;
   threshold `32` increases `false_accept_rate` to `0.3810`.
-- Keyed-template stress diagnostics now pass 6/7 available transforms
-  (`accept_rate=0.8571`). H.264 ffmpeg roundtrip at CRF28 and CRF35 passes;
-  `crop8_resize` currently fails against the calibrated threshold.
+- Keyed-template fixed-threshold stress diagnostics pass 6/7 available
+  transforms (`fixed_accept_rate=0.8571`). Resynchronized detector scoring
+  passes 7/7 (`resynchronized_accept_rate=1.0`), including `crop8_resize`.
+  H.264 ffmpeg roundtrip at CRF28 and CRF35 passes.
 
 ### 5.1 ZK + C2PA Provenance Root
 
@@ -473,7 +474,7 @@ Future tasks:
       robust-video detector candidate.
 - [x] Stress the keyed-template detector under real re-encoding, crop/scale,
       and screen-recording style transforms.
-- [ ] Add crop-resynchronization or multi-template search before promoting the
+- [x] Add crop-resynchronization or multi-template search before promoting the
       keyed-template detector beyond diagnostic-grade evidence.
 
 Implementation sequence:

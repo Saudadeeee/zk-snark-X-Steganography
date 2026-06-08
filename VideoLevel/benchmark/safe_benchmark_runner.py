@@ -404,8 +404,10 @@ def _validate_trust_architecture_schema(data: dict) -> list[str]:
     stress_summary = stress.get("summary", {})
     if not isinstance(stress_summary, dict) or stress_summary.get("available_count", 0) <= 0:
         errors.append("trust_architecture keyed template stress benchmark must report available transforms")
-    if "accept_rate" not in stress_summary:
-        errors.append("trust_architecture keyed template stress benchmark must report accept_rate")
+    if "fixed_accept_rate" not in stress_summary:
+        errors.append("trust_architecture keyed template stress benchmark must report fixed_accept_rate")
+    if "resynchronized_accept_rate" not in stress_summary:
+        errors.append("trust_architecture keyed template stress benchmark must report resynchronized_accept_rate")
     if data["attestation"].get("signature_valid") is not True:
         errors.append("trust_architecture attestation signature must verify")
     if data["attestation"].get("sidecar_roundtrip_valid") is not True:

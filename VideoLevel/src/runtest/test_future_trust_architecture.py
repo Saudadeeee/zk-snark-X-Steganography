@@ -152,6 +152,25 @@ def t_keyed_template_detector_separates_embedded_clip():
     assert b"unit-test-key".hex() not in detector.commitment
 
 
+def t_keyed_template_detector_resynchronizes_cropped_clip():
+    base = np.stack(
+        [
+            np.tile(np.linspace(32 + i * 8, 220 + i * 8, 64, dtype=np.float32), (64, 1))
+            for i in range(8)
+        ]
+    )
+    detector = KeyedTemplateDetector(b"upgrade-v2-watermark-key", frame_shape=(64, 64), grid_size=8)
+    embedded = detector.embed(base, strength=8.0)
+    cropped = embedded[:, 8:56, 8:56]
+    y_idx = (np.arange(64) * cropped.shape[1] / 64).astype(int)
+    x_idx = (np.arange(64) * cropped.shape[2] / 64).astype(int)
+    cropped_resized = cropped[:, y_idx[:, None], x_idx[None, :]]
+    aligned = detector.score_resynchronized(cropped_resized, crop_margins=(0, 4, 8, 12))
+    assert aligned.score >= detector.score(cropped_resized)
+    assert aligned.alignment != "center_crop_resize_margin_0"
+    assert aligned.candidate_count == 4
+
+
 def t_mock_tee_attestation_signature():
     bundle = AttestationBundle(
         video_hash="aa" * 32,
@@ -214,6 +233,10 @@ def main():
         run_test("tiny_video_features_are_circuit_sized", t_tiny_video_features_are_circuit_sized),
         run_test("calibrated_detector_selects_threshold", t_calibrated_detector_selects_threshold),
         run_test("keyed_template_detector_separates_embedded_clip", t_keyed_template_detector_separates_embedded_clip),
+        run_test(
+            "keyed_template_detector_resynchronizes_cropped_clip",
+            t_keyed_template_detector_resynchronizes_cropped_clip,
+        ),
         run_test("mock_tee_attestation_signature", t_mock_tee_attestation_signature),
         run_test("attestation_sidecar_roundtrip", t_attestation_sidecar_roundtrip),
         run_test("zkml_interface_is_explicit_stub", t_zkml_interface_is_explicit_stub),

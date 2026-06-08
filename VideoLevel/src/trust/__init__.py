@@ -17,6 +17,7 @@ from .fingerprint import (
 )
 from .watermark_receipt import (
     CalibratedThresholdDetector,
+    DetectorAlignmentScore,
     DetectorCalibration,
     DetectorReceipt,
     KeyedTemplateDetector,
@@ -45,6 +46,7 @@ __all__ = [
     "compute_video_fingerprint",
     "sample_frame_indices",
     "DetectorReceipt",
+    "DetectorAlignmentScore",
     "DetectorCalibration",
     "CalibratedThresholdDetector",
     "KeyedTemplateDetector",
