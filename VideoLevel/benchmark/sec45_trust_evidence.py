@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from benchmark._common import RESULTS_DIR, PALETTE, save_fig, setup_style
+from benchmark.trust_corpus import validate_trust_corpus_manifest
 
 DIAGNOSTIC_PATH = RESULTS_DIR / "trust_architecture_diagnostic.json"
 OUTPUT_PATH = RESULTS_DIR / "sec45_trust_evidence_data.json"
@@ -47,6 +48,7 @@ def _best_threshold_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
 def collect_data() -> dict[str, Any]:
     diagnostic = _load_or_run_diagnostic()
     corpus_manifest = json.loads(CORPUS_MANIFEST_PATH.read_text(encoding="utf-8"))
+    corpus_validation = validate_trust_corpus_manifest(corpus_manifest)
     fingerprint = diagnostic["fingerprint_registry"]
     watermark = diagnostic["watermark_receipt"]
     circuits = diagnostic["circuits"]
@@ -121,8 +123,7 @@ def collect_data() -> dict[str, Any]:
     }
 
     blockers = []
-    if corpus_manifest.get("external_public_dataset") is not True:
-        blockers.append("No non-local or externally curated real-video corpus is registered.")
+    blockers.extend(corpus_validation["promotion_blockers"])
     if watermark["keyed_template_stress_benchmark"]["summary"]["available_count"] < 7:
         blockers.append("Watermark stress matrix has insufficient available transforms.")
     if diagnostic.get("tier") != "diagnostic_grade":
@@ -133,11 +134,14 @@ def collect_data() -> dict[str, Any]:
         "source": str(DIAGNOSTIC_PATH),
         "source_tier": diagnostic.get("tier"),
         "corpus_manifest": corpus_manifest,
+        "corpus_validation": corpus_validation,
         "promotion_ready": not blockers and all(gate["passed"] for gate in claim_gates.values()),
         "blockers": blockers,
         "claim_gates": claim_gates,
         "metrics": {
             "fingerprint_clip_count": int(real_clip.get("clip_count", 0)),
+            "trust_corpus_external_file_count": int(corpus_validation["external_file_count"]),
+            "trust_corpus_external_hash_match_count": int(corpus_validation["external_hash_match_count"]),
             "fingerprint_best_zero_far_threshold": (
                 int(best_real_threshold["threshold"]) if best_real_threshold else None
             ),

@@ -282,6 +282,7 @@ Current implementation status:
 - [x] Register diagnostic-grade runner section `44`.
 - [x] Validate section `44` through `safe_benchmark_runner.py`.
 - [x] Add corpus contract `benchmark/trust_corpus_manifest.json`.
+- [x] Add corpus validator `benchmark/trust_corpus.py`.
 - [x] Add claim-gated evidence runner section `45`.
 - [x] Validate section `45` through `safe_benchmark_runner.py`.
 - [ ] Promote a future trust plane into paper-grade benchmark evidence only
@@ -289,7 +290,8 @@ Current implementation status:
 
 Current diagnostic status on 2026-06-09:
 
-- Future trust interface tests now pass `16/16`, including terminal CLI coverage.
+- Future trust interface tests now pass `17/17`, including terminal CLI and
+  trust-corpus validator coverage.
 - Section `44`: passed with schema validation OK.
 - `fingerprint_verify.circom`: compiled and proved, `606` non-linear
   constraints, `842` linear constraints, Groth16 verify passed.
@@ -324,12 +326,41 @@ Current diagnostic status on 2026-06-09:
 - The same trust workflows are now runnable from the terminal via
   `python -m src.trust.workflows`.
 - Section `45` claim gates pass `6/6`, but `promotion_ready=false` because no
-  non-local or externally curated real-video corpus is registered.
+  external/public corpus files are registered and `external_public_dataset` is
+  false.
+- `benchmark.trust_corpus` validates the promotion contract: local registered
+  corpus is `22/22`, external registered files are `0`, and external hash
+  matches are `0`.
 - Section `45` artifacts are
   `benchmark/results/sec45_trust_evidence_data.json` and
   `benchmark/results/sec45_trust_evidence_summary.png`.
 - Upgrade-v2 trust replay command:
   `py -3.12 -m benchmark.safe_benchmark_runner --sections 44 45`.
+- Trust corpus validation command:
+  `py -3.12 -m benchmark.trust_corpus`.
+
+### 5.0.1 Q1 Readiness Position
+
+Current-system paper:
+
+- A focused paper on the frozen H.264/CAVLC exact-bit embedding plus Groth16
+  proof path is viable as an independent submission candidate if the paper
+  stays inside the measured claims: locked operating point, patchability-aware
+  reconstruction, near-blind sidecar verification, capacity decomposition,
+  and measured ZK overhead.
+- A Q1/top-tier venue is plausible only with conservative wording and strong
+  evaluation framing. The current evidence is strongest for a systems/security
+  prototype paper, not for broad universal video watermarking.
+
+Upgrade-v2 trust architecture:
+
+- This is not Q1-ready as a promoted empirical claim yet.
+- It is currently a strong future-branch architecture with executable
+  interfaces, diagnostics, toy Groth16 receipt circuits, and local-corpus
+  evidence.
+- Promotion requires at minimum an external/public corpus with source,
+  license, codec/container, resolution, frame count, and SHA-256 hashes, plus
+  rerun Section `44/45` with `promotion_ready=true`.
 
 ### 5.1 ZK + C2PA Provenance Root
 

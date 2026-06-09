@@ -48,6 +48,7 @@ from src.trust import (
     watermark_workflow,
 )
 from src.manifest import StegoManifest, VideoMetadata
+from benchmark.trust_corpus import validate_trust_corpus_manifest
 
 
 def t_provenance_root_detects_tamper():
@@ -473,6 +474,66 @@ def t_trust_workflows_cli_entrypoints():
         assert "signature_valid" in attestation_run.stdout
 
 
+def t_trust_corpus_manifest_validator():
+    current_manifest = {
+        "schema": "trust-corpus-manifest-v1",
+        "status": "local_curated",
+        "description": "unit local manifest",
+        "claim_scope": "local only",
+        "external_public_dataset": False,
+        "entries": [
+            {
+                "group": "registered_local_h264",
+                "source": "benchmark._common.SEQUENCES",
+                "selection": "all existing registered local H.264 assets",
+                "use": ["fingerprint threshold sweep"],
+            }
+        ],
+        "promotion_requirements": ["add external corpus"],
+    }
+    local_validation = validate_trust_corpus_manifest(current_manifest)
+    assert local_validation["schema_valid"]
+    assert not local_validation["promotion_ready"]
+    assert "external_public_dataset is false" in local_validation["promotion_blockers"]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        sample = tmp / "external_sample.h264"
+        sample.write_bytes(b"external-video-bytes")
+        external_manifest = {
+            "schema": "trust-corpus-manifest-v1",
+            "status": "external_curated",
+            "description": "unit external manifest",
+            "claim_scope": "external public corpus",
+            "external_public_dataset": True,
+            "entries": [
+                {
+                    "group": "external_public_video",
+                    "source": "unit fixture",
+                    "source_uri": "https://example.invalid/dataset",
+                    "license": "unit-test-license",
+                    "files": [
+                        {
+                            "id": "sample-1",
+                            "path": "external_sample.h264",
+                            "sha256": __import__("hashlib").sha256(b"external-video-bytes").hexdigest(),
+                            "codec": "h264",
+                            "container": "raw_h264",
+                            "frame_count": 1,
+                            "resolution": [16, 16],
+                        }
+                    ],
+                }
+            ],
+            "promotion_requirements": ["unit complete"],
+        }
+        external_validation = validate_trust_corpus_manifest(external_manifest, root=tmp)
+        assert external_validation["schema_valid"]
+        assert external_validation["promotion_ready"]
+        assert external_validation["external_file_count"] == 1
+        assert external_validation["external_hash_match_count"] == 1
+
+
 def main():
     section("Future Trust Architecture Interfaces")
     results = [
@@ -495,6 +556,7 @@ def main():
         run_test("zkml_interface_is_explicit_stub", t_zkml_interface_is_explicit_stub),
         run_test("ready_to_use_trust_workflows", t_ready_to_use_trust_workflows),
         run_test("trust_workflows_cli_entrypoints", t_trust_workflows_cli_entrypoints),
+        run_test("trust_corpus_manifest_validator", t_trust_corpus_manifest_validator),
     ]
     sys.exit(summarise(results, "Future Trust Architecture"))
 

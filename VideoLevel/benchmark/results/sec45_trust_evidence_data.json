@@ -26,9 +26,29 @@
       "Do not claim broad public-dataset robustness until external_public_dataset is true and section 45 gates pass."
     ]
   },
+  "corpus_validation": {
+    "schema": "trust-corpus-validation-v1",
+    "manifest_commitment": "606343947b8711b019cf40d3772a2d113c70d2a3c81d4c8c6822f92ab832cc5c",
+    "schema_valid": true,
+    "external_public_dataset": false,
+    "local_registered_count": 22,
+    "local_existing_count": 22,
+    "external_entry_count": 0,
+    "external_file_count": 0,
+    "external_existing_count": 0,
+    "external_hash_match_count": 0,
+    "promotion_ready": false,
+    "promotion_blockers": [
+      "external_public_dataset is false",
+      "no external corpus files are registered"
+    ],
+    "errors": [],
+    "warnings": []
+  },
   "promotion_ready": false,
   "blockers": [
-    "No non-local or externally curated real-video corpus is registered."
+    "external_public_dataset is false",
+    "no external corpus files are registered"
   ],
   "claim_gates": {
     "c2pa_anchor": {
@@ -70,6 +90,8 @@
   },
   "metrics": {
     "fingerprint_clip_count": 22,
+    "trust_corpus_external_file_count": 0,
+    "trust_corpus_external_hash_match_count": 0,
     "fingerprint_best_zero_far_threshold": 24,
     "keyed_template_threshold": 0.32310818135738373,
     "keyed_template_score_margin": 0.105317622423172,

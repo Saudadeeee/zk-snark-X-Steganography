@@ -152,7 +152,9 @@ Latest local Section 45 replay reports:
 
 - claim gates: `6/6` passed,
 - `promotion_ready=false`,
-- blocker: no non-local or externally curated real-video corpus is registered.
+- corpus validation: local registered corpus `22/22` present,
+- blockers: `external_public_dataset=false` and no external corpus files are
+  registered.
 
 This supports branch-level development claims for C2PA anchoring, local-corpus
 fingerprint lookup, keyed-template watermark receipt, mock TEE attestation, and

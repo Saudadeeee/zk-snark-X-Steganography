@@ -56,6 +56,7 @@ node_modules/
 !circuits/build/verification_key.json
 !benchmark/results/sec*.json
 !benchmark/results/trust_architecture_diagnostic.json
+!benchmark/results/trust_corpus_validation.json
 !benchmark/trust_corpus_manifest.json
 !src/runtest/test_future_trust_architecture.py
 

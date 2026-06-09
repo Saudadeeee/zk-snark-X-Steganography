@@ -371,6 +371,9 @@ py -3.12 benchmark/sec10_gop_sweep.py --sequences foreman_q22_g1
 
 # Upgrade-v2 trust architecture diagnostics and claim-gated evidence
 py -3.12 -m benchmark.safe_benchmark_runner --sections 44 45
+
+# Validate the trust corpus promotion contract
+py -3.12 -m benchmark.trust_corpus
 ```
 
 Upgrade-v2 application-level trust workflows are exposed through
@@ -385,6 +388,10 @@ py -3.12 -m src.trust.workflows fingerprint --frames frames.npy --records regist
 py -3.12 -m src.trust.workflows watermark --frames embedded.npy --key demo-key --frame-shape 64 64 --threshold 0.5 --output watermark.json
 py -3.12 -m src.trust.workflows attestation --signer-key demo-key --video-path video.bin --model-config-path model.json --model-binary-path model.bin --policy-id policy-v1 --timestamp 2026-06-09T00:00:00Z --output attestation.json
 ```
+
+`benchmark.trust_corpus` currently validates the local corpus contract and
+keeps Upgrade-v2 promotion blocked until an external/public corpus with source,
+license, file metadata, and matching hashes is registered.
 
 ---
 

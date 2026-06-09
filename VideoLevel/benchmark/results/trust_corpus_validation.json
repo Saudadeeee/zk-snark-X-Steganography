@@ -1,0 +1,19 @@
+{
+  "schema": "trust-corpus-validation-v1",
+  "manifest_commitment": "606343947b8711b019cf40d3772a2d113c70d2a3c81d4c8c6822f92ab832cc5c",
+  "schema_valid": true,
+  "external_public_dataset": false,
+  "local_registered_count": 22,
+  "local_existing_count": 22,
+  "external_entry_count": 0,
+  "external_file_count": 0,
+  "external_existing_count": 0,
+  "external_hash_match_count": 0,
+  "promotion_ready": false,
+  "promotion_blockers": [
+    "external_public_dataset is false",
+    "no external corpus files are registered"
+  ],
+  "errors": [],
+  "warnings": []
+}

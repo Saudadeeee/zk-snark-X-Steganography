@@ -17,6 +17,7 @@ and which files are rebuildable diagnostics or local cache.
 - `src/runtest/test_future_trust_architecture.py`
 - `benchmark/trust_architecture_diagnostic.py`
 - `benchmark/sec45_trust_evidence.py`
+- `benchmark/trust_corpus.py`
 - `benchmark/trust_corpus_manifest.json`
 - `circuits/payload_verify.circom`
 - `circuits/package.json`
@@ -55,6 +56,7 @@ Keep benchmark outputs that are directly referenced by paper evidence:
 - `benchmark/results/sec7_*.json`
 - `benchmark/results/sec7_*.png`
 - `benchmark/results/trust_architecture_diagnostic.json`
+- `benchmark/results/trust_corpus_validation.json`
 - `benchmark/results/sec45_trust_evidence_data.json`
 - `benchmark/results/sec45_trust_evidence_summary.png`
 

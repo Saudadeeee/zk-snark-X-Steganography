@@ -453,7 +453,7 @@ def _validate_trust_architecture_schema(data: dict) -> list[str]:
 
 
 def _validate_sec45_trust_evidence_schema(data: dict) -> list[str]:
-    required = {"tier", "source_tier", "promotion_ready", "blockers", "claim_gates", "metrics"}
+    required = {"tier", "source_tier", "promotion_ready", "blockers", "claim_gates", "metrics", "corpus_validation"}
     missing = sorted(required - set(data.keys()))
     if missing:
         return [f"sec45 missing keys: {', '.join(missing)}"]
@@ -487,6 +487,8 @@ def _validate_sec45_trust_evidence_schema(data: dict) -> list[str]:
     else:
         for key in (
             "fingerprint_clip_count",
+            "trust_corpus_external_file_count",
+            "trust_corpus_external_hash_match_count",
             "watermark_fixed_accept_rate",
             "watermark_resynchronized_accept_rate",
             "fingerprint_groth16_verified",
@@ -495,6 +497,18 @@ def _validate_sec45_trust_evidence_schema(data: dict) -> list[str]:
         ):
             if key not in metrics:
                 errors.append(f"sec45 metrics missing {key}")
+    corpus_validation = data.get("corpus_validation")
+    if not isinstance(corpus_validation, dict):
+        errors.append("sec45 corpus_validation must be object")
+    else:
+        if corpus_validation.get("schema") != "trust-corpus-validation-v1":
+            errors.append("sec45 corpus_validation schema must be trust-corpus-validation-v1")
+        if "promotion_blockers" not in corpus_validation:
+            errors.append("sec45 corpus_validation must report promotion_blockers")
+        if "external_file_count" not in corpus_validation:
+            errors.append("sec45 corpus_validation must report external_file_count")
+        if corpus_validation.get("schema_valid") is not True:
+            errors.append("sec45 corpus manifest must be schema-valid")
     blockers = data.get("blockers")
     if not isinstance(blockers, list):
         errors.append("sec45 blockers must be list")
