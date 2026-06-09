@@ -48,7 +48,7 @@ from src.trust import (
     watermark_workflow,
 )
 from src.manifest import StegoManifest, VideoMetadata
-from benchmark.trust_corpus import validate_trust_corpus_manifest
+from benchmark.trust_corpus import build_external_file_entry, validate_trust_corpus_manifest
 
 
 def t_provenance_root_detects_tamper():
@@ -532,6 +532,22 @@ def t_trust_corpus_manifest_validator():
         assert external_validation["promotion_ready"]
         assert external_validation["external_file_count"] == 1
         assert external_validation["external_hash_match_count"] == 1
+
+        generated_entry = build_external_file_entry(
+            file_id="sample-1",
+            path="external_sample.h264",
+            source_uri="https://example.invalid/dataset",
+            license_name="unit-test-license",
+            codec="h264",
+            container="raw_h264",
+            frame_count=1,
+            resolution="16x16",
+            source="unit fixture",
+            group="external_public_video",
+            root=tmp,
+        )
+        assert generated_entry["files"][0]["sha256"] == external_manifest["entries"][0]["files"][0]["sha256"]
+        assert generated_entry["files"][0]["resolution"] == "16x16"
 
 
 def main():

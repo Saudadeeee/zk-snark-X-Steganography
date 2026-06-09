@@ -202,17 +202,113 @@ def load_and_validate_manifest(path: str | Path = DEFAULT_MANIFEST_PATH, *, root
     return validate_trust_corpus_manifest(data, root=root)
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Validate Upgrade-v2 trust corpus manifest")
-    parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST_PATH), help="Path to trust corpus manifest JSON")
-    parser.add_argument("--root", default=str(ROOT), help="Root used to resolve relative corpus file paths")
-    parser.add_argument("--output", default=str(DEFAULT_OUTPUT_PATH), help="Path to write validation JSON")
-    args = parser.parse_args(argv)
+def build_external_file_entry(
+    *,
+    file_id: str,
+    path: str | Path,
+    source_uri: str,
+    license_name: str,
+    codec: str,
+    frame_count: int,
+    resolution: str,
+    source: str,
+    group: str,
+    container: str | None = None,
+    bitstream_format: str | None = None,
+    root: str | Path = ROOT,
+) -> dict[str, Any]:
+    resolved = _resolve_path(path, root=Path(root))
+    if not resolved.exists():
+        raise FileNotFoundError(f"external corpus file not found: {path}")
+    if not container and not bitstream_format:
+        raise ValueError("container or bitstream_format must be provided")
+    if frame_count <= 0:
+        raise ValueError("frame_count must be positive")
+    if not _validate_resolution(resolution):
+        raise ValueError("resolution must be WxH, for example 352x288")
 
+    file_info: dict[str, Any] = {
+        "id": file_id,
+        "path": str(path).replace("\\", "/"),
+        "sha256": sha256_file(resolved),
+        "source_uri": source_uri,
+        "license": license_name,
+        "codec": codec,
+        "frame_count": int(frame_count),
+        "resolution": resolution,
+    }
+    if container:
+        file_info["container"] = container
+    if bitstream_format:
+        file_info["bitstream_format"] = bitstream_format
+    return {
+        "group": group,
+        "source": source,
+        "source_uri": source_uri,
+        "license": license_name,
+        "files": [file_info],
+    }
+
+
+def _register_file_cli(args: argparse.Namespace) -> dict[str, Any]:
+    entry = build_external_file_entry(
+        file_id=args.id,
+        path=args.path,
+        source_uri=args.source_uri,
+        license_name=args.license,
+        codec=args.codec,
+        frame_count=args.frame_count,
+        resolution=args.resolution,
+        source=args.source,
+        group=args.group,
+        container=args.container,
+        bitstream_format=args.bitstream_format,
+        root=args.root,
+    )
+    print(json.dumps(entry, indent=2, ensure_ascii=True))
+    return entry
+
+
+def _validate_cli(args: argparse.Namespace) -> dict[str, Any]:
     validation = load_and_validate_manifest(args.manifest, root=args.root)
     Path(args.output).write_text(json.dumps(validation, indent=2, ensure_ascii=True), encoding="utf-8")
     print(json.dumps(validation, indent=2, ensure_ascii=True))
-    return 0 if validation["schema_valid"] else 1
+    return validation
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Validate and register Upgrade-v2 trust corpus metadata")
+    subparsers = parser.add_subparsers(dest="command")
+
+    validate = subparsers.add_parser("validate", help="Validate a trust corpus manifest")
+    validate.add_argument("--manifest", default=str(DEFAULT_MANIFEST_PATH), help="Path to trust corpus manifest JSON")
+    validate.add_argument("--root", default=str(ROOT), help="Root used to resolve relative corpus file paths")
+    validate.add_argument("--output", default=str(DEFAULT_OUTPUT_PATH), help="Path to write validation JSON")
+    validate.set_defaults(func=_validate_cli)
+
+    register = subparsers.add_parser("register-file", help="Print one external corpus manifest entry")
+    register.add_argument("--id", required=True, help="Stable corpus file id")
+    register.add_argument("--path", required=True, help="Path to the external corpus file")
+    register.add_argument("--source-uri", required=True, help="Dataset or source URL")
+    register.add_argument("--license", required=True, help="Dataset/file license")
+    register.add_argument("--codec", required=True, help="Codec, for example h264")
+    register.add_argument("--container", help="Container or bitstream type, for example raw_h264")
+    register.add_argument("--bitstream-format", help="Alternative bitstream format field")
+    register.add_argument("--frame-count", required=True, type=int, help="Frame count")
+    register.add_argument("--resolution", required=True, help="Resolution as WxH, for example 352x288")
+    register.add_argument("--source", required=True, help="Human-readable dataset/source name")
+    register.add_argument("--group", default="external_public_video", help="Corpus group label")
+    register.add_argument("--root", default=str(ROOT), help="Root used to resolve relative corpus file paths")
+    register.set_defaults(func=_register_file_cli)
+
+    args = parser.parse_args(argv)
+    if args.command is None:
+        args = parser.parse_args(["validate", *([] if argv is None else argv)])
+
+    result = args.func(args)
+    if isinstance(result, dict) and result.get("schema") == "trust-corpus-validation-v1":
+        return 0 if result["schema_valid"] else 1
+    return 0
 
 
 if __name__ == "__main__":

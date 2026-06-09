@@ -283,6 +283,8 @@ Current implementation status:
 - [x] Validate section `44` through `safe_benchmark_runner.py`.
 - [x] Add corpus contract `benchmark/trust_corpus_manifest.json`.
 - [x] Add corpus validator `benchmark/trust_corpus.py`.
+- [x] Add minimal external corpus onboarding playbook and `register-file`
+      helper.
 - [x] Add claim-gated evidence runner section `45`.
 - [x] Validate section `45` through `safe_benchmark_runner.py`.
 - [ ] Promote a future trust plane into paper-grade benchmark evidence only
@@ -338,6 +340,10 @@ Current diagnostic status on 2026-06-09:
   `py -3.12 -m benchmark.safe_benchmark_runner --sections 44 45`.
 - Trust corpus validation command:
   `py -3.12 -m benchmark.trust_corpus`.
+- External corpus entry helper:
+  `py -3.12 -m benchmark.trust_corpus register-file ...`.
+- External corpus onboarding playbook:
+  `doc/trust_corpus_onboarding.md`.
 
 ### 5.0.1 Q1 Readiness Position
 
@@ -361,6 +367,9 @@ Upgrade-v2 trust architecture:
 - Promotion requires at minimum an external/public corpus with source,
   license, codec/container, resolution, frame count, and SHA-256 hashes, plus
   rerun Section `44/45` with `promotion_ready=true`.
+- The next real step is to add actual externally sourced videos through
+  `doc/trust_corpus_onboarding.md`; do not build more architecture until that
+  evidence blocker is removed.
 
 ### 5.1 ZK + C2PA Provenance Root
 

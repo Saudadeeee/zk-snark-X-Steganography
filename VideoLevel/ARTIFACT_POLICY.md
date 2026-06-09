@@ -34,6 +34,7 @@ and which files are rebuildable diagnostics or local cache.
 - `ARTIFACT_POLICY.md`
 - `COMPARATIVE_ANALYSIS.md`
 - `COMPLETION.md`
+- `doc/trust_corpus_onboarding.md`
 - `doc/system_video_embedding_walkthrough.tex`
 - `doc/system_video_embedding_walkthrough.pdf`
 

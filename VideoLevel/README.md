@@ -374,6 +374,9 @@ py -3.12 -m benchmark.safe_benchmark_runner --sections 44 45
 
 # Validate the trust corpus promotion contract
 py -3.12 -m benchmark.trust_corpus
+
+# Print a ready-to-paste external corpus manifest entry
+py -3.12 -m benchmark.trust_corpus register-file --id sample-001 --path data/external/trust_corpus/sample_001.h264 --source-uri https://example.org/dataset --license CC-BY-4.0 --codec h264 --container raw_h264 --frame-count 300 --resolution 352x288 --source "Example Dataset"
 ```
 
 Upgrade-v2 application-level trust workflows are exposed through
@@ -392,6 +395,7 @@ py -3.12 -m src.trust.workflows attestation --signer-key demo-key --video-path v
 `benchmark.trust_corpus` currently validates the local corpus contract and
 keeps Upgrade-v2 promotion blocked until an external/public corpus with source,
 license, file metadata, and matching hashes is registered.
+See `doc/trust_corpus_onboarding.md` for the step-by-step corpus playbook.
 
 ---
 
