@@ -41,6 +41,30 @@
             "resolution": "352x288"
           }
         ]
+      },
+      {
+        "group": "external_public_video",
+        "source": "MDN CC0 video examples",
+        "source_uri": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4",
+        "license": "CC0-1.0",
+        "derivation": {
+          "tool": "ffmpeg",
+          "command": "ffmpeg -i mdn_friday.mp4 -vf scale=352:288,fps=30 -frames:v 30 -an -c:v libx264 -profile:v baseline -coder 0 -g 1 -qp 22 mdn_friday_cif_q22_g1_30f.h264",
+          "purpose": "small reproducible H.264 baseline/CAVLC diagnostic fixture"
+        },
+        "files": [
+          {
+            "id": "mdn-friday-cif-q22-g1-30f",
+            "path": "data/external/trust_corpus/mdn_friday_cif_q22_g1_30f.h264",
+            "sha256": "0d003128aef1beffcfcfd0e1d5a93c47a95355b8e4da2a3496e409672f6abf40",
+            "source_uri": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4",
+            "license": "CC0-1.0",
+            "codec": "h264",
+            "container": "raw_h264",
+            "frame_count": 30,
+            "resolution": "352x288"
+          }
+        ]
       }
     ],
     "promotion_requirements": [
@@ -52,15 +76,15 @@
   },
   "corpus_validation": {
     "schema": "trust-corpus-validation-v1",
-    "manifest_commitment": "b3b432406038c5ea0f1cce9c8bd4f78d9fc786c2d5fb14fe1dae89f92fa2b3f6",
+    "manifest_commitment": "f20af8fae2561e16f9d9d70c0498407cada179b7f2a8e7e4b13459544e1ff0f9",
     "schema_valid": true,
     "external_public_dataset": true,
     "local_registered_count": 22,
     "local_existing_count": 22,
-    "external_entry_count": 1,
-    "external_file_count": 1,
-    "external_existing_count": 1,
-    "external_hash_match_count": 1,
+    "external_entry_count": 2,
+    "external_file_count": 2,
+    "external_existing_count": 2,
+    "external_hash_match_count": 2,
     "promotion_ready": true,
     "promotion_blockers": [],
     "errors": [],
@@ -85,9 +109,9 @@
       "status": "supported_external_seed_corpus",
       "evidence": "external corpus fingerprint decode and threshold sanity",
       "passed": true,
-      "registered_file_count": 1,
-      "decoded_file_count": 1,
-      "best_zero_far_threshold": 32
+      "registered_file_count": 2,
+      "decoded_file_count": 2,
+      "best_zero_far_threshold": 24
     },
     "watermark_receipt": {
       "status": "supported_synthetic_stress",
@@ -116,9 +140,9 @@
   },
   "metrics": {
     "fingerprint_clip_count": 22,
-    "fingerprint_external_decoded_file_count": 1,
-    "trust_corpus_external_file_count": 1,
-    "trust_corpus_external_hash_match_count": 1,
+    "fingerprint_external_decoded_file_count": 2,
+    "trust_corpus_external_file_count": 2,
+    "trust_corpus_external_hash_match_count": 2,
     "fingerprint_best_zero_far_threshold": 24,
     "keyed_template_threshold": 0.32310818135738373,
     "keyed_template_score_margin": 0.105317622423172,

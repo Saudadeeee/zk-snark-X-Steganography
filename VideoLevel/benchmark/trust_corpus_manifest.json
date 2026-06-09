@@ -37,6 +37,30 @@
           "resolution": "352x288"
         }
       ]
+    },
+    {
+      "group": "external_public_video",
+      "source": "MDN CC0 video examples",
+      "source_uri": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4",
+      "license": "CC0-1.0",
+      "derivation": {
+        "tool": "ffmpeg",
+        "command": "ffmpeg -i mdn_friday.mp4 -vf scale=352:288,fps=30 -frames:v 30 -an -c:v libx264 -profile:v baseline -coder 0 -g 1 -qp 22 mdn_friday_cif_q22_g1_30f.h264",
+        "purpose": "small reproducible H.264 baseline/CAVLC diagnostic fixture"
+      },
+      "files": [
+        {
+          "id": "mdn-friday-cif-q22-g1-30f",
+          "path": "data/external/trust_corpus/mdn_friday_cif_q22_g1_30f.h264",
+          "sha256": "0d003128aef1beffcfcfd0e1d5a93c47a95355b8e4da2a3496e409672f6abf40",
+          "source_uri": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4",
+          "license": "CC0-1.0",
+          "codec": "h264",
+          "container": "raw_h264",
+          "frame_count": 30,
+          "resolution": "352x288"
+        }
+      ]
     }
   ],
   "promotion_requirements": [

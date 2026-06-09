@@ -153,7 +153,7 @@ Latest local Section 45 replay reports:
 - claim gates: `6/6` passed,
 - `promotion_ready=true`,
 - corpus validation: local registered corpus `22/22` present, external seed
-  corpus `1/1` present,
+  corpus `2/2` present,
 - no promotion blockers remain for the seed corpus contract.
 
 This supports branch-level development claims for C2PA anchoring, local-corpus

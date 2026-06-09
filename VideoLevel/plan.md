@@ -330,8 +330,11 @@ Current diagnostic status on 2026-06-09:
 - Section `45` claim gates pass `7/7`, and `promotion_ready=true` for the
   current seed corpus contract.
 - `benchmark.trust_corpus` validates the promotion contract: local registered
-  corpus is `22/22`, external registered files are `1`, and external hash
-  matches are `1`.
+  corpus is `22/22`, external registered files are `2`, and external hash
+  matches are `2`.
+- External fingerprint sanity now decodes `2/2` external seed files and keeps
+  false accepts at `0.0` through threshold `24`; threshold `32` is not safe on
+  the seed corpus.
 - Section `45` artifacts are
   `benchmark/results/sec45_trust_evidence_data.json` and
   `benchmark/results/sec45_trust_evidence_summary.png`.

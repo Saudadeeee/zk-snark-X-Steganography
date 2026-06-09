@@ -392,9 +392,9 @@ py -3.12 -m src.trust.workflows watermark --frames embedded.npy --key demo-key -
 py -3.12 -m src.trust.workflows attestation --signer-key demo-key --video-path video.bin --model-config-path model.json --model-binary-path model.bin --policy-id policy-v1 --timestamp 2026-06-09T00:00:00Z --output attestation.json
 ```
 
-`benchmark.trust_corpus` currently validates the corpus contract and keeps
-Upgrade-v2 broad-public-dataset claims blocked until a larger external corpus
-with source, license, file metadata, and matching hashes is registered.
+`benchmark.trust_corpus` currently validates a two-file external CC0 seed
+corpus and keeps broad-public-dataset claims blocked until a larger external
+corpus with source, license, file metadata, and matching hashes is registered.
 See `doc/trust_corpus_onboarding.md` for the step-by-step corpus playbook.
 
 ---
