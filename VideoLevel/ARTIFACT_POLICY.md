@@ -1,6 +1,6 @@
 # Artifact Policy
 
-Last updated: 2026-06-08
+Last updated: 2026-06-09
 
 This policy defines which files are part of the current reproducible baseline
 and which files are rebuildable diagnostics or local cache.
@@ -14,7 +14,7 @@ and which files are rebuildable diagnostics or local cache.
 - `src/trust/**`
 - `src/trust/workflows.py`
 - `src/provenance/**`
-- `src/runtest/test_future_trust_architecture.py`
+- `src/runtest/*.py`
 - `benchmark/trust_architecture_diagnostic.py`
 - `benchmark/sec45_trust_evidence.py`
 - `benchmark/trust_corpus.py`
@@ -77,12 +77,14 @@ specific paper table depends on them:
 - `data/output/*.positions.json`
 - `data/output/*.meta.json`
 - `data/output/*.manifest.json`
+- `data/external/trust_corpus/*.mp4`
 
 ## Never Commit
 
 - `data/raw/*.y4m`
 - `data/raw/*.h264`
 - `data/encoded/*.h264`
+- `data/output/*.h264`
 - `circuits/node_modules/**`
 - `circuits/build/*.zkey`
 - `circuits/build/*.wasm`
@@ -107,6 +109,8 @@ Remove-Item -Recurse -Force .cache
 
 ## Policy Notes
 
+- Raw source videos are local-only inputs. The tracked baseline keeps derived
+  H.264 fixtures and metadata, not raw Y4M source files.
 - Do not mix blind-core diagnostics into paper-grade evidence.
 - Do not mix future trust architecture diagnostics into the frozen baseline
   paper-grade evidence. On `Upgrade-v2`, use section `45` as a claim-gated

@@ -158,9 +158,9 @@ VideoLevel/
 |   `-- sec1_audit.py             Quality guard audit logging
 |-- circuits/                     Circom circuit + Groth16 keys
 |-- data/
-|   |-- encoded/                  H.264 benchmark inputs
-|   |-- output/                   Stego outputs + sidecars
-|   `-- raw/                      Raw source sequences
+|   |-- encoded/                  Local H.264 benchmark inputs (ignored)
+|   |-- output/                   Local stego outputs + sidecars (ignored)
+|   `-- raw/                      Local raw source sequences (ignored)
 |-- src/
 |   |-- bitstream/                H.264 / CAVLC parsing and patching
 |   |-- core/
@@ -347,8 +347,9 @@ Test exit codes:
 py -3.12 src/runtest/demo_embed_verify.py
 ```
 
-The demo uses the real `embed()` and `verify()` APIs. It exits with code `2`
-when no verified locked SEC1 operating contract is currently available.
+The demo verifies the current locked operating artifact through the public
+`verify()` API. It exits with code `2` when no verified locked SEC1 operating
+contract is currently available.
 
 ### Run benchmarks
 

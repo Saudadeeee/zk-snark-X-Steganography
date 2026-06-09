@@ -60,7 +60,7 @@ def _get_validated_positions(original_path: Path, rec: BitstreamReconstructor,
                               coefficients, frame_verified_data, nC_map,
                               nal_length_map, t1_override_map,
                               extract_bit_count: int) -> list:
-    """Reproduce embedding position selection: shuffle → dedup → FFmpeg validate."""
+    """Reproduce embedding position selection: shuffle -> dedup -> FFmpeg validate."""
     safety = CAVLCSafetyFilter()
     safe_positions = safety.get_safe_positions(
         coefficients,

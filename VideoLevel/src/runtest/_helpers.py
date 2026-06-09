@@ -1,5 +1,5 @@
 """
-_helpers.py — Shared utilities for the runtest suite.
+_helpers.py - Shared utilities for the runtest suite.
 
 Usage in every test file:
     from src.runtest._helpers import setup_path, section, run_test, PASS, FAIL, SKIP
@@ -13,7 +13,7 @@ import shutil
 import sys
 
 
-# ── Path setup ─────────────────────────────────────────────────────────── #
+# -- Path setup ----------------------------------------------------------- #
 
 def get_project_root() -> str:
     """Return absolute path to project root (two levels above this file)."""
@@ -49,7 +49,7 @@ def node_available() -> bool:
     return shutil.which('node') is not None
 
 
-# ── Output helpers ─────────────────────────────────────────────────────── #
+# -- Output helpers ------------------------------------------------------- #
 
 @dataclass(frozen=True)
 class TestResult:
@@ -92,7 +92,7 @@ def SKIP(name: str, reason: str = ''):
     raise SkipTest(name, reason)
 
 
-# ── Test runner ─────────────────────────────────────────────────────────── #
+# -- Test runner ----------------------------------------------------------- #
 
 def run_test(name: str, fn) -> TestResult:
     """

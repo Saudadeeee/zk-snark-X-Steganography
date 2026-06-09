@@ -62,6 +62,8 @@ node_modules/
 !benchmark/results/trust_architecture_diagnostic.json
 !benchmark/results/trust_corpus_validation.json
 !benchmark/trust_corpus_manifest.json
+!src/runtest/demo_embed_verify.py
+!src/runtest/test_*.py
 !src/runtest/test_future_trust_architecture.py
 data/external/trust_corpus/*.mp4
 !data/external/trust_corpus/*_source.json

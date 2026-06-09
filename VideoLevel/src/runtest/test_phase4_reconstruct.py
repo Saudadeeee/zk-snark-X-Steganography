@@ -1,12 +1,12 @@
 """
-test_phase4_reconstruct.py — Phase 4: Bitstream Reconstruction (Patcher)
+test_phase4_reconstruct.py - Phase 4: Bitstream Reconstruction (Patcher)
 
 Tests:
-  1. output_file_created      — stego video file is written and non-empty
-  2. output_valid_h264        — output starts with H.264 Annex B start code
-  3. patcher_zero_skips       — embed 10 bytes → patcher applies 100% of patches
-  4. file_size_within_bounds  — stego file size within ±2% of original
-  5. reconstruct_stats_ok     — reconstruct_video returns success=True with expected fields
+  1. output_file_created      - stego video file is written and non-empty
+  2. output_valid_h264        - output starts with H.264 Annex B start code
+  3. patcher_zero_skips       - embed 10 bytes -> patcher applies 100% of patches
+  4. file_size_within_bounds  - stego file size within +/-2% of original
+  5. reconstruct_stats_ok     - reconstruct_video returns success=True with expected fields
 
 Run:
     python src/runtest/test_phase4_reconstruct.py
@@ -23,14 +23,14 @@ from src.core.pipeline import extract_all_idr_blocks
 from src.core.stego import PayloadEmbedder
 from src.bitstream.bitstream_ops import BitstreamReconstructor
 
-# ── Fixtures ─────────────────────────────────────────────────────────── #
+# -- Fixtures ----------------------------------------------------------- #
 
 VIDEO      = get_video('foreman_cif_g8_300f_b800k.h264')
 STEGO_OUT  = get_output('test_phase4_stego.h264')
 
 _fixture = None   # (modified_coeffs, frame_verified_data, safe_positions, stats)
 
-PAYLOAD   = b"Phase4TestAB"   # 12 bytes = 96 bits — fast to embed
+PAYLOAD   = b"Phase4TestAB"   # 12 bytes = 96 bits - fast to embed
 
 
 def _build_fixture():
@@ -77,7 +77,7 @@ def _build_fixture():
     return _fixture
 
 
-# ── Tests ─────────────────────────────────────────────────────────────── #
+# -- Tests --------------------------------------------------------------- #
 
 def t_output_file_created():
     _build_fixture()
@@ -127,10 +127,10 @@ def t_reconstruct_stats_ok():
     assert 'slices_reconstructed' in stats
     assert 'blocks_modified' in stats
     assert stats['blocks_modified'] > 0, \
-        "No blocks modified — embedding may not have taken effect"
+        "No blocks modified - embedding may not have taken effect"
 
 
-# ── Cleanup ──────────────────────────────────────────────────────────── #
+# -- Cleanup ------------------------------------------------------------ #
 
 def _cleanup():
     if os.path.exists(STEGO_OUT):
@@ -140,10 +140,10 @@ def _cleanup():
             pass
 
 
-# ── Main ─────────────────────────────────────────────────────────────── #
+# -- Main --------------------------------------------------------------- #
 
 def main():
-    section("Phase 4 — Bitstream Reconstruction: patcher, output validity")
+    section("Phase 4 - Bitstream Reconstruction: patcher, output validity")
     results = [
         run_test("output_file_created",     t_output_file_created),
         run_test("output_valid_h264",       t_output_valid_h264),

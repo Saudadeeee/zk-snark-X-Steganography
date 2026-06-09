@@ -1,13 +1,13 @@
 """
-test_phase1_zk_proof.py — Phase 1: ZK-SNARK Proof Generation, Serialization, Verification
+test_phase1_zk_proof.py - Phase 1: ZK-SNARK Proof Generation, Serialization, Verification
 
 Tests:
-  1. pack_unpack_roundtrip        — pack/unpack preserves message and proof bytes
-  2. proof_bytes_roundtrip        — proof_to_bytes / bytes_to_proof is lossless
-  3. proof_size_129               — serialized proof is exactly 129 bytes
-  4. blob_bit_length_formula      — blob_bit_length = (4 + len(msg) + 129) * 8
-  5. zk_generate_and_verify       — real Groth16 proof generation + verification (needs node)
-  6. zk_tampered_message_fails    — verification with wrong payload returns False (needs node)
+  1. pack_unpack_roundtrip        - pack/unpack preserves message and proof bytes
+  2. proof_bytes_roundtrip        - proof_to_bytes / bytes_to_proof is lossless
+  3. proof_size_129               - serialized proof is exactly 129 bytes
+  4. blob_bit_length_formula      - blob_bit_length = (4 + len(msg) + 129) * 8
+  5. zk_generate_and_verify       - real Groth16 proof generation + verification (needs node)
+  6. zk_tampered_message_fails    - verification with wrong payload returns False (needs node)
 
 Run:
     python src/runtest/test_phase1_zk_proof.py
@@ -29,7 +29,7 @@ from src.zk_proof import (
     PROOF_SIZE_BYTES,
 )
 
-# ── Fixtures ──────────────────────────────────────────────────────────── #
+# -- Fixtures ------------------------------------------------------------ #
 
 SECRET_KEY = b"zk_mv_stego_2026_secret_key!!!!!"   # 32 bytes
 TEST_MSG   = b"Hello ZK-Stego"
@@ -50,7 +50,7 @@ def _fake_proof() -> dict:
 _FAKE_PROOF_BYTES = proof_to_bytes(_fake_proof())
 
 
-# ── Test cases ────────────────────────────────────────────────────────── #
+# -- Test cases ---------------------------------------------------------- #
 
 def t_pack_unpack_roundtrip():
     blob = pack(TEST_MSG, _FAKE_PROOF_BYTES)
@@ -64,8 +64,8 @@ def t_proof_bytes_roundtrip():
     raw      = proof_to_bytes(original)
     restored = bytes_to_proof(raw)
     # Compressed format stores only X coordinate; Y is recomputed from BN128 curve.
-    # pi_a=(1,2): 1^3+3=4, sqrt(4)=2 — valid curve point, Y roundtrips.
-    # pi_c=(7,8): not a valid curve point — only X is preserved.
+    # pi_a=(1,2): 1^3+3=4, sqrt(4)=2 - valid curve point, Y roundtrips.
+    # pi_c=(7,8): not a valid curve point - only X is preserved.
     assert int(restored["pi_a"][0], 16) == int(original["pi_a"][0], 16)
     assert int(restored["pi_a"][1], 16) == int(original["pi_a"][1], 16)
     assert int(restored["pi_c"][0], 16) == int(original["pi_c"][0], 16)
@@ -128,10 +128,10 @@ def t_zk_tampered_message_fails():
     assert not ok, "verify should return False for tampered message"
 
 
-# ── Main ─────────────────────────────────────────────────────────────── #
+# -- Main --------------------------------------------------------------- #
 
 def main():
-    section("Phase 1 — ZK-SNARK Proof: Format, Serialization, Verification")
+    section("Phase 1 - ZK-SNARK Proof: Format, Serialization, Verification")
     results = [
         run_test("pack_unpack_roundtrip",     t_pack_unpack_roundtrip),
         run_test("proof_bytes_roundtrip",     t_proof_bytes_roundtrip),

@@ -1,5 +1,5 @@
 """
-run_all.py — Run all phase tests in order and print a summary table.
+run_all.py - Run all phase tests in order and print a summary table.
 
 Usage:
     python src/runtest/run_all.py
@@ -14,7 +14,7 @@ import subprocess
 import sys
 import argparse
 
-# ── Locate project root and test files ───────────────────────────────── #
+# -- Locate project root and test files --------------------------------- #
 
 ROOT     = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 RUNTEST  = os.path.join(ROOT, 'src', 'runtest')
@@ -75,7 +75,7 @@ def _status_from_exit_code(code: int) -> str:
     return 'FAIL'
 
 
-# ── Main ─────────────────────────────────────────────────────────────── #
+# -- Main --------------------------------------------------------------- #
 
 def main():
     parser = argparse.ArgumentParser(description="Run full or quick phase test suite")
@@ -94,13 +94,13 @@ def main():
 
     print()
     print(SEP2)
-    print("  ZK-SNARK Video Steganography — Full Test Suite")
+    print("  ZK-SNARK Video Steganography - Full Test Suite")
     print(SEP2)
 
     selected_phases = PHASES[:3] if args.quick else PHASES
     summary = []
     for label, desc, filename in selected_phases:
-        print(f"\n>>> Running {label} — {desc}")
+        print(f"\n>>> Running {label} - {desc}")
         print(SEP)
         passed, failed, skipped, code = run_phase(label, desc, filename)
         print(SEP)
@@ -147,7 +147,7 @@ def main():
     elif any_incomplete and not total_f:
         print("  [INCOMPLETE] One or more phases skipped required coverage.")
     else:
-        print("  [FAIL] One or more phases failed — see output above.")
+        print("  [FAIL] One or more phases failed - see output above.")
 
     print(SEP2)
     if total_f:
