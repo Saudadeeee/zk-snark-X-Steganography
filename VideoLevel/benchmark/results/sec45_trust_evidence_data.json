@@ -4,10 +4,10 @@
   "source_tier": "diagnostic_grade",
   "corpus_manifest": {
     "schema": "trust-corpus-manifest-v1",
-    "status": "local_curated",
-    "description": "Curated corpus contract for Upgrade-v2 trust architecture evidence. The current entries point to registered local H.264 assets; external public-dataset entries can be added without changing benchmark code.",
-    "claim_scope": "local H.264 corpus only",
-    "external_public_dataset": false,
+    "status": "external_seeded",
+    "description": "Curated corpus contract for Upgrade-v2 trust architecture evidence. The current entries include registered local H.264 assets plus a small external CC0 H.264 derivative used for promotion-gate sanity checks.",
+    "claim_scope": "local H.264 corpus plus external CC0 seed corpus",
+    "external_public_dataset": true,
     "entries": [
       {
         "group": "registered_local_h264",
@@ -17,39 +17,57 @@
           "fingerprint threshold sweep",
           "local content-diversity sanity check"
         ]
+      },
+      {
+        "group": "external_public_video",
+        "source": "MDN CC0 video examples",
+        "source_uri": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+        "license": "CC0-1.0",
+        "derivation": {
+          "tool": "ffmpeg",
+          "command": "ffmpeg -i mdn_flower.mp4 -vf scale=352:288,fps=30 -frames:v 30 -an -c:v libx264 -profile:v baseline -coder 0 -g 1 -qp 22 mdn_flower_cif_q22_g1_30f.h264",
+          "purpose": "small reproducible H.264 baseline/CAVLC diagnostic fixture"
+        },
+        "files": [
+          {
+            "id": "mdn-flower-cif-q22-g1-30f",
+            "path": "data/external/trust_corpus/mdn_flower_cif_q22_g1_30f.h264",
+            "sha256": "b2b61e67156977195be33f485309c7119be7ac1a60e80243550ed70f72f59025",
+            "source_uri": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+            "license": "CC0-1.0",
+            "codec": "h264",
+            "container": "raw_h264",
+            "frame_count": 30,
+            "resolution": "352x288"
+          }
+        ]
       }
     ],
     "promotion_requirements": [
       "Add non-local or externally curated real-video assets.",
       "Record source, license, codec/container, resolution, frame count, and hash for every external asset.",
       "Keep local, synthetic, and external-public metrics separated in output JSON.",
-      "Do not claim broad public-dataset robustness until external_public_dataset is true and section 45 gates pass."
+      "Do not claim broad public-dataset robustness from the seed corpus alone; broad claims require a larger external corpus."
     ]
   },
   "corpus_validation": {
     "schema": "trust-corpus-validation-v1",
-    "manifest_commitment": "606343947b8711b019cf40d3772a2d113c70d2a3c81d4c8c6822f92ab832cc5c",
+    "manifest_commitment": "b3b432406038c5ea0f1cce9c8bd4f78d9fc786c2d5fb14fe1dae89f92fa2b3f6",
     "schema_valid": true,
-    "external_public_dataset": false,
+    "external_public_dataset": true,
     "local_registered_count": 22,
     "local_existing_count": 22,
-    "external_entry_count": 0,
-    "external_file_count": 0,
-    "external_existing_count": 0,
-    "external_hash_match_count": 0,
-    "promotion_ready": false,
-    "promotion_blockers": [
-      "external_public_dataset is false",
-      "no external corpus files are registered"
-    ],
+    "external_entry_count": 1,
+    "external_file_count": 1,
+    "external_existing_count": 1,
+    "external_hash_match_count": 1,
+    "promotion_ready": true,
+    "promotion_blockers": [],
     "errors": [],
     "warnings": []
   },
-  "promotion_ready": false,
-  "blockers": [
-    "external_public_dataset is false",
-    "no external corpus files are registered"
-  ],
+  "promotion_ready": true,
+  "blockers": [],
   "claim_gates": {
     "c2pa_anchor": {
       "status": "supported",
@@ -62,6 +80,14 @@
       "passed": true,
       "clip_count": 22,
       "best_zero_far_threshold": 24
+    },
+    "fingerprint_external_corpus": {
+      "status": "supported_external_seed_corpus",
+      "evidence": "external corpus fingerprint decode and threshold sanity",
+      "passed": true,
+      "registered_file_count": 1,
+      "decoded_file_count": 1,
+      "best_zero_far_threshold": 32
     },
     "watermark_receipt": {
       "status": "supported_synthetic_stress",
@@ -90,8 +116,9 @@
   },
   "metrics": {
     "fingerprint_clip_count": 22,
-    "trust_corpus_external_file_count": 0,
-    "trust_corpus_external_hash_match_count": 0,
+    "fingerprint_external_decoded_file_count": 1,
+    "trust_corpus_external_file_count": 1,
+    "trust_corpus_external_hash_match_count": 1,
     "fingerprint_best_zero_far_threshold": 24,
     "keyed_template_threshold": 0.32310818135738373,
     "keyed_template_score_margin": 0.105317622423172,

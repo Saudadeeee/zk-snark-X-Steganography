@@ -1,0 +1,5 @@
+{
+  "source": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+  "license": "CC0-1.0",
+  "description": "External CC0 source used to derive the small H.264 trust corpus fixture mdn_flower_cif_q22_g1_30f.h264."
+}

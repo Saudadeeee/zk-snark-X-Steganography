@@ -54,6 +54,7 @@ from benchmark._common import SEQUENCES, decode_luma_frames
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS_DIR = ROOT / "benchmark" / "results"
 OUTPUT_PATH = RESULTS_DIR / "trust_architecture_diagnostic.json"
+TRUST_CORPUS_MANIFEST_PATH = ROOT / "benchmark" / "trust_corpus_manifest.json"
 CIRCUIT_OUT_DIR = ROOT / ".cache" / "future_circuits"
 ATTESTATION_TMP_PATH = ROOT / "data" / "output" / "_trust_architecture_attestation.json"
 _SHELL = sys.platform == "win32"
@@ -489,6 +490,127 @@ def _real_clip_fingerprint_benchmark() -> dict[str, object]:
         "registry_record": first_name,
         "clip_count": len(fingerprints),
         "fingerprints": {name: fp.to_dict() for name, fp in fingerprints.items()},
+        "rows": rows,
+    }
+
+
+def _external_corpus_entries() -> list[dict[str, Any]]:
+    if not TRUST_CORPUS_MANIFEST_PATH.exists():
+        return []
+    manifest = json.loads(TRUST_CORPUS_MANIFEST_PATH.read_text(encoding="utf-8"))
+    entries = manifest.get("entries", [])
+    external_files: list[dict[str, Any]] = []
+    if not isinstance(entries, list):
+        return external_files
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        files = entry.get("files", [])
+        if not isinstance(files, list):
+            continue
+        for file_info in files:
+            if not isinstance(file_info, dict):
+                continue
+            external_files.append(
+                {
+                    "group": entry.get("group"),
+                    "source": entry.get("source"),
+                    "source_uri": file_info.get("source_uri") or entry.get("source_uri"),
+                    "license": file_info.get("license") or entry.get("license"),
+                    **file_info,
+                }
+            )
+    return external_files
+
+
+def _external_corpus_fingerprint_benchmark() -> dict[str, object]:
+    policy = FingerprintPreprocessPolicy(sample_count=4, hash_size=8)
+    entries = _external_corpus_entries()
+    fingerprints: dict[str, Any] = {}
+    records: list[dict[str, object]] = []
+    errors = []
+    for entry in entries:
+        file_id = str(entry.get("id", ""))
+        path_value = entry.get("path")
+        if not file_id or not path_value:
+            continue
+        path = ROOT / str(path_value)
+        if not path.exists():
+            errors.append(f"missing external file: {path_value}")
+            continue
+        try:
+            frames = decode_luma_frames(path, max_frames=16)
+            if len(frames) == 0:
+                errors.append(f"no decodable frames: {path_value}")
+                continue
+            fingerprint = compute_video_fingerprint(frames, policy=policy)
+        except Exception as exc:
+            errors.append(f"{file_id}: {type(exc).__name__}: {exc}")
+            continue
+        fingerprints[file_id] = fingerprint
+        records.append(
+            {
+                "id": file_id,
+                "path": str(path_value),
+                "source": entry.get("source"),
+                "source_uri": entry.get("source_uri"),
+                "license": entry.get("license"),
+                "sha256": entry.get("sha256"),
+                "codec": entry.get("codec"),
+                "container": entry.get("container"),
+                "frame_count": entry.get("frame_count"),
+                "resolution": entry.get("resolution"),
+            }
+        )
+
+    if not fingerprints:
+        return {
+            "available": False,
+            "reason": "no external corpus files decoded",
+            "policy": policy.to_dict(),
+            "registered_file_count": len(entries),
+            "decoded_file_count": 0,
+            "errors": errors,
+            "records": records,
+            "rows": [],
+        }
+
+    first_id = next(iter(fingerprints))
+    registry = FingerprintRegistry(
+        [
+            FingerprintRecord(
+                record_id=first_id,
+                fingerprint_hex=fingerprints[first_id].fingerprint_hex,
+                metadata_hash=canonical_json_hash({"source": "external-corpus-diagnostic"}),
+            )
+        ]
+    )
+    rows = []
+    for threshold in (0, 4, 8, 16, 24, 32):
+        positives = [registry.lookup(fingerprints[first_id].fingerprint_hex, threshold=threshold).matched]
+        negatives = [
+            registry.lookup(fp.fingerprint_hex, threshold=threshold).matched
+            for name, fp in fingerprints.items()
+            if name != first_id
+        ]
+        rows.append(
+            {
+                "threshold": threshold,
+                "true_accept_rate": sum(positives) / len(positives),
+                "false_accept_rate": (sum(negatives) / len(negatives)) if negatives else 0.0,
+                "negative_count": len(negatives),
+            }
+        )
+    return {
+        "available": True,
+        "policy": policy.to_dict(),
+        "corpus_scope": "external files registered in benchmark/trust_corpus_manifest.json",
+        "registry_record": first_id,
+        "registered_file_count": len(entries),
+        "decoded_file_count": len(fingerprints),
+        "records": records,
+        "fingerprints": {name: fp.to_dict() for name, fp in fingerprints.items()},
+        "errors": errors,
         "rows": rows,
     }
 
@@ -1059,6 +1181,7 @@ def run_diagnostic() -> dict[str, object]:
             "threshold_behavior": _synthetic_fingerprint_rates(registry, fp),
             "committed_synthetic_benchmark": _committed_synthetic_fingerprint_benchmark(),
             "real_clip_benchmark": _real_clip_fingerprint_benchmark(),
+            "external_corpus_benchmark": _external_corpus_fingerprint_benchmark(),
         },
         "watermark_receipt": {
             "receipt": receipt.to_dict(),

@@ -41,6 +41,10 @@ data/encoded/*.h264
 data/output/*.h264
 data/raw/*.h264
 data/raw/*.y4m
+data/external/trust_corpus/*
+!data/external/trust_corpus/
+!data/external/trust_corpus/*.h264
+!data/external/trust_corpus/*.json
 *.zkey
 *.ptau
 *.r1cs
@@ -59,6 +63,8 @@ node_modules/
 !benchmark/results/trust_corpus_validation.json
 !benchmark/trust_corpus_manifest.json
 !src/runtest/test_future_trust_architecture.py
+data/external/trust_corpus/*.mp4
+!data/external/trust_corpus/mdn_flower_source.json
 
 # Temporary files
 *.tmp

@@ -55,6 +55,8 @@ def collect_data() -> dict[str, Any]:
 
     real_clip = fingerprint["real_clip_benchmark"]
     best_real_threshold = _best_threshold_row(real_clip.get("rows", []))
+    external_clip = fingerprint.get("external_corpus_benchmark", {})
+    best_external_threshold = _best_threshold_row(external_clip.get("rows", []))
     keyed = watermark["keyed_template_benchmark"]
     stress = watermark["keyed_template_stress_benchmark"]
 
@@ -74,6 +76,18 @@ def collect_data() -> dict[str, Any]:
             "passed": best_real_threshold is not None and int(real_clip.get("clip_count", 0)) >= 8,
             "clip_count": int(real_clip.get("clip_count", 0)),
             "best_zero_far_threshold": int(best_real_threshold["threshold"]) if best_real_threshold else None,
+        },
+        "fingerprint_external_corpus": {
+            "status": "supported_external_seed_corpus",
+            "evidence": "external corpus fingerprint decode and threshold sanity",
+            "passed": bool(
+                external_clip.get("available") is True
+                and int(external_clip.get("decoded_file_count", 0)) >= 1
+                and best_external_threshold is not None
+            ),
+            "registered_file_count": int(external_clip.get("registered_file_count", 0)),
+            "decoded_file_count": int(external_clip.get("decoded_file_count", 0)),
+            "best_zero_far_threshold": int(best_external_threshold["threshold"]) if best_external_threshold else None,
         },
         "watermark_receipt": {
             "status": "supported_synthetic_stress",
@@ -140,6 +154,7 @@ def collect_data() -> dict[str, Any]:
         "claim_gates": claim_gates,
         "metrics": {
             "fingerprint_clip_count": int(real_clip.get("clip_count", 0)),
+            "fingerprint_external_decoded_file_count": int(external_clip.get("decoded_file_count", 0)),
             "trust_corpus_external_file_count": int(corpus_validation["external_file_count"]),
             "trust_corpus_external_hash_match_count": int(corpus_validation["external_hash_match_count"]),
             "fingerprint_best_zero_far_threshold": (

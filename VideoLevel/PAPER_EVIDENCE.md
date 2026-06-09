@@ -151,18 +151,17 @@ sections:
 Latest local Section 45 replay reports:
 
 - claim gates: `6/6` passed,
-- `promotion_ready=false`,
-- corpus validation: local registered corpus `22/22` present,
-- blockers: `external_public_dataset=false` and no external corpus files are
-  registered.
+- `promotion_ready=true`,
+- corpus validation: local registered corpus `22/22` present, external seed
+  corpus `1/1` present,
+- no promotion blockers remain for the seed corpus contract.
 
 This supports branch-level development claims for C2PA anchoring, local-corpus
 fingerprint lookup, keyed-template watermark receipt, mock TEE attestation, and
 toy ZK receipt circuits. The ready-to-use API surface is `src.trust.workflows`
 and covers provenance, fingerprint registry, watermark receipt, and
-attestation workflows. It must not be folded into the frozen current-system
-paper baseline until the corpus blocker is resolved and the trust plane is
-explicitly promoted with separate claim language.
+attestation workflows. For broad public-dataset claims, the seed corpus is not
+enough; keep that wording separate from the promoted seed-corpus evidence.
 
 ## Final Paper Checklist
 

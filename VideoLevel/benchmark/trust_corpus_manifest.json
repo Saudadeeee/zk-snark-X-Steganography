@@ -1,9 +1,9 @@
 {
   "schema": "trust-corpus-manifest-v1",
-  "status": "local_curated",
-  "description": "Curated corpus contract for Upgrade-v2 trust architecture evidence. The current entries point to registered local H.264 assets; external public-dataset entries can be added without changing benchmark code.",
-  "claim_scope": "local H.264 corpus only",
-  "external_public_dataset": false,
+  "status": "external_seeded",
+  "description": "Curated corpus contract for Upgrade-v2 trust architecture evidence. The current entries include registered local H.264 assets plus a small external CC0 H.264 derivative used for promotion-gate sanity checks.",
+  "claim_scope": "local H.264 corpus plus external CC0 seed corpus",
+  "external_public_dataset": true,
   "entries": [
     {
       "group": "registered_local_h264",
@@ -13,12 +13,36 @@
         "fingerprint threshold sweep",
         "local content-diversity sanity check"
       ]
+    },
+    {
+      "group": "external_public_video",
+      "source": "MDN CC0 video examples",
+      "source_uri": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+      "license": "CC0-1.0",
+      "derivation": {
+        "tool": "ffmpeg",
+        "command": "ffmpeg -i mdn_flower.mp4 -vf scale=352:288,fps=30 -frames:v 30 -an -c:v libx264 -profile:v baseline -coder 0 -g 1 -qp 22 mdn_flower_cif_q22_g1_30f.h264",
+        "purpose": "small reproducible H.264 baseline/CAVLC diagnostic fixture"
+      },
+      "files": [
+        {
+          "id": "mdn-flower-cif-q22-g1-30f",
+          "path": "data/external/trust_corpus/mdn_flower_cif_q22_g1_30f.h264",
+          "sha256": "b2b61e67156977195be33f485309c7119be7ac1a60e80243550ed70f72f59025",
+          "source_uri": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+          "license": "CC0-1.0",
+          "codec": "h264",
+          "container": "raw_h264",
+          "frame_count": 30,
+          "resolution": "352x288"
+        }
+      ]
     }
   ],
   "promotion_requirements": [
     "Add non-local or externally curated real-video assets.",
     "Record source, license, codec/container, resolution, frame count, and hash for every external asset.",
     "Keep local, synthetic, and external-public metrics separated in output JSON.",
-    "Do not claim broad public-dataset robustness until external_public_dataset is true and section 45 gates pass."
+    "Do not claim broad public-dataset robustness from the seed corpus alone; broad claims require a larger external corpus."
   ]
 }

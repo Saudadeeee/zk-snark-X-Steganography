@@ -373,6 +373,14 @@ def _validate_trust_architecture_schema(data: dict) -> list[str]:
         errors.append("trust_architecture real-clip fingerprint benchmark must report rows")
     if int(real_clip.get("clip_count", 0)) < 8:
         errors.append("trust_architecture real-clip fingerprint benchmark must cover local corpus")
+    external_fp = data["fingerprint_registry"].get("external_corpus_benchmark", {})
+    if external_fp:
+        if external_fp.get("available") is not True:
+            errors.append("trust_architecture external corpus fingerprint benchmark must be available")
+        if int(external_fp.get("registered_file_count", 0)) > 0 and int(external_fp.get("decoded_file_count", 0)) <= 0:
+            errors.append("trust_architecture external corpus fingerprint benchmark must decode registered files")
+        if not isinstance(external_fp.get("rows"), list) or not external_fp.get("rows"):
+            errors.append("trust_architecture external corpus fingerprint benchmark must report rows")
     if data["watermark_receipt"].get("receipt", {}).get("valid") is not True:
         errors.append("trust_architecture watermark receipt must be valid")
     transform_rows = data["watermark_receipt"].get("transform_benchmark", {}).get("rows", [])
@@ -467,6 +475,7 @@ def _validate_sec45_trust_evidence_schema(data: dict) -> list[str]:
         expected = {
             "c2pa_anchor",
             "fingerprint_local_registry",
+            "fingerprint_external_corpus",
             "watermark_receipt",
             "tee_attestation",
             "ready_workflows",
@@ -487,6 +496,7 @@ def _validate_sec45_trust_evidence_schema(data: dict) -> list[str]:
     else:
         for key in (
             "fingerprint_clip_count",
+            "fingerprint_external_decoded_file_count",
             "trust_corpus_external_file_count",
             "trust_corpus_external_hash_match_count",
             "watermark_fixed_accept_rate",

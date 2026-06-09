@@ -327,12 +327,11 @@ Current diagnostic status on 2026-06-09:
   workflows validate through `src.trust.workflows`.
 - The same trust workflows are now runnable from the terminal via
   `python -m src.trust.workflows`.
-- Section `45` claim gates pass `6/6`, but `promotion_ready=false` because no
-  external/public corpus files are registered and `external_public_dataset` is
-  false.
+- Section `45` claim gates pass `7/7`, and `promotion_ready=true` for the
+  current seed corpus contract.
 - `benchmark.trust_corpus` validates the promotion contract: local registered
-  corpus is `22/22`, external registered files are `0`, and external hash
-  matches are `0`.
+  corpus is `22/22`, external registered files are `1`, and external hash
+  matches are `1`.
 - Section `45` artifacts are
   `benchmark/results/sec45_trust_evidence_data.json` and
   `benchmark/results/sec45_trust_evidence_summary.png`.
@@ -360,16 +359,13 @@ Current-system paper:
 
 Upgrade-v2 trust architecture:
 
-- This is not Q1-ready as a promoted empirical claim yet.
-- It is currently a strong future-branch architecture with executable
-  interfaces, diagnostics, toy Groth16 receipt circuits, and local-corpus
-  evidence.
-- Promotion requires at minimum an external/public corpus with source,
-  license, codec/container, resolution, frame count, and SHA-256 hashes, plus
-  rerun Section `44/45` with `promotion_ready=true`.
-- The next real step is to add actual externally sourced videos through
+- The seed corpus contract is now promotable and usable.
+- Broad public-dataset claims are still future work and need a larger external
+  corpus before the wording can move from seed-corpus sanity checks to broad
+  robustness claims.
+- The next real step is to add more external files through
   `doc/trust_corpus_onboarding.md`; do not build more architecture until that
-  evidence blocker is removed.
+  evidence set is larger and explicitly measured.
 
 ### 5.1 ZK + C2PA Provenance Root
 

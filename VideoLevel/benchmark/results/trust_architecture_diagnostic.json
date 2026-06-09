@@ -735,6 +735,98 @@
           "negative_count": 21
         }
       ]
+    },
+    "external_corpus_benchmark": {
+      "available": true,
+      "policy": {
+        "sample_count": 4,
+        "hash_size": 8,
+        "color_mode": "bt601_luma",
+        "resize_mode": "block_mean",
+        "aggregate_mode": "majority_vote"
+      },
+      "corpus_scope": "external files registered in benchmark/trust_corpus_manifest.json",
+      "registry_record": "mdn-flower-cif-q22-g1-30f",
+      "registered_file_count": 1,
+      "decoded_file_count": 1,
+      "records": [
+        {
+          "id": "mdn-flower-cif-q22-g1-30f",
+          "path": "data/external/trust_corpus/mdn_flower_cif_q22_g1_30f.h264",
+          "source": "MDN CC0 video examples",
+          "source_uri": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+          "license": "CC0-1.0",
+          "sha256": "b2b61e67156977195be33f485309c7119be7ac1a60e80243550ed70f72f59025",
+          "codec": "h264",
+          "container": "raw_h264",
+          "frame_count": 30,
+          "resolution": "352x288"
+        }
+      ],
+      "fingerprints": {
+        "mdn-flower-cif-q22-g1-30f": {
+          "fingerprint_hex": "475e0f3f59788485",
+          "bit_count": 64,
+          "sample_indices": [
+            0,
+            5,
+            10,
+            15
+          ],
+          "frame_hashes": [
+            "475e0f3f79b88405",
+            "475e0f3f59788485",
+            "475e0f3f59782485",
+            "475e0f3f59784485"
+          ],
+          "policy": {
+            "sample_count": 4,
+            "hash_size": 8,
+            "color_mode": "bt601_luma",
+            "resize_mode": "block_mean",
+            "aggregate_mode": "majority_vote"
+          }
+        }
+      },
+      "errors": [],
+      "rows": [
+        {
+          "threshold": 0,
+          "true_accept_rate": 1.0,
+          "false_accept_rate": 0.0,
+          "negative_count": 0
+        },
+        {
+          "threshold": 4,
+          "true_accept_rate": 1.0,
+          "false_accept_rate": 0.0,
+          "negative_count": 0
+        },
+        {
+          "threshold": 8,
+          "true_accept_rate": 1.0,
+          "false_accept_rate": 0.0,
+          "negative_count": 0
+        },
+        {
+          "threshold": 16,
+          "true_accept_rate": 1.0,
+          "false_accept_rate": 0.0,
+          "negative_count": 0
+        },
+        {
+          "threshold": 24,
+          "true_accept_rate": 1.0,
+          "false_accept_rate": 0.0,
+          "negative_count": 0
+        },
+        {
+          "threshold": 32,
+          "true_accept_rate": 1.0,
+          "false_accept_rate": 0.0,
+          "negative_count": 0
+        }
+      ]
     }
   },
   "watermark_receipt": {
@@ -1291,10 +1383,10 @@
         "verified": true,
         "setup_ran": false,
         "setup_time_ms": 0.0,
-        "witness_time_ms": 132.58,
-        "prove_time_ms": 1408.24,
-        "verify_time_ms": 1148.22,
-        "proof_json_size_bytes": 805,
+        "witness_time_ms": 111.23,
+        "prove_time_ms": 1092.66,
+        "verify_time_ms": 1006.91,
+        "proof_json_size_bytes": 802,
         "public_signal_count": 67,
         "public_signals": [
           "1",
@@ -1386,9 +1478,9 @@
         "verified": true,
         "setup_ran": false,
         "setup_time_ms": 0.0,
-        "witness_time_ms": 122.06,
-        "prove_time_ms": 1131.85,
-        "verify_time_ms": 1017.37,
+        "witness_time_ms": 99.48,
+        "prove_time_ms": 1096.52,
+        "verify_time_ms": 952.46,
         "proof_json_size_bytes": 806,
         "public_signal_count": 7,
         "public_signals": [
