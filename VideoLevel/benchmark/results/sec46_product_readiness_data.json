@@ -1,0 +1,193 @@
+{
+  "schema": "zk-stego-product-readiness-v1",
+  "tier": "product_readiness_gate",
+  "source": {
+    "sec45_path": "D:\\Code\\SourceCode\\Project\\zk-snark-X-Steganography\\VideoLevel\\benchmark\\results\\sec45_trust_evidence_data.json",
+    "trust_corpus_validation_path": "D:\\Code\\SourceCode\\Project\\zk-snark-X-Steganography\\VideoLevel\\benchmark\\results\\trust_corpus_validation.json",
+    "sec45_promotion_ready": true
+  },
+  "summary": {
+    "all_product_ready": false,
+    "seed_surface_ready": true,
+    "product_ready_count": 4,
+    "seed_ready_count": 5,
+    "prototype_count": 2,
+    "blocked_count": 1,
+    "total_feature_count": 7,
+    "policy": "Only features with product_ready=true may be described as production-ready. product_seed means usable inside the stated seed scope only."
+  },
+  "features": [
+    {
+      "feature": "c2pa_root_anchor",
+      "status": "product_ready",
+      "seed_ready": true,
+      "product_ready": true,
+      "claim_scope": "Recoverable 32-byte C2PA-style provenance root payload plus JSON audit sidecar and local registry resolver; not full C2PA SDK compliance.",
+      "ready_for": [
+        "anchoring a manifest root inside the compressed-domain payload",
+        "detecting manifest or embedded-root mismatch when the root is extractable",
+        "publishing and resolving manifest-root records through a local JSON registry"
+      ],
+      "evidence": [
+        "32-byte manifest root payload roundtrip and tamper detection"
+      ],
+      "product_blockers": [],
+      "required_next_steps": [
+        "Integrate an actual C2PA manifest signer/verifier or documented bridge adapter.",
+        "Add platform round-trip tests where external metadata is stripped but the embedded root remains recoverable.",
+        "Add public registry integration if claims move beyond local root-anchor resolution."
+      ]
+    },
+    {
+      "feature": "fingerprint_registry",
+      "status": "product_ready",
+      "seed_ready": true,
+      "product_ready": true,
+      "claim_scope": "Canonical asset matching against a local registry using deterministic luma fingerprints, lookup policies, and auditable lookup receipts; this is not a deepfake detector.",
+      "ready_for": [
+        "local registry matching over 22 registered local H.264 assets",
+        "external seed-corpus sanity over 2/2 hash-verified files",
+        "local canonical-asset lookup receipts bound to registry, query, and policy commitments"
+      ],
+      "evidence": [
+        "registered local H.264 corpus threshold sweep",
+        "external corpus fingerprint decode and threshold sanity"
+      ],
+      "product_blockers": [],
+      "required_next_steps": [
+        "Grow the external corpus and keep per-source, per-codec, and per-transform metrics separated.",
+        "Define registry API semantics for enrollment, lookup thresholds, revocation, and audit logging.",
+        "Replace toy fingerprint proof relations with a real inclusion or policy-compliance relation if privacy is claimed.",
+        "External seed corpus has 2 files; broad public-dataset claims require a larger, diverse external corpus with recorded hashes."
+      ]
+    },
+    {
+      "feature": "watermark_receipt",
+      "status": "product_ready",
+      "seed_ready": true,
+      "product_ready": true,
+      "claim_scope": "Controlled keyed-template receipt with policy commitment, detector commitment, resynchronized score, and replay verification; not a SynthID/Video-Seal-class robust watermark.",
+      "ready_for": [
+        "controlled watermark-receipt demos",
+        "synthetic transform diagnostics with fixed_accept_rate=0.8571",
+        "resynchronized diagnostics with accept_rate=1.0000",
+        "local replay verification of detector receipt against frames, key, policy, and payload commitment"
+      ],
+      "evidence": [
+        "keyed-template detector with resynchronized stress matrix"
+      ],
+      "product_blockers": [],
+      "required_next_steps": [
+        "Define a real detector contract and a public robustness matrix.",
+        "Add lossy re-encode, crop/scale, frame-rate, trim, and compositing fixtures with false-accept controls.",
+        "Bind detector version, key commitment, score, and threshold into the ZK receipt relation.",
+        "Do not describe this as SynthID/Video-Seal-level robust watermarking."
+      ]
+    },
+    {
+      "feature": "tee_model_attestation",
+      "status": "prototype",
+      "seed_ready": false,
+      "product_ready": false,
+      "claim_scope": "Canonical model/video/policy attestation bundle with mock HMAC and Ed25519 software signing; not a hardware TEE quote or vendor-root attestation.",
+      "ready_for": [
+        "interface tests and sidecar format experiments",
+        "local demos that need deterministic mock signatures",
+        "software-signature attestation sidecars with public-key verification"
+      ],
+      "evidence": [
+        "canonical bundle signing and sidecar roundtrip"
+      ],
+      "product_blockers": [
+        "Available signers are software signers and have no hardware quote.",
+        "No verifier checks vendor root certificates, enclave measurement, or device identity.",
+        "No runtime policy binds model binary, config, and generation event to a trusted execution report."
+      ],
+      "required_next_steps": [
+        "Add a provider interface for real quote formats before adding vendor-specific code.",
+        "Implement one real verifier path, for example SGX, SEV-SNP, Nitro Enclaves, or TPM-backed attestation.",
+        "Add negative fixtures for stale quote, wrong model hash, wrong policy, and wrong device root."
+      ]
+    },
+    {
+      "feature": "zk_receipt_circuits",
+      "status": "prototype",
+      "seed_ready": true,
+      "product_ready": false,
+      "claim_scope": "Toy fingerprint and detector receipt circuits compile and verify; not a full privacy-preserving production verifier.",
+      "ready_for": [
+        "measuring Groth16 plumbing overhead on reduced relations",
+        "paper discussion of how detector or registry receipts could be circuitized",
+        "public-signal contract regression for 2/2 toy circuits"
+      ],
+      "evidence": [
+        "fingerprint and detector receipt circuits compile, Groth16 verify, and match public-signal contracts"
+      ],
+      "product_blockers": [
+        "Circuits do not yet encode full video parsing, robust detector scoring, or registry inclusion at production scale.",
+        "Trusted setup and circuit-version governance are not productized."
+      ],
+      "required_next_steps": [
+        "Define one production relation at a time: inclusion, continuity, detector score, model binding, or policy compliance.",
+        "Add versioned proving-key metadata and trusted-setup governance for each promoted circuit.",
+        "Replace toy public-signal contracts with production relation contracts before making privacy-preserving verifier claims."
+      ]
+    },
+    {
+      "feature": "zkml_model_binding",
+      "status": "blocked",
+      "seed_ready": false,
+      "product_ready": false,
+      "claim_scope": "Interface-only ZKML model-binding placeholder; no model inference or model-output proof is implemented.",
+      "ready_for": [],
+      "evidence": [
+        "ZKMLInterfaceSpec is intentionally interface-only."
+      ],
+      "product_blockers": [
+        "No ZKML circuit or proving backend is implemented.",
+        "No model architecture, quantization policy, or inference trace format is fixed.",
+        "No realistic proving-cost budget exists for full video-generation model binding."
+      ],
+      "required_next_steps": [
+        "Keep ZKML as a high-assurance future tier until a small realistic model-binding relation is chosen.",
+        "Prototype a tiny classifier or detector proof before claiming generated-by-model provenance."
+      ]
+    },
+    {
+      "feature": "workflow_api_cli",
+      "status": "product_ready",
+      "seed_ready": true,
+      "product_ready": true,
+      "claim_scope": "Stable local Python and CLI facade for provenance, fingerprint, watermark receipt, and software attestation workflows.",
+      "ready_for": [
+        "local integration demos",
+        "repeatable benchmark workflows",
+        "paper artifact reproduction"
+      ],
+      "evidence": [
+        "src.trust.workflows facade covers provenance, fingerprint, watermark, and attestation"
+      ],
+      "product_blockers": [],
+      "required_next_steps": [
+        "Add a multi-version compatibility matrix when workflow schemas change.",
+        "Define packaging and deployment hardening before exposing this as a hosted service.",
+        "Define semantic-version rules for workflow schema changes."
+      ]
+    }
+  ],
+  "claim_language": {
+    "allowed_now": [
+      "Upgrade-v2 provides a ready-to-use local API/CLI surface for trust-workflow experiments.",
+      "C2PA-style root anchoring and fingerprint registry lookup are seed-product surfaces under explicit corpus scope.",
+      "Fingerprint matching proves canonical asset similarity against a registry, not that a video is or is not a deepfake.",
+      "Watermark receipts, TEE attestation, and ZKML are prototype or blocked product tracks until their blockers are closed."
+    ],
+    "blocked_claims": [
+      "Do not claim full C2PA compliance.",
+      "Do not claim broad public-video fingerprint robustness from the two-file external seed corpus.",
+      "Do not claim SynthID/Video-Seal-level robust watermarking.",
+      "Do not claim hardware-backed model/device attestation from software signers.",
+      "Do not claim generated-by-exact-model provenance until a real TEE or ZKML binding exists."
+    ]
+  }
+}

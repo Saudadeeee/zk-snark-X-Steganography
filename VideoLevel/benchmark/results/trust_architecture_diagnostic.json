@@ -866,14 +866,18 @@
   },
   "watermark_receipt": {
     "receipt": {
+      "schema": "zk-stego-detector-receipt-v2",
       "detector_id": "tiny-threshold-v1",
       "score": 0.75,
       "threshold": 0.7,
       "valid": true,
       "payload_commitment": "478c192f0906784d713458f7d1ad7f4d980084942f7d88d14469f70489d13cb0",
-      "detector_commitment": "e1244e34d78e5a1a66ea5b0c375fe5a56150dadaa7791b59bc8bc5ec77f7e1aa"
+      "detector_commitment": "e1244e34d78e5a1a66ea5b0c375fe5a56150dadaa7791b59bc8bc5ec77f7e1aa",
+      "policy_commitment": null,
+      "alignment": null,
+      "receipt_commitment": "aeac41ecea6033f11725346b11b6c42173d8983209cc01b67580bfc2f19dd36d"
     },
-    "receipt_commitment": "cd04097de638be3656621bcf0ee12d85c846f16b396d69cc798b4e7f41d62113",
+    "receipt_commitment": "b4c89e4784dd9e97ed3b0c33c1f8403d4f036edb04c566a19f4b4546987ad222",
     "transform_benchmark": {
       "detector_commitment": "45a7af2dc57a4621c3dc1bcaff647a03ec3a21cab7127c4ae831a96873ef3840",
       "calibration": {
@@ -1346,6 +1350,7 @@
     "statement_hash": "785adef202d7b624d603fd4942575d6bc5c6f8059d3a8b12a8850d0cf6aa4aee",
     "signature_valid": true,
     "signed": {
+      "schema": "zk-stego-attestation-signed-v2",
       "bundle": {
         "video_hash": "1111111111111111111111111111111111111111111111111111111111111111",
         "model_config_hash": "2222222222222222222222222222222222222222222222222222222222222222",
@@ -1354,9 +1359,11 @@
         "timestamp": "2026-06-08T00:00:00Z",
         "hardware_root": "mock-root"
       },
+      "bundle_commitment": "785adef202d7b624d603fd4942575d6bc5c6f8059d3a8b12a8850d0cf6aa4aee",
       "signature": "c10da5c0cfe85a3de38fc442813248420699d11917ae074b39551c02a4f701a1",
       "signer_id": "mock-tee-v1",
-      "scheme": "mock-hmac-sha256"
+      "scheme": "mock-hmac-sha256",
+      "signed_commitment": "20b3446629880b3422829b0177665e6d54f6423409c3621c435f75fe90b7d4e3"
     },
     "sidecar_roundtrip_valid": true
   },
@@ -1383,7 +1390,12 @@
       "record_id": "workflow-canonical-asset",
       "distance": 0,
       "threshold": 0,
-      "registry_commitment": "603615d3d7c9fad0c13b900e17e66a925e4b1e317ca3030a920d229c5a7aba50"
+      "registry_commitment": "603615d3d7c9fad0c13b900e17e66a925e4b1e317ca3030a920d229c5a7aba50",
+      "candidate_count": 1,
+      "tied_record_ids": [
+        "workflow-canonical-asset"
+      ],
+      "record_commitment": "0ab2a41b0ef085ac068291a83dcee6404a8045604b5c8327fd0293655b86f319"
     },
     "watermark_valid": true,
     "watermark_alignment": {
@@ -1418,10 +1430,10 @@
         "verified": true,
         "setup_ran": false,
         "setup_time_ms": 0.0,
-        "witness_time_ms": 124.57,
-        "prove_time_ms": 1133.7,
-        "verify_time_ms": 961.19,
-        "proof_json_size_bytes": 807,
+        "witness_time_ms": 104.72,
+        "prove_time_ms": 1248.25,
+        "verify_time_ms": 1129.37,
+        "proof_json_size_bytes": 802,
         "public_signal_count": 67,
         "public_signals": [
           "1",
@@ -1513,10 +1525,10 @@
         "verified": true,
         "setup_ran": false,
         "setup_time_ms": 0.0,
-        "witness_time_ms": 97.31,
-        "prove_time_ms": 1057.75,
-        "verify_time_ms": 950.34,
-        "proof_json_size_bytes": 808,
+        "witness_time_ms": 94.94,
+        "prove_time_ms": 1198.11,
+        "verify_time_ms": 1061.59,
+        "proof_json_size_bytes": 807,
         "public_signal_count": 7,
         "public_signals": [
           "1",
@@ -1529,5 +1541,395 @@
         ]
       }
     }
+  },
+  "zk_receipt_contracts": {
+    "schema": "zk-stego-zk-receipt-contract-report-v1",
+    "tier": "zk_receipt_contract_diagnostic",
+    "summary": {
+      "all_contracts_valid": true,
+      "valid_contract_count": 2,
+      "circuit_count": 2,
+      "groth16_bound_count": 2,
+      "claim_scope": "Versioned public-signal layout and toy test vectors for reduced ZK receipt relations."
+    },
+    "circuits": {
+      "fingerprint_verify": {
+        "contract_valid": true,
+        "compile_ok": true,
+        "groth16_verified": true,
+        "contract": {
+          "schema": "zk-stego-zk-receipt-circuit-contract-v1",
+          "circuit_name": "fingerprint_verify",
+          "relation": "hamming_distance_lte_threshold_with_poseidon_record_commitment",
+          "public_outputs": [
+            "matched",
+            "registry_commitment"
+          ],
+          "public_inputs": [
+            "query_bits[64]",
+            "threshold"
+          ],
+          "private_inputs": [
+            "record_bits[64]",
+            "record_chunks[8]"
+          ],
+          "public_signal_order": [
+            "matched",
+            "registry_commitment",
+            "query_bits[64]",
+            "threshold"
+          ],
+          "claim_scope": "Toy 64-bit fingerprint threshold proof. The proof binds a private record to a public Poseidon commitment and proves Hamming distance is below threshold.",
+          "limitations": [
+            "No Merkle registry inclusion.",
+            "No private multi-record search.",
+            "No full video fingerprint extraction inside the circuit.",
+            "Poseidon commitment is treated as the circuit public output, not recomputed in Python."
+          ],
+          "contract_commitment": "63e3e79fc3b6539c388388131dd385a7d8dec2902e0fb1e7eebd8bb967d9d87a"
+        },
+        "test_vector": {
+          "schema": "zk-stego-zk-receipt-test-vector-v1",
+          "contract_commitment": "63e3e79fc3b6539c388388131dd385a7d8dec2902e0fb1e7eebd8bb967d9d87a",
+          "circuit_name": "fingerprint_verify",
+          "witness": {
+            "query_bits": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "record_bits": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "record_chunks": [
+              0,
+              0,
+              0,
+              0,
+              255,
+              255,
+              255,
+              255
+            ],
+            "threshold": 0
+          },
+          "witness_commitment": "ea8b3727f8259f9266ecb2b389bbc7ff32868650d0c47ef4d4c4aaefcb262563",
+          "expected_public_signals": [
+            "1",
+            "21451698921772718435912221772150976482499822594119359987538900709054009240964",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "0"
+          ],
+          "expected_relation_result": true
+        },
+        "local_validation": {
+          "schema": "zk-stego-zk-receipt-validation-v1",
+          "circuit_name": "fingerprint_verify",
+          "verified": true,
+          "relation_valid": true,
+          "public_layout_valid": true,
+          "contract_commitment": "63e3e79fc3b6539c388388131dd385a7d8dec2902e0fb1e7eebd8bb967d9d87a",
+          "witness_commitment": "ea8b3727f8259f9266ecb2b389bbc7ff32868650d0c47ef4d4c4aaefcb262563",
+          "public_signal_count": 67,
+          "expected_public_signal_count": 67,
+          "reason": null
+        },
+        "groth16_measurement_validation": {
+          "schema": "zk-stego-zk-receipt-validation-v1",
+          "circuit_name": "fingerprint_verify",
+          "verified": true,
+          "relation_valid": true,
+          "public_layout_valid": true,
+          "contract_commitment": "63e3e79fc3b6539c388388131dd385a7d8dec2902e0fb1e7eebd8bb967d9d87a",
+          "witness_commitment": "ea8b3727f8259f9266ecb2b389bbc7ff32868650d0c47ef4d4c4aaefcb262563",
+          "public_signal_count": 67,
+          "expected_public_signal_count": 67,
+          "reason": null
+        }
+      },
+      "detector_receipt": {
+        "contract_valid": true,
+        "compile_ok": true,
+        "groth16_verified": true,
+        "contract": {
+          "schema": "zk-stego-zk-receipt-circuit-contract-v1",
+          "circuit_name": "detector_receipt",
+          "relation": "private_weight_dot_product_gte_threshold_with_poseidon_weight_commitment",
+          "public_outputs": [
+            "accepted",
+            "detector_commitment"
+          ],
+          "public_inputs": [
+            "features[4]",
+            "threshold"
+          ],
+          "private_inputs": [
+            "weights[4]"
+          ],
+          "public_signal_order": [
+            "accepted",
+            "detector_commitment",
+            "features[4]",
+            "threshold"
+          ],
+          "claim_scope": "Toy detector-score receipt. The proof keeps detector weights private, binds them to a public Poseidon commitment, and proves score >= threshold.",
+          "limitations": [
+            "No robust video feature extractor inside the circuit.",
+            "No calibrated detector-version governance.",
+            "No production watermark detector parity.",
+            "Poseidon commitment is treated as the circuit public output, not recomputed in Python."
+          ],
+          "contract_commitment": "65834a741c25031deca81c9d886bd8fb8476289db83912d5d29b86fc0e36ae7c"
+        },
+        "test_vector": {
+          "schema": "zk-stego-zk-receipt-test-vector-v1",
+          "contract_commitment": "65834a741c25031deca81c9d886bd8fb8476289db83912d5d29b86fc0e36ae7c",
+          "circuit_name": "detector_receipt",
+          "witness": {
+            "features": [
+              100,
+              100,
+              50,
+              50
+            ],
+            "weights": [
+              25,
+              25,
+              25,
+              25
+            ],
+            "threshold": 7000
+          },
+          "witness_commitment": "6081f00183ba37d5e8b24feea99f340042417d5c9553f88deea1b5155dd177c4",
+          "expected_public_signals": [
+            "1",
+            "4220715926047232732883364092278159128484462297542435605209235091838322135833",
+            "100",
+            "100",
+            "50",
+            "50",
+            "7000"
+          ],
+          "expected_relation_result": true
+        },
+        "local_validation": {
+          "schema": "zk-stego-zk-receipt-validation-v1",
+          "circuit_name": "detector_receipt",
+          "verified": true,
+          "relation_valid": true,
+          "public_layout_valid": true,
+          "contract_commitment": "65834a741c25031deca81c9d886bd8fb8476289db83912d5d29b86fc0e36ae7c",
+          "witness_commitment": "6081f00183ba37d5e8b24feea99f340042417d5c9553f88deea1b5155dd177c4",
+          "public_signal_count": 7,
+          "expected_public_signal_count": 7,
+          "reason": null
+        },
+        "groth16_measurement_validation": {
+          "schema": "zk-stego-zk-receipt-validation-v1",
+          "circuit_name": "detector_receipt",
+          "verified": true,
+          "relation_valid": true,
+          "public_layout_valid": true,
+          "contract_commitment": "65834a741c25031deca81c9d886bd8fb8476289db83912d5d29b86fc0e36ae7c",
+          "witness_commitment": "6081f00183ba37d5e8b24feea99f340042417d5c9553f88deea1b5155dd177c4",
+          "public_signal_count": 7,
+          "expected_public_signal_count": 7,
+          "reason": null
+        }
+      }
+    },
+    "limitations": [
+      "These are toy reduced relations, not production privacy-preserving video verifiers.",
+      "Fingerprint proof lacks registry inclusion and private multi-record lookup.",
+      "Detector proof lacks real robust-video detector parity and feature extraction in-circuit.",
+      "Trusted setup and proving-key governance remain outside this contract."
+    ]
   }
 }

@@ -4,15 +4,17 @@ This playbook explains how to add a real external/public corpus for the
 Upgrade-v2 trust evidence gate without changing the frozen H.264/CAVLC paper
 baseline.
 
-The current repository is intentionally blocked from promotion:
+The current repository has a small external seed corpus:
 
 - local registered corpus: `22/22` files available,
-- external registered files: `0`,
-- `external_public_dataset=false`,
-- Section 45 `promotion_ready=false`.
+- external registered files: `2`,
+- `external_public_dataset=true`,
+- Section 45 `promotion_ready=true` for the seed-corpus contract,
+- Section 46 `seed_surface_ready=true` but `all_product_ready=false`.
 
-Do not flip `external_public_dataset` to `true` until at least one external
-corpus entry has source, license, file metadata, and matching SHA-256 hashes.
+Do not treat this as broad public-dataset evidence. Broad claims require a
+larger and more diverse external corpus with source, license, file metadata,
+and matching SHA-256 hashes for every registered file.
 
 ## Step 1: Place The External Files
 
@@ -79,8 +81,8 @@ After corpus validation is clean, rerun:
 py -3.12 -m benchmark.safe_benchmark_runner --sections 44 45
 ```
 
-Section 45 is the only place that decides whether the Upgrade-v2 trust plane is
-promotion-ready.
+Section 45 decides whether the evidence gates pass for the current claim scope.
+Section 46 decides whether a feature may be described as product-ready.
 
 ## Step 5: Keep Claims Narrow
 

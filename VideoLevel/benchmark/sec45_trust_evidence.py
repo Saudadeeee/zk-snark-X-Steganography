@@ -52,6 +52,8 @@ def collect_data() -> dict[str, Any]:
     fingerprint = diagnostic["fingerprint_registry"]
     watermark = diagnostic["watermark_receipt"]
     circuits = diagnostic["circuits"]
+    zk_receipt_contracts = diagnostic.get("zk_receipt_contracts", {})
+    zk_contract_summary = zk_receipt_contracts.get("summary", {}) if isinstance(zk_receipt_contracts, dict) else {}
 
     real_clip = fingerprint["real_clip_benchmark"]
     best_real_threshold = _best_threshold_row(real_clip.get("rows", []))
@@ -120,12 +122,13 @@ def collect_data() -> dict[str, Any]:
         },
         "zk_circuits": {
             "status": "supported_for_toy_relations",
-            "evidence": "fingerprint and detector receipt circuits compile and Groth16 verify",
+            "evidence": "fingerprint and detector receipt circuits compile, Groth16 verify, and match public-signal contracts",
             "passed": bool(
                 circuits["fingerprint_verify"]["compile_ok"]
                 and circuits["fingerprint_verify"]["groth16_measurement"]["verified"]
                 and circuits["detector_receipt"]["compile_ok"]
                 and circuits["detector_receipt"]["groth16_measurement"]["verified"]
+                and zk_contract_summary.get("all_contracts_valid") is True
             ),
             "fingerprint_non_linear_constraints": int(
                 circuits["fingerprint_verify"]["stats"]["non_linear_constraints"]
@@ -133,6 +136,9 @@ def collect_data() -> dict[str, Any]:
             "detector_non_linear_constraints": int(
                 circuits["detector_receipt"]["stats"]["non_linear_constraints"]
             ),
+            "contract_valid_count": int(zk_contract_summary.get("valid_contract_count", 0)),
+            "contract_circuit_count": int(zk_contract_summary.get("circuit_count", 0)),
+            "groth16_bound_count": int(zk_contract_summary.get("groth16_bound_count", 0)),
         },
     }
 
@@ -166,6 +172,8 @@ def collect_data() -> dict[str, Any]:
             "watermark_resynchronized_accept_rate": float(stress["summary"]["resynchronized_accept_rate"]),
             "fingerprint_groth16_verified": bool(circuits["fingerprint_verify"]["groth16_measurement"]["verified"]),
             "detector_groth16_verified": bool(circuits["detector_receipt"]["groth16_measurement"]["verified"]),
+            "zk_receipt_contracts_valid": bool(zk_contract_summary.get("all_contracts_valid")),
+            "zk_receipt_contract_count": int(zk_contract_summary.get("circuit_count", 0)),
             "ready_workflows_valid": bool(claim_gates["ready_workflows"]["passed"]),
         },
     }

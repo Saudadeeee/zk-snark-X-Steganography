@@ -7,6 +7,8 @@ production-style interface for future C2PA/root-hash anchoring experiments.
 from .c2pa_bridge import (
     C2PAAnchor,
     C2PAAuditSidecar,
+    ProvenanceRegistry,
+    ProvenanceRegistryRecord,
     attach_anchor_to_manifest,
     build_c2pa_anchor,
     load_audit_sidecar,
@@ -17,6 +19,8 @@ from .c2pa_bridge import (
 __all__ = [
     "C2PAAnchor",
     "C2PAAuditSidecar",
+    "ProvenanceRegistry",
+    "ProvenanceRegistryRecord",
     "attach_anchor_to_manifest",
     "build_c2pa_anchor",
     "load_audit_sidecar",

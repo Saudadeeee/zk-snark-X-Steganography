@@ -17,6 +17,11 @@ import numpy as np
 from .canonical import canonical_json_hash
 
 
+FINGERPRINT_REGISTRY_SCHEMA = "zk-stego-fingerprint-registry-v2"
+FINGERPRINT_REGISTRY_LEGACY_SCHEMA = "zk-stego-fingerprint-registry-v1"
+FINGERPRINT_LOOKUP_RECEIPT_SCHEMA = "zk-stego-fingerprint-lookup-receipt-v1"
+
+
 @dataclass(frozen=True)
 class FingerprintPreprocessPolicy:
     """Deterministic preprocessing contract for future video fingerprints."""
@@ -204,6 +209,49 @@ class FingerprintRecord:
 
 
 @dataclass(frozen=True)
+class FingerprintLookupPolicy:
+    """Deterministic lookup policy for local canonical asset matching."""
+
+    threshold: int = 8
+    distance_metric: str = "hamming"
+    tie_break: str = "lowest_distance_then_record_id"
+    claim_scope: str = "canonical_asset_match"
+
+    def validate(self) -> None:
+        if self.threshold < 0:
+            raise ValueError("fingerprint lookup threshold must be non-negative")
+        if self.distance_metric != "hamming":
+            raise ValueError("only hamming distance is supported")
+        if self.tie_break != "lowest_distance_then_record_id":
+            raise ValueError("only lowest_distance_then_record_id tie break is supported")
+        if self.claim_scope != "canonical_asset_match":
+            raise ValueError("only canonical_asset_match scope is supported")
+
+    def to_dict(self) -> dict[str, object]:
+        self.validate()
+        return {
+            "threshold": self.threshold,
+            "distance_metric": self.distance_metric,
+            "tie_break": self.tie_break,
+            "claim_scope": self.claim_scope,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> "FingerprintLookupPolicy":
+        policy = cls(
+            threshold=int(data.get("threshold", 8)),
+            distance_metric=str(data.get("distance_metric", "hamming")),
+            tie_break=str(data.get("tie_break", "lowest_distance_then_record_id")),
+            claim_scope=str(data.get("claim_scope", "canonical_asset_match")),
+        )
+        policy.validate()
+        return policy
+
+    def commitment(self) -> str:
+        return canonical_json_hash(self.to_dict())
+
+
+@dataclass(frozen=True)
 class RegistryMatch:
     """Result of a private-registry style lookup."""
 
@@ -212,6 +260,9 @@ class RegistryMatch:
     distance: int | None
     threshold: int
     registry_commitment: str
+    candidate_count: int = 0
+    tied_record_ids: tuple[str, ...] = ()
+    record_commitment: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -220,35 +271,134 @@ class RegistryMatch:
             "distance": self.distance,
             "threshold": self.threshold,
             "registry_commitment": self.registry_commitment,
+            "candidate_count": self.candidate_count,
+            "tied_record_ids": list(self.tied_record_ids),
+            "record_commitment": self.record_commitment,
         }
+
+
+@dataclass(frozen=True)
+class FingerprintLookupReceipt:
+    """Auditable lookup receipt for a query against a registry commitment."""
+
+    query_fingerprint_hex: str
+    bit_count: int
+    policy: FingerprintLookupPolicy
+    match: RegistryMatch
+    registry_commitment: str
+    query_commitment: str
+    policy_commitment: str
+    lookup_commitment: str
+    schema: str = FINGERPRINT_LOOKUP_RECEIPT_SCHEMA
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema": self.schema,
+            "query_fingerprint_hex": self.query_fingerprint_hex,
+            "bit_count": self.bit_count,
+            "policy": self.policy.to_dict(),
+            "match": self.match.to_dict(),
+            "registry_commitment": self.registry_commitment,
+            "query_commitment": self.query_commitment,
+            "policy_commitment": self.policy_commitment,
+            "lookup_commitment": self.lookup_commitment,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> "FingerprintLookupReceipt":
+        policy_data = data.get("policy")
+        match_data = data.get("match")
+        if not isinstance(policy_data, dict):
+            raise ValueError("lookup receipt policy must be an object")
+        if not isinstance(match_data, dict):
+            raise ValueError("lookup receipt match must be an object")
+        match = RegistryMatch(
+            matched=bool(match_data["matched"]),
+            record_id=match_data.get("record_id") if match_data.get("record_id") is None else str(match_data["record_id"]),
+            distance=match_data.get("distance") if match_data.get("distance") is None else int(match_data["distance"]),
+            threshold=int(match_data["threshold"]),
+            registry_commitment=str(match_data["registry_commitment"]),
+            candidate_count=int(match_data.get("candidate_count", 0)),
+            tied_record_ids=tuple(str(v) for v in match_data.get("tied_record_ids", [])),
+            record_commitment=(
+                match_data.get("record_commitment")
+                if match_data.get("record_commitment") is None
+                else str(match_data["record_commitment"])
+            ),
+        )
+        return cls(
+            query_fingerprint_hex=str(data["query_fingerprint_hex"]),
+            bit_count=int(data["bit_count"]),
+            policy=FingerprintLookupPolicy.from_dict(policy_data),
+            match=match,
+            registry_commitment=str(data["registry_commitment"]),
+            query_commitment=str(data["query_commitment"]),
+            policy_commitment=str(data["policy_commitment"]),
+            lookup_commitment=str(data["lookup_commitment"]),
+            schema=str(data.get("schema", FINGERPRINT_LOOKUP_RECEIPT_SCHEMA)),
+        )
+
+    def verify(self, registry: "FingerprintRegistry") -> bool:
+        replay = registry.lookup_with_receipt(
+            self.query_fingerprint_hex,
+            bit_count=self.bit_count,
+            policy=self.policy,
+        )
+        return replay.lookup_commitment == self.lookup_commitment
 
 
 class FingerprintRegistry:
     """Small deterministic registry with Hamming-threshold lookup."""
 
-    def __init__(self, records: Iterable[FingerprintRecord] = ()):
-        self._records = list(records)
+    def __init__(
+        self,
+        records: Iterable[FingerprintRecord] = (),
+        *,
+        default_policy: FingerprintLookupPolicy | None = None,
+    ):
+        self.default_policy = default_policy or FingerprintLookupPolicy()
+        self.default_policy.validate()
+        self._records: list[FingerprintRecord] = []
+        for record in records:
+            self.add(record)
 
     @property
     def records(self) -> tuple[FingerprintRecord, ...]:
         return tuple(self._records)
 
     def add(self, record: FingerprintRecord) -> None:
+        if not record.record_id:
+            raise ValueError("fingerprint record_id must be non-empty")
+        if record.bit_count <= 0:
+            raise ValueError("fingerprint bit_count must be positive")
+        _hex_to_bits(record.fingerprint_hex, record.bit_count)
+        if any(existing.record_id == record.record_id for existing in self._records):
+            raise ValueError(f"duplicate fingerprint record_id: {record.record_id}")
         self._records.append(record)
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "schema": "zk-stego-fingerprint-registry-v1",
+            "schema": FINGERPRINT_REGISTRY_SCHEMA,
             "commitment": self.commitment(),
+            "default_policy": self.default_policy.to_dict(),
             "records": [record.to_dict() for record in self._records],
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> "FingerprintRegistry":
+        schema = data.get("schema", FINGERPRINT_REGISTRY_LEGACY_SCHEMA)
+        if schema not in {FINGERPRINT_REGISTRY_SCHEMA, FINGERPRINT_REGISTRY_LEGACY_SCHEMA}:
+            raise ValueError(f"unsupported fingerprint registry schema: {schema}")
         raw_records = data.get("records", [])
         if not isinstance(raw_records, list):
             raise ValueError("fingerprint registry records must be a list")
-        registry = cls(FingerprintRecord.from_dict(record) for record in raw_records)
+        policy_data = data.get("default_policy")
+        default_policy = (
+            FingerprintLookupPolicy.from_dict(policy_data)
+            if isinstance(policy_data, dict)
+            else FingerprintLookupPolicy()
+        )
+        registry = cls((FingerprintRecord.from_dict(record) for record in raw_records), default_policy=default_policy)
         expected_commitment = data.get("commitment")
         if expected_commitment is not None and str(expected_commitment) != registry.commitment():
             raise ValueError("fingerprint registry commitment mismatch")
@@ -268,22 +418,89 @@ class FingerprintRegistry:
         """Commit to the registry set without exposing an external DB."""
         return canonical_json_hash([record.to_public_commitment() for record in self._records])
 
-    def lookup(self, fingerprint_hex: str, *, bit_count: int = 64, threshold: int = 8) -> RegistryMatch:
-        """Return the nearest threshold match."""
-        best_record: FingerprintRecord | None = None
-        best_distance: int | None = None
-        for record in self._records:
+    def lookup_with_receipt(
+        self,
+        fingerprint_hex: str,
+        *,
+        bit_count: int = 64,
+        threshold: int | None = None,
+        policy: FingerprintLookupPolicy | None = None,
+    ) -> FingerprintLookupReceipt:
+        """Return the nearest threshold match plus an auditable receipt."""
+        lookup_policy = policy or FingerprintLookupPolicy(
+            threshold=self.default_policy.threshold if threshold is None else int(threshold),
+            distance_metric=self.default_policy.distance_metric,
+            tie_break=self.default_policy.tie_break,
+            claim_scope=self.default_policy.claim_scope,
+        )
+        lookup_policy.validate()
+        query_bits = _hex_to_bits(fingerprint_hex, bit_count)
+        normalized_query = _bits_to_hex(query_bits)
+
+        candidates: list[tuple[int, FingerprintRecord]] = []
+        for record in sorted(self._records, key=lambda item: item.record_id):
             if record.bit_count != bit_count:
                 continue
-            distance = hamming_distance_hex(fingerprint_hex, record.fingerprint_hex, bit_count)
-            if best_distance is None or distance < best_distance:
-                best_distance = distance
-                best_record = record
-        matched = best_record is not None and best_distance is not None and best_distance <= threshold
-        return RegistryMatch(
+            distance = hamming_distance_hex(normalized_query, record.fingerprint_hex, bit_count)
+            candidates.append((distance, record))
+
+        best_distance = min((distance for distance, _record in candidates), default=None)
+        tied = [
+            record
+            for distance, record in candidates
+            if best_distance is not None and distance == best_distance
+        ]
+        best_record = tied[0] if tied else None
+        matched = best_record is not None and best_distance is not None and best_distance <= lookup_policy.threshold
+        match = RegistryMatch(
             matched=matched,
             record_id=best_record.record_id if matched else None,
             distance=best_distance,
-            threshold=threshold,
+            threshold=lookup_policy.threshold,
             registry_commitment=self.commitment(),
+            candidate_count=len(candidates),
+            tied_record_ids=tuple(record.record_id for record in tied),
+            record_commitment=best_record.to_public_commitment() if matched and best_record else None,
         )
+        query_commitment = canonical_json_hash(
+            {
+                "fingerprint_hex": normalized_query,
+                "bit_count": bit_count,
+            }
+        )
+        policy_commitment = lookup_policy.commitment()
+        lookup_commitment = canonical_json_hash(
+            {
+                "schema": FINGERPRINT_LOOKUP_RECEIPT_SCHEMA,
+                "query_commitment": query_commitment,
+                "policy_commitment": policy_commitment,
+                "registry_commitment": self.commitment(),
+                "match": match.to_dict(),
+            }
+        )
+        return FingerprintLookupReceipt(
+            query_fingerprint_hex=normalized_query,
+            bit_count=bit_count,
+            policy=lookup_policy,
+            match=match,
+            registry_commitment=self.commitment(),
+            query_commitment=query_commitment,
+            policy_commitment=policy_commitment,
+            lookup_commitment=lookup_commitment,
+        )
+
+    def lookup(
+        self,
+        fingerprint_hex: str,
+        *,
+        bit_count: int = 64,
+        threshold: int = 8,
+        policy: FingerprintLookupPolicy | None = None,
+    ) -> RegistryMatch:
+        """Return the nearest threshold match."""
+        return self.lookup_with_receipt(
+            fingerprint_hex,
+            bit_count=bit_count,
+            threshold=threshold,
+            policy=policy,
+        ).match

@@ -147,21 +147,29 @@ sections:
 
 - Section 44: diagnostic trust architecture replay.
 - Section 45: claim-gated trust evidence distilled from Section 44.
+- Section 46: explicit product-readiness gate for the trust plane.
 
 Latest local Section 45 replay reports:
 
-- claim gates: `6/6` passed,
+- claim gates: `7/7` passed,
 - `promotion_ready=true`,
 - corpus validation: local registered corpus `22/22` present, external seed
   corpus `2/2` present,
 - no promotion blockers remain for the seed corpus contract.
 
 This supports branch-level development claims for C2PA anchoring, local-corpus
-fingerprint lookup, keyed-template watermark receipt, mock TEE attestation, and
+fingerprint lookup, keyed-template watermark receipt, software attestation, and
 toy ZK receipt circuits. The ready-to-use API surface is `src.trust.workflows`
 and covers provenance, fingerprint registry, watermark receipt, and
-attestation workflows. For broad public-dataset claims, the seed corpus is not
-enough; keep that wording separate from the promoted seed-corpus evidence.
+attestation workflows. Section `46` is the product-readiness contract and
+currently reports `seed_surface_ready=true`, `product_ready_count=4/7`, and
+`all_product_ready=false`. The product-ready scope is local C2PA-style
+root-anchor registry, local fingerprint-registry lookup receipts, controlled
+watermark receipt replay, and local workflow API/CLI; broader C2PA compliance,
+public registry integration, platform round-trip survival, broad public-video
+fingerprint robustness, and robust watermarking remain future work.
+For broad public-dataset claims, the seed corpus is not enough; keep that
+wording separate from the promoted seed-corpus evidence.
 
 ## Final Paper Checklist
 

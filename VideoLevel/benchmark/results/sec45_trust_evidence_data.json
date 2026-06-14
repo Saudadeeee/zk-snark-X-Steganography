@@ -132,10 +132,13 @@
     },
     "zk_circuits": {
       "status": "supported_for_toy_relations",
-      "evidence": "fingerprint and detector receipt circuits compile and Groth16 verify",
+      "evidence": "fingerprint and detector receipt circuits compile, Groth16 verify, and match public-signal contracts",
       "passed": true,
       "fingerprint_non_linear_constraints": 606,
-      "detector_non_linear_constraints": 465
+      "detector_non_linear_constraints": 465,
+      "contract_valid_count": 2,
+      "contract_circuit_count": 2,
+      "groth16_bound_count": 2
     }
   },
   "metrics": {
@@ -150,6 +153,8 @@
     "watermark_resynchronized_accept_rate": 1.0,
     "fingerprint_groth16_verified": true,
     "detector_groth16_verified": true,
+    "zk_receipt_contracts_valid": true,
+    "zk_receipt_contract_count": 2,
     "ready_workflows_valid": true
   }
 }

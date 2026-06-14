@@ -13,10 +13,12 @@ and which files are rebuildable diagnostics or local cache.
 - `benchmark/*.py`
 - `src/trust/**`
 - `src/trust/workflows.py`
+- `src/trust/workflow_contracts.py`
 - `src/provenance/**`
 - `src/runtest/*.py`
 - `benchmark/trust_architecture_diagnostic.py`
 - `benchmark/sec45_trust_evidence.py`
+- `benchmark/sec46_product_readiness.py`
 - `benchmark/trust_corpus.py`
 - `benchmark/trust_corpus_manifest.json`
 - `circuits/payload_verify.circom`
@@ -60,6 +62,7 @@ Keep benchmark outputs that are directly referenced by paper evidence:
 - `benchmark/results/trust_corpus_validation.json`
 - `benchmark/results/sec45_trust_evidence_data.json`
 - `benchmark/results/sec45_trust_evidence_summary.png`
+- `benchmark/results/sec46_product_readiness_data.json`
 
 ## Rebuildable Or Local Only
 
@@ -77,6 +80,7 @@ specific paper table depends on them:
 - `data/output/*.positions.json`
 - `data/output/*.meta.json`
 - `data/output/*.manifest.json`
+- `data/output/*provenance_registry*.json`
 - `data/external/trust_corpus/*.mp4`
 
 ## Never Commit
@@ -114,7 +118,7 @@ Remove-Item -Recurse -Force .cache
 - Do not mix blind-core diagnostics into paper-grade evidence.
 - Do not mix future trust architecture diagnostics into the frozen baseline
   paper-grade evidence. On `Upgrade-v2`, use section `45` as a claim-gated
-  evidence layer and keep promotion blockers explicit.
+  evidence layer and section `46` as the product-readiness gate.
 - Do not use raw safe-position counts as final capacity evidence.
 - Keep sidecar files only when they are needed to reproduce a specific
   operating-point artifact.

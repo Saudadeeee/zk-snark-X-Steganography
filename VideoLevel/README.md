@@ -370,8 +370,11 @@ py -3.12 benchmark/statistical_benchmark.py --section sec1 --runs 3
 # GOP sweep
 py -3.12 benchmark/sec10_gop_sweep.py --sequences foreman_q22_g1
 
-# Upgrade-v2 trust architecture diagnostics and claim-gated evidence
-py -3.12 -m benchmark.safe_benchmark_runner --sections 44 45
+# Upgrade-v2 trust architecture diagnostics, claim gates, and product-readiness gates
+py -3.12 -m benchmark.safe_benchmark_runner --sections 44 45 46
+
+# Product-readiness JSON only
+py -3.12 -m benchmark.sec46_product_readiness
 
 # Validate the trust corpus promotion contract
 py -3.12 -m benchmark.trust_corpus
@@ -383,19 +386,32 @@ py -3.12 -m benchmark.trust_corpus register-file --id sample-001 --path data/ext
 Upgrade-v2 application-level trust workflows are exposed through
 `src.trust.workflows` for provenance anchoring, fingerprint registry lookup,
 watermark receipt, and model/device attestation.
+Every workflow output includes a versioned `schema` and `workflow` field, with
+validators in `src.trust.workflow_contracts`.
 
 CLI usage:
 
 ```bash
-py -3.12 -m src.trust.workflows provenance --manifest manifest.json --registry-uri registry://example/asset --output provenance.json
+py -3.12 -m src.trust.workflows provenance --manifest manifest.json --registry-uri registry://example/asset --registry-out provenance_registry.json --output provenance.json
 py -3.12 -m src.trust.workflows fingerprint --frames frames.npy --records registry.json --threshold 0 --output fingerprint.json
 py -3.12 -m src.trust.workflows watermark --frames embedded.npy --key demo-key --frame-shape 64 64 --threshold 0.5 --output watermark.json
 py -3.12 -m src.trust.workflows attestation --signer-key demo-key --video-path video.bin --model-config-path model.json --model-binary-path model.bin --policy-id policy-v1 --timestamp 2026-06-09T00:00:00Z --output attestation.json
+py -3.12 -m src.trust.workflows attestation --signer-scheme ed25519 --signer-key demo-seed --video-path video.bin --model-config-path model.json --model-binary-path model.bin --policy-id policy-v1 --timestamp 2026-06-09T00:00:00Z --output attestation_ed25519.json
 ```
 
+Section `46` is the product-readiness source of truth. Current state:
+
+- `seed_surface_ready=true`.
+- `all_product_ready=false`.
+- `product_ready`: C2PA-style local root-anchor registry, local fingerprint-registry lookup receipts, controlled watermark receipt replay, and workflow API/CLI.
+- `product_seed`: none.
+- `prototype`: software attestation, toy ZK receipt circuits.
+- `blocked`: ZKML model binding.
+
 `benchmark.trust_corpus` currently validates a two-file external CC0 seed
-corpus and keeps broad-public-dataset claims blocked until a larger external
-corpus with source, license, file metadata, and matching hashes is registered.
+corpus. It is enough for seed-scope evidence, but broad-public-dataset claims
+remain blocked until a larger external corpus with source, license, file
+metadata, and matching hashes is registered.
 See `doc/trust_corpus_onboarding.md` for the step-by-step corpus playbook.
 
 ---
@@ -463,6 +479,7 @@ See `doc/trust_corpus_onboarding.md` for the step-by-step corpus playbook.
 - **Locked Operating-Point Mode:** the strongest end-to-end path currently reuses pre-validated operating positions for selected benchmark assets.
 - **Broad Public API Mode:** generic embedding without locked operating positions still under-fills on representative assets and should not be used for headline claims.
 - **Blind-Core Branch:** candidate synchronization and proxy research exists, but blind extraction is not yet a usable system feature and should be treated as future work.
+- **Upgrade-v2 Product Scope:** trust-plane seed surfaces are usable for local workflows, but section `46` currently blocks full-product claims for robust watermarking, hardware TEE attestation, broad public fingerprint robustness, full C2PA compliance, and ZKML model binding.
 - **High QP Limits:** QP=32 assets have limited capacity under 40 dB guard.
 - **Parser Resync Warnings:** Some streams emit warnings but still decode correctly.
 

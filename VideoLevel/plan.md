@@ -1,6 +1,6 @@
 # ZK-Stego VideoLevel Plan
 
-Last updated: 2026-06-09
+Last updated: 2026-06-10
 Branch: `Upgrade-v2`
 
 This plan reflects the repository as it exists now. The frozen H.264/CAVLC +
@@ -263,7 +263,8 @@ Build the future branch in this order:
 2. Private fingerprint registry lookup.
 3. Robust watermark receipt.
 4. TEE attestation bundle.
-5. ZKML only after a realistic proving target exists.
+5. Toy ZK receipt contracts for reduced relations.
+6. ZKML only after a realistic proving target exists.
 
 Rules:
 
@@ -277,6 +278,9 @@ Current implementation status:
 - [x] Add experimental trust-plane package under `src/trust`.
 - [x] Add ready-to-use workflow facade `src/trust/workflows.py`.
 - [x] Add terminal CLI entrypoint for `src.trust.workflows` and lock it with CLI tests.
+- [x] Add versioned workflow output schemas in `src/trust/workflow_contracts.py`.
+- [x] Add Ed25519 software attestation signer/verifier path while keeping mock
+      HMAC for deterministic tests.
 - [x] Add diagnostic runner `benchmark/trust_architecture_diagnostic.py`.
 - [x] Add interface tests in `src/runtest/test_future_trust_architecture.py`.
 - [x] Register diagnostic-grade runner section `44`.
@@ -287,18 +291,43 @@ Current implementation status:
       helper.
 - [x] Add claim-gated evidence runner section `45`.
 - [x] Validate section `45` through `safe_benchmark_runner.py`.
+- [x] Add product-readiness report `src/trust/product_readiness.py`.
+- [x] Register product-readiness runner section `46`.
+- [x] Validate section `46` through `safe_benchmark_runner.py`.
+- [x] Add ZK receipt contract helpers in `src/trust/zk_receipts.py`.
+- [x] Add public-signal layout test vectors for `fingerprint_verify.circom`
+      and `detector_receipt.circom`.
+- [x] Register ZK receipt contract runner section `47`.
+- [x] Validate section `47` through `safe_benchmark_runner.py`.
 - [ ] Promote a future trust plane into paper-grade benchmark evidence only
-      after the corpus and claim-language blockers are resolved.
+      after section `46` reports `product_ready=true` for that exact feature.
 
-Current diagnostic status on 2026-06-09:
+Current diagnostic status on 2026-06-10:
 
-- Future trust interface tests now pass `17/17`, including terminal CLI and
-  trust-corpus validator coverage.
+- Future trust interface tests now pass `24/24`, including terminal CLI,
+  Ed25519 software attestation, trust-corpus validator coverage, and
+  product-readiness and ZK receipt contract coverage.
+- Section `46`: passed with schema validation OK.
+- Section `46` reports `seed_surface_ready=true`, `all_product_ready=false`,
+  and `product_ready_count=4/7`.
+- Section `46` marks C2PA-style local root-anchor registry, fingerprint-registry
+  lookup receipts, controlled watermark receipt replay, and workflow API/CLI as
+  `product_ready` within their stated local integration scope.
+- Section `46` marks software attestation and toy ZK receipt circuits as
+  `prototype`.
+- Section `46` marks ZKML model binding as `blocked`.
 - Section `44`: passed with schema validation OK.
+- Section `47`: passed with schema validation OK.
 - `fingerprint_verify.circom`: compiled and proved, `606` non-linear
   constraints, `842` linear constraints, Groth16 verify passed.
 - `detector_receipt.circom`: compiled and proved, `465` non-linear
   constraints, `448` linear constraints, Groth16 verify passed.
+- `src/trust/zk_receipts.py` now defines versioned public-signal contracts and
+  test vectors for both toy receipt circuits.
+- Section `47` reports `all_contracts_valid=true`, `valid_contract_count=2/2`,
+  and `groth16_bound_count=2/2`.
+- Section `45` now gates `zk_circuits` on compile success, Groth16 verification,
+  and matching public-signal contracts.
 - The diagnostic JSON is `benchmark/results/trust_architecture_diagnostic.json`.
 - Real-clip fingerprint diagnostics now run on local H.264 assets.
 - Committed synthetic fingerprint diagnostics now include positive and negative
@@ -322,11 +351,16 @@ Current diagnostic status on 2026-06-09:
   transforms (`fixed_accept_rate=0.8571`). Resynchronized detector scoring
   passes 7/7 (`resynchronized_accept_rate=1.0`), including `crop8_resize`.
   H.264 ffmpeg roundtrip at CRF28 and CRF35 passes.
-- Ready-to-use trust workflow facade is covered in section `44` and section
-  `45`: provenance, fingerprint registry, watermark receipt, and attestation
+- Ready-to-use trust workflow facade is covered in sections `44`, `45`, and
+  `46`: provenance, fingerprint registry, watermark receipt, and attestation
   workflows validate through `src.trust.workflows`.
+- Workflow outputs now expose versioned `schema` and `workflow` fields and are
+  checked by contract validators in both Python and CLI tests.
 - The same trust workflows are now runnable from the terminal via
   `python -m src.trust.workflows`.
+- Attestation workflow supports both deterministic mock HMAC signatures and
+  Ed25519 software signatures. This is still not hardware-backed TEE
+  attestation.
 - Section `45` claim gates pass `7/7`, and `promotion_ready=true` for the
   current seed corpus contract.
 - `benchmark.trust_corpus` validates the promotion contract: local registered
@@ -338,8 +372,12 @@ Current diagnostic status on 2026-06-09:
 - Section `45` artifacts are
   `benchmark/results/sec45_trust_evidence_data.json` and
   `benchmark/results/sec45_trust_evidence_summary.png`.
+- Section `46` artifact is
+  `benchmark/results/sec46_product_readiness_data.json`.
+- Section `47` artifact is
+  `benchmark/results/sec47_zk_receipt_contracts_data.json`.
 - Upgrade-v2 trust replay command:
-  `py -3.12 -m benchmark.safe_benchmark_runner --sections 44 45`.
+  `py -3.12 -m benchmark.safe_benchmark_runner --sections 44 45 46 47`.
 - Trust corpus validation command:
   `py -3.12 -m benchmark.trust_corpus`.
 - External corpus entry helper:
@@ -362,13 +400,61 @@ Current-system paper:
 
 Upgrade-v2 trust architecture:
 
-- The seed corpus contract is now promotable and usable.
+- The seed corpus contract is now promotable and usable for seed-scope claims.
+- The product-readiness contract is now explicit. No feature is full-product
+  ready yet; section `46` is the promotion gate.
 - Broad public-dataset claims are still future work and need a larger external
   corpus before the wording can move from seed-corpus sanity checks to broad
   robustness claims.
-- The next real step is to add more external files through
-  `doc/trust_corpus_onboarding.md`; do not build more architecture until that
-  evidence set is larger and explicitly measured.
+- The next real step is to choose exactly one `product_seed` track and close its
+  blockers before adding new architecture.
+
+### 5.0.2 Productization Playbook
+
+Section `46` is the source of truth for product readiness.
+
+Allowed current claims:
+
+- Upgrade-v2 has a ready-to-use local Python/CLI trust-workflow surface.
+- C2PA-style root anchoring is product-ready only for local root-anchor
+  resolution: embedded 32-byte root, audit sidecar, and local JSON registry.
+- Fingerprint registry lookup is product-ready only for local canonical asset
+  matching: deterministic luma fingerprints, lookup policy, registry
+  commitment, query commitment, and lookup receipt.
+- Watermark receipt is product-ready only for controlled keyed-template replay:
+  detector commitment, policy commitment, payload commitment, resynchronized
+  score, and verifier replay.
+- Software attestation supports mock HMAC and Ed25519 signatures, but not
+  hardware-backed TEE attestation.
+- ZK receipt circuits are toy reduced relations.
+- ZKML model binding is blocked.
+
+Blocked current claims:
+
+- Full C2PA compliance.
+- Broad public-video fingerprint robustness.
+- SynthID/Video-Seal-level robust watermarking.
+- Hardware-backed model/device attestation.
+- Generated-by-exact-model provenance.
+- Production ZKML model binding.
+
+Promotion order:
+
+1. Harden `fingerprint_registry` beyond local scope: grow the external corpus,
+   add revocation/audit logging, and replace toy proof relations with a real
+   inclusion or policy-compliance relation if privacy is claimed.
+2. Harden `c2pa_root_anchor` beyond local registry scope: integrate a real C2PA
+   signer/verifier or documented bridge adapter, then add metadata-strip and
+   platform-roundtrip fixtures.
+3. Harden `workflow_api_cli`: add multi-version compatibility tests and package
+   boundary rules before exposing it as a hosted service.
+4. Harden `watermark_receipt` beyond controlled replay: define a real detector
+   contract, public robustness matrix, and ZK detector-score relation before
+   making robust watermark claims.
+5. Keep `tee_model_attestation` in prototype until one real hardware quote
+   verifier path exists.
+6. Keep `zkml_model_binding` blocked until a small realistic model-binding
+   relation is selected.
 
 ### 5.1 ZK + C2PA Provenance Root
 
@@ -592,6 +678,56 @@ Definition of done:
 - The attestation path does not depend on fragile CAVLC extraction.
 - ZKML remains clearly marked as future interface work unless and until a
   realistic proving target exists.
+
+### 5.5 ZK Receipt Circuit Contracts
+
+Value:
+
+- Turns the toy Circom receipts into explicit, versioned proof contracts.
+- Locks the public-signal layout for each circuit so downstream verifiers know
+  what the Groth16 public array means.
+- Makes circuit evidence auditable beyond "snarkjs returned OK".
+
+Current scope:
+
+- `fingerprint_verify.circom`: toy 64-bit Hamming-distance threshold proof with
+  private record bits and public query bits/threshold.
+- `detector_receipt.circom`: toy four-feature dot-product threshold proof with
+  private detector weights and public features/threshold.
+- The contract binds expected public outputs, public inputs, private inputs,
+  test-vector witness commitments, and public signal order.
+
+Future tasks:
+
+- [x] Add `src/trust/zk_receipts.py`.
+- [x] Add versioned circuit-contract dataclasses.
+- [x] Add local test vectors for fingerprint and detector receipt circuits.
+- [x] Validate expected public signal layout against Groth16 public signals.
+- [x] Register runner section `47`.
+- [x] Add schema validation for section `47` in `safe_benchmark_runner.py`.
+- [x] Make section `45` require valid ZK receipt contracts for `zk_circuits`.
+- [ ] Add proving-key metadata contract: circuit hash, r1cs hash, zkey hash,
+      vkey hash, ptau hash, snarkjs version, circom version.
+- [ ] Add a real registry-inclusion relation before claiming private registry
+      membership proof.
+- [ ] Add a detector-score relation connected to the keyed-template detector
+      before claiming watermark detector proof parity.
+
+Definition of done for prototype:
+
+- Section `47` passes with `all_contracts_valid=true`.
+- Both toy circuits have stable public-signal contract commitments.
+- Section `45` refuses `zk_circuits` evidence if public signals no longer match
+  the contract.
+
+Definition of done for product promotion:
+
+- A single production relation is chosen and frozen.
+- Proving-key metadata and trusted-setup governance are versioned.
+- The circuit relation is connected to a real product workflow, not just a toy
+  witness.
+- Section `46` marks `zk_receipt_circuits` as product-ready only after those
+  conditions are met.
 
 ---
 

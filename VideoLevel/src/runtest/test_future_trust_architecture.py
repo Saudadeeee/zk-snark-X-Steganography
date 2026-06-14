@@ -16,6 +16,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from src.provenance import (
+    ProvenanceRegistry,
     attach_anchor_to_manifest,
     build_c2pa_anchor,
     load_audit_sidecar,
@@ -26,26 +27,35 @@ from src.runtest._helpers import run_test, section, summarise
 from src.trust import (
     AttestationBundle,
     AttestationSidecar,
+    AttestationVerificationPolicy,
     CalibratedThresholdDetector,
+    Ed25519AttestationSigner,
+    FingerprintLookupPolicy,
+    FingerprintLookupReceipt,
     FingerprintRecord,
     FingerprintRegistry,
     FingerprintPreprocessPolicy,
     KeyedTemplateDetector,
     MockTEESigner,
     TinyThresholdDetector,
+    WatermarkReceiptPolicy,
     ZKMLInterfaceSpec,
     attestation_workflow,
     build_provenance_root,
     compute_framehash,
     compute_video_fingerprint,
     extract_tiny_video_features,
+    evaluate_product_readiness,
     fingerprint_workflow,
     load_attestation_sidecar,
     provenance_workflow,
     sample_frame_indices,
     save_attestation_sidecar,
+    validate_workflow_output,
     verify_provenance_root,
+    verify_attestation_bundle,
     watermark_workflow,
+    zk_receipt_test_vectors,
 )
 from src.manifest import StegoManifest, VideoMetadata
 from benchmark.trust_corpus import build_external_file_entry, validate_trust_corpus_manifest
@@ -71,6 +81,24 @@ def t_c2pa_bridge_audit_sidecar_roundtrip():
         save_audit_sidecar(sidecar, path)
         loaded = load_audit_sidecar(path)
         assert verify_c2pa_anchor(loaded, manifest), "loaded audit sidecar should verify"
+    finally:
+        if os.path.exists(path):
+            os.remove(path)
+
+
+def t_provenance_registry_roundtrip():
+    manifest = {"claim_generator": "registry-test", "assertions": [{"label": "asset", "value": "asset-1"}]}
+    registry = ProvenanceRegistry()
+    record = registry.publish(manifest, registry_uri="registry://unit-test/asset-1")
+    sidecar = build_c2pa_anchor(manifest, registry_uri=record.registry_uri)
+    assert registry.verify_anchor(sidecar, embedded_payload=sidecar.anchor.payload_bytes)
+
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "output", "_test_provenance_registry.json")
+    try:
+        registry.save(path)
+        loaded = ProvenanceRegistry.load(path)
+        assert loaded.verify_anchor(sidecar, embedded_payload=sidecar.anchor.payload_bytes)
+        assert not loaded.verify_anchor(sidecar, embedded_payload=b"\x00" * 32)
     finally:
         if os.path.exists(path):
             os.remove(path)
@@ -106,6 +134,31 @@ def t_fingerprint_registry_threshold_match():
     match = registry.lookup(fingerprint, threshold=0)
     assert match.matched, "exact fingerprint should match"
     assert match.record_id == "clip-1", "registry returned wrong record"
+    assert match.candidate_count == 1
+
+
+def t_fingerprint_lookup_receipt_roundtrip():
+    frame = np.arange(64 * 64, dtype=np.float32).reshape(64, 64)
+    fingerprint = compute_framehash(frame)
+    policy = FingerprintLookupPolicy(threshold=0)
+    registry = FingerprintRegistry([FingerprintRecord("clip-1", fingerprint)], default_policy=policy)
+    receipt = registry.lookup_with_receipt(fingerprint, policy=policy)
+    assert receipt.match.matched
+    assert receipt.verify(registry)
+
+    encoded = receipt.to_dict()
+    loaded = FingerprintLookupReceipt.from_dict(encoded)
+    assert loaded.lookup_commitment == receipt.lookup_commitment
+    assert loaded.verify(registry)
+
+    try:
+        registry.add(FingerprintRecord("clip-1", fingerprint))
+        raise AssertionError("duplicate record_id should be rejected")
+    except ValueError:
+        pass
+
+    other = FingerprintRegistry([FingerprintRecord("clip-2", "0" * len(fingerprint))], default_policy=policy)
+    assert not loaded.verify(other), "receipt should not verify against a different registry"
 
 
 def t_video_fingerprint_policy_is_deterministic():
@@ -161,6 +214,39 @@ def t_keyed_template_detector_separates_embedded_clip():
     assert b"unit-test-key".hex() not in detector.commitment
 
 
+def t_watermark_receipt_policy_verifies_replay():
+    base = np.stack(
+        [
+            np.tile(np.linspace(32 + i * 6, 220 + i * 6, 32, dtype=np.float32), (32, 1))
+            for i in range(4)
+        ]
+    )
+    detector = KeyedTemplateDetector(b"unit-test-key", frame_shape=(32, 32), grid_size=8)
+    embedded = detector.embed(base, strength=9.0)
+    calibration = detector.calibrate_resynchronized([embedded], [base], crop_margins=(0, 4))
+    policy = WatermarkReceiptPolicy(
+        scoring_mode="resynchronized",
+        threshold_source="calibrated",
+        crop_margins=(0, 4),
+    )
+    receipt = detector.receipt_resynchronized(
+        embedded,
+        threshold=calibration.threshold,
+        payload_commitment="aa" * 32,
+        crop_margins=policy.crop_margins,
+        policy=policy,
+    )
+    report = detector.verify_receipt(embedded, receipt, policy=policy, payload_commitment="aa" * 32)
+    assert report.verified
+    assert report.expected_commitment == report.observed_commitment
+    assert receipt.policy_commitment == policy.commitment()
+    assert receipt.alignment is not None
+
+    wrong_detector = KeyedTemplateDetector(b"wrong-key", frame_shape=(32, 32), grid_size=8)
+    wrong_report = wrong_detector.verify_receipt(embedded, receipt, policy=policy, payload_commitment="aa" * 32)
+    assert not wrong_report.verified
+
+
 def t_keyed_template_detector_resynchronizes_cropped_clip():
     base = np.stack(
         [
@@ -195,6 +281,35 @@ def t_mock_tee_attestation_signature():
     assert not wrong.verify(signed), "wrong key must not verify attestation"
 
 
+def t_ed25519_attestation_signature():
+    bundle = AttestationBundle(
+        video_hash="aa" * 32,
+        model_config_hash="bb" * 32,
+        model_binary_hash="cc" * 32,
+        policy_id="policy-v1",
+        timestamp="2026-06-08T00:00:00Z",
+    )
+    signer = Ed25519AttestationSigner.from_seed(b"ed25519-test-seed")
+    signed = signer.sign(bundle)
+    assert signed.scheme == "ed25519"
+    assert signer.verify(signed), "Ed25519 signature should verify"
+
+    tampered = AttestationBundle(
+        video_hash="00" * 32,
+        model_config_hash=bundle.model_config_hash,
+        model_binary_hash=bundle.model_binary_hash,
+        policy_id=bundle.policy_id,
+        timestamp=bundle.timestamp,
+    )
+    tampered_signed = type(signed)(
+        bundle=tampered,
+        signature=signed.signature,
+        signer_id=signed.signer_id,
+        scheme=signed.scheme,
+    )
+    assert not signer.verify(tampered_signed), "tampered bundle should fail Ed25519 verification"
+
+
 def t_attestation_sidecar_roundtrip():
     bundle = AttestationBundle(
         video_hash="aa" * 32,
@@ -219,6 +334,55 @@ def t_attestation_sidecar_roundtrip():
             os.remove(path)
 
 
+def t_attestation_verification_policy_and_report():
+    bundle = AttestationBundle(
+        video_hash="aa" * 32,
+        model_config_hash="bb" * 32,
+        model_binary_hash="cc" * 32,
+        policy_id="policy-v1",
+        timestamp="2026-06-08T00:00:00Z",
+    )
+    signer = Ed25519AttestationSigner.from_seed(b"ed25519-test-seed")
+    signed = signer.sign(bundle)
+    sidecar = AttestationSidecar(signed_attestation=signed, provenance_root_hash="dd" * 32)
+
+    policy = AttestationVerificationPolicy(
+        expected_signer_id=signed.signer_id,
+        expected_scheme=signed.scheme,
+        allow_software_only=True,
+        claim_scope="software_signature_bundle",
+    )
+    report = verify_attestation_bundle(signer, signed, policy=policy, sidecar=sidecar)
+    assert report.verified
+    assert report.signature_valid
+    assert report.sidecar_roundtrip_valid
+    assert report.hardware_root_present is False
+    assert report.policy.claim_scope == "software_signature_bundle"
+    assert report.bundle_commitment == bundle.statement_hash()
+    assert report.signed_commitment == signed.commitment()
+
+    mismatch_policy = AttestationVerificationPolicy(
+        expected_signer_id="other-signer",
+        expected_scheme=signed.scheme,
+        allow_software_only=True,
+    )
+    mismatch_report = verify_attestation_bundle(signer, signed, policy=mismatch_policy)
+    assert not mismatch_report.verified
+    assert mismatch_report.reason == "signer_id mismatch"
+
+    hardware_policy = AttestationVerificationPolicy(
+        expected_signer_id=signed.signer_id,
+        expected_scheme=signed.scheme,
+        hardware_root="hardware-root",
+        require_hardware_root=True,
+        allow_software_only=False,
+        claim_scope="hardware_attestation_bundle",
+    )
+    hardware_report = verify_attestation_bundle(signer, signed, policy=hardware_policy)
+    assert not hardware_report.verified
+    assert hardware_report.reason == "missing hardware root"
+
+
 def t_zkml_interface_is_explicit_stub():
     spec = ZKMLInterfaceSpec(
         circuit_name="future_detector",
@@ -227,6 +391,23 @@ def t_zkml_interface_is_explicit_stub():
     )
     assert spec.validate_interface_only(), "ZKML spec should be interface-only"
     assert spec.status == "interface_only", "ZKML must not imply implementation"
+
+
+def t_zk_receipt_contract_vectors_validate():
+    vectors = zk_receipt_test_vectors()
+    assert len(vectors) == 2
+    for vector in vectors:
+        report = vector.validate()
+        assert report.verified
+        assert report.relation_valid
+        assert report.public_layout_valid
+        assert report.contract_commitment == vector.contract.commitment()
+        assert report.witness_commitment == vector.witness_commitment()
+
+        tampered = list(vector.expected_public_signals)
+        tampered[0] = "0" if tampered[0] == "1" else "1"
+        tamper_report = vector.validate(tampered)
+        assert not tamper_report.verified
 
 
 def t_ready_to_use_trust_workflows():
@@ -250,12 +431,15 @@ def t_ready_to_use_trust_workflows():
             registry_uri="registry://workflow/asset-1",
             stego_manifest=stego_manifest,
             sidecar_path=c2pa_path,
+            registry_path=registry_path,
         )
         assert provenance.verified
         assert provenance.embedded_payload_tamper_detected
         assert provenance.manifest_tamper_detected
         assert provenance.attached_manifest.video.provenance_root_hash == provenance.root.manifest_root_hash
         assert provenance.sidecar_roundtrip_valid
+        assert provenance.registry_roundtrip_valid
+        assert validate_workflow_output("provenance", provenance.to_dict()) == []
 
         frames = np.stack([np.full((32, 32), i, dtype=np.float32) for i in range(6)])
         policy = FingerprintPreprocessPolicy(sample_count=3, hash_size=8)
@@ -264,6 +448,7 @@ def t_ready_to_use_trust_workflows():
         fingerprint = fingerprint_workflow(frames, [record], policy=policy, threshold=0)
         assert fingerprint.match.matched
         assert fingerprint.match.record_id == "canonical-asset-1"
+        assert validate_workflow_output("fingerprint", fingerprint.to_dict()) == []
         fingerprint.registry.save(registry_path)
         loaded_registry = FingerprintRegistry.load(registry_path)
         assert loaded_registry.commitment() == fingerprint.registry.commitment()
@@ -285,6 +470,8 @@ def t_ready_to_use_trust_workflows():
             payload_commitment=provenance.root.manifest_root_hash,
         )
         assert watermark.resynchronized_receipt.valid
+        assert watermark.verification_report.verified
+        assert validate_workflow_output("watermark", watermark.to_dict()) == []
         watermark.resynchronized_receipt.save(receipt_path)
         loaded_receipt = watermark.resynchronized_receipt.load(receipt_path)
         assert loaded_receipt.commitment() == watermark.resynchronized_receipt.commitment()
@@ -307,6 +494,10 @@ def t_ready_to_use_trust_workflows():
         )
         assert attestation.signature_valid
         assert attestation.sidecar_roundtrip_valid
+        assert attestation.verification_policy is not None
+        assert attestation.verification_report is not None
+        assert attestation.verification_report.verified
+        assert validate_workflow_output("attestation", attestation.to_dict()) == []
     finally:
         for path in (
             c2pa_path,
@@ -395,11 +586,15 @@ def t_trust_workflows_cli_entrypoints():
             "registry://cli-test/asset-1",
             "--sidecar-out",
             str(provenance_sidecar),
+            "--registry-out",
+            str(tmp / "provenance_registry.json"),
             "--output",
             str(provenance_out),
         )
         provenance_json = json.loads(provenance_out.read_text(encoding="utf-8"))
         assert provenance_json["verified"]
+        assert validate_workflow_output("provenance", provenance_json) == []
+        assert provenance_json["registry_roundtrip_valid"]
         assert provenance_json["embedded_payload_tamper_detected"]
         assert provenance_json["manifest_tamper_detected"]
         assert provenance_sidecar.exists()
@@ -422,6 +617,7 @@ def t_trust_workflows_cli_entrypoints():
         )
         fingerprint_json = json.loads(fingerprint_out.read_text(encoding="utf-8"))
         assert fingerprint_json["match"]["matched"]
+        assert validate_workflow_output("fingerprint", fingerprint_json) == []
         assert fingerprint_json["match"]["record_id"] == "canonical-asset-1"
         assert "registry_commitment" in fingerprint_run.stdout
 
@@ -443,6 +639,7 @@ def t_trust_workflows_cli_entrypoints():
         )
         watermark_json = json.loads(watermark_out.read_text(encoding="utf-8"))
         assert watermark_json["resynchronized_receipt"]["valid"]
+        assert validate_workflow_output("watermark", watermark_json) == []
         assert watermark_json["calibration"]["accuracy"] == 1.0
         assert "resynchronized_receipt" in watermark_run.stdout
 
@@ -469,9 +666,39 @@ def t_trust_workflows_cli_entrypoints():
         )
         attestation_json = json.loads(attestation_out.read_text(encoding="utf-8"))
         assert attestation_json["signature_valid"]
+        assert attestation_json["verification_policy"]["claim_scope"] == "software_signature_bundle"
+        assert attestation_json["verification_report"]["verified"]
+        assert validate_workflow_output("attestation", attestation_json) == []
         assert attestation_json["sidecar_roundtrip_valid"]
         assert attestation_sidecar.exists()
         assert "signature_valid" in attestation_run.stdout
+
+        ed25519_out = tmp / "attestation_ed25519.json"
+        ed25519_run = run_cli(
+            "attestation",
+            "--signer-scheme",
+            "ed25519",
+            "--signer-key",
+            "workflow-ed25519-seed",
+            "--video-path",
+            str(video_path),
+            "--model-config-path",
+            str(model_config_path),
+            "--model-binary-path",
+            str(model_binary_path),
+            "--policy-id",
+            "workflow-policy-v1",
+            "--timestamp",
+            "2026-06-09T00:00:00Z",
+            "--output",
+            str(ed25519_out),
+        )
+        ed25519_json = json.loads(ed25519_out.read_text(encoding="utf-8"))
+        assert ed25519_json["signature_valid"]
+        assert validate_workflow_output("attestation", ed25519_json) == []
+        assert ed25519_json["signed_attestation"]["scheme"] == "ed25519"
+        assert len(ed25519_json["verifier_public_key"]) == 64
+        assert "ed25519" in ed25519_run.stdout
 
 
 def t_trust_corpus_manifest_validator():
@@ -550,29 +777,63 @@ def t_trust_corpus_manifest_validator():
         assert generated_entry["files"][0]["resolution"] == "16x16"
 
 
+def t_product_readiness_gate_is_conservative():
+    report = evaluate_product_readiness()
+    assert report["schema"] == "zk-stego-product-readiness-v1"
+    assert report["tier"] == "product_readiness_gate"
+    summary = report["summary"]
+    assert summary["seed_surface_ready"], "seed surface should be ready in current scope"
+    assert not summary["all_product_ready"], "not every trust feature is product-ready yet"
+
+    features = {feature["feature"]: feature for feature in report["features"]}
+    assert features["c2pa_root_anchor"]["status"] == "product_ready"
+    assert features["c2pa_root_anchor"]["product_ready"]
+    assert features["fingerprint_registry"]["status"] == "product_ready"
+    assert features["fingerprint_registry"]["product_ready"]
+    assert features["workflow_api_cli"]["status"] == "product_ready"
+    assert features["workflow_api_cli"]["product_ready"]
+    assert features["watermark_receipt"]["status"] == "product_ready"
+    assert features["watermark_receipt"]["product_ready"]
+    assert features["tee_model_attestation"]["status"] == "prototype"
+    assert features["zk_receipt_circuits"]["status"] == "prototype"
+    assert features["zkml_model_binding"]["status"] == "blocked"
+    assert not features["zkml_model_binding"]["product_ready"]
+    assert not features["tee_model_attestation"]["product_ready"]
+
+
 def main():
     section("Future Trust Architecture Interfaces")
     results = [
         run_test("provenance_root_detects_tamper", t_provenance_root_detects_tamper),
         run_test("c2pa_bridge_audit_sidecar_roundtrip", t_c2pa_bridge_audit_sidecar_roundtrip),
+        run_test("provenance_registry_roundtrip", t_provenance_registry_roundtrip),
         run_test("manifest_provenance_fields_roundtrip", t_manifest_provenance_fields_roundtrip),
         run_test("c2pa_anchor_attaches_to_manifest", t_c2pa_anchor_attaches_to_manifest),
         run_test("fingerprint_registry_threshold_match", t_fingerprint_registry_threshold_match),
+        run_test("fingerprint_lookup_receipt_roundtrip", t_fingerprint_lookup_receipt_roundtrip),
         run_test("video_fingerprint_policy_is_deterministic", t_video_fingerprint_policy_is_deterministic),
         run_test("watermark_receipt_threshold", t_watermark_receipt_threshold),
         run_test("tiny_video_features_are_circuit_sized", t_tiny_video_features_are_circuit_sized),
         run_test("calibrated_detector_selects_threshold", t_calibrated_detector_selects_threshold),
         run_test("keyed_template_detector_separates_embedded_clip", t_keyed_template_detector_separates_embedded_clip),
+        run_test("watermark_receipt_policy_verifies_replay", t_watermark_receipt_policy_verifies_replay),
         run_test(
             "keyed_template_detector_resynchronizes_cropped_clip",
             t_keyed_template_detector_resynchronizes_cropped_clip,
         ),
         run_test("mock_tee_attestation_signature", t_mock_tee_attestation_signature),
+        run_test("ed25519_attestation_signature", t_ed25519_attestation_signature),
         run_test("attestation_sidecar_roundtrip", t_attestation_sidecar_roundtrip),
+        run_test(
+            "attestation_verification_policy_and_report",
+            t_attestation_verification_policy_and_report,
+        ),
         run_test("zkml_interface_is_explicit_stub", t_zkml_interface_is_explicit_stub),
+        run_test("zk_receipt_contract_vectors_validate", t_zk_receipt_contract_vectors_validate),
         run_test("ready_to_use_trust_workflows", t_ready_to_use_trust_workflows),
         run_test("trust_workflows_cli_entrypoints", t_trust_workflows_cli_entrypoints),
         run_test("trust_corpus_manifest_validator", t_trust_corpus_manifest_validator),
+        run_test("product_readiness_gate_is_conservative", t_product_readiness_gate_is_conservative),
     ]
     sys.exit(summarise(results, "Future Trust Architecture"))
 

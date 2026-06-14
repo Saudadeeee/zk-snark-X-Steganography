@@ -19,6 +19,7 @@ import numpy as np
 from src.manifest import StegoManifest
 from src.provenance import (
     C2PAAuditSidecar,
+    ProvenanceRegistry,
     build_c2pa_anchor,
     load_audit_sidecar,
     save_audit_sidecar,
@@ -26,15 +27,38 @@ from src.provenance import (
     verify_c2pa_anchor,
 )
 
-from .attestation import AttestationBundle, AttestationSidecar, MockTEESigner, SignedAttestation, load_attestation_sidecar, save_attestation_sidecar
-from .fingerprint import FingerprintPreprocessPolicy, FingerprintRecord, FingerprintRegistry, RegistryMatch, VideoFingerprint, compute_video_fingerprint
+from .attestation import (
+    AttestationBundle,
+    AttestationSidecar,
+    AttestationVerificationPolicy,
+    AttestationVerificationReport,
+    Ed25519AttestationSigner,
+    MockTEESigner,
+    SignedAttestation,
+    verify_attestation_bundle,
+    load_attestation_sidecar,
+    save_attestation_sidecar,
+)
+from .fingerprint import (
+    FingerprintLookupPolicy,
+    FingerprintLookupReceipt,
+    FingerprintPreprocessPolicy,
+    FingerprintRecord,
+    FingerprintRegistry,
+    RegistryMatch,
+    VideoFingerprint,
+    compute_video_fingerprint,
+)
 from .provenance import ProvenanceRoot, build_provenance_root, verify_provenance_root
+from .workflow_contracts import WORKFLOW_OUTPUT_SCHEMAS
 from .watermark_receipt import (
     CalibratedThresholdDetector,
     DetectorAlignmentScore,
     DetectorCalibration,
     DetectorReceipt,
     KeyedTemplateDetector,
+    WatermarkReceiptPolicy,
+    WatermarkVerificationReport,
 )
 
 
@@ -73,9 +97,12 @@ class ProvenanceWorkflowResult:
     manifest_tamper_detected: bool
     attached_manifest: StegoManifest | None = None
     sidecar_roundtrip_valid: bool | None = None
+    registry_roundtrip_valid: bool | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "schema": WORKFLOW_OUTPUT_SCHEMAS["provenance"],
+            "workflow": "provenance",
             "root": self.root.to_dict(),
             "sidecar": self.sidecar.to_dict(),
             "verified": self.verified,
@@ -84,49 +111,56 @@ class ProvenanceWorkflowResult:
             "manifest_tamper_detected": self.manifest_tamper_detected,
             "attached_manifest": self.attached_manifest.to_dict() if self.attached_manifest else None,
             "sidecar_roundtrip_valid": self.sidecar_roundtrip_valid,
+            "registry_roundtrip_valid": self.registry_roundtrip_valid,
         }
 
 
 @dataclass(frozen=True)
 class FingerprintWorkflowResult:
     policy: FingerprintPreprocessPolicy
+    lookup_policy: FingerprintLookupPolicy
     fingerprint: VideoFingerprint
     registry: FingerprintRegistry
     match: RegistryMatch
+    receipt: FingerprintLookupReceipt
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "schema": WORKFLOW_OUTPUT_SCHEMAS["fingerprint"],
+            "workflow": "fingerprint",
             "policy": self.policy.to_dict(),
+            "lookup_policy": self.lookup_policy.to_dict(),
             "fingerprint": self.fingerprint.to_dict(),
             "registry_commitment": self.registry.commitment(),
-            "match": {
-                "matched": self.match.matched,
-                "record_id": self.match.record_id,
-                "distance": self.match.distance,
-                "threshold": self.match.threshold,
-                "registry_commitment": self.match.registry_commitment,
-            },
+            "match": self.match.to_dict(),
+            "receipt": self.receipt.to_dict(),
         }
 
 
 @dataclass(frozen=True)
 class WatermarkWorkflowResult:
     detector: KeyedTemplateDetector
+    receipt_policy: WatermarkReceiptPolicy
     calibration: DetectorCalibration | None
     fixed_receipt: DetectorReceipt
     resynchronized_receipt: DetectorReceipt
     resynchronized_alignment: DetectorAlignmentScore
+    verification_report: WatermarkVerificationReport
     claim_scope: tuple[str, ...]
     out_of_scope: tuple[str, ...]
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "schema": WORKFLOW_OUTPUT_SCHEMAS["watermark"],
+            "workflow": "watermark",
             "detector": self.detector.public_config(),
             "detector_commitment": self.detector.commitment,
+            "receipt_policy": self.receipt_policy.to_dict(),
             "calibration": self.calibration.to_dict() if self.calibration else None,
             "fixed_receipt": self.fixed_receipt.to_dict(),
             "resynchronized_receipt": self.resynchronized_receipt.to_dict(),
             "resynchronized_alignment": self.resynchronized_alignment.to_dict(),
+            "verification_report": self.verification_report.to_dict(),
             "claim_scope": list(self.claim_scope),
             "out_of_scope": list(self.out_of_scope),
         }
@@ -138,14 +172,22 @@ class AttestationWorkflowResult:
     signed_attestation: SignedAttestation
     sidecar: AttestationSidecar
     signature_valid: bool
+    verifier_public_key: str | None = None
+    verification_policy: AttestationVerificationPolicy | None = None
+    verification_report: AttestationVerificationReport | None = None
     sidecar_roundtrip_valid: bool | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "schema": WORKFLOW_OUTPUT_SCHEMAS["attestation"],
+            "workflow": "attestation",
             "bundle": self.bundle.to_dict(),
             "signed_attestation": self.signed_attestation.to_dict(),
             "sidecar": self.sidecar.to_dict(),
             "signature_valid": self.signature_valid,
+            "verifier_public_key": self.verifier_public_key,
+            "verification_policy": self.verification_policy.to_dict() if self.verification_policy else None,
+            "verification_report": self.verification_report.to_dict() if self.verification_report else None,
             "sidecar_roundtrip_valid": self.sidecar_roundtrip_valid,
         }
 
@@ -157,6 +199,7 @@ def provenance_workflow(
     media_path: str | Path | None = None,
     stego_manifest: StegoManifest | None = None,
     sidecar_path: str | Path | None = None,
+    registry_path: str | Path | None = None,
 ) -> ProvenanceWorkflowResult:
     """Build, verify, and optionally attach a C2PA-style provenance root."""
     manifest_dict = _manifest_dict(manifest)
@@ -174,6 +217,18 @@ def provenance_workflow(
         attached_manifest = attach_anchor_to_manifest(copy.deepcopy(stego_manifest), sidecar)
 
     embedded_payload = sidecar.anchor.payload_bytes
+    registry_roundtrip_valid: bool | None = None
+    if registry_path is not None:
+        registry = ProvenanceRegistry()
+        registry.publish(manifest_dict, registry_uri=registry_uri, media_path=media_path)
+        registry.save(registry_path)
+        loaded_registry = ProvenanceRegistry.load(registry_path)
+        registry_roundtrip_valid = loaded_registry.verify_anchor(
+            sidecar,
+            media_path=media_path,
+            embedded_payload=embedded_payload,
+        )
+
     verified = verify_c2pa_anchor(sidecar, manifest_dict, media_path=media_path, embedded_payload=embedded_payload)
     embedded_payload_tamper_detected = not verify_c2pa_anchor(
         sidecar,
@@ -191,6 +246,7 @@ def provenance_workflow(
         manifest_tamper_detected=manifest_tamper_detected,
         attached_manifest=attached_manifest,
         sidecar_roundtrip_valid=sidecar_roundtrip_valid,
+        registry_roundtrip_valid=registry_roundtrip_valid,
     )
 
 
@@ -200,13 +256,26 @@ def fingerprint_workflow(
     *,
     policy: FingerprintPreprocessPolicy | None = None,
     threshold: int = 8,
+    lookup_policy: FingerprintLookupPolicy | None = None,
 ) -> FingerprintWorkflowResult:
     """Compute a video fingerprint and match it against a private registry."""
     policy = policy or FingerprintPreprocessPolicy()
-    registry = FingerprintRegistry(records)
+    lookup_policy = lookup_policy or FingerprintLookupPolicy(threshold=threshold)
+    registry = FingerprintRegistry(records, default_policy=lookup_policy)
     fingerprint = compute_video_fingerprint(frames, policy=policy)
-    match = registry.lookup(fingerprint.fingerprint_hex, bit_count=fingerprint.bit_count, threshold=threshold)
-    return FingerprintWorkflowResult(policy=policy, fingerprint=fingerprint, registry=registry, match=match)
+    receipt = registry.lookup_with_receipt(
+        fingerprint.fingerprint_hex,
+        bit_count=fingerprint.bit_count,
+        policy=lookup_policy,
+    )
+    return FingerprintWorkflowResult(
+        policy=policy,
+        lookup_policy=lookup_policy,
+        fingerprint=fingerprint,
+        registry=registry,
+        match=receipt.match,
+        receipt=receipt,
+    )
 
 
 def watermark_workflow(
@@ -224,28 +293,52 @@ def watermark_workflow(
     """Calibrate and/or evaluate a keyed watermark detector."""
     detector = KeyedTemplateDetector(key, frame_shape=frame_shape, grid_size=grid_size)
     calibration: DetectorCalibration | None = None
+    threshold_source = "provided"
     if threshold is None:
         if positive_clips is None or negative_clips is None:
             raise ValueError("either threshold or calibration clips must be provided")
         calibration = detector.calibrate_resynchronized(positive_clips, negative_clips, crop_margins=crop_margins)
         threshold = calibration.threshold
+        threshold_source = "calibrated"
 
-    fixed_receipt = detector.receipt(frames, threshold=threshold, payload_commitment=payload_commitment)
-    aligned = detector.score_resynchronized(frames, crop_margins=crop_margins)
-    resynchronized_receipt = DetectorReceipt(
-        detector_id=detector.detector_id,
-        score=aligned.score,
+    fixed_policy = WatermarkReceiptPolicy(
+        scoring_mode="fixed",
+        threshold_source=threshold_source,
+        crop_margins=tuple(int(value) for value in crop_margins),
+    )
+    receipt_policy = WatermarkReceiptPolicy(
+        scoring_mode="resynchronized",
+        threshold_source=threshold_source,
+        crop_margins=tuple(int(value) for value in crop_margins),
+    )
+    fixed_receipt = detector.receipt(
+        frames,
         threshold=threshold,
-        valid=aligned.score >= threshold,
         payload_commitment=payload_commitment,
-        detector_commitment=detector.commitment,
+        policy=fixed_policy,
+    )
+    resynchronized_receipt = detector.receipt_resynchronized(
+        frames,
+        threshold=threshold,
+        payload_commitment=payload_commitment,
+        crop_margins=crop_margins,
+        policy=receipt_policy,
+    )
+    aligned = resynchronized_receipt.alignment or detector.score_resynchronized(frames, crop_margins=crop_margins)
+    verification_report = detector.verify_receipt(
+        frames,
+        resynchronized_receipt,
+        policy=receipt_policy,
+        payload_commitment=payload_commitment,
     )
     return WatermarkWorkflowResult(
         detector=detector,
+        receipt_policy=receipt_policy,
         calibration=calibration,
         fixed_receipt=fixed_receipt,
         resynchronized_receipt=resynchronized_receipt,
         resynchronized_alignment=aligned,
+        verification_report=verification_report,
         claim_scope=(
             "brightness_shift",
             "contrast_scale",
@@ -266,7 +359,7 @@ def watermark_workflow(
 
 def attestation_workflow(
     *,
-    signer: MockTEESigner,
+    signer: Any,
     bundle: AttestationBundle | None = None,
     video_path: str | Path | None = None,
     model_config_path: str | Path | None = None,
@@ -292,12 +385,31 @@ def attestation_workflow(
 
     signed = signer.sign(bundle)
     sidecar = AttestationSidecar(signed_attestation=signed, provenance_root_hash=provenance_root_hash)
-    signature_valid = signer.verify(signed)
+    verification_policy = AttestationVerificationPolicy(
+        expected_signer_id=signed.signer_id,
+        expected_scheme=signed.scheme,
+        hardware_root=hardware_root,
+        require_hardware_root=False,
+        allow_software_only=True,
+    )
+    verification_report = verify_attestation_bundle(
+        signer,
+        signed,
+        policy=verification_policy,
+        sidecar=sidecar,
+    )
+    signature_valid = verification_report.signature_valid
+    verifier_public_key = getattr(signer, "public_key_hex", None)
     sidecar_roundtrip_valid: bool | None = None
     if sidecar_path is not None:
         save_attestation_sidecar(sidecar, sidecar_path)
         loaded = load_attestation_sidecar(sidecar_path)
-        sidecar_roundtrip_valid = signer.verify(loaded.signed_attestation)
+        sidecar_roundtrip_valid = verify_attestation_bundle(
+            signer,
+            loaded.signed_attestation,
+            policy=verification_policy,
+            sidecar=loaded,
+        ).verified
         if provenance_root_hash is not None:
             sidecar_roundtrip_valid = sidecar_roundtrip_valid and loaded.provenance_root_hash == provenance_root_hash
 
@@ -306,6 +418,9 @@ def attestation_workflow(
         signed_attestation=signed,
         sidecar=sidecar,
         signature_valid=signature_valid,
+        verifier_public_key=verifier_public_key,
+        verification_policy=verification_policy,
+        verification_report=verification_report,
         sidecar_roundtrip_valid=sidecar_roundtrip_valid,
     )
 
@@ -339,6 +454,7 @@ def _provenance_cli(args: argparse.Namespace) -> dict[str, Any]:
         media_path=args.media_path,
         stego_manifest=stego_manifest,
         sidecar_path=args.sidecar_out,
+        registry_path=args.registry_out,
     )
     output = result.to_dict()
     if args.output:
@@ -360,7 +476,12 @@ def _fingerprint_cli(args: argparse.Namespace) -> dict[str, Any]:
         sample_count=args.sample_count,
         hash_size=args.hash_size,
     )
-    result = fingerprint_workflow(frames, registry.records, policy=policy, threshold=args.threshold)
+    result = fingerprint_workflow(
+        frames,
+        registry.records,
+        policy=policy,
+        lookup_policy=FingerprintLookupPolicy(threshold=args.threshold),
+    )
     output = result.to_dict()
     if args.output:
         _write_json(args.output, output)
@@ -398,7 +519,23 @@ def _attestation_cli(args: argparse.Namespace) -> dict[str, Any]:
     if not args.signer_key and not args.signer_key_file:
         raise ValueError("either --signer-key or --signer-key-file must be provided")
     signer_key = _load_bytes(args.signer_key_file) if args.signer_key_file else args.signer_key.encode("utf-8")
-    signer = MockTEESigner(signer_key, signer_id=args.signer_id)
+    signer_id = args.signer_id or ("ed25519-v1" if args.signer_scheme == "ed25519" else "mock-tee-v1")
+    if args.signer_scheme == "mock-hmac":
+        signer = MockTEESigner(signer_key, signer_id=signer_id)
+    elif args.signer_scheme == "ed25519":
+        try:
+            key_text = signer_key.decode("ascii").strip()
+            if len(key_text) == 64:
+                try:
+                    signer = Ed25519AttestationSigner(key_text, signer_id=signer_id)
+                except ValueError:
+                    signer = Ed25519AttestationSigner.from_seed(signer_key, signer_id=signer_id)
+            else:
+                signer = Ed25519AttestationSigner.from_seed(signer_key, signer_id=signer_id)
+        except UnicodeDecodeError:
+            signer = Ed25519AttestationSigner.from_seed(signer_key, signer_id=signer_id)
+    else:
+        raise ValueError(f"unsupported signer scheme: {args.signer_scheme}")
     bundle = None
     if args.bundle:
         bundle_data = _load_json_file(args.bundle)
@@ -439,6 +576,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     provenance.add_argument("--media-path", help="Optional media path used in the root hash")
     provenance.add_argument("--stego-manifest", help="Optional stego manifest to attach the anchor to")
     provenance.add_argument("--sidecar-out", help="Optional path to save the audit sidecar JSON")
+    provenance.add_argument("--registry-out", help="Optional path to save a local provenance registry JSON")
     provenance.add_argument("--output", help="Optional path to save workflow output JSON")
     provenance.set_defaults(func=_provenance_cli)
 
@@ -466,9 +604,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     watermark.set_defaults(func=_watermark_cli)
 
     attestation = subparsers.add_parser("attestation", help="Run attestation workflow")
+    attestation.add_argument("--signer-scheme", choices=["mock-hmac", "ed25519"], default="mock-hmac")
     attestation.add_argument("--signer-key", help="ASCII signer key")
     attestation.add_argument("--signer-key-file", help="Binary signer key file")
-    attestation.add_argument("--signer-id", default="mock-tee-v1")
+    attestation.add_argument("--signer-id")
     attestation.add_argument("--bundle", help="Optional bundle JSON with hash fields")
     attestation.add_argument("--video-path", help="Path to video file")
     attestation.add_argument("--model-config-path", help="Path to model config file")

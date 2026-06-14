@@ -50,12 +50,14 @@ SECTIONS = {
     43: "blind_real_proof_header_diagnostic",
     44: "trust_architecture_diagnostic",
     45: "sec45_trust_evidence",
+    46: "sec46_product_readiness",
+    47: "sec47_zk_receipt_contracts",
 }
 
 DEFAULT_TIMEOUT = 180  # 3 minutes per section
-FAST_CAPABLE_SECTIONS = {1, 2, 3, 4, 6, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45}
+FAST_CAPABLE_SECTIONS = {1, 2, 3, 4, 6, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47}
 PAPER_GRADE_DEFAULT = [1, 2, 3, 4, 5, 6]
-DIAGNOSTIC_DEFAULT = [31, 32, 44, 45]
+DIAGNOSTIC_DEFAULT = [31, 32, 44, 45, 46, 47]
 SECTION_CLASS = {
     1: "paper_grade",
     2: "paper_grade",
@@ -78,6 +80,8 @@ SECTION_CLASS = {
     43: "diagnostic_grade",
     44: "diagnostic_grade",
     45: "claim_gated_evidence",
+    46: "product_readiness_gate",
+    47: "zk_receipt_contract_diagnostic",
 }
 ARTIFACT_SPEC = {
     1: {
@@ -163,6 +167,14 @@ ARTIFACT_SPEC = {
     45: {
         "charts": ["sec45_trust_evidence_summary.png"],
         "data": ["sec45_trust_evidence_data.json"],
+    },
+    46: {
+        "charts": [],
+        "data": ["sec46_product_readiness_data.json"],
+    },
+    47: {
+        "charts": [],
+        "data": ["sec47_zk_receipt_contracts_data.json"],
     },
 }
 
@@ -503,6 +515,8 @@ def _validate_sec45_trust_evidence_schema(data: dict) -> list[str]:
             "watermark_resynchronized_accept_rate",
             "fingerprint_groth16_verified",
             "detector_groth16_verified",
+            "zk_receipt_contracts_valid",
+            "zk_receipt_contract_count",
             "ready_workflows_valid",
         ):
             if key not in metrics:
@@ -524,6 +538,190 @@ def _validate_sec45_trust_evidence_schema(data: dict) -> list[str]:
         errors.append("sec45 blockers must be list")
     if data.get("promotion_ready") is False and not blockers:
         errors.append("sec45 must explain blockers when promotion_ready is false")
+    return errors
+
+
+def _validate_sec46_product_readiness_schema(data: dict) -> list[str]:
+    required = {"schema", "tier", "source", "summary", "features", "claim_language"}
+    missing = sorted(required - set(data.keys()))
+    if missing:
+        return [f"sec46 missing keys: {', '.join(missing)}"]
+
+    errors: list[str] = []
+    if data.get("schema") != "zk-stego-product-readiness-v1":
+        errors.append("sec46 schema must be zk-stego-product-readiness-v1")
+    if data.get("tier") != "product_readiness_gate":
+        errors.append("sec46 tier must be product_readiness_gate")
+
+    summary = data.get("summary")
+    if not isinstance(summary, dict):
+        errors.append("sec46 summary must be object")
+    else:
+        for key in (
+            "all_product_ready",
+            "seed_surface_ready",
+            "product_ready_count",
+            "seed_ready_count",
+            "prototype_count",
+            "blocked_count",
+            "total_feature_count",
+            "policy",
+        ):
+            if key not in summary:
+                errors.append(f"sec46 summary missing {key}")
+
+    features = data.get("features")
+    expected_features = {
+        "c2pa_root_anchor",
+        "fingerprint_registry",
+        "watermark_receipt",
+        "tee_model_attestation",
+        "zk_receipt_circuits",
+        "zkml_model_binding",
+        "workflow_api_cli",
+    }
+    allowed_statuses = {"product_ready", "product_seed", "prototype", "blocked"}
+    product_ready_count = 0
+    seed_ready_count = 0
+    prototype_count = 0
+    blocked_count = 0
+    if not isinstance(features, list) or not features:
+        errors.append("sec46 features must be a non-empty list")
+    else:
+        names = {feature.get("feature") for feature in features if isinstance(feature, dict)}
+        missing_features = sorted(expected_features - names)
+        if missing_features:
+            errors.append(f"sec46 missing features: {', '.join(missing_features)}")
+        for feature in features:
+            if not isinstance(feature, dict):
+                errors.append("sec46 feature entries must be objects")
+                continue
+            name = feature.get("feature", "<unknown>")
+            for key in (
+                "status",
+                "seed_ready",
+                "product_ready",
+                "claim_scope",
+                "ready_for",
+                "evidence",
+                "product_blockers",
+                "required_next_steps",
+            ):
+                if key not in feature:
+                    errors.append(f"sec46 feature {name} missing {key}")
+            status = feature.get("status")
+            if status not in allowed_statuses:
+                errors.append(f"sec46 feature {name} has invalid status {status}")
+            if not isinstance(feature.get("product_blockers"), list):
+                errors.append(f"sec46 feature {name} product_blockers must be list")
+            if feature.get("product_ready") is True:
+                product_ready_count += 1
+                if status != "product_ready":
+                    errors.append(f"sec46 feature {name} product_ready requires status=product_ready")
+                if feature.get("product_blockers"):
+                    errors.append(f"sec46 feature {name} cannot be product_ready with blockers")
+            if feature.get("seed_ready") is True:
+                seed_ready_count += 1
+            if status == "prototype":
+                prototype_count += 1
+            if status == "blocked":
+                blocked_count += 1
+
+    if isinstance(summary, dict):
+        if isinstance(features, list) and summary.get("total_feature_count") != len(features):
+            errors.append("sec46 total_feature_count must match feature list length")
+        if summary.get("product_ready_count") != product_ready_count:
+            errors.append("sec46 product_ready_count mismatch")
+        if summary.get("seed_ready_count") != seed_ready_count:
+            errors.append("sec46 seed_ready_count mismatch")
+        if summary.get("prototype_count") != prototype_count:
+            errors.append("sec46 prototype_count mismatch")
+        if summary.get("blocked_count") != blocked_count:
+            errors.append("sec46 blocked_count mismatch")
+        if summary.get("all_product_ready") is True and product_ready_count != summary.get("total_feature_count"):
+            errors.append("sec46 all_product_ready true requires every feature product_ready")
+
+    claim_language = data.get("claim_language")
+    if not isinstance(claim_language, dict):
+        errors.append("sec46 claim_language must be object")
+    else:
+        if not isinstance(claim_language.get("allowed_now"), list):
+            errors.append("sec46 claim_language.allowed_now must be list")
+        if not isinstance(claim_language.get("blocked_claims"), list):
+            errors.append("sec46 claim_language.blocked_claims must be list")
+    return errors
+
+
+def _validate_sec47_zk_receipt_contracts_schema(data: dict) -> list[str]:
+    required = {"schema", "tier", "summary", "circuits", "limitations"}
+    missing = sorted(required - set(data.keys()))
+    if missing:
+        return [f"sec47 missing keys: {', '.join(missing)}"]
+
+    errors: list[str] = []
+    if data.get("schema") != "zk-stego-zk-receipt-contract-report-v1":
+        errors.append("sec47 schema must be zk-stego-zk-receipt-contract-report-v1")
+    if data.get("tier") != "zk_receipt_contract_diagnostic":
+        errors.append("sec47 tier must be zk_receipt_contract_diagnostic")
+
+    summary = data.get("summary")
+    if not isinstance(summary, dict):
+        errors.append("sec47 summary must be object")
+    else:
+        for key in (
+            "all_contracts_valid",
+            "valid_contract_count",
+            "circuit_count",
+            "groth16_bound_count",
+            "claim_scope",
+        ):
+            if key not in summary:
+                errors.append(f"sec47 summary missing {key}")
+        if summary.get("all_contracts_valid") is not True:
+            errors.append("sec47 all_contracts_valid must be true")
+
+    circuits = data.get("circuits")
+    expected_circuits = {"fingerprint_verify", "detector_receipt"}
+    if not isinstance(circuits, dict):
+        errors.append("sec47 circuits must be object")
+    else:
+        missing_circuits = sorted(expected_circuits - set(circuits.keys()))
+        if missing_circuits:
+            errors.append(f"sec47 missing circuits: {', '.join(missing_circuits)}")
+        for name in expected_circuits & set(circuits.keys()):
+            circuit = circuits.get(name)
+            if not isinstance(circuit, dict):
+                errors.append(f"sec47 circuit {name} must be object")
+                continue
+            for key in (
+                "contract_valid",
+                "contract",
+                "test_vector",
+                "local_validation",
+            ):
+                if key not in circuit:
+                    errors.append(f"sec47 circuit {name} missing {key}")
+            if circuit.get("contract_valid") is not True:
+                errors.append(f"sec47 circuit {name} contract_valid must be true")
+            contract = circuit.get("contract", {})
+            if not isinstance(contract, dict) or not contract.get("contract_commitment"):
+                errors.append(f"sec47 circuit {name} contract must include commitment")
+            else:
+                if not isinstance(contract.get("public_signal_order"), list):
+                    errors.append(f"sec47 circuit {name} public_signal_order must be list")
+            test_vector = circuit.get("test_vector", {})
+            if not isinstance(test_vector, dict) or not test_vector.get("witness_commitment"):
+                errors.append(f"sec47 circuit {name} test_vector must include witness_commitment")
+            local_validation = circuit.get("local_validation", {})
+            if not isinstance(local_validation, dict) or local_validation.get("verified") is not True:
+                errors.append(f"sec47 circuit {name} local validation must verify")
+            groth16_validation = circuit.get("groth16_measurement_validation")
+            if groth16_validation is not None:
+                if not isinstance(groth16_validation, dict) or groth16_validation.get("verified") is not True:
+                    errors.append(f"sec47 circuit {name} Groth16 public signals must match contract")
+
+    if not isinstance(data.get("limitations"), list) or not data.get("limitations"):
+        errors.append("sec47 limitations must be a non-empty list")
     return errors
 
 
@@ -549,6 +747,10 @@ def _schema_errors_for_section(sec_id: int, data_file: Path) -> list[str]:
         return _validate_trust_architecture_schema(data or {})
     if sec_id == 45:
         return _validate_sec45_trust_evidence_schema(data or {})
+    if sec_id == 46:
+        return _validate_sec46_product_readiness_schema(data or {})
+    if sec_id == 47:
+        return _validate_sec47_zk_receipt_contracts_schema(data or {})
     if sec_id == 31:
         if not isinstance(data, dict) or "variants" not in data:
             return ["sec3a: missing or invalid 'variants' object"]
@@ -729,7 +931,7 @@ def validate_results() -> dict:
         valid = len(charts) >= len(spec["charts"]) and len(data) >= len(spec["data"])
 
         schema_errors: list[str] = []
-        if data and sec_id in {1, 2, 3, 4, 5, 6, 44, 45}:
+        if data and sec_id in {1, 2, 3, 4, 5, 6, 44, 45, 46, 47}:
             schema_errors = _schema_errors_for_section(sec_id, Path(data[0]))
 
         validation[sec_id] = {
@@ -910,17 +1112,18 @@ def main():
         json.dump(metadata, f, indent=2)
     print(f"  Metadata: {metadata_path.name}")
     
-    # Exit code: 0 if all passed and paper-grade validation is clean, 1 otherwise
+    # Exit code: 0 if all passed and strict artifact validation is clean, 1 otherwise
     failed = [s for s, r in results.items() if not r["success"]]
     invalid = [
         s for s, v in validation.items()
         if s in results
-        if v.get("tier") == "paper_grade" and (not v.get("valid", False) or not v.get("schema_valid", True))
+        if v.get("tier") in {"paper_grade", "product_readiness_gate"}
+        and (not v.get("valid", False) or not v.get("schema_valid", True))
     ]
     if failed or invalid:
         print(f"\n  [warn] Failed sections: {failed}")
         if invalid:
-            print(f"  [warn] Invalid paper-grade artifacts: {invalid}")
+            print(f"  [warn] Invalid strict artifacts: {invalid}")
         sys.exit(1)
     else:
         print("\n  All sections completed successfully.\n")

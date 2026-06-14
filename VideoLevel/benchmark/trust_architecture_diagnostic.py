@@ -36,6 +36,7 @@ from src.trust import (
     TinyThresholdDetector,
     ZKMLInterfaceSpec,
     attestation_workflow,
+    build_zk_receipt_contract_report,
     build_provenance_root,
     compute_framehash,
     compute_video_fingerprint,
@@ -1207,6 +1208,7 @@ def run_diagnostic() -> dict[str, object]:
     for circuit_name in ("fingerprint_verify", "detector_receipt"):
         result["circuits"][circuit_name] = _compile_circuit(circuit_name)
         result["circuits"][circuit_name]["groth16_measurement"] = _measure_groth16_circuit(circuit_name)
+    result["zk_receipt_contracts"] = build_zk_receipt_contract_report(result["circuits"])
     OUTPUT_PATH.write_text(json.dumps(result, indent=2, ensure_ascii=True), encoding="utf-8")
     return result
 
@@ -1234,6 +1236,7 @@ def main() -> None:
         result["circuits"]["detector_receipt"]["compile_ok"],
         result["circuits"]["fingerprint_verify"]["groth16_measurement"]["verified"],
         result["circuits"]["detector_receipt"]["groth16_measurement"]["verified"],
+        result["zk_receipt_contracts"]["summary"]["all_contracts_valid"],
     ]
     print("=== Trust Architecture Diagnostic ===")
     print(f"  output: {OUTPUT_PATH}")

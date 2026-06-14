@@ -19,6 +19,7 @@ from src.trust.provenance import ProvenanceRoot, build_provenance_root, verify_p
 
 
 ANCHOR_SCHEMA = "zk-stego-c2pa-anchor-v1"
+REGISTRY_SCHEMA = "zk-stego-provenance-registry-v1"
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,125 @@ def _load_manifest(manifest: str | Path | dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("C2PA manifest must be a JSON object")
     return data
+
+
+@dataclass(frozen=True)
+class ProvenanceRegistryRecord:
+    """Manifest registry record keyed by a resolver URI."""
+
+    registry_uri: str
+    manifest: dict[str, Any]
+    manifest_commitment: str
+    anchor_root_hash: str
+    media_hash: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "registry_uri": self.registry_uri,
+            "manifest": self.manifest,
+            "manifest_commitment": self.manifest_commitment,
+            "anchor_root_hash": self.anchor_root_hash,
+            "media_hash": self.media_hash,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ProvenanceRegistryRecord":
+        manifest = data.get("manifest")
+        if not isinstance(manifest, dict):
+            raise ValueError("registry record manifest must be an object")
+        return cls(
+            registry_uri=str(data["registry_uri"]),
+            manifest=dict(manifest),
+            manifest_commitment=str(data["manifest_commitment"]),
+            anchor_root_hash=str(data["anchor_root_hash"]),
+            media_hash=data.get("media_hash"),
+        )
+
+
+class ProvenanceRegistry:
+    """Small JSON-backed manifest registry for root-anchor workflows."""
+
+    def __init__(self, records: list[ProvenanceRegistryRecord] | None = None):
+        self._records: dict[str, ProvenanceRegistryRecord] = {}
+        for record in records or []:
+            self.publish_record(record)
+
+    @property
+    def records(self) -> list[ProvenanceRegistryRecord]:
+        return [self._records[key] for key in sorted(self._records)]
+
+    def publish(
+        self,
+        manifest: str | Path | dict[str, Any],
+        *,
+        registry_uri: str,
+        media_path: str | Path | None = None,
+    ) -> ProvenanceRegistryRecord:
+        manifest_dict = _load_manifest(manifest)
+        sidecar = build_c2pa_anchor(manifest_dict, registry_uri=registry_uri, media_path=media_path)
+        record = ProvenanceRegistryRecord(
+            registry_uri=registry_uri,
+            manifest=manifest_dict,
+            manifest_commitment=sidecar.manifest_commitment,
+            anchor_root_hash=sidecar.anchor.root.manifest_root_hash,
+            media_hash=sidecar.media_hash,
+        )
+        self.publish_record(record)
+        return record
+
+    def publish_record(self, record: ProvenanceRegistryRecord) -> None:
+        if not record.registry_uri:
+            raise ValueError("registry_uri must be non-empty")
+        self._records[record.registry_uri] = record
+
+    def resolve(self, registry_uri: str) -> ProvenanceRegistryRecord | None:
+        return self._records.get(registry_uri)
+
+    def verify_anchor(
+        self,
+        sidecar: C2PAAuditSidecar,
+        *,
+        media_path: str | Path | None = None,
+        embedded_payload: bytes | None = None,
+    ) -> bool:
+        record = self.resolve(sidecar.registry_uri)
+        if record is None:
+            return False
+        if record.manifest_commitment != sidecar.manifest_commitment:
+            return False
+        if record.anchor_root_hash != sidecar.anchor.root.manifest_root_hash:
+            return False
+        return verify_c2pa_anchor(
+            sidecar,
+            record.manifest,
+            media_path=media_path,
+            embedded_payload=embedded_payload,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": REGISTRY_SCHEMA,
+            "records": [record.to_dict() for record in self.records],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ProvenanceRegistry":
+        if data.get("schema") != REGISTRY_SCHEMA:
+            raise ValueError(f"registry schema must be {REGISTRY_SCHEMA}")
+        records = data.get("records")
+        if not isinstance(records, list):
+            raise ValueError("registry records must be a list")
+        return cls([ProvenanceRegistryRecord.from_dict(record) for record in records])
+
+    def save(self, path: str | Path) -> None:
+        Path(path).write_text(json.dumps(self.to_dict(), indent=2, ensure_ascii=True), encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: str | Path) -> "ProvenanceRegistry":
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("provenance registry must be a JSON object")
+        return cls.from_dict(data)
 
 
 def build_c2pa_anchor(

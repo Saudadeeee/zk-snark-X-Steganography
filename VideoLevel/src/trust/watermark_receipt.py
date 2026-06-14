@@ -18,6 +18,11 @@ import numpy as np
 from .canonical import canonical_json_hash
 
 
+DETECTOR_RECEIPT_SCHEMA = "zk-stego-detector-receipt-v2"
+WATERMARK_POLICY_SCHEMA = "zk-stego-watermark-policy-v1"
+WATERMARK_VERIFICATION_SCHEMA = "zk-stego-watermark-verification-v1"
+
+
 @dataclass(frozen=True)
 class DetectorCalibration:
     """Threshold calibration summary for a small detector candidate."""
@@ -59,6 +64,58 @@ class DetectorAlignmentScore:
 
 
 @dataclass(frozen=True)
+class WatermarkReceiptPolicy:
+    """Verification policy for controlled watermark receipt workflows."""
+
+    detector_family: str = "keyed-template"
+    scoring_mode: str = "resynchronized"
+    threshold_source: str = "calibrated"
+    claim_scope: str = "controlled_keyed_template_receipt"
+    crop_margins: tuple[int, ...] = (0, 4, 8, 12)
+
+    def validate(self) -> None:
+        if self.detector_family != "keyed-template":
+            raise ValueError("only keyed-template detector family is supported")
+        if self.scoring_mode not in {"fixed", "resynchronized"}:
+            raise ValueError("scoring_mode must be fixed or resynchronized")
+        if self.threshold_source not in {"calibrated", "provided"}:
+            raise ValueError("threshold_source must be calibrated or provided")
+        if self.claim_scope != "controlled_keyed_template_receipt":
+            raise ValueError("only controlled_keyed_template_receipt scope is supported")
+        if not self.crop_margins:
+            raise ValueError("crop_margins must be non-empty")
+        for margin in self.crop_margins:
+            if int(margin) < 0:
+                raise ValueError("crop_margins must be non-negative")
+
+    def to_dict(self) -> dict[str, object]:
+        self.validate()
+        return {
+            "schema": WATERMARK_POLICY_SCHEMA,
+            "detector_family": self.detector_family,
+            "scoring_mode": self.scoring_mode,
+            "threshold_source": self.threshold_source,
+            "claim_scope": self.claim_scope,
+            "crop_margins": [int(value) for value in self.crop_margins],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> "WatermarkReceiptPolicy":
+        policy = cls(
+            detector_family=str(data.get("detector_family", "keyed-template")),
+            scoring_mode=str(data.get("scoring_mode", "resynchronized")),
+            threshold_source=str(data.get("threshold_source", "calibrated")),
+            claim_scope=str(data.get("claim_scope", "controlled_keyed_template_receipt")),
+            crop_margins=tuple(int(value) for value in data.get("crop_margins", (0, 4, 8, 12))),
+        )
+        policy.validate()
+        return policy
+
+    def commitment(self) -> str:
+        return canonical_json_hash(self.to_dict())
+
+
+@dataclass(frozen=True)
 class DetectorReceipt:
     """Public output of a detector wrapped in a trust receipt."""
 
@@ -68,22 +125,50 @@ class DetectorReceipt:
     valid: bool
     payload_commitment: str | None = None
     detector_commitment: str | None = None
+    policy_commitment: str | None = None
+    alignment: DetectorAlignmentScore | None = None
+    receipt_schema: str = DETECTOR_RECEIPT_SCHEMA
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "schema": self.receipt_schema,
             "detector_id": self.detector_id,
             "score": self.score,
             "threshold": self.threshold,
             "valid": self.valid,
             "payload_commitment": self.payload_commitment,
             "detector_commitment": self.detector_commitment,
+            "policy_commitment": self.policy_commitment,
+            "alignment": self.alignment.to_dict() if self.alignment else None,
+            "receipt_commitment": self.commitment(include_self=False),
         }
 
-    def commitment(self) -> str:
-        return canonical_json_hash(self.to_dict())
+    def commitment(self, *, include_self: bool = True) -> str:
+        data = {
+            "schema": self.receipt_schema,
+            "detector_id": self.detector_id,
+            "score": round(float(self.score), 12),
+            "threshold": round(float(self.threshold), 12),
+            "valid": bool(self.valid),
+            "payload_commitment": self.payload_commitment,
+            "detector_commitment": self.detector_commitment,
+            "policy_commitment": self.policy_commitment,
+            "alignment": self.alignment.to_dict() if self.alignment else None,
+        }
+        if include_self:
+            data["receipt_commitment"] = canonical_json_hash(data)
+        return canonical_json_hash(data)
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> "DetectorReceipt":
+        alignment_data = data.get("alignment")
+        alignment = None
+        if isinstance(alignment_data, dict):
+            alignment = DetectorAlignmentScore(
+                score=float(alignment_data["score"]),
+                alignment=str(alignment_data["alignment"]),
+                candidate_count=int(alignment_data["candidate_count"]),
+            )
         return cls(
             detector_id=str(data["detector_id"]),
             score=float(data["score"]),
@@ -95,6 +180,11 @@ class DetectorReceipt:
             detector_commitment=data.get("detector_commitment")
             if data.get("detector_commitment") is None
             else str(data["detector_commitment"]),
+            policy_commitment=data.get("policy_commitment")
+            if data.get("policy_commitment") is None
+            else str(data["policy_commitment"]),
+            alignment=alignment,
+            receipt_schema=str(data.get("schema", DETECTOR_RECEIPT_SCHEMA)),
         )
 
     def save(self, path: str | Path) -> None:
@@ -106,6 +196,28 @@ class DetectorReceipt:
         if not isinstance(data, dict):
             raise ValueError("detector receipt must be a JSON object")
         return cls.from_dict(data)
+
+
+@dataclass(frozen=True)
+class WatermarkVerificationReport:
+    """Result of replaying a watermark receipt against frames and policy."""
+
+    verified: bool
+    expected_commitment: str
+    observed_commitment: str
+    receipt: DetectorReceipt
+    policy: WatermarkReceiptPolicy
+    schema: str = WATERMARK_VERIFICATION_SCHEMA
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema": self.schema,
+            "verified": self.verified,
+            "expected_commitment": self.expected_commitment,
+            "observed_commitment": self.observed_commitment,
+            "receipt": self.receipt.to_dict(),
+            "policy": self.policy.to_dict(),
+        }
 
 
 def extract_tiny_video_features(frames: Sequence[np.ndarray] | np.ndarray) -> list[float]:
@@ -161,6 +273,7 @@ class TinyThresholdDetector:
         *,
         threshold: float,
         payload_commitment: str | None = None,
+        policy_commitment: str | None = None,
     ) -> DetectorReceipt:
         score = self.score(features)
         return DetectorReceipt(
@@ -170,6 +283,7 @@ class TinyThresholdDetector:
             valid=score >= threshold,
             payload_commitment=payload_commitment,
             detector_commitment=self.commitment,
+            policy_commitment=policy_commitment,
         )
 
 
@@ -356,7 +470,9 @@ class KeyedTemplateDetector:
         *,
         threshold: float,
         payload_commitment: str | None = None,
+        policy: WatermarkReceiptPolicy | None = None,
     ) -> DetectorReceipt:
+        policy = policy or WatermarkReceiptPolicy(scoring_mode="fixed", threshold_source="provided")
         score = self.score(frames)
         return DetectorReceipt(
             detector_id=self.detector_id,
@@ -365,6 +481,7 @@ class KeyedTemplateDetector:
             valid=score >= threshold,
             payload_commitment=payload_commitment,
             detector_commitment=self.commitment,
+            policy_commitment=policy.commitment(),
         )
 
     def receipt_resynchronized(
@@ -374,7 +491,13 @@ class KeyedTemplateDetector:
         threshold: float,
         payload_commitment: str | None = None,
         crop_margins: Sequence[int] = (0, 4, 8),
+        policy: WatermarkReceiptPolicy | None = None,
     ) -> DetectorReceipt:
+        policy = policy or WatermarkReceiptPolicy(
+            scoring_mode="resynchronized",
+            threshold_source="provided",
+            crop_margins=tuple(int(value) for value in crop_margins),
+        )
         aligned = self.score_resynchronized(frames, crop_margins=crop_margins)
         return DetectorReceipt(
             detector_id=self.detector_id,
@@ -383,6 +506,57 @@ class KeyedTemplateDetector:
             valid=aligned.score >= threshold,
             payload_commitment=payload_commitment,
             detector_commitment=self.commitment,
+            policy_commitment=policy.commitment(),
+            alignment=aligned,
+        )
+
+    def verify_receipt(
+        self,
+        frames: Sequence[np.ndarray] | np.ndarray,
+        receipt: DetectorReceipt,
+        *,
+        policy: WatermarkReceiptPolicy,
+        payload_commitment: str | None = None,
+        tolerance: float = 1e-9,
+    ) -> WatermarkVerificationReport:
+        if receipt.detector_commitment != self.commitment:
+            observed = receipt
+        elif receipt.policy_commitment != policy.commitment():
+            observed = receipt
+        elif payload_commitment is not None and receipt.payload_commitment != payload_commitment:
+            observed = receipt
+        elif policy.scoring_mode == "fixed":
+            observed = self.receipt(
+                frames,
+                threshold=receipt.threshold,
+                payload_commitment=receipt.payload_commitment,
+                policy=policy,
+            )
+        else:
+            observed = self.receipt_resynchronized(
+                frames,
+                threshold=receipt.threshold,
+                payload_commitment=receipt.payload_commitment,
+                crop_margins=policy.crop_margins,
+                policy=policy,
+            )
+        same_score = abs(float(observed.score) - float(receipt.score)) <= tolerance
+        same_valid = bool(observed.valid) == bool(receipt.valid)
+        same_commitment = observed.commitment() == receipt.commitment()
+        verified = (
+            receipt.detector_commitment == self.commitment
+            and receipt.policy_commitment == policy.commitment()
+            and (payload_commitment is None or receipt.payload_commitment == payload_commitment)
+            and same_score
+            and same_valid
+            and same_commitment
+        )
+        return WatermarkVerificationReport(
+            verified=verified,
+            expected_commitment=receipt.commitment(),
+            observed_commitment=observed.commitment(),
+            receipt=observed,
+            policy=policy,
         )
 
     def calibrate(
