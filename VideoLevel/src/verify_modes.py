@@ -13,16 +13,17 @@ Usage:
     result = verify_strict(
         stego_video_path="stego.h264",
         original_video_path="original.h264",
-        circuits_dir="circuits/",
-        secret_key=secret_key,
+        circuits_dir="",
+        secret_key=b"",
+        lattice_public_key=lattice_public_key,
         message_length=len(message),
     )
 
     # Sidecar-assisted near-blind mode (no original video)
     result = verify_nearblind(
         stego_video_path="stego.h264",
-        circuits_dir="circuits/",
-        secret_key=secret_key,
+        circuits_dir="",
+        secret_key=b"",
         message_length=len(message),
         manifest_public_key=manifest_public_key,
     )
@@ -31,8 +32,9 @@ Usage:
     result = verify_benchmark(
         stego_video_path="stego.h264",
         original_video_path="original.h264",
-        circuits_dir="circuits/",
-        secret_key=secret_key,
+        circuits_dir="",
+        secret_key=b"",
+        lattice_public_key=lattice_public_key,
         message_length=len(message),
     )
 """
@@ -53,6 +55,7 @@ def verify_strict(
     chaos_key: Optional[bytes] = None,
     precomputed_positions: Optional[List[tuple[int, int, int]]] = None,
     precomputed_payload_bits: Optional[int] = None,
+    lattice_public_key: Optional[bytes] = None,
 ) -> VerifyResult:
     """
     Strict non-blind verification with full cover analysis.
@@ -75,6 +78,7 @@ def verify_strict(
         chaos_key=chaos_key,
         precomputed_positions=precomputed_positions,
         precomputed_payload_bits=precomputed_payload_bits,
+        lattice_public_key=lattice_public_key,
         use_analysis_cache=True,
         force_analysis_refresh=False,
     )
@@ -98,7 +102,7 @@ def verify_nearblind(
     **Requirements:**
     - manifest.json must exist alongside stego video
     - positions.json must exist (from embedding)
-    - manifest_public_key must be the Ed25519 public key for the signer
+    - manifest_public_key must be the ML-DSA-65 public key for the signer
     - No original video required
     - Suitable for: sidecar-assisted verification at scale
 
@@ -131,6 +135,7 @@ def verify_benchmark(
     max_modifications_per_block: int = 1,
     chaos_key: Optional[bytes] = None,
     use_cache: bool = True,
+    lattice_public_key: Optional[bytes] = None,
 ) -> VerifyResult:
     """
     Benchmark-optimized verification mode.
@@ -155,6 +160,7 @@ def verify_benchmark(
         chaos_key=chaos_key,
         use_analysis_cache=use_cache,
         force_analysis_refresh=False,
+        lattice_public_key=lattice_public_key,
     )
 
 
@@ -167,6 +173,7 @@ def verify_auto(
     max_modifications_per_block: int = 1,
     chaos_key: Optional[bytes] = None,
     manifest_public_key: Optional[bytes] = None,
+    lattice_public_key: Optional[bytes] = None,
 ) -> VerifyResult:
     """
     Auto-select verification mode based on available files.
@@ -205,6 +212,7 @@ def verify_auto(
             message_length=message_length,
             max_modifications_per_block=max_modifications_per_block,
             chaos_key=chaos_key,
+            lattice_public_key=lattice_public_key,
         )
 
     raise RuntimeError(

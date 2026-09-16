@@ -1,8 +1,8 @@
-# ZK-SNARK Video Steganography
+# Post-Quantum Lattice-ZKP Video Steganography
 
-Hide a Groth16 zero-knowledge proof inside H.264 baseline video by modifying CAVLC coefficients in IDR frames.
+Hide a fixed commitment to a transparent lattice zero-knowledge proof inside H.264 Baseline/CAVLC video by modifying coefficients directly. The proof transcript and its ML-DSA-65 authentication remain in a sidecar; neither uses SEI.
 
-**Status:** Research prototype; supported path is H.264 Baseline/CAVLC with signed sidecar-assisted near-blind verification.
+**Status:** Research prototype. The supported path is direct H.264 Baseline/CAVLC embedding with a signed lattice-ZKP sidecar-assisted near-blind verification.
 **Validated Runtime:** `py -3.12`
 **Current hardening checks:** quick suite `23/23`, hardening `6/6`, and FFmpeg codec fixture `1/1` passed. Full local-asset E2E and benchmarks require revalidation after the circuit/sidecar update.
 **Benchmark Sections:** SEC1-SEC10 (Quality, Capacity, Methods, Security, Performance, Tradeoff, Real-time, Motion/GOP, Statistical, Audit)
@@ -11,17 +11,18 @@ Hide a Groth16 zero-knowledge proof inside H.264 baseline video by modifying CAV
 
 ## Overview
 
-The system embeds a message-authentication proof into H.264 bitstreams without leaving the compressed-domain workflow. It:
+The default system embeds a proof binding into H.264 bitstreams without leaving the compressed-domain workflow. It:
 
-1. Generates a Groth16 proof for the payload.
-2. Packs `[4B message_length][message][129B compressed proof]`.
-3. Optionally applies chaos transforms:
+1. Generates a Fiat-Shamir proof of knowledge of a short SIS witness, with the public matrix derived from the payload hash.
+2. Authenticates the transcript with ML-DSA-65 and stores it as `.lattice-zkp.json`.
+3. Packs `[LQ1][4B message_length][message][32B sidecar commitment]` into the video.
+4. Optionally applies chaos transforms:
    - Arnold Cat Map on payload bits
    - Logistic Map on embedding-position order
-4. Locates CAVLC-safe candidate positions in IDR frames.
-5. Applies length-preserving coefficient/sign modifications.
-6. Reconstructs a valid H.264 bitstream.
-7. Extracts and verifies the proof from the stego video.
+5. Locates CAVLC-safe candidate positions in IDR frames.
+6. Applies length-preserving coefficient/sign modifications.
+7. Reconstructs a valid H.264 bitstream.
+8. Extracts the reference, verifies the lattice transcript, ML-DSA signature, and sidecar binding.
 
 ### New Features (IEEE-ready)
 
@@ -33,30 +34,13 @@ The system embeds a message-authentication proof into H.264 bitstreams without l
 - **Optimized Extraction**: Parallel IDR parsing with vectorization
 - **GOP Sweep Analysis**: Quality/capacity tradeoff across GOP=1,4,8,16
 
-### Payload format
+### Proof and payload format
 
-- Compressed Groth16 proof size: `129` bytes
-- Example benchmark message: `13` bytes (`b"ZK-bench-v1.0!"`)
-- Packed blob: `4 + 13 + 129 = 146` bytes = `1168` bits
-- Chaos-expanded operating payload used by benchmarks: `1232` bits
+The in-video payload is always `3 + 4 + message_length + 32` bytes. The 32-byte value is SHA3-256 over the exact lattice-ZKP sidecar, so substituting a proof or its ML-DSA signature fails verification.
 
-### Circuit
+The prover derives a ternary vector `x` and the sidecar proves a bounded modular preimage relation for `t = A(message_hash) · x (mod q)` using 128 parallel Fiat-Shamir challenge rounds and rejection sampling. The proof transcript does not serialize `x` or the 32-byte witness key. ML-DSA-65 authenticates the sidecar and the manifest binds the final stego hash and positions hash.
 
-`PayloadVerify` proves:
-
-```text
-commitment = SHA256(SHA256(message) || secret_key)
-```
-
-**Constraint Count:** 62,577 (Groth16; Circom 2.2.0 build with enforced payload-length range)
-
-Public inputs:
-- `payload_hash[256]`
-- `commitment[256]`
-- `payload_length`
-
-Private input:
-- `secret[256]`
+This is an experimental, transparent lattice proof for the stated SIS relation—not a standardized general circuit zkSNARK. Its response bound is not an independently audited parameter set or a formal verifier-enforced ternary-witness claim. It also is not a proof that an H.264 encoder executed every operation correctly. Codec correctness remains covered by the direct-CAVLC implementation, hashes, signatures, FFmpeg fixtures, and integration tests. A production cryptographic claim requires replacing this backend with a reviewed lattice-ZK library/protocol and a third-party audit.
 
 ---
 
@@ -159,7 +143,7 @@ VideoLevel/
 |   |-- sec10_gop_sweep.py        Explicit GOP sweep
 |   |-- statistical_benchmark.py  Error bars, 3 or more runs
 |   `-- sec1_audit.py             Quality guard audit logging
-|-- circuits/                     Circom circuit + Groth16 keys
+|-- circuits/                     Legacy Groth16 migration artifacts (not used by default)
 |-- native/                       C17 Annex-B relay + optional x264 adapter
 |-- data/
 |   |-- encoded/                  Local H.264 benchmark inputs (ignored)
@@ -173,11 +157,12 @@ VideoLevel/
 |   |   |-- stego.py              Safety filter + embed logic
 |   |   |-- chaos.py              Arnold Cat + Logistic Map
 |   |   `-- analysis_cache.py     Process-local safe video-analysis cache
-|   |-- manifest.py               v2.0.0 authenticated manifest schema
+|   |-- manifest.py               v4.0.0 ML-DSA-authenticated manifest schema
 |   |-- embedder.py               Public embed API
 |   |-- verifier.py               Public verify API
 |   |-- verifier_blind.py         Near-blind verification
-|   `-- zk_proof.py               Proof packing + snarkjs bridge
+|   |-- lattice_pq.py             ML-KEM/ML-DSA + transparent lattice-ZKP sidecar
+|   `-- zk_proof.py               Legacy Groth16 migration bridge
 |-- plan.md                       Current freeze plan
 `-- README.md
 ```
@@ -189,9 +174,6 @@ VideoLevel/
 ### Requirements
 
 - Python 3.12 recommended
-- Node.js 22.x or compatible
-- `circom` 2.2.x
-- `snarkjs` 0.7.x
 - `ffmpeg` 8.x or compatible
 - Python packages from `requirements.lock`
 
@@ -206,18 +188,12 @@ Current audited Python package set:
 Observed native toolchain on the current audit machine:
 
 - Python 3.12.10
-- Node.js 22.20.0
-- `circom` 2.2.0
-- `snarkjs` 0.7.6
 - `ffmpeg` 8.0.1
 
 Install:
 
 ```bash
 py -3.12 -m pip install -r requirements.lock
-cd circuits
-npm ci
-cd ..
 ```
 
 ### Prepare input video
@@ -232,28 +208,22 @@ ffmpeg -i input.y4m -c:v libx264 -profile:v baseline -coder 0 -g 1 -qp 22 -y out
 
 ```python
 import os
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from src.embedder import embed
+from src.lattice_pq import LatticeSigner
 
-secret_key = os.urandom(32)
+witness_key = os.urandom(32)
 chaos_key = b"example-chaos-key"
 message = b"Hello ZK-Stego"
-manifest_signer = Ed25519PrivateKey.generate()
-manifest_private_key = manifest_signer.private_bytes(
-    serialization.Encoding.Raw,
-    serialization.PrivateFormat.Raw,
-    serialization.NoEncryption(),
-)
+lattice_public_key, lattice_private_key = LatticeSigner.generate_keypair()
 
 result = embed(
     video_path="data/encoded/foreman_cif_q22_g1.h264",
     message=message,
     output_path="data/output/stego.h264",
-    circuits_dir="circuits",
-    secret_key=secret_key,
+    circuits_dir="",  # unused by the default lattice_zkp backend
+    secret_key=witness_key,
     chaos_key=chaos_key,
-    manifest_private_key=manifest_private_key,
+    lattice_private_key=lattice_private_key,
     manifest_signer_id="example-sender-v1",
 )
 
@@ -261,7 +231,8 @@ print(result.bits_embedded, result.output_path)
 # Also generates:
 # - data/output/stego.h264.positions.json
 # - data/output/stego.h264.meta.json
-# - data/output/stego.h264.manifest.json (v2.0.0, Ed25519-signed)
+# - data/output/stego.h264.lattice-zkp.json (SIS proof + ML-DSA-65 signature)
+# - data/output/stego.h264.manifest.json (v4.0.0, ML-DSA-65-signed)
 ```
 
 ### Embed (locked operating-point mode)
@@ -276,8 +247,9 @@ result = embed(
     video_path="data/encoded/coastguard_cif_q22_g1.h264",
     message=b"ZK-bench-v1.0!",
     output_path="data/output/stego_locked.h264",
-    circuits_dir="circuits",
+    circuits_dir="",
     secret_key=bytes(range(32)),
+    lattice_private_key=lattice_private_key,
     chaos_key=b"sec1_benchmark_chaos_v1",
     precomputed_positions=locked_positions,
     trust_precomputed_positions=True,
@@ -295,8 +267,9 @@ from src.verifier import verify
 result = verify(
     stego_video_path="data/output/stego.h264",
     original_video_path="data/encoded/foreman_cif_q22_g1.h264",
-    circuits_dir="circuits",
-    secret_key=secret_key,
+    circuits_dir="",
+    secret_key=b"" ,  # unused by lattice_zkp verification
+    lattice_public_key=lattice_public_key,
     message_length=len(message),
     chaos_key=chaos_key,
 )

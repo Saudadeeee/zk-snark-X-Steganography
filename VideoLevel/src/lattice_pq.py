@@ -144,15 +144,18 @@ def _challenge_bits(message_hash: bytes, statement: list[int], commitments: list
 
 @dataclass(frozen=True)
 class LatticeZkProof:
-    """Transparent Fiat-Shamir proof of knowledge of a short SIS witness.
+    """Experimental transparent Fiat-Shamir proof for a bounded SIS preimage.
 
     The public statement is ``t = A(message) * x mod q``.  ``A`` is derived
-    from the payload hash, while ``x`` is a short vector derived from a local
-    32-byte witness key.  For every Fiat-Shamir challenge bit the prover sends
+    from the payload hash, while the prover's intended ``x`` is a ternary
+    vector derived from a local 32-byte witness key.  For every Fiat-Shamir challenge bit the prover sends
     ``z = y + c*x`` and uses rejection sampling, so accepted responses are in
     a common interval independent of ``x``.  Thus the serialized transcript
-    contains no witness vector.  It is intentionally scoped to this linear
-    relation; it does *not* claim to prove H.264 codec execution.
+    contains no witness vector.  The verifier's response bound establishes a
+    bounded modular preimage relation; this prototype does not constitute a
+    parameterized, independently-audited proof that the preimage is ternary.
+    It is intentionally scoped to this linear relation and does *not* claim
+    to prove H.264 codec execution.
     """
 
     version: str

@@ -21,9 +21,9 @@ from src.runtest._helpers import (
     get_video,
     get_output,
     get_circuits_dir,
-    node_available,
 )
 from src.embedder import embed
+from src.lattice_pq import LatticeSigner
 from src.exceptions import InsufficientCapacityError
 from src.verifier import verify
 from benchmark._common import (
@@ -40,6 +40,7 @@ from benchmark.locked_operating_contract import (
 SECRET_KEY = LOCKED_SECRET_KEY
 TEST_MSG = LOCKED_MESSAGE
 CIRCUITS_DIR = get_circuits_dir()
+LATTICE_PUBLIC_KEY, LATTICE_PRIVATE_KEY = LatticeSigner.generate_keypair()
 
 # Prefer larger all-intra assets first because patchable capacity is the real constraint.
 VIDEO_CANDIDATES = [
@@ -52,7 +53,7 @@ SCAN_JSON = Path(__file__).resolve().parent.parent.parent / "benchmark" / "resul
 
 
 def _first_embeddable_video(message: bytes) -> str | None:
-    required_bits = (4 + len(message) + 129) * 8
+    required_bits = (3 + 4 + len(message) + 32) * 8
     contract = load_best_locked_operating_contract(required_bits=required_bits)
     if contract is not None:
         return contract.video_path
@@ -93,7 +94,7 @@ def _first_embeddable_video(message: bytes) -> str | None:
 
 
 def _validated_pool_for_video(video: str) -> list[tuple[int, int, int]]:
-    required_bits = (4 + len(TEST_MSG) + 129) * 8
+    required_bits = (3 + 4 + len(TEST_MSG) + 32) * 8
     contract = load_best_locked_operating_contract(required_bits=required_bits)
     if contract is None:
         return []
@@ -108,16 +109,13 @@ def _cleanup_output(base_path: str) -> None:
         f"{base_path}.positions.json",
         f"{base_path}.meta.json",
         f"{base_path}.manifest.json",
+        f"{base_path}.lattice-zkp.json",
         ):
         if os.path.exists(path):
             os.remove(path)
 
 
 def t_embed_api_sidecars_exist():
-    if not node_available():
-        SKIP("embed_api_sidecars_exist", "node not found on PATH")
-        return
-
     video = _first_embeddable_video(TEST_MSG)
     if video is None:
         SKIP("embed_api_sidecars_exist", "no benchmark asset available")
@@ -133,6 +131,7 @@ def t_embed_api_sidecars_exist():
                 output_path=out,
                 circuits_dir=CIRCUITS_DIR,
                 secret_key=SECRET_KEY,
+                lattice_private_key=LATTICE_PRIVATE_KEY,
                 precomputed_positions=candidate_pool or None,
                 trust_precomputed_positions=False,
                 use_analysis_cache=True,
@@ -152,10 +151,6 @@ def t_embed_api_sidecars_exist():
 
 
 def t_zk_full_pipeline():
-    if not node_available():
-        SKIP("zk_full_pipeline", "node not found on PATH")
-        return
-
     video = _first_embeddable_video(TEST_MSG)
     if video is None:
         SKIP("zk_full_pipeline", "no benchmark asset available")
@@ -171,6 +166,7 @@ def t_zk_full_pipeline():
                 output_path=out,
                 circuits_dir=CIRCUITS_DIR,
                 secret_key=SECRET_KEY,
+                lattice_private_key=LATTICE_PRIVATE_KEY,
                 precomputed_positions=candidate_pool or None,
                 trust_precomputed_positions=False,
                 use_analysis_cache=True,
@@ -184,6 +180,7 @@ def t_zk_full_pipeline():
             original_video_path=video,
             circuits_dir=CIRCUITS_DIR,
             secret_key=SECRET_KEY,
+            lattice_public_key=LATTICE_PUBLIC_KEY,
             message_length=len(TEST_MSG),
             precomputed_positions=result.used_positions,
             precomputed_payload_bits=result.bits_embedded,

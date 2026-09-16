@@ -1,9 +1,9 @@
 """
-ZK-SNARK CAVLC Video Steganography
-Core CAVLC-based video steganography system with Zero-Knowledge proofs.
+Post-Quantum Lattice-ZKP CAVLC Video Steganography.
+Core CAVLC-based steganography with transparent lattice proofs and ML-DSA.
 """
 
-__version__ = "3.1-upgrade-v3"
+__version__ = "4.0-lattice-zkp"
 
 # Public APIs
 from .embedder import embed, EmbedResult

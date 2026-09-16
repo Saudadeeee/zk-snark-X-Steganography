@@ -14,8 +14,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 from .lattice_pq import LATTICE_SIGNATURE_ALGORITHM, LatticeSigner
 
 
-MANIFEST_VERSION = "3.0.0"
-"""Manifest v3 activates ML-DSA signatures for the lattice path."""
+MANIFEST_VERSION = "4.0.0"
+"""Manifest v4 makes transparent lattice-ZKP metadata the default."""
 
 SIGNATURE_ALGORITHM = "ml-dsa-65"
 LEGACY_SIGNATURE_ALGORITHM = "ed25519"
@@ -58,7 +58,7 @@ class VideoMetadata:
 
 @dataclass
 class ProofMetadata:
-    proof_system: str = "groth16"
+    proof_system: str = "sis-linear-fiat-shamir-v1"
     proof_size_bytes: int = 0
     constraint_count: int = 0
     prove_time_ms: Optional[float] = None
@@ -198,7 +198,7 @@ class StegoManifest:
                 provenance_root_hash=video.get("provenance_root_hash"),
             ),
             proof=ProofMetadata(
-                proof_system=str(proof.get("proof_system", "groth16")),
+                proof_system=str(proof.get("proof_system", "sis-linear-fiat-shamir-v1")),
                 proof_size_bytes=int(proof["proof_size_bytes"]),
                 constraint_count=int(proof["constraint_count"]),
                 prove_time_ms=proof.get("prove_time_ms"),
