@@ -5,6 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 static const uint8_t ZKS_DEFAULT_UUID[16] = {
     0x9d, 0x4f, 0x11, 0x0d, 0x48, 0xfe, 0x45, 0x20,
     0x9d, 0xfe, 0x01, 0x57, 0x91, 0x82, 0x45, 0x72,
@@ -98,6 +103,12 @@ int main(int argc, char **argv) {
     int status = ZKS_OK;
     RelayContext context;
     ZksAnnexBParser parser;
+#ifdef _WIN32
+    if (_setmode(_fileno(stdin), _O_BINARY) == -1 || _setmode(_fileno(stdout), _O_BINARY) == -1) {
+        fprintf(stderr, "cannot set binary stdin/stdout mode\n");
+        return 1;
+    }
+#endif
     memset(&context, 0, sizeof(context));
     for (argument_index = 1; argument_index < argc; ++argument_index) {
         if (strcmp(argv[argument_index], "--sei-payload-hex") == 0 && argument_index + 1 < argc) {

@@ -31,6 +31,8 @@ jobs:
           cmake -S native -B native/build
           cmake --build native/build
           ctest --test-dir native/build --output-on-failure
+      - name: Native relay FFmpeg integration
+        run: python src/runtest/test_native_relay_ffmpeg.py
       - name: Circuit package contract
         run: npm --prefix circuits test
       - name: Security hardening regression tests
