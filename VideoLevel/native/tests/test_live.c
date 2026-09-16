@@ -1,4 +1,5 @@
 #include "zkstego_live.h"
+#include "zkstego_cavlc_direct.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -138,15 +139,72 @@ static int test_inband_sei_round_trip_preserves_video_nals(void) {
     return 0;
 }
 
+static int test_direct_cavlc_embedding_preserves_nonzero_support(void) {
+    int16_t coefficients[16] = {
+        0, 0, 1, 0,
+        0, -2, 0, 0,
+        0, 0, 0, 3,
+        0, 0, 0, -6,
+    };
+    static const uint8_t payload[] = {0x40u}; /* First payload bit is one. */
+    ZksCavlcEmbedState state;
+    size_t modified_index = 0u;
+
+    zks_cavlc_embed_state_init(&state, payload, sizeof(payload));
+    CHECK(zks_cavlc_embed_block(&state, coefficients, 16u, &modified_index) == ZKS_OK);
+    CHECK(modified_index == 15u);
+    CHECK(coefficients[15] == -7);
+    CHECK(coefficients[2] == 1 && coefficients[5] == -2 && coefficients[11] == 3);
+    CHECK(state.embedded_bits == 1u && state.modified_coefficients == 1u);
+    return 0;
+}
+
+static int test_direct_cavlc_embedding_rejects_unsafe_block_without_consuming_payload(void) {
+    int16_t coefficients[16] = {
+        0, 0, 1, 0,
+        0, -2, 0, 0,
+        0, 0, 0, 2,
+        0, 0, 0, -1,
+    };
+    static const uint8_t payload[] = {0x80u};
+    ZksCavlcEmbedState state;
+    size_t modified_index = 0u;
+
+    zks_cavlc_embed_state_init(&state, payload, sizeof(payload));
+    CHECK(zks_cavlc_embed_block(&state, coefficients, 16u, &modified_index) == ZKS_NO_PAYLOAD);
+    CHECK(modified_index == ZKS_CAVLC_NO_INDEX);
+    CHECK(coefficients[11] == 2 && coefficients[15] == -1);
+    CHECK(state.embedded_bits == 0u && state.modified_coefficients == 0u);
+    return 0;
+}
+
+static int test_direct_cavlc_extraction_uses_same_high_frequency_carrier(void) {
+    int16_t coefficients[16] = {
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 4,
+        0, 0, 0, -7,
+    };
+    uint8_t bit = 0u;
+    size_t carrier_index = 0u;
+
+    CHECK(zks_cavlc_extract_block_bit(coefficients, 16u, &bit, &carrier_index) == ZKS_OK);
+    CHECK(carrier_index == 15u && bit == 1u);
+    return 0;
+}
+
 int main(void) {
     int failed = 0;
     failed |= test_incremental_annexb_parser();
     failed |= test_aud_assembler_emits_complete_idr_access_unit();
     failed |= test_idr_payload_scheduler_is_bounded_and_repeats();
     failed |= test_inband_sei_round_trip_preserves_video_nals();
+    failed |= test_direct_cavlc_embedding_preserves_nonzero_support();
+    failed |= test_direct_cavlc_embedding_rejects_unsafe_block_without_consuming_payload();
+    failed |= test_direct_cavlc_extraction_uses_same_high_frequency_carrier();
     if (failed) {
         return 1;
     }
-    puts("native realtime transport: 4/4 passed");
+    puts("native realtime transport: 7/7 passed");
     return 0;
 }
