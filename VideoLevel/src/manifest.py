@@ -11,10 +11,14 @@ from typing import Any, Optional, Sequence
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from .lattice_pq import LATTICE_SIGNATURE_ALGORITHM, LatticeSigner
 
 
-MANIFEST_VERSION = "2.0.0"
-SIGNATURE_ALGORITHM = "ed25519"
+MANIFEST_VERSION = "3.0.0"
+"""Manifest v3 activates ML-DSA signatures for the lattice path."""
+
+SIGNATURE_ALGORITHM = "ml-dsa-65"
+LEGACY_SIGNATURE_ALGORITHM = "ed25519"
 
 
 @dataclass
@@ -231,22 +235,34 @@ class StegoManifest:
         return hashlib.sha256(canonical_json_bytes(self._unsigned_dict())).hexdigest()
 
     def sign(self, private_key: bytes | Ed25519PrivateKey, signer_id: Optional[str] = None) -> None:
-        self.signature_algorithm = SIGNATURE_ALGORITHM
-        signature = _private_key(private_key).sign(canonical_json_bytes(self._unsigned_dict()))
+        """Sign with ML-DSA-65, preserving Ed25519 only for legacy artifacts."""
+        if isinstance(private_key, Ed25519PrivateKey) or (
+            isinstance(private_key, (bytes, bytearray)) and len(private_key) == 32
+        ):
+            self.signature_algorithm = LEGACY_SIGNATURE_ALGORITHM
+            signature = _private_key(private_key).sign(canonical_json_bytes(self._unsigned_dict()))
+            default_signer = LEGACY_SIGNATURE_ALGORITHM
+        else:
+            self.signature_algorithm = SIGNATURE_ALGORITHM
+            signature = LatticeSigner.sign(bytes(private_key), canonical_json_bytes(self._unsigned_dict()))
+            default_signer = SIGNATURE_ALGORITHM
         self.signature = base64.b64encode(signature).decode("ascii")
-        self.signer = signer_id or "ed25519"
+        self.signer = signer_id or default_signer
 
     def verify_signature(self, public_key: bytes | Ed25519PublicKey) -> bool:
-        if self.signature_algorithm != SIGNATURE_ALGORITHM or not self.signature:
+        if not self.signature:
             return False
         try:
-            _public_key(public_key).verify(
-                base64.b64decode(self.signature.encode("ascii"), validate=True),
-                canonical_json_bytes(self._unsigned_dict()),
-            )
-        except (ValueError, InvalidSignature):
+            signature = base64.b64decode(self.signature.encode("ascii"), validate=True)
+            data = canonical_json_bytes(self._unsigned_dict())
+            if self.signature_algorithm == SIGNATURE_ALGORITHM:
+                return LatticeSigner.verify(bytes(public_key), data, signature)
+            if self.signature_algorithm == LEGACY_SIGNATURE_ALGORITHM:
+                _public_key(public_key).verify(signature, data)
+                return True
+        except (TypeError, ValueError, InvalidSignature):
             return False
-        return True
+        return False
 
 def compute_file_hash(file_path: str) -> str:
     sha256 = hashlib.sha256()
