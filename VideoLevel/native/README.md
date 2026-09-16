@@ -17,6 +17,17 @@ units to stdout. It is deliberately a transport-only relay until a native
 CAVLC mutator is linked; it never pretends to hide a payload while forwarding
 unmodified video.
 
+For an operational realtime in-band payload path, it can insert an opaque,
+fragmented chunk in an H.264 `user_data_unregistered` SEI before every IDR:
+
+```powershell
+Get-Content input.h264 -AsByteStream | .\native\build\Release\zkstego_annexb_relay.exe --sei-payload-hex 0123456789abcdef --chunk-bytes 8 > output.h264
+```
+
+This SEI mode has no decoded-pixel quality cost and the native extractor can
+recover the chunk sequence, but SEI is **not covert steganography**. It is a
+deliberately visible metadata carrier for realtime authenticated transport.
+
 ## Selected encoder: x264
 
 The optional `zkstego_x264` target provides a native low-latency I420 encoder

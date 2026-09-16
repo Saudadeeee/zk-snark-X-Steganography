@@ -52,6 +52,14 @@ unsafe to market as realtime. The compact ML-DSA receipt/reference path is the
 appropriate payload source for the live scheduler; Groth16 proving belongs to
 an asynchronous control plane, not the per-frame hot path.
 
+## Native C in-band path
+
+`native/` now provides a C17 relay plus a `user_data_unregistered` SEI carrier.
+It inserts fragmented opaque payload chunks before IDR and recovers them
+natively with no decoded-pixel change. This is usable for realtime authenticated
+metadata transport, but SEI is visible to an observer and is not claimed as
+covert steganography. See `native/README.md` for build and pipe commands.
+
 ## Next implementation decision
 
 The native backend depends on the deployment target and transport: x86/Linux

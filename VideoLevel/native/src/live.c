@@ -39,6 +39,27 @@ static int append_bytes(uint8_t **buffer, size_t *size, size_t *capacity, const 
     return ZKS_OK;
 }
 
+void zks_byte_buffer_init(ZksByteBuffer *buffer) {
+    if (buffer) {
+        memset(buffer, 0, sizeof(*buffer));
+    }
+}
+
+void zks_byte_buffer_destroy(ZksByteBuffer *buffer) {
+    if (!buffer) {
+        return;
+    }
+    free(buffer->data);
+    memset(buffer, 0, sizeof(*buffer));
+}
+
+static int append_to_byte_buffer(ZksByteBuffer *buffer, const uint8_t *data, size_t data_size) {
+    if (!buffer || (!data && data_size != 0u)) {
+        return ZKS_ERR_ARGUMENT;
+    }
+    return append_bytes(&buffer->data, &buffer->size, &buffer->capacity, data, data_size);
+}
+
 static int find_start_code(const uint8_t *data, size_t size, size_t from, size_t *offset, size_t *length) {
     size_t index;
     for (index = from; index + 3u <= size; ++index) {
@@ -312,5 +333,256 @@ int zks_payload_scheduler_next(ZksPayloadScheduler *scheduler, int is_idr, ZksPa
         out_chunk->data[index] = scheduler->payload[(offset + index) % scheduler->payload_size];
     }
     scheduler->emitted++;
+    return ZKS_OK;
+}
+
+static int append_sei_value(ZksByteBuffer *buffer, size_t value) {
+    uint8_t byte;
+    while (value >= 255u) {
+        byte = 255u;
+        if (append_to_byte_buffer(buffer, &byte, 1u) != ZKS_OK) {
+            return ZKS_ERR_MEMORY;
+        }
+        value -= 255u;
+    }
+    byte = (uint8_t)value;
+    return append_to_byte_buffer(buffer, &byte, 1u);
+}
+
+static int append_u64_be(ZksByteBuffer *buffer, uint64_t value) {
+    uint8_t bytes[8];
+    size_t index;
+    for (index = 0u; index < sizeof(bytes); ++index) {
+        bytes[sizeof(bytes) - 1u - index] = (uint8_t)(value & 0xffu);
+        value >>= 8u;
+    }
+    return append_to_byte_buffer(buffer, bytes, sizeof(bytes));
+}
+
+static uint64_t read_u64_be(const uint8_t *data) {
+    size_t index;
+    uint64_t value = 0u;
+    for (index = 0u; index < 8u; ++index) {
+        value = (value << 8u) | data[index];
+    }
+    return value;
+}
+
+static int append_escaped_rbsp(ZksByteBuffer *out, const uint8_t *rbsp, size_t rbsp_size) {
+    size_t index;
+    uint8_t zero_count = 0u;
+    for (index = 0u; index < rbsp_size; ++index) {
+        if (zero_count == 2u && rbsp[index] <= 3u) {
+            const uint8_t prevention = 3u;
+            if (append_to_byte_buffer(out, &prevention, 1u) != ZKS_OK) {
+                return ZKS_ERR_MEMORY;
+            }
+            zero_count = 0u;
+        }
+        if (append_to_byte_buffer(out, rbsp + index, 1u) != ZKS_OK) {
+            return ZKS_ERR_MEMORY;
+        }
+        if (rbsp[index] == 0u) {
+            zero_count++;
+        } else {
+            zero_count = 0u;
+        }
+    }
+    return ZKS_OK;
+}
+
+static int unescape_rbsp(const uint8_t *ebsp, size_t ebsp_size, ZksByteBuffer *out) {
+    size_t index;
+    uint8_t zero_count = 0u;
+    for (index = 0u; index < ebsp_size; ++index) {
+        uint8_t byte = ebsp[index];
+        if (zero_count == 2u && byte == 3u) {
+            zero_count = 0u;
+            continue;
+        }
+        if (append_to_byte_buffer(out, &byte, 1u) != ZKS_OK) {
+            return ZKS_ERR_MEMORY;
+        }
+        if (byte == 0u) {
+            zero_count++;
+        } else {
+            zero_count = 0u;
+        }
+    }
+    return ZKS_OK;
+}
+
+static int build_user_data_sei(const uint8_t uuid[16], const ZksPayloadChunk *chunk, ZksByteBuffer *out) {
+    static const uint8_t start_code[] = {0u, 0u, 0u, 1u};
+    static const uint8_t nal_header = 0x06u;
+    static const uint8_t magic[] = {'Z', 'K', 'S', '1'};
+    const uint8_t trailing_bits = 0x80u;
+    ZksByteBuffer rbsp;
+    size_t user_data_size;
+    int status;
+    if (!uuid || !chunk || !out || chunk->size > ZKS_MAX_PAYLOAD_CHUNK) {
+        return ZKS_ERR_ARGUMENT;
+    }
+    user_data_size = 16u + sizeof(magic) + 8u + 2u + chunk->size;
+    zks_byte_buffer_init(&rbsp);
+    status = append_sei_value(&rbsp, 5u);
+    if (status == ZKS_OK) {
+        status = append_sei_value(&rbsp, user_data_size);
+    }
+    if (status == ZKS_OK) {
+        status = append_to_byte_buffer(&rbsp, uuid, 16u);
+    }
+    if (status == ZKS_OK) {
+        status = append_to_byte_buffer(&rbsp, magic, sizeof(magic));
+    }
+    if (status == ZKS_OK) {
+        status = append_u64_be(&rbsp, chunk->sequence);
+    }
+    if (status == ZKS_OK) {
+        uint8_t size_bytes[2] = {(uint8_t)(chunk->size >> 8u), (uint8_t)(chunk->size & 0xffu)};
+        status = append_to_byte_buffer(&rbsp, size_bytes, sizeof(size_bytes));
+    }
+    if (status == ZKS_OK) {
+        status = append_to_byte_buffer(&rbsp, chunk->data, chunk->size);
+    }
+    if (status == ZKS_OK) {
+        status = append_to_byte_buffer(&rbsp, &trailing_bits, 1u);
+    }
+    if (status == ZKS_OK) {
+        status = append_to_byte_buffer(out, start_code, sizeof(start_code));
+    }
+    if (status == ZKS_OK) {
+        status = append_to_byte_buffer(out, &nal_header, 1u);
+    }
+    if (status == ZKS_OK) {
+        status = append_escaped_rbsp(out, rbsp.data, rbsp.size);
+    }
+    zks_byte_buffer_destroy(&rbsp);
+    return status;
+}
+
+int zks_sei_inject_user_data(
+    const uint8_t *access_unit_annexb,
+    size_t access_unit_size,
+    const uint8_t uuid[16],
+    const ZksPayloadChunk *chunk,
+    ZksByteBuffer *out_annexb
+) {
+    size_t offset;
+    size_t length;
+    size_t next_offset;
+    size_t next_length;
+    int found_idr = 0;
+    int status;
+    if (!access_unit_annexb || access_unit_size == 0u || !uuid || !chunk || !out_annexb) {
+        return ZKS_ERR_ARGUMENT;
+    }
+    zks_byte_buffer_destroy(out_annexb);
+    zks_byte_buffer_init(out_annexb);
+    if (!find_start_code(access_unit_annexb, access_unit_size, 0u, &offset, &length)) {
+        return ZKS_ERR_FORMAT;
+    }
+    while (find_start_code(access_unit_annexb, access_unit_size, offset, &offset, &length)) {
+        size_t nal_end = access_unit_size;
+        if (offset + length >= access_unit_size) {
+            break;
+        }
+        if (find_start_code(access_unit_annexb, access_unit_size, offset + length, &next_offset, &next_length)) {
+            (void)next_length;
+            nal_end = next_offset;
+        }
+        if ((access_unit_annexb[offset + length] & 0x1fu) == 5u) {
+            found_idr = 1;
+            status = append_to_byte_buffer(out_annexb, access_unit_annexb, offset);
+            if (status == ZKS_OK) {
+                status = build_user_data_sei(uuid, chunk, out_annexb);
+            }
+            if (status == ZKS_OK) {
+                status = append_to_byte_buffer(out_annexb, access_unit_annexb + offset, access_unit_size - offset);
+            }
+            return status;
+        }
+        if (nal_end == access_unit_size) {
+            break;
+        }
+        offset = nal_end;
+    }
+    (void)found_idr;
+    return ZKS_ERR_FORMAT;
+}
+
+static int read_sei_value(const uint8_t *data, size_t size, size_t *offset, size_t *value) {
+    uint8_t byte;
+    *value = 0u;
+    do {
+        if (*offset >= size || *value > ((size_t)-1) - 255u) {
+            return ZKS_ERR_FORMAT;
+        }
+        byte = data[(*offset)++];
+        *value += byte;
+    } while (byte == 255u);
+    return ZKS_OK;
+}
+
+int zks_sei_extract_user_data(
+    const uint8_t *annexb,
+    size_t annexb_size,
+    const uint8_t uuid[16],
+    ZksPayloadChunkCallback callback,
+    void *opaque
+) {
+    size_t offset;
+    size_t length;
+    size_t next_offset;
+    size_t next_length;
+    if (!annexb || annexb_size == 0u || !uuid || !callback) {
+        return ZKS_ERR_ARGUMENT;
+    }
+    if (!find_start_code(annexb, annexb_size, 0u, &offset, &length)) {
+        return ZKS_ERR_FORMAT;
+    }
+    while (find_start_code(annexb, annexb_size, offset, &offset, &length)) {
+        size_t nal_end = annexb_size;
+        if (offset + length >= annexb_size) {
+            break;
+        }
+        if (find_start_code(annexb, annexb_size, offset + length, &next_offset, &next_length)) {
+            (void)next_length;
+            nal_end = next_offset;
+        }
+        if ((annexb[offset + length] & 0x1fu) == 6u) {
+            ZksByteBuffer rbsp;
+            size_t field_offset = 0u;
+            size_t payload_type;
+            size_t payload_size;
+            zks_byte_buffer_init(&rbsp);
+            if (unescape_rbsp(annexb + offset + length + 1u, nal_end - offset - length - 1u, &rbsp) != ZKS_OK) {
+                zks_byte_buffer_destroy(&rbsp);
+                return ZKS_ERR_MEMORY;
+            }
+            if (read_sei_value(rbsp.data, rbsp.size, &field_offset, &payload_type) == ZKS_OK &&
+                read_sei_value(rbsp.data, rbsp.size, &field_offset, &payload_size) == ZKS_OK &&
+                payload_type == 5u && payload_size >= 30u && field_offset + payload_size <= rbsp.size &&
+                memcmp(rbsp.data + field_offset, uuid, 16u) == 0 &&
+                memcmp(rbsp.data + field_offset + 16u, "ZKS1", 4u) == 0) {
+                ZksPayloadChunk chunk;
+                size_t data_size = ((size_t)rbsp.data[field_offset + 28u] << 8u) | rbsp.data[field_offset + 29u];
+                if (data_size <= ZKS_MAX_PAYLOAD_CHUNK && 30u + data_size <= payload_size) {
+                    chunk.sequence = read_u64_be(rbsp.data + field_offset + 20u);
+                    chunk.size = data_size;
+                    memcpy(chunk.data, rbsp.data + field_offset + 30u, data_size);
+                    if (callback(&chunk, opaque) != ZKS_OK) {
+                        zks_byte_buffer_destroy(&rbsp);
+                        return ZKS_ERR_CALLBACK;
+                    }
+                }
+            }
+            zks_byte_buffer_destroy(&rbsp);
+        }
+        if (nal_end == annexb_size) {
+            break;
+        }
+        offset = nal_end;
+    }
     return ZKS_OK;
 }

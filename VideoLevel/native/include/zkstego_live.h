@@ -78,6 +78,37 @@ typedef struct {
 } ZksPayloadChunk;
 
 typedef struct {
+    uint8_t *data;
+    size_t size;
+    size_t capacity;
+} ZksByteBuffer;
+
+typedef int (*ZksPayloadChunkCallback)(const ZksPayloadChunk *chunk, void *opaque);
+
+void zks_byte_buffer_init(ZksByteBuffer *buffer);
+void zks_byte_buffer_destroy(ZksByteBuffer *buffer);
+
+/*
+ * Insert a user_data_unregistered SEI NAL immediately before the first IDR
+ * slice in an AUD-delimited access unit. This is an in-band transport carrier,
+ * not covert CAVLC steganography; it preserves decoded pixels exactly.
+ */
+int zks_sei_inject_user_data(
+    const uint8_t *access_unit_annexb,
+    size_t access_unit_size,
+    const uint8_t uuid[16],
+    const ZksPayloadChunk *chunk,
+    ZksByteBuffer *out_annexb
+);
+int zks_sei_extract_user_data(
+    const uint8_t *annexb,
+    size_t annexb_size,
+    const uint8_t uuid[16],
+    ZksPayloadChunkCallback callback,
+    void *opaque
+);
+
+typedef struct {
     const uint8_t *payload;
     size_t payload_size;
     size_t chunk_size;
