@@ -52,13 +52,19 @@ unsafe to market as realtime. The compact ML-DSA receipt/reference path is the
 appropriate payload source for the live scheduler; Groth16 proving belongs to
 an asynchronous control plane, not the per-frame hot path.
 
-## Native C in-band path
+## Native C direct-video path
 
-`native/` now provides a C17 relay plus a `user_data_unregistered` SEI carrier.
-It inserts fragmented opaque payload chunks before IDR and recovers them
-natively with no decoded-pixel change. This is usable for realtime authenticated
-metadata transport, but SEI is visible to an observer and is not claimed as
-covert steganography. See `native/README.md` for build and pipe commands.
+`native/` now includes a C17 direct CAVLC coefficient carrier. It changes the
+magnitude parity of one high-frequency, already-nonzero AC coefficient by at
+most one. The rule preserves nonzero support and permits deterministic
+extraction from the decoded coefficient stream.
+
+The generic Annex-B relay remains transport-only. It may expose an SEI
+diagnostic path, but SEI is explicitly excluded from the direct-video stego
+pipeline. Direct CAVLC mutation is safe only in an encoder fork after
+quantization and before inverse transform/reconstruction; otherwise reference
+frames can drift. The native x264 adapter selects Baseline/CAVLC specifically
+for that fork integration.
 
 ## Next implementation decision
 

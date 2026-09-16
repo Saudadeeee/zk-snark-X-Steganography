@@ -17,16 +17,37 @@ units to stdout. It is deliberately a transport-only relay until a native
 CAVLC mutator is linked; it never pretends to hide a payload while forwarding
 unmodified video.
 
-For an operational realtime in-band payload path, it can insert an opaque,
-fragmented chunk in an H.264 `user_data_unregistered` SEI before every IDR:
+The relay still supports an opaque, fragmented H.264 `user_data_unregistered`
+SEI chunk for diagnostic/authentication interoperability:
 
 ```powershell
 Get-Content input.h264 -AsByteStream | .\native\build\Release\zkstego_annexb_relay.exe --sei-payload-hex 0123456789abcdef --chunk-bytes 8 > output.h264
 ```
 
 This SEI mode has no decoded-pixel quality cost and the native extractor can
-recover the chunk sequence, but SEI is **not covert steganography**. It is a
-deliberately visible metadata carrier for realtime authenticated transport.
+recover the chunk sequence, but it is **not** the steganographic carrier and
+must not be enabled for a direct-video stego deployment. It remains only as a
+visible metadata diagnostic path.
+
+## Direct-video CAVLC carrier
+
+`zkstego_cavlc_direct` is the native carrier primitive for the actual stego
+path. It embeds one payload bit in the magnitude parity of the highest-
+frequency eligible AC coefficient in a 4x4 CAVLC block. The rule is deliberately
+conservative:
+
+- it never uses DC or creates/removes a non-zero coefficient;
+- it accepts only original magnitudes of 4 or more, and changes a selected
+  coefficient by at most one;
+- it keeps the coefficient eligible after the edit, so the decoder can apply
+  the identical selection rule; and
+- it limits the primitive to one edit per 4x4 block. The x264 fork imposes the
+  stricter realtime policy of one edit per macroblock.
+
+The primitive is tested independently, but it is not wired into the generic
+Annex-B relay: direct embedding must happen inside the encoder before reference
+reconstruction. Editing an already-encoded CAVLC bitstream would let encoder
+and decoder derive different reference frames and can cause inter-frame drift.
 
 ## Selected encoder: x264
 
@@ -41,7 +62,13 @@ cmake -S native -B native/build-x264 -DZKS_WITH_X264=ON
 cmake --build native/build-x264 --config Release
 ```
 
-The adapter is intentionally separate from the CAVLC mutator: libx264's public
-API does not expose a safe residual-coefficient hook. A real compressed-domain
-embedding backend must be integrated into a reviewed x264 fork before the
-relay is allowed to advertise stego embedding.
+The adapter is intentionally separate from the CAVLC mutator: stock libx264's
+public API does not expose a residual-coefficient hook. The direct backend
+therefore requires a reviewed x264 fork which applies the carrier after
+quantization and before inverse transform/reconstruction, then limits its rate
+to one edit per macroblock. This placement keeps encoder and decoder reference
+frames synchronized. Do not substitute the SEI relay for that fork.
+
+Because x264 is GPL-2.0-or-later (unless separately commercially licensed), a
+distributed binary linked with a modified x264 must meet the applicable x264
+licensing obligations.
