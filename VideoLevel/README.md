@@ -42,6 +42,8 @@ ML-DSA-65 authenticates the payload hash and the manifest binds the final stego 
 
 The source tree retains an experimental Fiat-Shamir lattice preimage prototype for research-only testing. Public `embed()` and `verify()` reject `proof_backend="lattice_zkp"`; a reviewed lattice-ZK library/protocol with a verifier-known, non-trivial statement and an audited parameter set is required before enabling any lattice-ZKP path.
 
+The pinned Linux-only LaZer research adapter is in [`lazer/`](lazer/README.md). Its current hardware assessment is recorded in [`lazer/EVALUATION.md`](lazer/EVALUATION.md); it is not part of the active video pipeline.
+
 ---
 
 ## Historic Benchmark Snapshot (not revalidated for this revision)

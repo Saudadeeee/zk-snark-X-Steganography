@@ -32,6 +32,8 @@ jobs:
         run: python src/runtest/test_lattice_pq_stack.py
       - name: Transparent lattice ZKP contracts
         run: python src/runtest/test_lattice_zkp.py
+      - name: LaZer Linux integration contracts
+        run: python src/runtest/test_lazer_backend.py
       - name: Cost-guided matrix embedding contracts
         run: python src/runtest/test_cost_guided_matrix_embedding.py
       - name: Realtime Annex-B transport contracts
