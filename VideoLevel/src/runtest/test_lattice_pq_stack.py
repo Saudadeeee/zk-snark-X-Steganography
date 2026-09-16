@@ -59,6 +59,20 @@ def t_lattice_reference_is_small_enough_for_video_payload() -> None:
     assert len(blob) == 3 + 4 + 13 + LATTICE_REFERENCE_SIZE
 
 
+def t_manifest_accepts_ml_dsa_signature_and_rejects_tampering() -> None:
+    from src.lattice_pq import LatticeSigner
+    from src.manifest import StegoManifest, VideoMetadata
+
+    public_key, private_key = LatticeSigner.generate_keypair()
+    manifest = StegoManifest(video=VideoMetadata(file_path="cover.h264", file_hash="cover"))
+    manifest.sign(private_key, signer_id="camera-01")
+
+    assert manifest.signature_algorithm == "ml-dsa-65"
+    assert manifest.verify_signature(public_key)
+    manifest.video.file_hash = "tampered"
+    assert not manifest.verify_signature(public_key)
+
+
 def main() -> None:
     section("Lattice PQ stack")
     results = [
@@ -66,6 +80,7 @@ def main() -> None:
         run_test("video_reference_binds_exact_signed_receipt", t_video_reference_binds_exact_signed_receipt),
         run_test("ml_kem_encapsulation_agrees_and_rejects_tampering", t_ml_kem_encapsulation_agrees_and_rejects_tampering),
         run_test("lattice_reference_is_small_enough_for_video_payload", t_lattice_reference_is_small_enough_for_video_payload),
+        run_test("manifest_accepts_ml_dsa_signature_and_rejects_tampering", t_manifest_accepts_ml_dsa_signature_and_rejects_tampering),
     ]
     raise SystemExit(summarise(results, "Lattice PQ"))
 
