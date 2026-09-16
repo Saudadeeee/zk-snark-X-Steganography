@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from src.runtest._helpers import section, run_test, summarise, SKIP, get_circuits_dir
 from src.verifier import verify
-from src.verifier_blind import verify_near_blind
+from src.manifest import MANIFEST_VERSION, StegoManifest
 
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -92,27 +92,20 @@ def t_near_threshold_quality_guard_retention():
     assert min_psnr >= 40.0, f"quality-guard fixture is invalid: {min_psnr:.2f} dB"
 
 
-def t_near_blind_existing_sec1_sidecar():
+def t_legacy_near_blind_artifacts_are_not_trusted():
     stego = OUTPUT_DIR / "sec1_stego_akiyo_q22_g1.h264"
     manifest = OUTPUT_DIR / "sec1_stego_akiyo_q22_g1.h264.manifest.json"
     pos_path = OUTPUT_DIR / "sec1_stego_akiyo_q22_g1.h264.positions.json"
     if not stego.exists() or not manifest.exists() or not pos_path.exists():
-        SKIP("near_blind_existing_sec1_sidecar", "required SEC1 sidecar artifact missing")
+        SKIP("legacy_near_blind_artifacts_are_not_trusted", "required SEC1 sidecar artifact missing")
         return
     if not _sec1_artifact_verified(stego):
-        SKIP("near_blind_existing_sec1_sidecar", "SEC1 artifact is not verified")
+        SKIP("legacy_near_blind_artifacts_are_not_trusted", "SEC1 artifact is not verified")
         return
-
-    result = verify_near_blind(
-        stego_video_path=str(stego),
-        circuits_dir=CIRCUITS_DIR,
-        secret_key=SECRET_KEY,
-        message_length=len(REAL_PROOF_MESSAGE),
-        chaos_key=CHAOS_KEY,
-        use_analysis_cache=True,
+    artifact_manifest = StegoManifest.load(str(manifest))
+    assert artifact_manifest.version != MANIFEST_VERSION, (
+        "legacy benchmark sidecar unexpectedly claims the authenticated manifest schema"
     )
-    assert result.valid, "existing SEC1 sidecar-assisted near-blind artifact should verify"
-    assert result.message == REAL_PROOF_MESSAGE, "near-blind verified message mismatch"
 
 
 def main():
@@ -120,7 +113,7 @@ def main():
     results = [
         run_test("verified_all_intra_operating_point", t_verified_all_intra_operating_point),
         run_test("near_threshold_quality_guard_retention", t_near_threshold_quality_guard_retention),
-        run_test("near_blind_existing_sec1_sidecar", t_near_blind_existing_sec1_sidecar),
+        run_test("legacy_near_blind_artifacts_are_not_trusted", t_legacy_near_blind_artifacts_are_not_trusted),
     ]
     sys.exit(summarise(results, "Phase 7"))
 

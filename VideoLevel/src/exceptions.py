@@ -28,6 +28,11 @@ class SafetyFilterError(ZKStegoError):
     pass
 
 
+class UnsupportedStreamError(EmbeddingError):
+    """Input stream is outside the supported H.264 Baseline/CAVLC envelope."""
+    pass
+
+
 class InsufficientCapacityError(EmbeddingError):
     """Not enough embedding capacity for payload"""
 

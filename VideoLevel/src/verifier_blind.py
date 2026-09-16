@@ -19,6 +19,12 @@ from .core.chaos import ChaosTransformer
 from .core.pipeline import extract_all_idr_blocks, extract_bits_direct
 from .verifier import VerifyResult, _load_sidecar_data
 from .zk_proof import ZKSnarkBridge, unpack, blob_bit_length
+from .manifest import compute_file_hash, hash_positions
+from .stream_profile import analyze_stream_profile
+from .exceptions import UnsupportedStreamError
+
+
+MAX_MESSAGE_BYTES = 999_999
 
 
 @lru_cache(maxsize=4)
@@ -31,12 +37,12 @@ def verify_near_blind(
     circuits_dir: str,
     secret_key: bytes,
     message_length: int,
+    manifest_public_key: bytes,
     max_modifications_per_block: int = 1,
     chaos_key: Optional[bytes] = None,
     use_analysis_cache: bool = True,
     force_analysis_refresh: bool = False,
     analysis_cache_dir: Optional[str] = None,
-    manifest_signing_key: Optional[bytes] = None,
 ) -> VerifyResult:
     """
     Verify ZK proof without the original cover video.
@@ -52,8 +58,18 @@ def verify_near_blind(
         raise FileNotFoundError(f"circuits_dir not found: {circuits_dir}")
     if not isinstance(secret_key, bytes) or len(secret_key) != 32:
         raise ValueError("secret_key must be exactly 32 bytes")
-    if message_length <= 0:
-        raise ValueError("message_length must be a positive integer")
+    if not isinstance(message_length, int) or not 0 < message_length <= MAX_MESSAGE_BYTES:
+        raise ValueError(f"message_length must be between 1 and {MAX_MESSAGE_BYTES}")
+    if not isinstance(manifest_public_key, bytes) or len(manifest_public_key) != 32:
+        raise ValueError("manifest_public_key must be a 32-byte Ed25519 public key")
+
+    stego_profile = analyze_stream_profile(stego_video_path)
+    if not stego_profile.supported:
+        raise UnsupportedStreamError(
+            stego_profile.rejection_reason or "unsupported H.264 stego stream",
+            profile=stego_profile.profile,
+            entropy_mode=stego_profile.entropy_mode,
+        )
 
     positions, payload_bits, manifest = _load_sidecar_data(stego_video_path)
     if manifest is None:
@@ -67,28 +83,22 @@ def verify_near_blind(
             "Near-blind verification requires positions.json."
         )
 
-    if manifest_signing_key is not None:
-        if not manifest.verify_signature(manifest_signing_key):
-            raise RuntimeError("Manifest signature verification failed")
-    elif manifest.signature:
-        logger.warning(
-            "[Manifest] Signature present but no manifest_signing_key was provided; "
-            "skipping authenticity verification"
-        )
-
-    if manifest.payload.message_length and manifest.payload.message_length != message_length:
-        logger.warning(
-            "[Manifest] message_length mismatch: manifest=%d, requested=%d",
-            manifest.payload.message_length,
-            message_length,
-        )
-
+    if not manifest.verify_signature(manifest_public_key):
+        raise RuntimeError("Manifest Ed25519 signature verification failed")
+    if manifest.video.stego_file_hash != compute_file_hash(stego_video_path):
+        raise RuntimeError("Stego file hash does not match the signed manifest")
+    if manifest.embedding.positions_count != len(positions):
+        raise RuntimeError("Positions count does not match the signed manifest")
+    if manifest.embedding.positions_hash != hash_positions(positions):
+        raise RuntimeError("Positions sidecar hash does not match the signed manifest")
+    if manifest.payload.message_length != message_length:
+        raise RuntimeError("Requested message length does not match the signed manifest")
     if manifest.payload.chaos_enabled != (chaos_key is not None):
-        logger.warning(
-            "[Manifest] Chaos mismatch: manifest says %s, chaos_key %s provided",
-            manifest.payload.chaos_enabled,
-            "was" if chaos_key is not None else "was not",
-        )
+        raise RuntimeError("Chaos configuration does not match the signed manifest")
+    if manifest.embedding.strategy != "t1_sign_flip":
+        raise RuntimeError("Signed embedding strategy is unsupported")
+    if manifest.embedding.max_modifications_per_block != max_modifications_per_block:
+        raise RuntimeError("Modification limit does not match the signed manifest")
 
     parser = H264BitstreamParser(stego_video_path)
     parser.parse()
@@ -110,13 +120,18 @@ def verify_near_blind(
     if chaos_key is not None:
         chaos = ChaosTransformer(chaos_key)
 
-    if payload_bits is not None:
-        extract_bit_count = int(payload_bits)
-    elif chaos is not None:
-        padded_bits = ChaosTransformer.padded_bit_count(original_bit_count)
-        extract_bit_count = math.ceil(padded_bits / 8) * 8
-    else:
-        extract_bit_count = original_bit_count
+    extract_bit_count = int(manifest.payload.bits_required)
+    if payload_bits is not None and int(payload_bits) != extract_bit_count:
+        raise RuntimeError("Payload bit count does not match the signed manifest")
+    if extract_bit_count <= 0 or extract_bit_count > len(positions):
+        raise RuntimeError("Signed payload bit count is outside the positions sidecar bounds")
+    expected_bit_count = (
+        math.ceil(ChaosTransformer.padded_bit_count(original_bit_count) / 8) * 8
+        if chaos is not None
+        else original_bit_count
+    )
+    if extract_bit_count != expected_bit_count:
+        raise RuntimeError("Signed payload bit count is inconsistent with the message length and chaos mode")
 
     extracted_blob = extract_bits_direct(
         stego_video_path=stego_video_path,

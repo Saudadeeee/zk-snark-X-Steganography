@@ -32,6 +32,11 @@ from .core.pipeline        import extract_bits_direct
 from .core.chaos           import ChaosTransformer
 from .zk_proof             import ZKSnarkBridge, unpack, blob_bit_length
 from .manifest             import StegoManifest
+from .stream_profile       import analyze_stream_profile
+from .exceptions           import UnsupportedStreamError
+
+
+MAX_MESSAGE_BYTES = 999_999
 
 
 def _load_sidecar_data(stego_video_path: str) -> tuple[Optional[list[tuple[int, int, int]]], Optional[int], Optional[StegoManifest]]:
@@ -156,15 +161,16 @@ def verify(
         raise FileNotFoundError(f"circuits_dir not found: {circuits_dir}")
     if not isinstance(secret_key, bytes) or len(secret_key) != 32:
         raise ValueError("secret_key must be exactly 32 bytes")
-    if message_length <= 0:
-        raise ValueError("message_length must be a positive integer")
+    if not isinstance(message_length, int) or not 0 < message_length <= MAX_MESSAGE_BYTES:
+        raise ValueError(f"message_length must be between 1 and {MAX_MESSAGE_BYTES}")
 
-    if precomputed_positions is None or precomputed_payload_bits is None:
-        sidecar_positions, sidecar_bits, _ = _load_sidecar_data(stego_video_path)
-        if precomputed_positions is None and sidecar_positions is not None:
-            precomputed_positions = sidecar_positions
-        if precomputed_payload_bits is None and sidecar_bits is not None:
-            precomputed_payload_bits = sidecar_bits
+    cover_profile = analyze_stream_profile(original_video_path)
+    if not cover_profile.supported:
+        raise UnsupportedStreamError(
+            cover_profile.rejection_reason or "unsupported H.264 cover stream",
+            profile=cover_profile.profile,
+            entropy_mode=cover_profile.entropy_mode,
+        )
 
     # 1. Parse original video + 2. recover safe positions (runtime cacheable)
     (

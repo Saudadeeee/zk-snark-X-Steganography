@@ -196,7 +196,9 @@ class ZKSnarkBridge:
     WASM_FILE  = "payload_verify.wasm"
     ZKEY_FILE  = "proving_key.zkey"
     VKEY_FILE  = "verification_key.json"
-    CONSTRAINT_COUNT = 18680
+    # Generated from `circom payload_verify.circom ...` on circom 2.2.0.
+    # Update together with the circuit artifact manifest whenever the circuit changes.
+    CONSTRAINT_COUNT = 62577
 
     def __init__(self, circuits_dir: str):
         self.circuits_dir = Path(circuits_dir).resolve()

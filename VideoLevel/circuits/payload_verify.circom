@@ -2,6 +2,7 @@ pragma circom 2.0.0;
 
 include "node_modules/circomlib/circuits/sha256/sha256.circom";
 include "node_modules/circomlib/circuits/bitify.circom";
+include "node_modules/circomlib/circuits/comparators.circom";
 
 /*
  * ZK-SNARK Circuit for Video Steganography Payload Verification
@@ -60,13 +61,19 @@ template PayloadVerify() {
         commitment[i] === computed_commitment[i];
     }
     
-    // Verify payload_length is reasonable (0 < length < 1MB)
-    signal length_check;
-    length_check <== payload_length * (1000000 - payload_length);
-    
-    // Ensure length is positive
-    component n2b = Num2Bits(32);
-    n2b.in <== payload_length;
+    // Enforce the public payload range: 0 < length < 1,000,000 bytes.
+    // The comparison gadgets also range-constrain payload_length to 20 bits.
+    component length_lt_limit = LessThan(20);
+    length_lt_limit.in[0] <== payload_length;
+    length_lt_limit.in[1] <== 1000000;
+
+    component length_gt_zero = GreaterThan(20);
+    length_gt_zero.in[0] <== payload_length;
+    length_gt_zero.in[1] <== 0;
+
+    signal length_in_range;
+    length_in_range <== length_lt_limit.out * length_gt_zero.out;
+    length_in_range === 1;
 }
 
 component main {public [payload_hash, commitment, payload_length]} = PayloadVerify();

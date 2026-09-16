@@ -1,6 +1,6 @@
 # Supported Operating Envelope
 
-Last updated: 2026-06-08
+Last updated: 2026-09-16
 
 This file defines the supported operating envelope for the current system.
 Future robust watermarking, C2PA trust tiers, fingerprint registries, TEE, and
@@ -16,7 +16,7 @@ ZKML are not part of this baseline.
 - Embedding mode: patchability-aware residual-coefficient modification.
 - Verification:
   - strict non-blind via `verify()`,
-  - sidecar-assisted near-blind via `verify_near_blind()`.
+  - sidecar-assisted near-blind via `verify_near_blind()` with an authenticated v2 manifest.
 
 ## Unsupported Or Future Work
 
@@ -76,10 +76,14 @@ operating positions.
 ### Sidecar-assisted near-blind
 
 `verify_near_blind()` does not require the original cover video, but it requires
-sidecars:
+authenticated sidecars:
 
 - `.manifest.json`
 - `.positions.json`
+
+The manifest must have a valid Ed25519 signature from a trusted public key and
+bind both the stego-asset hash and the canonical positions-sidecar hash. Legacy
+v1 manifests are not accepted for authenticated near-blind verification.
 
 This is not full blind steganographic extraction.
 
@@ -110,6 +114,8 @@ Current evidence separates:
 - proof verification,
 - extraction.
 
-Cold-start video analysis can be expensive and should be treated as cacheable.
+Cold-start video analysis can be expensive and is cacheable only within the
+trusted current process; persistent cache deserialization is intentionally not
+implemented.
 Paper tables should not collapse one-time preprocessing and warm operational
 cost into one ambiguous number.

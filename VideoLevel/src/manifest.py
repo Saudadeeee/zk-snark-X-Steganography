@@ -1,51 +1,48 @@
-"""Manifest schema for ZK-Stego VideoLevel.
-
-Versioned manifest structure for embed/verify sidecars.
-"""
+"""Authenticated manifest schema for ZK-Stego video sidecars."""
 
 from __future__ import annotations
 
-import hmac
+import base64
 import hashlib
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Optional, Tuple, Dict, Any
+from datetime import datetime, timezone
+from typing import Any, Optional, Sequence
 
-# Current manifest schema version
-MANIFEST_VERSION = "1.0.0"
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+
+
+MANIFEST_VERSION = "2.0.0"
+SIGNATURE_ALGORITHM = "ed25519"
 
 
 @dataclass
 class PayloadMetadata:
-    """Payload metadata."""
-
-    message_length: int = 0        # Original message byte count
-    bits_embedded: int = 0         # Total bits embedded (message + proof + chaos)
-    bits_required: int = 0         # Minimum bits needed
-    chaos_enabled: bool = False        # Whether chaos expansion was used
-    chaos_original_bits: Optional[int] = None  # Original bits before chaos
-    chaos_expansion_factor: float = 1.0  # chaos_bits / original_bits
+    message_length: int = 0
+    bits_embedded: int = 0
+    bits_required: int = 0
+    chaos_enabled: bool = False
+    chaos_original_bits: Optional[int] = None
+    chaos_expansion_factor: float = 1.0
 
 
 @dataclass
 class EmbeddingMetadata:
-    """Embedding process metadata."""
-
-    strategy: str = "t1_sign_flip"             # e.g., "t1_sign_flip"
+    strategy: str = "t1_sign_flip"
     max_modifications_per_block: int = 1
-    positions_count: int = 0      # Number of T1 positions used
-    validation_threshold_db: Optional[float] = None  # PSNR threshold used
+    positions_count: int = 0
+    positions_hash: Optional[str] = None
+    validation_threshold_db: Optional[float] = None
 
 
 @dataclass
 class VideoMetadata:
-    """Source video metadata."""
-
     file_path: str = ""
-    file_hash: str = ""            # SHA-256 of original video
-    codec: str = "h264"                # e.g., "h264"
-    profile: Optional[str] = None  # e.g., "baseline"
+    file_hash: str = ""  # SHA-256 of the original cover video
+    stego_file_hash: Optional[str] = None
+    codec: str = "h264"
+    profile: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
     frame_count: Optional[int] = None
@@ -57,49 +54,64 @@ class VideoMetadata:
 
 @dataclass
 class ProofMetadata:
-    """ZK proof metadata."""
-
-    proof_system: str = "groth16"         # e.g., "groth16"
+    proof_system: str = "groth16"
     proof_size_bytes: int = 0
     constraint_count: int = 0
     prove_time_ms: Optional[float] = None
     verify_time_ms: Optional[float] = None
 
 
+def canonical_json_bytes(data: dict[str, Any]) -> bytes:
+    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+
+
+def hash_positions(positions: Sequence[Sequence[int]]) -> str:
+    """Hash normalized embedding positions so their sidecar is authenticated."""
+    normalized: list[list[int]] = []
+    for position in positions:
+        if len(position) != 3:
+            raise ValueError("each embedding position must contain exactly three integers")
+        if any(not isinstance(value, int) or isinstance(value, bool) for value in position):
+            raise ValueError("each embedding position must contain exactly three integers")
+        normalized.append(list(position))
+    return hashlib.sha256(canonical_json_bytes({"positions": normalized})).hexdigest()
+
+
+def _private_key(key: bytes | Ed25519PrivateKey) -> Ed25519PrivateKey:
+    if isinstance(key, Ed25519PrivateKey):
+        return key
+    if not isinstance(key, (bytes, bytearray)) or len(key) != 32:
+        raise ValueError("Ed25519 private key must be a 32-byte seed or Ed25519PrivateKey")
+    return Ed25519PrivateKey.from_private_bytes(bytes(key))
+
+
+def _public_key(key: bytes | Ed25519PublicKey) -> Ed25519PublicKey:
+    if isinstance(key, Ed25519PublicKey):
+        return key
+    if not isinstance(key, (bytes, bytearray)) or len(key) != 32:
+        raise ValueError("Ed25519 public key must be 32 bytes or Ed25519PublicKey")
+    return Ed25519PublicKey.from_public_bytes(bytes(key))
+
+
 @dataclass
 class StegoManifest:
-    """Complete steganography manifest.
-
-    This manifest accompanies a stego video and contains all information
-    needed for verification and reproducibility.
-
-    Version 1.0.0 structure:
-    - version: Schema version
-    - created: ISO-8601 timestamp
-    - payload: Payload metadata
-    - embedding: Embedding process metadata
-    - video: Source video metadata
-    - proof: ZK proof metadata
-    - signature: Optional HMAC/ED25519 signature for authenticity
-    """
+    """Versioned manifest bound to a stego asset and its positions sidecar."""
 
     version: str = MANIFEST_VERSION
-    created: str = field(default_factory=lambda: datetime.now().isoformat())
-
+    created: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     payload: PayloadMetadata = field(default_factory=PayloadMetadata)
     embedding: EmbeddingMetadata = field(default_factory=EmbeddingMetadata)
     video: VideoMetadata = field(default_factory=VideoMetadata)
     proof: ProofMetadata = field(default_factory=ProofMetadata)
+    signature: Optional[str] = None
+    signature_algorithm: Optional[str] = None
+    signer: Optional[str] = None
 
-    # Optional signing
-    signature: Optional[str] = None  # Base64-encoded signature
-    signer: Optional[str] = None    # Key identifier
-
-    def to_dict(self) -> dict:
-        """Convert manifest to JSON-serializable dict."""
+    def to_dict(self) -> dict[str, Any]:
         video = {
             "file_path": self.video.file_path,
             "file_hash": self.video.file_hash,
+            "stego_file_hash": self.video.stego_file_hash,
             "codec": self.video.codec,
             "profile": self.video.profile,
             "width": self.video.width,
@@ -127,6 +139,7 @@ class StegoManifest:
                 "strategy": self.embedding.strategy,
                 "max_modifications_per_block": self.embedding.max_modifications_per_block,
                 "positions_count": self.embedding.positions_count,
+                "positions_hash": self.embedding.positions_hash,
                 "validation_threshold_db": self.embedding.validation_threshold_db,
             },
             "video": video,
@@ -138,101 +151,106 @@ class StegoManifest:
                 "verify_time_ms": self.proof.verify_time_ms,
             },
             "signature": self.signature,
+            "signature_algorithm": self.signature_algorithm,
             "signer": self.signer,
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> StegoManifest:
-        """Create manifest from JSON dict."""
+    def from_dict(cls, data: dict[str, Any]) -> "StegoManifest":
+        payload = data["payload"]
+        embedding = data["embedding"]
+        video = data["video"]
+        proof = data["proof"]
         return cls(
-            version=data.get("version", MANIFEST_VERSION),
-            created=data.get("created", ""),
+            version=str(data.get("version", "1.0.0")),
+            created=str(data.get("created", "")),
             payload=PayloadMetadata(
-                message_length=data["payload"]["message_length"],
-                bits_embedded=data["payload"]["bits_embedded"],
-                bits_required=data["payload"]["bits_required"],
-                chaos_enabled=data["payload"].get("chaos_enabled", False),
-                chaos_original_bits=data["payload"].get("chaos_original_bits"),
-                chaos_expansion_factor=data["payload"].get("chaos_expansion_factor", 1.0),
+                message_length=int(payload["message_length"]),
+                bits_embedded=int(payload["bits_embedded"]),
+                bits_required=int(payload["bits_required"]),
+                chaos_enabled=bool(payload.get("chaos_enabled", False)),
+                chaos_original_bits=payload.get("chaos_original_bits"),
+                chaos_expansion_factor=float(payload.get("chaos_expansion_factor", 1.0)),
             ),
             embedding=EmbeddingMetadata(
-                strategy=data["embedding"]["strategy"],
-                max_modifications_per_block=data["embedding"]["max_modifications_per_block"],
-                positions_count=data["embedding"]["positions_count"],
-                validation_threshold_db=data["embedding"].get("validation_threshold_db"),
+                strategy=str(embedding["strategy"]),
+                max_modifications_per_block=int(embedding["max_modifications_per_block"]),
+                positions_count=int(embedding["positions_count"]),
+                positions_hash=embedding.get("positions_hash"),
+                validation_threshold_db=embedding.get("validation_threshold_db"),
             ),
             video=VideoMetadata(
-                file_path=data["video"]["file_path"],
-                file_hash=data["video"]["file_hash"],
-                codec=data["video"].get("codec", "h264"),
-                profile=data["video"].get("profile"),
-                width=data["video"].get("width"),
-                height=data["video"].get("height"),
-                frame_count=data["video"].get("frame_count"),
-                gop_size=data["video"].get("gop_size"),
-                qp_value=data["video"].get("qp_value"),
-                provenance_uri=data["video"].get("provenance_uri"),
-                provenance_root_hash=data["video"].get("provenance_root_hash"),
+                file_path=str(video["file_path"]),
+                file_hash=str(video["file_hash"]),
+                stego_file_hash=video.get("stego_file_hash"),
+                codec=str(video.get("codec", "h264")),
+                profile=video.get("profile"),
+                width=video.get("width"),
+                height=video.get("height"),
+                frame_count=video.get("frame_count"),
+                gop_size=video.get("gop_size"),
+                qp_value=video.get("qp_value"),
+                provenance_uri=video.get("provenance_uri"),
+                provenance_root_hash=video.get("provenance_root_hash"),
             ),
             proof=ProofMetadata(
-                proof_system=data["proof"].get("proof_system", "groth16"),
-                proof_size_bytes=data["proof"]["proof_size_bytes"],
-                constraint_count=data["proof"]["constraint_count"],
-                prove_time_ms=data["proof"].get("prove_time_ms"),
-                verify_time_ms=data["proof"].get("verify_time_ms"),
+                proof_system=str(proof.get("proof_system", "groth16")),
+                proof_size_bytes=int(proof["proof_size_bytes"]),
+                constraint_count=int(proof["constraint_count"]),
+                prove_time_ms=proof.get("prove_time_ms"),
+                verify_time_ms=proof.get("verify_time_ms"),
             ),
             signature=data.get("signature"),
+            signature_algorithm=data.get("signature_algorithm"),
             signer=data.get("signer"),
         )
 
     def to_json(self, indent: int = 2) -> str:
-        """Serialize manifest to JSON string."""
         return json.dumps(self.to_dict(), indent=indent, ensure_ascii=False)
 
     @classmethod
-    def from_json(cls, json_str: str) -> StegoManifest:
-        """Deserialize manifest from JSON string."""
+    def from_json(cls, json_str: str) -> "StegoManifest":
         return cls.from_dict(json.loads(json_str))
 
     def save(self, path: str) -> None:
-        """Save manifest to file."""
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(self.to_json())
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(self.to_json())
 
     @classmethod
-    def load(cls, path: str) -> StegoManifest:
-        """Load manifest from file."""
-        with open(path, "r", encoding="utf-8") as f:
-            return cls.from_json(f.read())
+    def load(cls, path: str) -> "StegoManifest":
+        with open(path, "r", encoding="utf-8") as file:
+            return cls.from_json(file.read())
+
+    def _unsigned_dict(self) -> dict[str, Any]:
+        data = self.to_dict()
+        data["signature"] = None
+        data["signer"] = None
+        return data
 
     def compute_content_hash(self) -> str:
-        """Compute SHA-256 hash of manifest content (excluding signature)."""
-        manifest_dict = self.to_dict()
-        manifest_dict["signature"] = None
-        manifest_dict["signer"] = None
-        content = json.dumps(manifest_dict, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        return hashlib.sha256(content.encode()).hexdigest()
+        return hashlib.sha256(canonical_json_bytes(self._unsigned_dict())).hexdigest()
 
-    def verify_signature(self, public_key: bytes) -> bool:
-        """Verify manifest signature using HMAC-SHA256."""
-        if not self.signature or not isinstance(public_key, (bytes, bytearray)) or len(public_key) == 0:
+    def sign(self, private_key: bytes | Ed25519PrivateKey, signer_id: Optional[str] = None) -> None:
+        self.signature_algorithm = SIGNATURE_ALGORITHM
+        signature = _private_key(private_key).sign(canonical_json_bytes(self._unsigned_dict()))
+        self.signature = base64.b64encode(signature).decode("ascii")
+        self.signer = signer_id or "ed25519"
+
+    def verify_signature(self, public_key: bytes | Ed25519PublicKey) -> bool:
+        if self.signature_algorithm != SIGNATURE_ALGORITHM or not self.signature:
             return False
-        expected = hmac.new(bytes(public_key), self.compute_content_hash().encode("utf-8"), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(self.signature, expected)
-
-    def sign(self, private_key: bytes, signer_id: Optional[str] = None) -> None:
-        """Sign manifest content using HMAC-SHA256."""
-        if not isinstance(private_key, (bytes, bytearray)) or len(private_key) == 0:
-            raise ValueError("private_key must be non-empty bytes")
-        content_hash = self.compute_content_hash()
-        self.signature = hmac.new(bytes(private_key), content_hash.encode("utf-8"), hashlib.sha256).hexdigest()
-        self.signer = signer_id or "default"
-
+        try:
+            _public_key(public_key).verify(
+                base64.b64decode(self.signature.encode("ascii"), validate=True),
+                canonical_json_bytes(self._unsigned_dict()),
+            )
+        except (ValueError, InvalidSignature):
+            return False
+        return True
 
 def compute_file_hash(file_path: str) -> str:
-    """Compute SHA-256 hash of a file."""
     sha256 = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
+    with open(file_path, "rb") as file:
+        for chunk in iter(lambda: file.read(8192), b""):
             sha256.update(chunk)
     return sha256.hexdigest()

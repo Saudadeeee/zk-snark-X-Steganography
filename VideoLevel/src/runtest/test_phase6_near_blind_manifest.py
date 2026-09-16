@@ -10,6 +10,8 @@ import os
 import sys
 import json
 from pathlib import Path
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -46,7 +48,8 @@ from benchmark.locked_operating_contract import (
 SCAN_JSON = Path(__file__).resolve().parent.parent.parent / "benchmark" / "results" / "patchable_capacity_scan.json"
 CIRCUITS_DIR = get_circuits_dir()
 SECRET_KEY = LOCKED_SECRET_KEY
-SIGNING_KEY = b"manifest-signing-key-v1"
+SIGNING_PRIVATE_KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
+SIGNING_PUBLIC_KEY = SIGNING_PRIVATE_KEY.public_key()
 TEST_MSG = LOCKED_MESSAGE
 VIDEO_CANDIDATES = [
     get_video("deadline_cif_q22_g1.h264"),
@@ -103,13 +106,13 @@ def t_manifest_hmac_roundtrip():
         payload=PayloadMetadata(message_length=4, bits_embedded=32, bits_required=32),
         embedding=EmbeddingMetadata(strategy="t1_sign_flip", positions_count=32),
         video=VideoMetadata(file_path="input.h264", file_hash="abc123"),
-        proof=ProofMetadata(proof_system="groth16", proof_size_bytes=129, constraint_count=18680),
+        proof=ProofMetadata(proof_system="groth16", proof_size_bytes=129, constraint_count=62577),
     )
-    manifest.sign(SIGNING_KEY, signer_id="test-suite")
+    manifest.sign(SIGNING_PRIVATE_KEY, signer_id="test-suite")
 
     assert manifest.signature is not None, "signature should be populated after sign()"
-    assert manifest.verify_signature(SIGNING_KEY), "manifest HMAC verification should succeed"
-    assert not manifest.verify_signature(b"wrong-key"), "manifest HMAC verification should fail for wrong key"
+    assert manifest.verify_signature(SIGNING_PUBLIC_KEY), "manifest Ed25519 verification should succeed"
+    assert not manifest.verify_signature(Ed25519PrivateKey.generate().public_key()), "wrong public key must fail"
 
     manifest.payload.message_length = 5
     assert not manifest.verify_signature(SIGNING_KEY), "manifest tampering must invalidate the signature"
@@ -134,6 +137,12 @@ def t_near_blind_verify_pipeline():
                 precomputed_positions=candidate_pool or None,
                 trust_precomputed_positions=False,
                 use_analysis_cache=True,
+                manifest_private_key=SIGNING_PRIVATE_KEY.private_bytes(
+                    encoding=serialization.Encoding.Raw,
+                    format=serialization.PrivateFormat.Raw,
+                    encryption_algorithm=serialization.NoEncryption(),
+                ),
+                manifest_signer_id="test-suite",
             )
         except InsufficientCapacityError:
             SKIP("near_blind_verify_pipeline", "selected asset lacks enough patchable capacity")
@@ -141,9 +150,6 @@ def t_near_blind_verify_pipeline():
 
         manifest_path = f"{out}.manifest.json"
         manifest = StegoManifest.load(manifest_path)
-        manifest.sign(SIGNING_KEY, signer_id="test-suite")
-        manifest.save(manifest_path)
-
         result = verify_near_blind(
             stego_video_path=out,
             circuits_dir=CIRCUITS_DIR,
@@ -151,7 +157,10 @@ def t_near_blind_verify_pipeline():
             message_length=len(TEST_MSG),
             chaos_key=LOCKED_CHAOS_KEY,
             use_analysis_cache=True,
-            manifest_signing_key=SIGNING_KEY,
+            manifest_public_key=SIGNING_PUBLIC_KEY.public_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PublicFormat.Raw,
+            ),
         )
         assert result.valid, "near-blind verification should succeed on a fresh embed"
         assert result.message == TEST_MSG, f"unexpected extracted message: {result.message!r}"

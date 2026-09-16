@@ -56,6 +56,12 @@ def t_manifest_uses_ed25519_and_binds_sidecars() -> None:
 
     manifest.video.stego_file_hash = "tampered"
     assert not manifest.verify_signature(public_key)
+    try:
+        hash_positions([(1, 2, 3.5)])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("position hashes must reject non-integer sidecar values")
 
 
 def t_supported_stream_classifier_rejects_unsupported_codecs() -> None:
@@ -81,6 +87,28 @@ def t_circuit_declares_enforced_payload_length_range() -> None:
     assert "length_in_range === 1" in circuit
 
 
+def t_circuit_rejects_out_of_range_payload_lengths() -> None:
+    from src.zk_proof import ZKSnarkBridge
+
+    bridge = ZKSnarkBridge(str(ROOT / "circuits"))
+    valid_input = bridge._build_circuit_input(b"x", bytes(range(32)))
+    for invalid_length in (0, 1_000_000):
+        invalid_input = dict(valid_input)
+        invalid_input["payload_length"] = invalid_length
+        try:
+            bridge._compute_witness(invalid_input)
+        except RuntimeError:
+            continue
+        raise AssertionError(f"payload_length={invalid_length} unexpectedly produced a valid witness")
+
+
+def t_verifier_mode_key_contracts_are_unambiguous() -> None:
+    from src.verify_modes import verify_nearblind, verify_strict
+
+    assert "manifest_public_key" not in inspect.signature(verify_strict).parameters
+    assert inspect.signature(verify_nearblind).parameters["manifest_public_key"].default is inspect.Parameter.empty
+
+
 def main() -> None:
     section("Hardening - security and reproducibility contracts")
     results = [
@@ -88,6 +116,8 @@ def main() -> None:
         run_test("manifest_uses_ed25519_and_binds_sidecars", t_manifest_uses_ed25519_and_binds_sidecars),
         run_test("supported_stream_classifier_rejects_unsupported_codecs", t_supported_stream_classifier_rejects_unsupported_codecs),
         run_test("circuit_declares_enforced_payload_length_range", t_circuit_declares_enforced_payload_length_range),
+        run_test("circuit_rejects_out_of_range_payload_lengths", t_circuit_rejects_out_of_range_payload_lengths),
+        run_test("verifier_mode_key_contracts_are_unambiguous", t_verifier_mode_key_contracts_are_unambiguous),
     ]
     raise SystemExit(summarise(results, "Hardening"))
 

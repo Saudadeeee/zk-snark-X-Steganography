@@ -33,7 +33,7 @@ from .core.analysis_cache  import (
 from .core.stego           import PayloadEmbedder
 from .core.chaos           import ChaosTransformer
 from .bitstream.bitstream_ops import BitstreamReconstructor, BitstreamPatcher
-from .exceptions           import InsufficientCapacityError
+from .exceptions           import InsufficientCapacityError, UnsupportedStreamError
 from .stream_profile       import analyze_stream_profile
 from .zk_proof             import ZKSnarkBridge, pack
 from .manifest             import (
@@ -43,6 +43,7 @@ from .manifest             import (
     VideoMetadata,
     ProofMetadata,
     compute_file_hash,
+    hash_positions,
 )
 
 
@@ -178,6 +179,8 @@ def embed(
     use_analysis_cache: bool = True,
     force_analysis_refresh: bool = False,
     analysis_cache_dir: Optional[str] = None,
+    manifest_private_key: Optional[bytes] = None,
+    manifest_signer_id: Optional[str] = None,
 ) -> EmbedResult:
     """
     Embed a Groth16 ZK proof for `message` into an H.264 video.
@@ -218,6 +221,11 @@ def embed(
                             Strongly recommended for app/runtime usage.
         force_analysis_refresh: Ignore cached cover analysis and rebuild it.
         analysis_cache_dir: Optional custom directory for analysis cache files.
+        manifest_private_key: Optional 32-byte Ed25519 private key. When
+            supplied, signs a manifest bound to the stego file and positions
+            sidecar, enabling secure near-blind verification.
+        manifest_signer_id: Optional public signer identifier stored in the
+            signed manifest.
 
     Returns:
         EmbedResult
@@ -236,6 +244,10 @@ def embed(
         raise ValueError("message must be non-empty bytes")
     if not isinstance(secret_key, bytes) or len(secret_key) != 32:
         raise ValueError("secret_key must be exactly 32 bytes")
+    if manifest_private_key is not None and (
+        not isinstance(manifest_private_key, bytes) or len(manifest_private_key) != 32
+    ):
+        raise ValueError("manifest_private_key must be exactly 32 bytes")
     if max_modifications_per_block < 1 or max_modifications_per_block > 8:
         raise ValueError("max_modifications_per_block must be between 1 and 8")
     if ffmpeg_validate and shutil.which("ffmpeg") is None:
@@ -243,6 +255,12 @@ def embed(
             "ffmpeg_validate=True but 'ffmpeg' was not found on PATH."
         )
     stream_profile = analyze_stream_profile(video_path)
+    if not stream_profile.supported:
+        raise UnsupportedStreamError(
+            stream_profile.rejection_reason or "unsupported H.264 stream",
+            profile=stream_profile.profile,
+            entropy_mode=stream_profile.entropy_mode,
+        )
     if not stream_profile.is_all_intra:
         logger.warning(
             "[Embed] Stream classified as %s; current strongest operating regime remains all-intra H.264/CAVLC",
@@ -496,10 +514,12 @@ def embed(
             strategy="t1_sign_flip",
             max_modifications_per_block=max_modifications_per_block,
             positions_count=len(used_positions),
+            positions_hash=hash_positions(used_positions),
         ),
         video=VideoMetadata(
             file_path=video_path,
             file_hash=compute_file_hash(video_path),
+            stego_file_hash=compute_file_hash(output_path),
             codec="h264",
             profile="baseline",
         ),
@@ -509,6 +529,8 @@ def embed(
             constraint_count=bridge.get_constraint_count(),
         ),
     )
+    if manifest_private_key is not None:
+        manifest.sign(manifest_private_key, signer_id=manifest_signer_id)
     manifest_path = f"{output_path}.manifest.json"
     manifest.save(manifest_path)
     capacity = sum(

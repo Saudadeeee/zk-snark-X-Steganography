@@ -2,9 +2,9 @@
 
 Hide a Groth16 zero-knowledge proof inside H.264 baseline video by modifying CAVLC coefficients in IDR frames.
 
-**Status:** Research prototype with a frozen benchmark-grade core: locked operating-point embedding plus sidecar-assisted near-blind verification
+**Status:** Research prototype; supported path is H.264 Baseline/CAVLC with signed sidecar-assisted near-blind verification.
 **Validated Runtime:** `py -3.12`
-**Tests:** full suite executes `35/35` passing checks with `0` failed and `0` skipped
+**Current hardening checks:** quick suite `23/23`, hardening `6/6`, and FFmpeg codec fixture `1/1` passed. Full local-asset E2E and benchmarks require revalidation after the circuit/sidecar update.
 **Benchmark Sections:** SEC1-SEC10 (Quality, Capacity, Methods, Security, Performance, Tradeoff, Real-time, Motion/GOP, Statistical, Audit)
 
 ---
@@ -25,7 +25,7 @@ The system embeds a message-authentication proof into H.264 bitstreams without l
 
 ### New Features (IEEE-ready)
 
-- **Versioned Manifest Schema** (v1.0.0): Structured sidecar files with signing hooks
+- **Authenticated Manifest Schema** (v2.0.0): Ed25519-signed sidecars bound to the stego asset and positions file
 - **Near-Blind Verification**: Reduced cover dependency via sidecar-driven extraction
 - **Statistical Benchmarking**: Multi-run error bars for IEEE TIP/TIFS validity (3+ runs)
 - **Audit Logging**: SEC1 quality guard tracking with reason logs
@@ -48,7 +48,7 @@ The system embeds a message-authentication proof into H.264 bitstreams without l
 commitment = SHA256(SHA256(message) || secret_key)
 ```
 
-**Constraint Count:** 18,680 (Groth16)
+**Constraint Count:** 62,577 (Groth16; Circom 2.2.0 build with enforced payload-length range)
 
 Public inputs:
 - `payload_hash[256]`
@@ -60,10 +60,13 @@ Private input:
 
 ---
 
-## Current Benchmark Snapshot
+## Historic Benchmark Snapshot (not revalidated for this revision)
 
-Current paper-grade artifacts were refreshed on `2026-06-08` for the locked
-`akiyo_q22_g1` operating point and validated with:
+The figures below describe the previous locked `akiyo_q22_g1` artifact set.
+They are retained for traceability only: the circuit constraint count and
+near-blind sidecar trust contract have since changed. Do not use them as claims
+for this revision until the benchmark suite is rerun with fresh signed v2
+sidecars and the rebuilt circuit artifacts.
 
 ```bash
 py -3.12 src/runtest/run_all.py
@@ -168,8 +171,8 @@ VideoLevel/
 |   |   |-- pipeline_optimized.py Parallel/vec optimization
 |   |   |-- stego.py              Safety filter + embed logic
 |   |   |-- chaos.py              Arnold Cat + Logistic Map
-|   |   `-- analysis_cache.py     Video analysis caching
-|   |-- manifest.py               v1.0.0 manifest schema
+|   |   `-- analysis_cache.py     Process-local safe video-analysis cache
+|   |-- manifest.py               v2.0.0 authenticated manifest schema
 |   |-- embedder.py               Public embed API
 |   |-- verifier.py               Public verify API
 |   |-- verifier_blind.py         Near-blind verification
@@ -189,7 +192,7 @@ VideoLevel/
 - `circom` 2.2.x
 - `snarkjs` 0.7.x
 - `ffmpeg` 8.x or compatible
-- Python packages from `requirements.txt`
+- Python packages from `requirements.lock`
 
 Current audited Python package set:
 
@@ -210,9 +213,9 @@ Observed native toolchain on the current audit machine:
 Install:
 
 ```bash
-py -3.12 -m pip install -r requirements.txt
+py -3.12 -m pip install -r requirements.lock
 cd circuits
-npm install
+npm ci
 cd ..
 ```
 
@@ -228,11 +231,19 @@ ffmpeg -i input.y4m -c:v libx264 -profile:v baseline -coder 0 -g 1 -qp 22 -y out
 
 ```python
 import os
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from src.embedder import embed
 
 secret_key = os.urandom(32)
 chaos_key = b"example-chaos-key"
 message = b"Hello ZK-Stego"
+manifest_signer = Ed25519PrivateKey.generate()
+manifest_private_key = manifest_signer.private_bytes(
+    serialization.Encoding.Raw,
+    serialization.PrivateFormat.Raw,
+    serialization.NoEncryption(),
+)
 
 result = embed(
     video_path="data/encoded/foreman_cif_q22_g1.h264",
@@ -241,13 +252,15 @@ result = embed(
     circuits_dir="circuits",
     secret_key=secret_key,
     chaos_key=chaos_key,
+    manifest_private_key=manifest_private_key,
+    manifest_signer_id="example-sender-v1",
 )
 
 print(result.bits_embedded, result.output_path)
 # Also generates:
 # - data/output/stego.h264.positions.json
 # - data/output/stego.h264.meta.json
-# - data/output/stego.h264.manifest.json (v1.0.0)
+# - data/output/stego.h264.manifest.json (v2.0.0, Ed25519-signed)
 ```
 
 ### Embed (locked operating-point mode)
@@ -296,9 +309,16 @@ Reduced dependency on the original cover video. This mode requires:
 - `manifest.json`
 - `positions.json`
 - a stego asset whose stored operating positions are still valid after reconstruction
+- the Ed25519 public key of the manifest signer
 
 ```python
+from cryptography.hazmat.primitives import serialization
 from src.verifier_blind import verify_near_blind
+
+manifest_public_key = manifest_signer.public_key().public_bytes(
+    serialization.Encoding.Raw,
+    serialization.PublicFormat.Raw,
+)
 
 result = verify_near_blind(
     stego_video_path="data/output/stego.h264",
@@ -306,6 +326,7 @@ result = verify_near_blind(
     secret_key=secret_key,
     message_length=len(message),
     chaos_key=chaos_key,
+    manifest_public_key=manifest_public_key,
 )
 ```
 
@@ -317,7 +338,7 @@ result = verify_near_blind(
 - `verify_near_blind()`:
   - sidecar-assisted near-blind verification
   - does not require the original cover video
-  - still requires sidecar metadata such as `manifest.json` and `positions.json`
+  - requires a signed manifest binding the stego hash and positions-sidecar hash
 - blind-core verification:
   - currently experimental / research-only
   - not part of the frozen benchmark-grade core path
@@ -434,18 +455,19 @@ See `doc/trust_corpus_onboarding.md` for the step-by-step corpus playbook.
 
 ### Manifest system
 
-`StegoManifest` (v1.0.0) provides:
+`StegoManifest` (v2.0.0) provides:
 - Versioned schema for forward/backward compatibility
 - Payload metadata (size, chaos expansion)
 - Embedding metadata (strategy, positions count)
-- Video metadata (file hash, codec, profile)
+- Original-cover and stego-file hashes
+- Canonical positions-sidecar hash
 - Proof metadata (system, size, constraint count)
-- Optional signing hooks for authentication
+- Required Ed25519 authentication for near-blind verification
 
 ### Near-blind extraction
 
 `verify_near_blind()` reduces cover dependency by:
-1. Loading `manifest.json` / `positions.json`
+1. Verifying the Ed25519 manifest and its stego/positions hashes
 2. Rebuilding extraction offsets from the stego bitstream
 3. Extracting from the stored operating positions
 4. Verifying the ZK proof
@@ -500,13 +522,17 @@ For IEEE TIP/TIFS submission:
 
 ## Rebuilding Circuit Artifacts
 
-The repo already includes built artifacts. To rebuild:
+Circuit artifacts are deliberately not committed. Rebuild them from a verified
+Powers-of-Tau file and freshly generated secret entropy. The build writes
+checksums to `build/artifacts.json`.
 
 ```bash
 cd circuits
-npm run compile
-npm run generate_proof_key
-npm run generate_verification_key
+npm ci
+export PTAU_FILE=/absolute/path/to/verified.ptau
+export ZKEY_ENTROPY="fresh-secret-entropy-at-least-32-characters"
+npm run build
+npm run verify-artifacts
 ```
 
 ---
@@ -537,6 +563,6 @@ npm run generate_verification_key
 - [`benchmark/sec1_audit.py`](benchmark/sec1_audit.py) - Quality guard audit logging
 
 ### API Documentation
-- [`src/manifest.py`](src/manifest.py) - Manifest schema (v1.0.0)
+- [`src/manifest.py`](src/manifest.py) - Authenticated manifest schema (v2.0.0)
 - [`src/verifier_blind.py`](src/verifier_blind.py) - Near-blind verification
 - [`src/verify_modes.py`](src/verify_modes.py) - Explicit verifier modes

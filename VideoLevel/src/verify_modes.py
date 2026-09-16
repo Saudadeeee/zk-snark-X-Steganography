@@ -24,6 +24,7 @@ Usage:
         circuits_dir="circuits/",
         secret_key=secret_key,
         message_length=len(message),
+        manifest_public_key=manifest_public_key,
     )
 
     # Benchmark mode (cached, fast)
@@ -39,6 +40,7 @@ Usage:
 from typing import Optional, List
 from .verifier import verify, VerifyResult
 from .verifier_blind import verify_near_blind as _verify_near_blind
+from .exceptions import ZKStegoError
 
 
 def verify_strict(
@@ -83,12 +85,12 @@ def verify_nearblind(
     circuits_dir: str,
     secret_key: bytes,
     message_length: int,
+    manifest_public_key: bytes,
     max_modifications_per_block: int = 1,
     chaos_key: Optional[bytes] = None,
     use_analysis_cache: bool = True,
     force_analysis_refresh: bool = False,
     analysis_cache_dir: Optional[str] = None,
-    manifest_signing_key: Optional[bytes] = None,
 ) -> VerifyResult:
     """
     Sidecar-assisted near-blind verification using manifest-driven extraction.
@@ -96,6 +98,7 @@ def verify_nearblind(
     **Requirements:**
     - manifest.json must exist alongside stego video
     - positions.json must exist (from embedding)
+    - manifest_public_key must be the Ed25519 public key for the signer
     - No original video required
     - Suitable for: sidecar-assisted verification at scale
 
@@ -115,7 +118,7 @@ def verify_nearblind(
         use_analysis_cache=use_analysis_cache,
         force_analysis_refresh=force_analysis_refresh,
         analysis_cache_dir=analysis_cache_dir,
-        manifest_signing_key=manifest_signing_key,
+        manifest_public_key=manifest_public_key,
     )
 
 
@@ -163,13 +166,13 @@ def verify_auto(
     original_video_path: Optional[str] = None,
     max_modifications_per_block: int = 1,
     chaos_key: Optional[bytes] = None,
-    manifest_signing_key: Optional[bytes] = None,
+    manifest_public_key: Optional[bytes] = None,
 ) -> VerifyResult:
     """
     Auto-select verification mode based on available files.
 
     **Priority:**
-    1. Near-blind (if manifest.json exists) — fastest
+    1. Near-blind (if a manifest and its trusted public key exist) — fastest
     2. Strict (if original_video_path provided) — fallback
     3. Error (if neither available)
 
@@ -177,7 +180,7 @@ def verify_auto(
     """
     manifest_path = f"{stego_video_path}.manifest.json"
 
-    if __import__("os").path.isfile(manifest_path):
+    if __import__("os").path.isfile(manifest_path) and manifest_public_key is not None:
         # Use near-blind if manifest exists
         try:
             return verify_nearblind(
@@ -187,9 +190,9 @@ def verify_auto(
                 message_length=message_length,
                 max_modifications_per_block=max_modifications_per_block,
                 chaos_key=chaos_key,
-                manifest_signing_key=manifest_signing_key,
+                manifest_public_key=manifest_public_key,
             )
-        except RuntimeError:
+        except (ZKStegoError, RuntimeError, ValueError):
             if not original_video_path:
                 raise
     elif original_video_path:

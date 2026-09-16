@@ -1,6 +1,6 @@
 # Current-System Completion Summary
 
-Last updated: 2026-06-08
+Last updated: 2026-09-16
 
 This file summarizes the current-system completion target. It intentionally does
 not include future architecture work such as robust watermarking, C2PA tiers,
@@ -15,7 +15,7 @@ fingerprint registries, TEE, or ZKML.
   `[4B message_length][message][129B proof]`.
 - Patchability-aware candidate filtering.
 - Reconstruction-aware applied-position accounting.
-- Manifest v1.0.0 sidecar.
+- Authenticated Manifest v2.0.0 sidecar (Ed25519, stego-hash and positions-hash binding).
 - Strict non-blind verifier.
 - Sidecar-assisted near-blind verifier.
 - Benchmark sections for quality, capacity, method comparison, security, ZKP,
@@ -49,10 +49,16 @@ contract:
 - [x] Confirm README links and documentation are consistent after benchmark
       reruns.
 
-Current validation:
+Current hardening validation (2026-09-16):
 
-- full runtime suite: `35/35` passed, `0` failed, `0` skipped.
-- benchmark runner sections `1 2 3 4 5 6`: `6/6` passed with schema validation OK.
+- quick runtime suite: `23/23` passed;
+- security/reproducibility hardening: `6/6` passed;
+- generated FFmpeg codec/decode fixture: `1/1` passed;
+- circuit package contract and artifact checksum verification passed.
+
+The previous full-suite and benchmark results above predate the enforced
+payload-length constraint and authenticated manifest v2. They must be rerun
+with freshly generated signed v2 sidecars before being used as current evidence.
 
 ## Not Part Of Current Completion
 

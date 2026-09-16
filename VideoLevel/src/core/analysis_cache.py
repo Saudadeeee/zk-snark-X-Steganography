@@ -1,20 +1,19 @@
-"""
-analysis_cache.py - Runtime cache for expensive original-video analysis.
+"""Process-local cache for expensive original-video analysis.
 
-Caches the immutable analysis derived from an original cover video:
-  - extracted IDR coefficients
-  - frame_verified_data
-  - nC / NAL length / T1 override maps
-  - safe_positions from CAVLCSafetyFilter
+The previous cache persisted Python pickle objects. A cache directory is often
+shared with tooling or restored from a previous run, so deserialising it made a
+local-file write primitive into arbitrary code execution. Analysis values now
+remain in memory for the lifetime of the trusted process only.
 
-This is intended for application/runtime usage, unlike benchmark-only caches.
+``cache_dir`` is retained as a deprecated API argument for compatibility but
+is intentionally ignored. Callers that need cross-process caching must store
+their own validated, non-executable representation.
 """
 
 from __future__ import annotations
 
-import hashlib
-import os
-import pickle
+import threading
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -25,19 +24,15 @@ from .stego import CAVLCSafetyFilter
 
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-DEFAULT_CACHE_DIR = ROOT / ".cache" / "video_analysis"
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_VERSION = 2
+
+_LOCK = threading.RLock()
+_VIDEO_ANALYSIS_CACHE: dict[str, tuple[dict[str, Any], tuple]] = {}
+_RECONSTRUCTION_CONTEXT_CACHE: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
 
 
-def _cache_path(video_path: str | Path, cache_dir: str | Path | None = None) -> Path:
-    base = Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
-    vp = Path(video_path)
-    try:
-        resolved = str(vp.resolve()).encode("utf-8")
-    except OSError:
-        resolved = str(vp).encode("utf-8")
-    path_hash = hashlib.sha1(resolved).hexdigest()[:12]
-    return base / f"{vp.stem}_{path_hash}.pkl"
+def _cache_key(video_path: str | Path) -> str:
+    return str(Path(video_path).resolve())
 
 
 def _code_fingerprint() -> dict[str, int | str]:
@@ -48,57 +43,65 @@ def _code_fingerprint() -> dict[str, int | str]:
         ROOT / "src" / "bitstream" / "h264.py",
         ROOT / "src" / "bitstream" / "bitstream_ops.py",
     ]
-    fp: dict[str, int | str] = {"schema": CACHE_SCHEMA_VERSION}
-    for f in files:
-        key = f.relative_to(ROOT).as_posix()
+    fingerprint: dict[str, int | str] = {"schema": CACHE_SCHEMA_VERSION}
+    for file_path in files:
+        key = file_path.relative_to(ROOT).as_posix()
         try:
-            fp[key] = int(f.stat().st_mtime_ns)
+            fingerprint[key] = int(file_path.stat().st_mtime_ns)
         except OSError:
-            fp[key] = "missing"
-    return fp
+            fingerprint[key] = "missing"
+    return fingerprint
 
 
 def _video_fingerprint(video_path: str | Path) -> dict[str, Any]:
-    vp = Path(video_path)
-    stat = vp.stat()
+    path = Path(video_path)
+    stat = path.stat()
     return {
-        "path": str(vp.resolve()),
+        "path": str(path.resolve()),
         "size": int(stat.st_size),
         "mtime_ns": int(stat.st_mtime_ns),
         "code": _code_fingerprint(),
     }
 
 
-def _build_reconstruction_context(video_path: str | Path,
-                                  parser: H264BitstreamParser | None = None) -> dict[str, Any]:
-    vp = Path(video_path)
+def _warn_legacy_cache_dir(cache_dir: str | Path | None) -> None:
+    if cache_dir is not None:
+        warnings.warn(
+            "analysis_cache_dir is ignored: persistent pickle caches were removed for safety.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+
+
+def _build_reconstruction_context(
+    video_path: str | Path,
+    parser: H264BitstreamParser | None = None,
+) -> dict[str, Any]:
+    path = Path(video_path)
     if parser is None:
-        parser = H264BitstreamParser(str(vp))
+        parser = H264BitstreamParser(str(path))
         parser.parse()
 
-    rec = BitstreamReconstructor()
+    reconstructor = BitstreamReconstructor()
     sps = None
     pps = None
     for nal in parser.nal_units:
         if int(nal.nal_unit_type) == 7:
             try:
-                sps = rec._parse_sps_from_nal(nal)
-            except Exception:
-                pass
+                sps = reconstructor._parse_sps_from_nal(nal)
+            except (ValueError, IndexError, EOFError):
+                continue
         elif int(nal.nal_unit_type) == 8:
             try:
-                pps = rec._parse_pps_from_nal(nal)
-            except Exception:
-                pass
+                pps = reconstructor._parse_pps_from_nal(nal)
+            except (ValueError, IndexError, EOFError):
+                continue
 
-    if sps is not None:
-        mb_count_per_slice = (
-            (sps.pic_width_in_mbs_minus1 + 1) *
-            (sps.pic_height_in_map_units_minus1 + 1)
-        )
-    else:
-        mb_count_per_slice = 264
-
+    mb_count_per_slice = (
+        (sps.pic_width_in_mbs_minus1 + 1) * (sps.pic_height_in_map_units_minus1 + 1)
+        if sps is not None
+        else 264
+    )
     return {
         "nal_units": parser.nal_units,
         "sps": sps,
@@ -114,69 +117,38 @@ def load_or_build_video_analysis(
     force_refresh: bool = False,
     cache_dir: str | Path | None = None,
 ) -> tuple:
-    """
-    Return:
-      (coefficients, frame_verified_data, nC_map, nal_length_map, t1_override_map, safe_positions)
-    """
-    vp = Path(video_path)
-    if not vp.exists():
+    """Return trusted, process-local cover-video analysis."""
+    _warn_legacy_cache_dir(cache_dir)
+    path = Path(video_path)
+    if not path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
 
-    cache_path = _cache_path(vp, cache_dir)
-    fingerprint = _video_fingerprint(vp)
+    key = _cache_key(path)
+    fingerprint = _video_fingerprint(path)
+    with _LOCK:
+        cached = _VIDEO_ANALYSIS_CACHE.get(key)
+        if use_cache and not force_refresh and cached and cached[0] == fingerprint:
+            return cached[1]
 
-    if use_cache and not force_refresh and cache_path.exists():
-        try:
-            with open(cache_path, "rb") as f:
-                payload = pickle.load(f)
-            if payload.get("fingerprint") == fingerprint and "data" in payload:
-                return payload["data"]
-        except (OSError, pickle.PickleError, EOFError, AttributeError, ValueError):
-            pass
-
-    parser = H264BitstreamParser(str(vp))
+    parser = H264BitstreamParser(str(path))
     parser.parse()
-
-    rec = BitstreamReconstructor()
-    coefficients, frame_verified_data, nC_map, nal_length_map, t1_override_map = (
-        extract_all_idr_blocks(str(vp), rec, parser=parser)
+    reconstructor = BitstreamReconstructor()
+    coefficients, frame_verified_data, n_c_map, nal_length_map, t1_override_map = extract_all_idr_blocks(
+        str(path), reconstructor, parser=parser
     )
-
-    safety = CAVLCSafetyFilter()
-    safe_positions = safety.get_safe_positions(
+    safe_positions = CAVLCSafetyFilter().get_safe_positions(
         coefficients,
-        nC_map=nC_map,
+        nC_map=n_c_map,
         nal_length_map=nal_length_map,
         t1_override_map=t1_override_map,
     )
-
-    data = (
-        coefficients,
-        frame_verified_data,
-        nC_map,
-        nal_length_map,
-        t1_override_map,
-        safe_positions,
-    )
+    data = (coefficients, frame_verified_data, n_c_map, nal_length_map, t1_override_map, safe_positions)
 
     if use_cache:
-        try:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(cache_path, "wb") as f:
-                pickle.dump({"fingerprint": fingerprint, "data": data}, f, protocol=pickle.HIGHEST_PROTOCOL)
-        except OSError:
-            pass
-
-        # Also persist reconstruction context from the same parsed bitstream so
-        # cold-start embed paths do not need to parse the video a second time.
-        try:
-            recon_path = cache_path.with_name(cache_path.stem + "_recon.pkl")
-            recon_data = _build_reconstruction_context(vp, parser=parser)
-            with open(recon_path, "wb") as f:
-                pickle.dump({"fingerprint": fingerprint, "data": recon_data}, f, protocol=pickle.HIGHEST_PROTOCOL)
-        except OSError:
-            pass
-
+        context = _build_reconstruction_context(path, parser=parser)
+        with _LOCK:
+            _VIDEO_ANALYSIS_CACHE[key] = (fingerprint, data)
+            _RECONSTRUCTION_CONTEXT_CACHE[key] = (fingerprint, context)
     return data
 
 
@@ -187,53 +159,31 @@ def load_or_build_reconstruction_context(
     force_refresh: bool = False,
     cache_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    """
-    Return cached reconstruction context for repeated patch/write operations:
-      {
-        "nal_units": list[NALUnit],
-        "sps": SPSData | None,
-        "pps": PPSData | None,
-        "mb_count_per_slice": int,
-      }
-    """
-    vp = Path(video_path)
-    if not vp.exists():
+    """Return trusted, process-local reconstruction context."""
+    _warn_legacy_cache_dir(cache_dir)
+    path = Path(video_path)
+    if not path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
 
-    cache_path = _cache_path(vp, cache_dir).with_name(_cache_path(vp, cache_dir).stem + "_recon.pkl")
-    fingerprint = _video_fingerprint(vp)
+    key = _cache_key(path)
+    fingerprint = _video_fingerprint(path)
+    with _LOCK:
+        cached = _RECONSTRUCTION_CONTEXT_CACHE.get(key)
+        if use_cache and not force_refresh and cached and cached[0] == fingerprint:
+            return cached[1]
 
-    if use_cache and not force_refresh and cache_path.exists():
-        try:
-            with open(cache_path, "rb") as f:
-                payload = pickle.load(f)
-            if payload.get("fingerprint") == fingerprint and "data" in payload:
-                return payload["data"]
-        except (OSError, pickle.PickleError, EOFError, AttributeError, ValueError):
-            pass
-
-    data = _build_reconstruction_context(vp)
-
+    data = _build_reconstruction_context(path)
     if use_cache:
-        try:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(cache_path, "wb") as f:
-                pickle.dump({"fingerprint": fingerprint, "data": data}, f, protocol=pickle.HIGHEST_PROTOCOL)
-        except OSError:
-            pass
-
+        with _LOCK:
+            _RECONSTRUCTION_CONTEXT_CACHE[key] = (fingerprint, data)
     return data
 
 
 def clear_video_analysis_cache(cache_dir: str | Path | None = None) -> int:
-    base = Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE_DIR
-    if not base.exists():
-        return 0
-    removed = 0
-    for p in base.glob("*.pkl"):
-        try:
-            p.unlink()
-            removed += 1
-        except OSError:
-            pass
-    return removed
+    """Clear the process-local cache and return the number of entries removed."""
+    _warn_legacy_cache_dir(cache_dir)
+    with _LOCK:
+        count = len(_VIDEO_ANALYSIS_CACHE) + len(_RECONSTRUCTION_CONTEXT_CACHE)
+        _VIDEO_ANALYSIS_CACHE.clear()
+        _RECONSTRUCTION_CONTEXT_CACHE.clear()
+    return count

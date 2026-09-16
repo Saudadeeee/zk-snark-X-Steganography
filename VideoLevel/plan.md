@@ -72,7 +72,8 @@ py -3.12 benchmark\safe_benchmark_runner.py --sections 1 2 3 4 5 6
 `src/runtest/_helpers.py::SKIP()` now raises an explicit skip result.
 `run_test()` and `summarise()` report pass/fail/skip separately.
 
-Current validation state on 2026-06-08:
+Historic validation state on 2026-06-08 (predates the current circuit and
+manifest v2 hardening):
 
 - quick suite: `23/23` passed,
 - Phase 4: `5/5` passed,
@@ -81,7 +82,8 @@ Current validation state on 2026-06-08:
 - Phase 7: `3/3` passed.
 - full suite: `35/35` passed, `0` failed, `0` skipped.
 
-Phase 5/6 now exercise public API and near-blind E2E coverage without skips.
+Phase 5/6 artifacts must be regenerated and rerun with signed manifest v2
+sidecars before being used as evidence for the current revision.
 Phase 7 now uses the verified SEC1 operating artifact for `akiyo_q22_g1`.
 
 Additional artifact-policy fix on 2026-06-08:
@@ -179,7 +181,7 @@ Current runner status:
 - [x] Keep `embed()` behavior stable for legacy v1 payload format.
 - [x] Keep `verify()` strict non-blind path stable.
 - [x] Keep `verify_near_blind()` explicitly sidecar-assisted.
-- [x] Keep manifest v1.0.0 backward-compatible.
+- [x] Migrate near-blind verification to signed manifest v2.0.0; legacy manifests remain parseable but are not trusted for authenticated verification.
 - [x] Avoid refactoring `embedder` / `verifier` unless tests are strengthened
       first. Current refactor risk is higher than the benefit before paper freeze.
 
