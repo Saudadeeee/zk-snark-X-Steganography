@@ -1,0 +1,8 @@
+{
+  "lock_version": 1,
+  "repository": "https://github.com/lazer-crypto/lazer.git",
+  "revision": "10eafeca4cd53ff4fc54193dce904dbd0026fefd",
+  "demo_path": "python/demo/demo.py",
+  "relation": "A*s=t",
+  "purpose": "Research-only smoke proof for a general lattice linear relation; not an active video proof backend."
+}
