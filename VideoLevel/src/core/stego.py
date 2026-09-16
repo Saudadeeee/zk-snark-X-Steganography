@@ -17,6 +17,14 @@ from ..bitstream.cavlc import CAVLCEncoder, CAVLCDecoder
 from ..bitstream.bitstream_io import BitstreamWriter, BitstreamReader
 from ..bitstream.bitstream_ops import BitstreamPatcher
 from ..exceptions import SafetyFilterError, EmbeddingError
+from .matrix_embedding import (
+    MATRIX_EMBEDDING_STRATEGY,
+    embed_hamming73,
+    extract_hamming73,
+    matrix_carrier_bit_count,
+    matrix_payload_capacity_bits,
+    rank_positions_cost_guided,
+)
 
 logger = logging.getLogger(__name__)
 # =============================================================================
@@ -556,7 +564,8 @@ class PayloadEmbedder:
                  use_safety_filter: bool = True,
                  enable_trailing_ones_protection: bool = True,
                  enable_bit_length_check: bool = True,
-                 max_modifications_per_block: int = 1):
+                 max_modifications_per_block: int = 1,
+                 embedding_strategy: str = "t1_sign_flip"):
         """
         Initialize embedder with CAVLC Safety Filter
         
@@ -572,12 +581,21 @@ class PayloadEmbedder:
                                         1 = safest (default)
                                         3 = balanced (higher capacity)
                                         4+ = higher capacity but may affect quality
+            embedding_strategy: ``t1_sign_flip`` preserves legacy direct LSB
+                                embedding. ``cost_guided_hamming_7_3`` uses
+                                seven CAVLC-safe carriers for three payload
+                                bits with at most one changed carrier.
         """
         self.skip_dc = skip_dc
         self.skip_zeros = skip_zeros
         self.allow_small_values = allow_small_values
         self.use_safety_filter = use_safety_filter
         self.max_modifications_per_block = max(1, min(max_modifications_per_block, 8))
+        if embedding_strategy not in {"t1_sign_flip", MATRIX_EMBEDDING_STRATEGY}:
+            raise ValueError(f"Unsupported embedding_strategy: {embedding_strategy}")
+        self.embedding_strategy = embedding_strategy
+        self.last_used_safe_positions: list[tuple[int, int, int]] = []
+        self.last_modified_safe_positions: list[tuple[int, int, int]] = []
         
         # Initialize CAVLC Safety Filter if enabled
         if self.use_safety_filter:
@@ -659,6 +677,9 @@ class PayloadEmbedder:
                 frame_verified_data=frame_verified_data,
             )
 
+        if self.embedding_strategy == MATRIX_EMBEDDING_STRATEGY:
+            return self._embed_with_matrix_embedding(coefficients, payload_bits, safe_positions)
+
         # Build coeff lookup: (mb_idx, block_idx) -> mutable coefficients list.
         # We iterate safe_positions directly (already in the correct interleaved order
         # from get_safe_positions / sort_blocks_interleaved) so that the embedding order
@@ -674,6 +695,7 @@ class PayloadEmbedder:
 
         bits_embedded = 0
         self.last_used_safe_positions = []
+        self.last_modified_safe_positions = []
         ffmpeg_skipped = 0
         modifications_count: Dict[Tuple[int, int], int] = {}
         modified_keys: list = []   # ordered list of (mb, blk) that were actually changed
@@ -719,6 +741,8 @@ class PayloadEmbedder:
             modifications_count[block_key] = modifications_count.get(block_key, 0) + 1
 
             self.last_used_safe_positions.append((mb_idx, block_idx, coeff_idx))
+            if modified_val != original_val:
+                self.last_modified_safe_positions.append((mb_idx, block_idx, coeff_idx))
             bits_embedded += 1
 
         # Build modified list: only blocks whose coefficients actually changed
@@ -733,6 +757,73 @@ class PayloadEmbedder:
         if ffmpeg_skipped:
             logger.warning(f"[Embedder] FFmpeg validator skipped {ffmpeg_skipped} unsafe positions")
 
+        return modified, bits_embedded
+
+    @staticmethod
+    def _carrier_bit(coeffs: List[int], coeff_idx: int) -> int:
+        """Read a direct-LSB or T1-sign carrier bit."""
+        if coeff_idx >= 0:
+            return abs(coeffs[coeff_idx]) & 1
+        return 0 if coeffs[~coeff_idx] > 0 else 1
+
+    def _embed_with_matrix_embedding(
+        self,
+        coefficients: List[Tuple[int, int, List[int]]],
+        payload_bits: List[int],
+        safe_positions: List[Tuple[int, int, int]],
+    ) -> Tuple[List[Tuple[int, int, List[int]]], int]:
+        """Apply cost-guided Hamming syndrome coding to already-safe carriers."""
+        coeff_dict = {(mb, blk): list(cs) for mb, blk, cs in coefficients}
+        ranked_positions = rank_positions_cost_guided(safe_positions, coefficients)
+
+        # Extraction limits carriers per block too.  Select carrier positions with
+        # the same constraint even when a group happens to need no actual flip.
+        selected: list[tuple[int, int, int]] = []
+        block_counts: Dict[Tuple[int, int], int] = {}
+        for position in ranked_positions:
+            key = (position[0], position[1])
+            if block_counts.get(key, 0) >= self.max_modifications_per_block:
+                continue
+            selected.append(position)
+            block_counts[key] = block_counts.get(key, 0) + 1
+            if len(selected) >= matrix_carrier_bit_count(len(payload_bits)):
+                break
+
+        usable_carrier_count = (len(selected) // 7) * 7
+        selected = selected[:usable_carrier_count]
+        embeddable_bits = min(len(payload_bits), matrix_payload_capacity_bits(usable_carrier_count))
+        cover_bits = [self._carrier_bit(coeff_dict[(mb, blk)], coeff_idx) for mb, blk, coeff_idx in selected]
+        stego_bits, bits_embedded, flipped_indexes = embed_hamming73(
+            cover_bits, payload_bits[:embeddable_bits]
+        )
+
+        self.last_used_safe_positions = selected
+        self.last_modified_safe_positions = []
+        modified_keys: list[tuple[int, int]] = []
+        for carrier_index in flipped_indexes:
+            mb_idx, block_idx, coeff_idx = selected[carrier_index]
+            block_key = (mb_idx, block_idx)
+            current_coeffs = coeff_dict[block_key]
+            original_val = current_coeffs[coeff_idx] if coeff_idx >= 0 else current_coeffs[~coeff_idx]
+            target_bit = stego_bits[carrier_index]
+            if coeff_idx >= 0:
+                current_coeffs[coeff_idx] = self._modify_lsb(current_coeffs[coeff_idx], target_bit)
+                modified_val = current_coeffs[coeff_idx]
+            else:
+                real_idx = ~coeff_idx
+                current_coeffs[real_idx] = abs(current_coeffs[real_idx]) if target_bit == 0 else -abs(current_coeffs[real_idx])
+                modified_val = current_coeffs[real_idx]
+            if modified_val != original_val:
+                self.last_modified_safe_positions.append((mb_idx, block_idx, coeff_idx))
+                if block_key not in modified_keys:
+                    modified_keys.append(block_key)
+
+        original = {(mb, blk): cs for mb, blk, cs in coefficients}
+        modified = [
+            (mb, blk, coeff_dict[(mb, blk)])
+            for mb, blk in modified_keys
+            if coeff_dict[(mb, blk)] != original[(mb, blk)]
+        ]
         return modified, bits_embedded
 
     def extract_payload(
@@ -817,6 +908,12 @@ class PayloadEmbedder:
                 nal_length_map=nal_length_map,
                 t1_override_map=t1_override_map
             )
+
+        if self.embedding_strategy == MATRIX_EMBEDDING_STRATEGY:
+            return self._extract_with_matrix_embedding(
+                coefficients, payload_length_bits, safe_positions,
+                positions_are_ranked=precomputed_safe_positions is not None,
+            )
         
         # Build coefficient lookup map for fast access
         coeff_map = {}
@@ -878,6 +975,32 @@ class PayloadEmbedder:
                 extractions_in_block += 1
         
         return self._bits_to_bytes(extracted_bits)
+
+    def _extract_with_matrix_embedding(
+        self,
+        coefficients: List[Tuple[int, int, List[int]]],
+        payload_length_bits: int,
+        safe_positions: List[Tuple[int, int, int]],
+        positions_are_ranked: bool,
+    ) -> bytes:
+        """Decode the authenticated payload length from Hamming syndromes."""
+        ordered = list(safe_positions) if positions_are_ranked else rank_positions_cost_guided(safe_positions, coefficients)
+        required = matrix_carrier_bit_count(payload_length_bits)
+        selected: list[tuple[int, int, int]] = []
+        block_counts: Dict[Tuple[int, int], int] = {}
+        for position in ordered:
+            key = (position[0], position[1])
+            if block_counts.get(key, 0) >= self.max_modifications_per_block:
+                continue
+            selected.append(position)
+            block_counts[key] = block_counts.get(key, 0) + 1
+            if len(selected) >= required:
+                break
+        if len(selected) != required:
+            raise EmbeddingError("Insufficient matrix carriers for payload extraction")
+        coeff_map = {(mb, blk): coeffs for mb, blk, coeffs in coefficients}
+        carrier_bits = [self._carrier_bit(coeff_map[(mb, blk)], coeff_idx) for mb, blk, coeff_idx in selected]
+        return self._bits_to_bytes(extract_hamming73(carrier_bits, payload_length_bits))
 
     def _modify_lsb(self, coeff: int, bit: int) -> int:
         """

@@ -17,6 +17,13 @@ from .bitstream.bitstream_ops import BitstreamReconstructor
 from .bitstream.h264 import H264BitstreamParser
 from .core.chaos import ChaosTransformer
 from .core.pipeline import extract_all_idr_blocks, extract_bits_direct
+from .core.matrix_embedding import (
+    MATRIX_EMBEDDING_STRATEGY,
+    bits_to_bytes,
+    bytes_to_bits,
+    extract_hamming73,
+    matrix_carrier_bit_count,
+)
 from .verifier import VerifyResult, _load_sidecar_data
 from .zk_proof import ZKSnarkBridge, unpack, blob_bit_length
 from .lattice_pq import LatticeReceipt, lattice_reference_bit_length, unpack_lattice_reference
@@ -99,7 +106,7 @@ def verify_near_blind(
         raise RuntimeError("Requested message length does not match the signed manifest")
     if manifest.payload.chaos_enabled != (chaos_key is not None):
         raise RuntimeError("Chaos configuration does not match the signed manifest")
-    if manifest.embedding.strategy != "t1_sign_flip":
+    if manifest.embedding.strategy not in {"t1_sign_flip", MATRIX_EMBEDDING_STRATEGY}:
         raise RuntimeError("Signed embedding strategy is unsupported")
     if manifest.embedding.max_modifications_per_block != max_modifications_per_block:
         raise RuntimeError("Modification limit does not match the signed manifest")
@@ -131,7 +138,12 @@ def verify_near_blind(
     extract_bit_count = int(manifest.payload.bits_required)
     if payload_bits is not None and int(payload_bits) != extract_bit_count:
         raise RuntimeError("Payload bit count does not match the signed manifest")
-    if extract_bit_count <= 0 or extract_bit_count > len(positions):
+    carrier_bit_count = (
+        matrix_carrier_bit_count(extract_bit_count)
+        if manifest.embedding.strategy == MATRIX_EMBEDDING_STRATEGY
+        else extract_bit_count
+    )
+    if extract_bit_count <= 0 or carrier_bit_count > len(positions):
         raise RuntimeError("Signed payload bit count is outside the positions sidecar bounds")
     expected_bit_count = (
         math.ceil(ChaosTransformer.padded_bit_count(original_bit_count) / 8) * 8
@@ -141,13 +153,20 @@ def verify_near_blind(
     if extract_bit_count != expected_bit_count:
         raise RuntimeError("Signed payload bit count is inconsistent with the message length and chaos mode")
 
-    extracted_blob = extract_bits_direct(
+    extracted_carriers = extract_bits_direct(
         stego_video_path=stego_video_path,
         embed_safe_positions=[tuple(int(v) for v in pos) for pos in positions],
         frame_verified_data=frame_verified_data,
         nC_map=nC_map,
-        payload_bits=extract_bit_count,
+        payload_bits=carrier_bit_count,
         max_modifications_per_block=max_modifications_per_block,
+    )
+    extracted_blob = (
+        bits_to_bytes(extract_hamming73(
+            bytes_to_bits(extracted_carriers, carrier_bit_count), extract_bit_count
+        ))
+        if manifest.embedding.strategy == MATRIX_EMBEDDING_STRATEGY
+        else extracted_carriers
     )
 
     if chaos is not None:

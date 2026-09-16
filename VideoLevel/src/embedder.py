@@ -32,6 +32,7 @@ from .core.analysis_cache  import (
     load_or_build_video_analysis,
 )
 from .core.stego           import PayloadEmbedder
+from .core.matrix_embedding import MATRIX_EMBEDDING_STRATEGY, matrix_carrier_bit_count
 from .core.chaos           import ChaosTransformer
 from .bitstream.bitstream_ops import BitstreamReconstructor, BitstreamPatcher
 from .exceptions           import InsufficientCapacityError, UnsupportedStreamError
@@ -165,6 +166,7 @@ class EmbedResult:
     applied_position_bits: Optional[int] = None
     chaos_original_bits: Optional[int] = None  # Set when chaos_key used (orig bit count)
     used_positions:      Optional[list[tuple[int, int, int]]] = None  # Final positions actually used for embedding
+    carrier_bits:        Optional[int] = None  # Syntax-safe carriers consumed (may exceed payload bits in matrix mode)
 
 
 def embed(
@@ -185,6 +187,7 @@ def embed(
     manifest_signer_id: Optional[str] = None,
     proof_backend: str = "groth16",
     lattice_private_key: Optional[bytes] = None,
+    embedding_strategy: str = "t1_sign_flip",
 ) -> EmbedResult:
     """
     Embed a Groth16 ZK proof for `message` into an H.264 video.
@@ -229,7 +232,12 @@ def embed(
             supplied, signs a manifest bound to the stego file and positions
             sidecar, enabling secure near-blind verification.
         manifest_signer_id: Optional public signer identifier stored in the
-            signed manifest.
+                            signed manifest.
+        embedding_strategy: ``t1_sign_flip`` (legacy direct replacement) or
+                            ``cost_guided_hamming_7_3``.  The latter uses a
+                            Hamming syndrome code over seven independently
+                            CAVLC-safe carriers to embed three payload bits
+                            with at most one coefficient change.
 
     Returns:
         EmbedResult
@@ -250,6 +258,8 @@ def embed(
         raise ValueError("secret_key must be exactly 32 bytes")
     if proof_backend not in {"groth16", "lattice"}:
         raise ValueError("proof_backend must be 'groth16' or 'lattice'")
+    if embedding_strategy not in {"t1_sign_flip", MATRIX_EMBEDDING_STRATEGY}:
+        raise ValueError("embedding_strategy must be 't1_sign_flip' or 'cost_guided_hamming_7_3'")
     if proof_backend == "lattice" and lattice_private_key is None:
         raise ValueError("lattice_private_key is required for the lattice proof backend")
     if manifest_private_key is not None and (
@@ -344,7 +354,11 @@ def embed(
             _vfn, _cleanup = rec.make_ffmpeg_position_validator(
                 video_path, coefficients, frame_verified_data
             )
-            _required = len(payload_blob) * 8
+            _required = (
+                matrix_carrier_bit_count(len(payload_blob) * 8)
+                if embedding_strategy == MATRIX_EMBEDDING_STRATEGY
+                else len(payload_blob) * 8
+            )
             _max_tries = max(_required * 5, 2000)
             _total_candidates = len(safe_positions)
             _validated: list = []
@@ -364,7 +378,11 @@ def embed(
             ffmpeg_validated_bits = len(safe_positions)
 
         # 4d. Keep only positions whose blocks are patchable in the original bitstream.
-        required_positions = len(payload_blob) * 8
+        required_positions = (
+            matrix_carrier_bit_count(len(payload_blob) * 8)
+            if embedding_strategy == MATRIX_EMBEDDING_STRATEGY
+            else len(payload_blob) * 8
+        )
         headroom_positions = max(required_positions + 256, int(required_positions * 1.30))
         safe_positions = _prune_patchable_positions(
             safe_positions,
@@ -406,7 +424,10 @@ def embed(
             if (int(mb), int(blk)) not in blocked_reconstruct_blocks
         ]
 
-        embedder = PayloadEmbedder(max_modifications_per_block=max_modifications_per_block)
+        embedder = PayloadEmbedder(
+            max_modifications_per_block=max_modifications_per_block,
+            embedding_strategy=embedding_strategy,
+        )
         modified, bits_embedded = embedder.embed_payload(
             coefficients, payload_blob,
             nC_map=nC_map,
@@ -462,6 +483,16 @@ def embed(
             if (mb, blk) not in modified_block_keys or (mb, blk) in applied_block_keys
         ]
         missing_modified_blocks = modified_block_keys - applied_block_keys
+        if embedding_strategy == MATRIX_EMBEDDING_STRATEGY:
+            # Every changed syndrome carrier must be reconstructed.  Unchanged
+            # carriers intentionally remain cover bits and require no patch.
+            if not missing_modified_blocks:
+                applied_position_bits = len(used_positions)
+                break
+            blocked_reconstruct_blocks.update(missing_modified_blocks)
+            bits_embedded = 0
+            used_positions = []
+            continue
         if len(filtered_positions) >= required_bits:
             used_positions = filtered_positions[:required_bits]
             bits_embedded = len(used_positions)
@@ -501,6 +532,8 @@ def embed(
             {
                 "bits_embedded": int(bits_embedded),
                 "bits_required": int(required_bits),
+                "carrier_bits": len(used_positions),
+                "embedding_strategy": embedding_strategy,
                 "positions_count": len(used_positions),
                 "raw_safe_bits": raw_safe_bits,
                 "ffmpeg_validated_bits": ffmpeg_validated_bits,
@@ -529,7 +562,7 @@ def embed(
             chaos_expansion_factor=len(payload_blob) * 8 / original_bit_count if chaos is not None else 1.0,
         ),
         embedding=EmbeddingMetadata(
-            strategy="t1_sign_flip",
+            strategy=embedding_strategy,
             max_modifications_per_block=max_modifications_per_block,
             positions_count=len(used_positions),
             positions_hash=hash_positions(used_positions),
@@ -574,4 +607,5 @@ def embed(
         public_dict=public_dict,
         chaos_original_bits=original_bit_count if chaos is not None else None,
         used_positions=used_positions,
+        carrier_bits=len(used_positions),
     )

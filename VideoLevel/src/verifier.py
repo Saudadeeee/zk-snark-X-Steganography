@@ -29,6 +29,13 @@ logger = logging.getLogger(__name__)
 
 from .core.analysis_cache  import load_or_build_video_analysis
 from .core.pipeline        import extract_bits_direct
+from .core.matrix_embedding import (
+    MATRIX_EMBEDDING_STRATEGY,
+    bits_to_bytes,
+    bytes_to_bits,
+    extract_hamming73,
+    matrix_carrier_bit_count,
+)
 from .core.chaos           import ChaosTransformer
 from .zk_proof             import ZKSnarkBridge, unpack, blob_bit_length
 from .lattice_pq           import LatticeReceipt, lattice_reference_bit_length, unpack_lattice_reference
@@ -115,6 +122,7 @@ def verify(
     analysis_cache_dir: Optional[str] = None,
     proof_backend: str = "groth16",
     lattice_public_key: Optional[bytes] = None,
+    embedding_strategy: str = "t1_sign_flip",
 ) -> VerifyResult:
     """
     Extract and verify the ZK proof embedded in a stego H.264 video.
@@ -147,6 +155,8 @@ def verify(
         use_analysis_cache:  Reuse cached cover-video analysis when available.
         force_analysis_refresh: Ignore cached cover analysis and rebuild it.
         analysis_cache_dir:  Optional custom directory for analysis cache files.
+        embedding_strategy: Must match embed().  ``cost_guided_hamming_7_3``
+                            decodes Hamming syndromes from carrier positions.
 
     Returns:
         VerifyResult with valid flag, message, and proof details.
@@ -164,6 +174,26 @@ def verify(
         raise FileNotFoundError(f"circuits_dir not found: {circuits_dir}")
     if proof_backend not in {"groth16", "lattice"}:
         raise ValueError("proof_backend must be 'groth16' or 'lattice'")
+
+    # The embedder persists the final candidate order.  Reusing it prevents a
+    # later cache rebuild from changing cost ordering or patchability pruning.
+    # Near-blind verification additionally authenticates this sidecar; normal
+    # verification still gets proof-level integrity from Groth16/ML-DSA.
+    if precomputed_positions is None:
+        sidecar_positions, sidecar_payload_bits, sidecar_manifest = _load_sidecar_data(stego_video_path)
+        if sidecar_positions:
+            precomputed_positions = sidecar_positions
+            if precomputed_payload_bits is None and sidecar_payload_bits is not None:
+                precomputed_payload_bits = sidecar_payload_bits
+            if sidecar_manifest is not None:
+                signed_strategy = sidecar_manifest.embedding.strategy
+                if signed_strategy not in {"t1_sign_flip", MATRIX_EMBEDDING_STRATEGY}:
+                    raise ValueError("stego manifest declares an unsupported embedding strategy")
+                if embedding_strategy != "t1_sign_flip" and embedding_strategy != signed_strategy:
+                    raise ValueError("embedding_strategy does not match stego manifest")
+                embedding_strategy = signed_strategy
+    if embedding_strategy not in {"t1_sign_flip", MATRIX_EMBEDDING_STRATEGY}:
+        raise ValueError("unsupported embedding_strategy")
     if proof_backend == "groth16" and (not isinstance(secret_key, bytes) or len(secret_key) != 32):
         raise ValueError("secret_key must be exactly 32 bytes")
     if proof_backend == "lattice" and (not isinstance(lattice_public_key, bytes) or len(lattice_public_key) != 1952):
@@ -227,13 +257,25 @@ def verify(
         extract_bit_count = original_bit_count
 
     # 3a. Extract bits from stego video
-    extracted_blob = extract_bits_direct(
+    carrier_bit_count = (
+        matrix_carrier_bit_count(extract_bit_count)
+        if embedding_strategy == MATRIX_EMBEDDING_STRATEGY
+        else extract_bit_count
+    )
+    extracted_carriers = extract_bits_direct(
         stego_video_path,
         safe_positions,
         frame_verified_data,
         nC_map,
-        extract_bit_count,
+        carrier_bit_count,
         max_modifications_per_block=max_modifications_per_block,
+    )
+    extracted_blob = (
+        bits_to_bytes(extract_hamming73(
+            bytes_to_bits(extracted_carriers, carrier_bit_count), extract_bit_count
+        ))
+        if embedding_strategy == MATRIX_EMBEDDING_STRATEGY
+        else extracted_carriers
     )
 
     # 3b. Chaos: Arnold Cat Map — unscramble extracted bits
