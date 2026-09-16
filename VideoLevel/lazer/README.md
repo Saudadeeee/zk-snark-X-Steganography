@@ -16,11 +16,11 @@ flags visible from Docker first:
 python -m src.lazer_backend
 ```
 
-Only when it returns `"ready": true`:
+Only when it returns `"ready": true`, build the source-pinned container:
 
 ```bash
 docker build -t zkstego-lazer:10eafec -f lazer/Dockerfile .
-docker run --rm --platform linux/amd64 zkstego-lazer:10eafec
+python -m src.lazer_backend --run --image zkstego-lazer:10eafec
 ```
 
 The demo accepts only its own example relation. Replacing it with a video

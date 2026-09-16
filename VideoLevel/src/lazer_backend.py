@@ -9,6 +9,7 @@ LaZer until an application relation and its proof serialization are reviewed.
 from __future__ import annotations
 
 import json
+import argparse
 import platform
 import shutil
 import subprocess
@@ -19,6 +20,8 @@ from typing import Iterable
 
 LAZER_LOCK_VERSION = 1
 LAZER_REQUIRED_FLAGS = frozenset({"avx512f", "aes"})
+LAZER_PREFLIGHT_IMAGE = "debian@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171"
+LAZER_BASE_IMAGE = "ubuntu@sha256:69cecf4bbf72d2d44a9eef1b71fb98c7fb973d78af11399deccef19beb008ad9"
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,18 @@ def load_lazer_lock(path: str | Path) -> LazerLock:
     if lock.demo_path != "python/demo/demo.py" or lock.relation != "A*s=t":
         raise ValueError("LaZer lock must target the reviewed general linear-relation demo")
     return lock
+
+
+def dockerfile_matches_lazer_lock(path: str | Path, lock: LazerLock) -> bool:
+    """Ensure the Docker recipe cannot be overridden away from the lock pin."""
+    source = Path(path).read_text(encoding="utf-8")
+    required = (
+        f"FROM {LAZER_BASE_IMAGE}",
+        f"git clone \"{lock.repository}\" /opt/lazer",
+        f"git -C /opt/lazer checkout --detach \"{lock.revision}\"",
+        f"test \"$(git -C /opt/lazer rev-parse HEAD)\" = \"{lock.revision}\"",
+    )
+    return "ARG LAZER_" not in source and all(fragment in source for fragment in required)
 
 
 def assess_lazer_host(
@@ -110,7 +125,7 @@ def assess_current_lazer_host() -> LazerHostAssessment:
     )
 
 
-def assess_docker_lazer_host(image: str = "debian:bookworm-slim") -> LazerHostAssessment:
+def assess_docker_lazer_host(image: str = LAZER_PREFLIGHT_IMAGE) -> LazerHostAssessment:
     """Assess the CPU flags actually visible to an amd64 Linux container."""
     if shutil.which("docker") is None:
         return assess_lazer_host(system_name="", machine="", cpu_flags=(), docker_available=False)
@@ -132,5 +147,26 @@ def docker_demo_command(image: str = "zkstego-lazer:10eafec") -> tuple[str, ...]
     return ("docker", "run", "--rm", "--platform", "linux/amd64", image)
 
 
+def run_lazer_demo(
+    image: str = "zkstego-lazer:10eafec", *, assessment: LazerHostAssessment | None = None,
+    executor: object = subprocess.run,
+) -> object:
+    """Run the smoke proof only after rechecking container-visible hardware."""
+    current = assessment or assess_docker_lazer_host()
+    if not current.ready:
+        raise RuntimeError("LaZer execution blocked: " + ", ".join(current.blockers))
+    return executor(
+        list(docker_demo_command(image)), check=False, capture_output=True, text=True, timeout=120,
+    )
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="LaZer Linux runtime preflight")
+    parser.add_argument("--run", action="store_true", help="run the guarded pinned demo after preflight")
+    parser.add_argument("--image", default="zkstego-lazer:10eafec")
+    arguments = parser.parse_args()
+    if arguments.run:
+        result = run_lazer_demo(arguments.image)
+        print(result.stdout, end="")
+        raise SystemExit(result.returncode)
     print(json.dumps(assess_docker_lazer_host().to_dict(), sort_keys=True))

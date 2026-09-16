@@ -37,7 +37,7 @@ end-to-end AVX-512 fixture run are implemented and reviewed.
 
 | Area | Status | Reason |
 |---|---|---|
-| Source reproducibility | Ready | Immutable Git revision and Docker recipe. |
+| Source reproducibility | Partial | Git revision and base image are pinned; container build is unverified on this host. |
 | Local execution | Blocked | Visible CPU lacks AVX-512F. |
 | Video pipeline integration | Not started | No reviewed application relation yet. |
 | Security claim | Not approved | LaZer and the application protocol require independent review. |
