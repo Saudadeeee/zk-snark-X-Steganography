@@ -5,7 +5,7 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-add_library(zkstego_live STATIC src/live.c)
+add_library(zkstego_live STATIC src/live.c src/cavlc_direct.c)
 target_include_directories(zkstego_live PUBLIC include)
 if(MSVC)
   target_compile_options(zkstego_live PRIVATE /W4 /WX)

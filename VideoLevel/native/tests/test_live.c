@@ -146,7 +146,7 @@ static int test_direct_cavlc_embedding_preserves_nonzero_support(void) {
         0, 0, 0, 3,
         0, 0, 0, -6,
     };
-    static const uint8_t payload[] = {0x40u}; /* First payload bit is one. */
+    static const uint8_t payload[] = {0x80u}; /* First payload bit is one. */
     ZksCavlcEmbedState state;
     size_t modified_index = 0u;
 
