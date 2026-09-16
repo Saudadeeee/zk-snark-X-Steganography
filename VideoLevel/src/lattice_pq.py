@@ -185,3 +185,10 @@ def unpack_lattice_reference(blob: bytes) -> tuple[bytes, bytes]:
     if message_length == 0 or len(blob) != expected_length:
         raise ValueError("invalid lattice reference length")
     return blob[header_size:header_size + message_length], blob[-LATTICE_REFERENCE_SIZE:]
+
+
+def lattice_reference_bit_length(message: bytes) -> int:
+    """Return the fixed extraction budget for a message's video reference."""
+    if not isinstance(message, bytes):
+        raise TypeError("message must be bytes")
+    return (len(LATTICE_REFERENCE_MAGIC) + 4 + len(message) + LATTICE_REFERENCE_SIZE) * 8

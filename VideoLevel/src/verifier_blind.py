@@ -19,6 +19,7 @@ from .core.chaos import ChaosTransformer
 from .core.pipeline import extract_all_idr_blocks, extract_bits_direct
 from .verifier import VerifyResult, _load_sidecar_data
 from .zk_proof import ZKSnarkBridge, unpack, blob_bit_length
+from .lattice_pq import LatticeReceipt, lattice_reference_bit_length, unpack_lattice_reference
 from .manifest import compute_file_hash, hash_positions
 from .stream_profile import analyze_stream_profile
 from .exceptions import UnsupportedStreamError
@@ -56,12 +57,12 @@ def verify_near_blind(
         raise FileNotFoundError(f"Stego video not found: {stego_video_path}")
     if not os.path.isdir(circuits_dir):
         raise FileNotFoundError(f"circuits_dir not found: {circuits_dir}")
+    if manifest_public_key is None:
+        raise ValueError("manifest_public_key is required")
     if not isinstance(secret_key, bytes) or len(secret_key) != 32:
         raise ValueError("secret_key must be exactly 32 bytes")
     if not isinstance(message_length, int) or not 0 < message_length <= MAX_MESSAGE_BYTES:
         raise ValueError(f"message_length must be between 1 and {MAX_MESSAGE_BYTES}")
-    if not isinstance(manifest_public_key, bytes) or len(manifest_public_key) != 32:
-        raise ValueError("manifest_public_key must be a 32-byte Ed25519 public key")
 
     stego_profile = analyze_stream_profile(stego_video_path)
     if not stego_profile.supported:
@@ -83,8 +84,11 @@ def verify_near_blind(
             "Near-blind verification requires positions.json."
         )
 
+    expected_key_size = 1952 if manifest.signature_algorithm == "ml-dsa-65" else 32
+    if not isinstance(manifest_public_key, bytes) or len(manifest_public_key) != expected_key_size:
+        raise ValueError(f"manifest_public_key must be {expected_key_size} bytes for the signed manifest")
     if not manifest.verify_signature(manifest_public_key):
-        raise RuntimeError("Manifest Ed25519 signature verification failed")
+        raise RuntimeError("Manifest signature verification failed")
     if manifest.video.stego_file_hash != compute_file_hash(stego_video_path):
         raise RuntimeError("Stego file hash does not match the signed manifest")
     if manifest.embedding.positions_count != len(positions):
@@ -115,7 +119,11 @@ def verify_near_blind(
         parser=parser,
     )
 
-    original_bit_count = blob_bit_length(b"\x00" * message_length)
+    is_lattice = manifest.proof.proof_system == "ml-dsa-65-attestation"
+    original_bit_count = (
+        lattice_reference_bit_length(b"\x00" * message_length)
+        if is_lattice else blob_bit_length(b"\x00" * message_length)
+    )
     chaos: Optional[ChaosTransformer] = None
     if chaos_key is not None:
         chaos = ChaosTransformer(chaos_key)
@@ -147,7 +155,10 @@ def verify_near_blind(
         logger.info("[Chaos] Arnold Cat Map inverse applied (k=%d)", chaos.arnold_k)
 
     try:
-        message, proof_bytes = unpack(extracted_blob)
+        if is_lattice:
+            message, proof_bytes = unpack_lattice_reference(extracted_blob)
+        else:
+            message, proof_bytes = unpack(extracted_blob)
     except ValueError:
         return VerifyResult(
             valid=False,
@@ -156,6 +167,17 @@ def verify_near_blind(
             public_dict=None,
             bits_extracted=extract_bit_count,
         )
+
+    if is_lattice:
+        try:
+            receipt = LatticeReceipt.load(f"{stego_video_path}.lattice.json")
+            is_valid = receipt.commitment() == proof_bytes and receipt.verify(message, manifest_public_key)
+            proof_dict = receipt.to_dict()
+        except (OSError, ValueError, KeyError):
+            is_valid = False
+            proof_dict = None
+        return VerifyResult(is_valid, message if is_valid else None, proof_dict,
+                            {"signature_algorithm": "ML-DSA-65"} if is_valid else None, extract_bit_count)
 
     bridge = _get_bridge(circuits_dir)
     proof_dict = bridge.bytes_to_proof(proof_bytes)

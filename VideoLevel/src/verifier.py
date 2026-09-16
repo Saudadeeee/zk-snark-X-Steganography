@@ -31,6 +31,7 @@ from .core.analysis_cache  import load_or_build_video_analysis
 from .core.pipeline        import extract_bits_direct
 from .core.chaos           import ChaosTransformer
 from .zk_proof             import ZKSnarkBridge, unpack, blob_bit_length
+from .lattice_pq           import LatticeReceipt, lattice_reference_bit_length, unpack_lattice_reference
 from .manifest             import StegoManifest
 from .stream_profile       import analyze_stream_profile
 from .exceptions           import UnsupportedStreamError
@@ -112,6 +113,8 @@ def verify(
     use_analysis_cache: bool = True,
     force_analysis_refresh: bool = False,
     analysis_cache_dir: Optional[str] = None,
+    proof_backend: str = "groth16",
+    lattice_public_key: Optional[bytes] = None,
 ) -> VerifyResult:
     """
     Extract and verify the ZK proof embedded in a stego H.264 video.
@@ -159,8 +162,12 @@ def verify(
         raise FileNotFoundError(f"Original video not found: {original_video_path}")
     if not os.path.isdir(circuits_dir):
         raise FileNotFoundError(f"circuits_dir not found: {circuits_dir}")
-    if not isinstance(secret_key, bytes) or len(secret_key) != 32:
+    if proof_backend not in {"groth16", "lattice"}:
+        raise ValueError("proof_backend must be 'groth16' or 'lattice'")
+    if proof_backend == "groth16" and (not isinstance(secret_key, bytes) or len(secret_key) != 32):
         raise ValueError("secret_key must be exactly 32 bytes")
+    if proof_backend == "lattice" and (not isinstance(lattice_public_key, bytes) or len(lattice_public_key) != 1952):
+        raise ValueError("lattice_public_key must be an ML-DSA-65 public key (1952 bytes)")
     if not isinstance(message_length, int) or not 0 < message_length <= MAX_MESSAGE_BYTES:
         raise ValueError(f"message_length must be between 1 and {MAX_MESSAGE_BYTES}")
 
@@ -189,7 +196,11 @@ def verify(
 
     # 2b. Chaos: Logistic Map — apply the same position shuffle as embed()
     chaos: Optional[ChaosTransformer] = None
-    original_bit_count = blob_bit_length(b"\x00" * message_length)
+    original_bit_count = (
+        blob_bit_length(b"\x00" * message_length)
+        if proof_backend == "groth16"
+        else lattice_reference_bit_length(b"\x00" * message_length)
+    )
     if precomputed_positions is not None:
         safe_positions = [tuple(int(v) for v in pos) for pos in precomputed_positions]
         if chaos_key is not None:
@@ -232,14 +243,33 @@ def verify(
 
     # 4. Unpack blob → (message, proof_bytes)
     try:
-        message, proof_bytes = unpack(extracted_blob)
+        if proof_backend == "groth16":
+            message, proof_bytes = unpack(extracted_blob)
+        else:
+            message, proof_bytes = unpack_lattice_reference(extracted_blob)
     except ValueError:
         return VerifyResult(
             valid=False, message=None, proof_dict=None,
             public_dict=None, bits_extracted=len(extracted_blob) * 8,
         )
 
-    # 5. Verify ZK proof
+    if proof_backend == "lattice":
+        try:
+            receipt = LatticeReceipt.load(f"{stego_video_path}.lattice.json")
+            is_valid = receipt.commitment() == proof_bytes and receipt.verify(message, lattice_public_key)
+            proof_dict = receipt.to_dict()
+        except (OSError, ValueError, KeyError):
+            is_valid = False
+            proof_dict = None
+        return VerifyResult(
+            valid=is_valid,
+            message=message if is_valid else None,
+            proof_dict=proof_dict,
+            public_dict={"signature_algorithm": "ML-DSA-65"} if is_valid else None,
+            bits_extracted=extract_bit_count,
+        )
+
+    # 5. Verify legacy Groth16 proof
     bridge         = _get_bridge(circuits_dir)
     proof_dict     = bridge.bytes_to_proof(proof_bytes)
     public_signals = bridge._build_public_signals(message, secret_key)
