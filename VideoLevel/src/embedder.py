@@ -19,6 +19,7 @@ import logging
 import os
 import json
 import shutil
+import base64
 from collections import defaultdict
 from functools import lru_cache
 from dataclasses import dataclass
@@ -542,7 +543,10 @@ def embed(
         ),
         proof=ProofMetadata(
             proof_system="groth16" if receipt is None else "ml-dsa-65-attestation",
-            proof_size_bytes=len(proof_bytes),
+            proof_size_bytes=(
+                len(proof_bytes) if receipt is None
+                else len(base64.b64decode(receipt.signature.encode("ascii"), validate=True))
+            ),
             constraint_count=bridge.get_constraint_count() if bridge is not None else 0,
         ),
     )
