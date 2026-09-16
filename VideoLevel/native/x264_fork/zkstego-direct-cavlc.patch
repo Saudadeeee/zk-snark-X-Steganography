@@ -1,0 +1,149 @@
+diff --git a/Makefile b/Makefile
+--- a/Makefile
++++ b/Makefile
+@@ -30 +30 @@
+-         encoder/cavlc.c encoder/encoder.c encoder/lookahead.c
++         encoder/cavlc.c encoder/encoder.c encoder/lookahead.c encoder/zkstego.c
+diff --git a/common/common.h b/common/common.h
+--- a/common/common.h
++++ b/common/common.h
+@@ -273,1 +273,8 @@
+     x264_param_t    param;
++    struct
++    {
++        int next_bit;
++        int armed;
++        int staged;
++        uint64_t embedded_bits;
++    } zkstego;
+diff --git a/encoder/encoder.c b/encoder/encoder.c
+--- a/encoder/encoder.c
++++ b/encoder/encoder.c
+@@ -29,1 +29,2 @@
+ #include "common/common.h"
++#include "zkstego.h"
+@@ -2865,1 +2866,2 @@
+ reencode:
++        x264_zkstego_begin_macroblock( h );
+@@ -2896,1 +2898,2 @@
+                 if( h->mb.b_overflow )
++                    x264_zkstego_abort_macroblock( h );
+@@ -2901,1 +2904,2 @@
+                     goto reencode;
++                x264_zkstego_commit_macroblock( h );
+@@ -4205,1 +4209,2 @@
+     x264_lookahead_delete( h );
++    x264_zkstego_clear( h );
+diff --git a/encoder/macroblock.c b/encoder/macroblock.c
+--- a/encoder/macroblock.c
++++ b/encoder/macroblock.c
+@@ -30,1 +30,2 @@
+ #include "macroblock.h"
++#include "zkstego.h"
+@@ -889,1 +890,3 @@
+                             {
++                                if( p == 0 )
++                                    x264_zkstego_try_embed_4x4( h, dct4x4[idx] );
+diff --git a/encoder/macroblock.h b/encoder/macroblock.h
+--- a/encoder/macroblock.h
++++ b/encoder/macroblock.h
+@@ -30,1 +30,2 @@
+ #include "common/macroblock.h"
++#include "zkstego.h"
+@@ -158,1 +159,3 @@
+     nz = x264_quant_4x4( h, dct4x4, i_qp, ctx_cat_plane[DCT_LUMA_4x4][p], 1, p, idx );
++    if( p == 0 )
++        x264_zkstego_try_embed_4x4( h, dct4x4 );
+diff --git a/x264.h b/x264.h
+--- a/x264.h
++++ b/x264.h
+@@ -383,1 +383,5 @@
+     int         i_cabac_init_idc;
++
++    /* zkstego fork: payload consumed directly in quantized CAVLC residuals. */
++    const uint8_t *zkstego_payload;
++    int         zkstego_payload_size;
+diff --git a/encoder/zkstego.h b/encoder/zkstego.h
+new file mode 100644
+--- /dev/null
++++ b/encoder/zkstego.h
+@@ -0,0 +1,12 @@
++#ifndef X264_ZKSTEGO_H
++#define X264_ZKSTEGO_H
++
++#include "../common/common.h"
++
++void x264_zkstego_begin_macroblock( x264_t *h );
++void x264_zkstego_try_embed_4x4( x264_t *h, dctcoef coefficients[16] );
++void x264_zkstego_commit_macroblock( x264_t *h );
++void x264_zkstego_abort_macroblock( x264_t *h );
++void x264_zkstego_clear( x264_t *h );
++
++#endif
+diff --git a/encoder/zkstego.c b/encoder/zkstego.c
+new file mode 100644
+--- /dev/null
++++ b/encoder/zkstego.c
+@@ -0,0 +1,62 @@
++#include "zkstego.h"
++
++static const uint8_t zigzag4_frame_to_dct[16] =
++{ 0, 4, 1, 2, 5, 8, 12, 9, 6, 3, 7, 10, 13, 14, 11, 15 };
++
++static unsigned int magnitude( dctcoef coefficient )
++{
++    return coefficient < 0 ? (unsigned int)-(int)coefficient : (unsigned int)coefficient;
++}
++
++void x264_zkstego_clear( x264_t *h )
++{
++    if( h )
++    {
++        memset( &h->zkstego, 0, sizeof(h->zkstego) );
++    }
++}
++
++void x264_zkstego_begin_macroblock( x264_t *h )
++{
++    h->zkstego.armed = h->param.zkstego_payload && h->zkstego.next_bit < h->param.zkstego_payload_size * 8;
++    h->zkstego.staged = 0;
++}
++
++void x264_zkstego_try_embed_4x4( x264_t *h, dctcoef coefficients[16] )
++{
++    int bit_index;
++    int target_bit;
++    if( !h->zkstego.armed || h->zkstego.staged )
++        return;
++    bit_index = h->zkstego.next_bit;
++    target_bit = (h->param.zkstego_payload[bit_index >> 3] >> (7 - (bit_index & 7))) & 1;
++    for( int scan_index = 15; scan_index > 0; scan_index-- )
++    {
++        int coefficient_index = zigzag4_frame_to_dct[scan_index];
++        dctcoef coefficient = coefficients[coefficient_index];
++        unsigned int absolute = magnitude( coefficient );
++        if( absolute < 4 )
++            continue;
++        if( (absolute & 1) != target_bit )
++            coefficients[coefficient_index] += coefficient < 0 ? -1 : 1;
++        h->zkstego.staged = 1;
++        return;
++    }
++}
++
++void x264_zkstego_commit_macroblock( x264_t *h )
++{
++    if( h->zkstego.staged )
++    {
++        h->zkstego.next_bit++;
++        h->zkstego.embedded_bits++;
++    }
++    h->zkstego.armed = 0;
++    h->zkstego.staged = 0;
++}
++
++void x264_zkstego_abort_macroblock( x264_t *h )
++{
++    h->zkstego.armed = 0;
++    h->zkstego.staged = 0;
++}

@@ -22,7 +22,7 @@ target_link_libraries(zkstego_annexb_relay PRIVATE zkstego_live)
 enable_testing()
 add_test(NAME zkstego_live_tests COMMAND zkstego_live_tests)
 
-option(ZKS_WITH_X264 "Build the optional x264 low-latency encoder adapter" OFF)
+option(ZKS_WITH_X264 "Build the optional patched-x264 direct-CAVLC encoder adapter" OFF)
 if(ZKS_WITH_X264)
   find_path(X264_INCLUDE_DIR x264.h)
   find_library(X264_LIBRARY NAMES x264 libx264)

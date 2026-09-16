@@ -19,6 +19,9 @@ typedef struct {
     int fps_den;
     int keyint;
     int crf;
+    /* Only accepted by the patched x264 fork in native/x264_fork/. */
+    const uint8_t *direct_payload;
+    size_t direct_payload_size;
 } ZksX264Config;
 
 typedef int (*ZksEncodedNalCallback)(const uint8_t *annexb, size_t size, void *opaque);

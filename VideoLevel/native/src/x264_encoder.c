@@ -1,11 +1,14 @@
 #include "zkstego_x264.h"
 
+#include <limits.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <x264.h>
 
 struct ZksX264Encoder {
     x264_t *encoder;
+    uint8_t *direct_payload;
 };
 
 int zks_x264_encoder_open(const ZksX264Config *config, ZksX264Encoder **out_encoder) {
@@ -14,6 +17,10 @@ int zks_x264_encoder_open(const ZksX264Config *config, ZksX264Encoder **out_enco
     int keyint;
     if (!config || !out_encoder || config->width <= 0 || config->height <= 0 ||
         (config->width & 1) || (config->height & 1) || config->fps_num <= 0 || config->fps_den <= 0) {
+        return ZKS_ERR_ARGUMENT;
+    }
+    if (config->direct_payload_size > (size_t)INT_MAX ||
+        (config->direct_payload_size != 0u && !config->direct_payload)) {
         return ZKS_ERR_ARGUMENT;
     }
     *out_encoder = NULL;
@@ -31,6 +38,10 @@ int zks_x264_encoder_open(const ZksX264Config *config, ZksX264Encoder **out_enco
     param.b_repeat_headers = 1;
     param.b_aud = 1;
     param.b_cabac = 0;
+    param.i_threads = 1;
+    param.b_sliced_threads = 0;
+    param.analyse.b_transform_8x8 = 0;
+    param.analyse.intra = X264_ANALYSE_I4x4;
     param.i_keyint_max = keyint;
     param.i_keyint_min = keyint;
     param.i_bframe = 0;
@@ -43,8 +54,19 @@ int zks_x264_encoder_open(const ZksX264Config *config, ZksX264Encoder **out_enco
     if (!state) {
         return ZKS_ERR_MEMORY;
     }
+    if (config->direct_payload_size != 0u) {
+        state->direct_payload = (uint8_t *)malloc(config->direct_payload_size);
+        if (!state->direct_payload) {
+            free(state);
+            return ZKS_ERR_MEMORY;
+        }
+        memcpy(state->direct_payload, config->direct_payload, config->direct_payload_size);
+        param.zkstego_payload = state->direct_payload;
+        param.zkstego_payload_size = (int)config->direct_payload_size;
+    }
     state->encoder = x264_encoder_open(&param);
     if (!state->encoder) {
+        free(state->direct_payload);
         free(state);
         return ZKS_ERR_FORMAT;
     }
@@ -103,5 +125,6 @@ void zks_x264_encoder_close(ZksX264Encoder *encoder) {
     if (encoder->encoder) {
         x264_encoder_close(encoder->encoder);
     }
+    free(encoder->direct_payload);
     free(encoder);
 }
