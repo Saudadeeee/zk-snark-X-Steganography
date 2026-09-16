@@ -7,6 +7,7 @@ the constrained H.264 payload and embeds only a fixed-size binding reference.
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -73,6 +74,20 @@ def t_manifest_accepts_ml_dsa_signature_and_rejects_tampering() -> None:
     assert not manifest.verify_signature(public_key)
 
 
+def t_receipt_sidecar_round_trip_preserves_embedded_binding() -> None:
+    from src.lattice_pq import LatticeReceipt, LatticeSigner
+
+    public_key, private_key = LatticeSigner.generate_keypair()
+    receipt = LatticeReceipt.create(b"sidecar message", private_key)
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "proof.lattice.json"
+        receipt.save(path)
+        restored = LatticeReceipt.load(path)
+
+    assert restored.commitment() == receipt.commitment()
+    assert restored.verify(b"sidecar message", public_key)
+
+
 def main() -> None:
     section("Lattice PQ stack")
     results = [
@@ -81,6 +96,7 @@ def main() -> None:
         run_test("ml_kem_encapsulation_agrees_and_rejects_tampering", t_ml_kem_encapsulation_agrees_and_rejects_tampering),
         run_test("lattice_reference_is_small_enough_for_video_payload", t_lattice_reference_is_small_enough_for_video_payload),
         run_test("manifest_accepts_ml_dsa_signature_and_rejects_tampering", t_manifest_accepts_ml_dsa_signature_and_rejects_tampering),
+        run_test("receipt_sidecar_round_trip_preserves_embedded_binding", t_receipt_sidecar_round_trip_preserves_embedded_binding),
     ]
     raise SystemExit(summarise(results, "Lattice PQ"))
 
