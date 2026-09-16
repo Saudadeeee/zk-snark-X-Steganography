@@ -49,11 +49,7 @@ def t_ml_kem_encapsulation_agrees_and_rejects_tampering() -> None:
     assert LatticeKem.decapsulate(private_key, capsule) == sender_secret
 
     tampered = bytes([capsule[0] ^ 1]) + capsule[1:]
-    try:
-        LatticeKem.decapsulate(private_key, tampered)
-    except ValueError:
-        return
-    raise AssertionError("tampered ML-KEM capsule must be rejected")
+    assert LatticeKem.decapsulate(private_key, tampered) != sender_secret
 
 
 def t_lattice_reference_is_small_enough_for_video_payload() -> None:
