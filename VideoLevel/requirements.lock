@@ -6,3 +6,4 @@ matplotlib==3.10.8
 scipy==1.17.0
 scikit-image==0.26.0
 cryptography==46.0.5
+pqcrypto==1.0.0
