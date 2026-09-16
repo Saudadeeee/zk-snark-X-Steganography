@@ -9,6 +9,7 @@ from src.realtime import (
     AnnexBStreamParser,
     AccessUnitAssembler,
     BoundedAccessUnitQueue,
+    RealtimeAnnexBRelay,
     RealtimePayloadScheduler,
 )
 
@@ -76,12 +77,46 @@ def t_scheduler_only_allocates_compact_lattice_chunks_to_idr_units():
     assert second is not None and second.data == b"yl" and second.sequence == 1
 
 
+def t_relay_preserves_live_annexb_and_only_schedules_idr_payload():
+    stream = _nal(9, b"a") + _nal(5, b"idr") + _nal(9, b"b") + _nal(1, b"p")
+    observed = []
+
+    def mutator(unit, chunk):
+        observed.append((unit.is_idr, None if chunk is None else chunk.data))
+        return unit
+
+    relay = RealtimeAnnexBRelay(
+        RealtimePayloadScheduler(b"abc", chunk_bytes=2), mutator=mutator, max_queue_units=2
+    )
+    output = relay.feed(stream[:17]) + relay.feed(stream[17:]) + relay.finish()
+
+    assert output == stream
+    assert observed == [(True, b"ab"), (False, None)]
+    assert relay.metrics.scheduled_chunks == 1
+    assert relay.metrics.mutation_failures == 0
+
+
+def t_relay_forwards_original_access_unit_when_mutator_fails():
+    stream = _nal(9) + _nal(5, b"idr")
+
+    def broken_mutator(_unit, _chunk):
+        raise RuntimeError("simulated native backend failure")
+
+    relay = RealtimeAnnexBRelay(RealtimePayloadScheduler(b"x"), mutator=broken_mutator)
+    output = relay.feed(stream) + relay.finish()
+
+    assert output == stream
+    assert relay.metrics.mutation_failures == 1
+
+
 def main():
     tests = [
         ("annexb_parser_handles_split_start_codes_without_losing_nals", t_annexb_parser_handles_split_start_codes_without_losing_nals),
         ("access_units_require_aud_and_preserve_idr_boundary", t_access_units_require_aud_and_preserve_idr_boundary),
         ("bounded_queue_drops_oldest_non_idr_before_an_idr", t_bounded_queue_drops_oldest_non_idr_before_an_idr),
         ("scheduler_only_allocates_compact_lattice_chunks_to_idr_units", t_scheduler_only_allocates_compact_lattice_chunks_to_idr_units),
+        ("relay_preserves_live_annexb_and_only_schedules_idr_payload", t_relay_preserves_live_annexb_and_only_schedules_idr_payload),
+        ("relay_forwards_original_access_unit_when_mutator_fails", t_relay_forwards_original_access_unit_when_mutator_fails),
     ]
     failures = []
     for name, test in tests:

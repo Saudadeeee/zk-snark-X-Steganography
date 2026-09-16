@@ -34,5 +34,7 @@ jobs:
         run: python src/runtest/test_lattice_pq_stack.py
       - name: Cost-guided matrix embedding contracts
         run: python src/runtest/test_cost_guided_matrix_embedding.py
+      - name: Realtime Annex-B transport contracts
+        run: python src/runtest/test_realtime_transport.py
       - name: Portable codec and FFmpeg integration test
         run: python src/runtest/test_ffmpeg_fixture.py

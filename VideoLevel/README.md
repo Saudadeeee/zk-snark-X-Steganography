@@ -545,6 +545,7 @@ npm run verify-artifacts
 - [`PAPER_EVIDENCE.md`](PAPER_EVIDENCE.md) - Claim-to-evidence staging notes
 - [`COMPLETION.md`](COMPLETION.md) - Completion summary checklist
 - [`OPERATING_ENVELOPE.md`](OPERATING_ENVELOPE.md) - Supported codec/GOP/QP ranges
+- [`REALTIME.md`](REALTIME.md) - Live Annex-B transport contract and native-backend boundary
 - [`ARTIFACT_POLICY.md`](ARTIFACT_POLICY.md) - Cleanup and artifact management
 - [`COMPARATIVE_ANALYSIS.md`](COMPARATIVE_ANALYSIS.md) - Comparison with existing systems
 - [`doc/system_video_embedding_walkthrough.tex`](doc/system_video_embedding_walkthrough.tex) - Detailed Vietnamese system walkthrough
