@@ -41,11 +41,13 @@ def t_lattice_zkp_rejects_message_transcript_and_signature_tampering() -> None:
 
     tampered_proof = receipt.to_dict()
     tampered_proof["proof"] = copy.deepcopy(tampered_proof["proof"])
-    tampered_proof["proof"]["responses"] = "A" + tampered_proof["proof"]["responses"][1:]
+    original_response = tampered_proof["proof"]["responses"]
+    tampered_proof["proof"]["responses"] = ("B" if original_response[0] != "B" else "C") + original_response[1:]
     assert not LatticeZkReceipt.from_dict(tampered_proof).verify(b"bound payload", public_key)
 
     tampered_signature = receipt.to_dict()
-    tampered_signature["signature"] = "A" + tampered_signature["signature"][1:]
+    original_signature = tampered_signature["signature"]
+    tampered_signature["signature"] = ("B" if original_signature[0] != "B" else "C") + original_signature[1:]
     assert not LatticeZkReceipt.from_dict(tampered_signature).verify(b"bound payload", public_key)
 
 

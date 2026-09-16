@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import secrets
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,21 @@ LATTICE_RECEIPT_VERSION = "1.0.0"
 LATTICE_REFERENCE_MAGIC = b"LQ1"
 LATTICE_REFERENCE_SIZE = 32
 
+# Transparent lattice proof parameters.  These are deliberately explicit in
+# every proof artifact so verifier code never silently negotiates a weaker
+# relation.  They define a compact SIS proof-of-knowledge relation, not a
+# NIST-standard general-purpose zkSNARK parameter set.
+LATTICE_ZKP_VERSION = "1.0.0"
+LATTICE_ZKP_PROTOCOL = "sis-linear-fiat-shamir-v1"
+LATTICE_ZKP_Q = 8_380_417  # The prime modulus used by ML-DSA.
+LATTICE_ZKP_ROWS = 64
+LATTICE_ZKP_COLS = 128
+LATTICE_ZKP_ROUNDS = 128
+LATTICE_ZKP_WITNESS_BOUND = 1
+LATTICE_ZKP_MASK_BOUND = 1 << 20
+LATTICE_ZKP_RESPONSE_BOUND = LATTICE_ZKP_MASK_BOUND - LATTICE_ZKP_WITNESS_BOUND
+_LATTICE_ZKP_DOMAIN = b"zkstego/lattice-zkp/sis-linear-fs/v1/"
+
 
 def _canonical_json_bytes(data: dict[str, Any]) -> bytes:
     return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
@@ -42,6 +58,278 @@ def _sha3_512_hex(data: bytes) -> str:
 
 def _sha3_256(data: bytes) -> bytes:
     return hashlib.sha3_256(data).digest()
+
+
+def _b64encode(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
+
+
+def _b64decode(value: str) -> bytes:
+    if not isinstance(value, str):
+        raise ValueError("encoded proof field must be a string")
+    try:
+        return base64.b64decode(value.encode("ascii"), validate=True)
+    except ValueError as error:
+        raise ValueError("invalid base64 proof field") from error
+
+
+def _pack_mod_q(values: list[int]) -> bytes:
+    if any(not isinstance(value, int) or not 0 <= value < LATTICE_ZKP_Q for value in values):
+        raise ValueError("invalid modular vector")
+    return b"".join(struct.pack(">I", value) for value in values)
+
+
+def _unpack_mod_q(data: bytes, expected_count: int) -> list[int]:
+    if len(data) != expected_count * 4:
+        raise ValueError("invalid modular vector length")
+    values = list(struct.unpack(f">{expected_count}I", data))
+    if any(value >= LATTICE_ZKP_Q for value in values):
+        raise ValueError("modular vector coefficient is outside q")
+    return values
+
+
+def _pack_signed(values: list[int]) -> bytes:
+    if any(not isinstance(value, int) or not -LATTICE_ZKP_RESPONSE_BOUND <= value <= LATTICE_ZKP_RESPONSE_BOUND for value in values):
+        raise ValueError("invalid response vector")
+    return b"".join(struct.pack(">i", value) for value in values)
+
+
+def _unpack_signed(data: bytes, expected_count: int) -> list[int]:
+    if len(data) != expected_count * 4:
+        raise ValueError("invalid response vector length")
+    values = list(struct.unpack(f">{expected_count}i", data))
+    if any(abs(value) > LATTICE_ZKP_RESPONSE_BOUND for value in values):
+        raise ValueError("response vector exceeds rejection bound")
+    return values
+
+
+def _message_hash(message: bytes) -> bytes:
+    if not isinstance(message, bytes) or not message:
+        raise ValueError("message must be non-empty bytes")
+    return hashlib.sha3_256(_LATTICE_ZKP_DOMAIN + b"message/" + message).digest()
+
+
+def _derive_matrix(message_hash: bytes) -> list[list[int]]:
+    """Derive the public SIS matrix from the exact payload hash."""
+    count = LATTICE_ZKP_ROWS * LATTICE_ZKP_COLS
+    stream = hashlib.shake_256(_LATTICE_ZKP_DOMAIN + b"matrix/" + message_hash).digest(count * 4)
+    values = [struct.unpack_from(">I", stream, offset)[0] % LATTICE_ZKP_Q for offset in range(0, len(stream), 4)]
+    return [values[index:index + LATTICE_ZKP_COLS] for index in range(0, count, LATTICE_ZKP_COLS)]
+
+
+def _derive_witness(witness_key: bytes, message_hash: bytes) -> list[int]:
+    if not isinstance(witness_key, bytes) or len(witness_key) != 32:
+        raise ValueError("lattice ZKP witness key must be exactly 32 bytes")
+    raw = hashlib.shake_256(_LATTICE_ZKP_DOMAIN + b"witness/" + witness_key + message_hash).digest(LATTICE_ZKP_COLS)
+    # Ternary, short witness.  The verifier only learns that a bounded witness
+    # exists; the key-derived vector itself is never serialized.
+    return [int(byte % 3) - 1 for byte in raw]
+
+
+def _matrix_vector_product(matrix: list[list[int]], vector: list[int]) -> list[int]:
+    return [sum(coefficient * value for coefficient, value in zip(row, vector)) % LATTICE_ZKP_Q for row in matrix]
+
+
+def _challenge_bits(message_hash: bytes, statement: list[int], commitments: list[int]) -> list[int]:
+    transcript = (
+        _LATTICE_ZKP_DOMAIN
+        + b"challenge/"
+        + message_hash
+        + _pack_mod_q(statement)
+        + _pack_mod_q(commitments)
+    )
+    digest = hashlib.shake_256(transcript).digest((LATTICE_ZKP_ROUNDS + 7) // 8)
+    return [(digest[index // 8] >> (index % 8)) & 1 for index in range(LATTICE_ZKP_ROUNDS)]
+
+
+@dataclass(frozen=True)
+class LatticeZkProof:
+    """Transparent Fiat-Shamir proof of knowledge of a short SIS witness.
+
+    The public statement is ``t = A(message) * x mod q``.  ``A`` is derived
+    from the payload hash, while ``x`` is a short vector derived from a local
+    32-byte witness key.  For every Fiat-Shamir challenge bit the prover sends
+    ``z = y + c*x`` and uses rejection sampling, so accepted responses are in
+    a common interval independent of ``x``.  Thus the serialized transcript
+    contains no witness vector.  It is intentionally scoped to this linear
+    relation; it does *not* claim to prove H.264 codec execution.
+    """
+
+    version: str
+    protocol: str
+    q: int
+    rows: int
+    cols: int
+    rounds: int
+    witness_bound: int
+    mask_bound: int
+    message_hash: str
+    statement: str
+    commitments: str
+    responses: str
+
+    @classmethod
+    def create(cls, message: bytes, witness_key: bytes) -> "LatticeZkProof":
+        message_hash = _message_hash(message)
+        matrix = _derive_matrix(message_hash)
+        witness = _derive_witness(witness_key, message_hash)
+        statement = _matrix_vector_product(matrix, witness)
+
+        # Rejection sampling restricts every accepted z coordinate to the
+        # intersection [-B+W, B-W], whose distribution is independent of the
+        # witness for all |x_i| <= W and c in {0, 1}.
+        for _attempt in range(1_000):
+            masks: list[list[int]] = [
+                [secrets.randbelow(2 * LATTICE_ZKP_MASK_BOUND + 1) - LATTICE_ZKP_MASK_BOUND for _ in range(LATTICE_ZKP_COLS)]
+                for _ in range(LATTICE_ZKP_ROUNDS)
+            ]
+            commitments = [coefficient for mask in masks for coefficient in _matrix_vector_product(matrix, mask)]
+            challenges = _challenge_bits(message_hash, statement, commitments)
+            responses = [
+                mask_value + challenge * witness_value
+                for challenge, mask in zip(challenges, masks)
+                for mask_value, witness_value in zip(mask, witness)
+            ]
+            if all(abs(value) <= LATTICE_ZKP_RESPONSE_BOUND for value in responses):
+                return cls(
+                    version=LATTICE_ZKP_VERSION,
+                    protocol=LATTICE_ZKP_PROTOCOL,
+                    q=LATTICE_ZKP_Q,
+                    rows=LATTICE_ZKP_ROWS,
+                    cols=LATTICE_ZKP_COLS,
+                    rounds=LATTICE_ZKP_ROUNDS,
+                    witness_bound=LATTICE_ZKP_WITNESS_BOUND,
+                    mask_bound=LATTICE_ZKP_MASK_BOUND,
+                    message_hash=message_hash.hex(),
+                    statement=_b64encode(_pack_mod_q(statement)),
+                    commitments=_b64encode(_pack_mod_q(commitments)),
+                    responses=_b64encode(_pack_signed(responses)),
+                )
+        raise RuntimeError("lattice ZKP rejection sampler exhausted")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "version": self.version,
+            "protocol": self.protocol,
+            "q": self.q,
+            "rows": self.rows,
+            "cols": self.cols,
+            "rounds": self.rounds,
+            "witness_bound": self.witness_bound,
+            "mask_bound": self.mask_bound,
+            "message_hash": self.message_hash,
+            "statement": self.statement,
+            "commitments": self.commitments,
+            "responses": self.responses,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LatticeZkProof":
+        return cls(
+            version=str(data["version"]), protocol=str(data["protocol"]), q=int(data["q"]),
+            rows=int(data["rows"]), cols=int(data["cols"]), rounds=int(data["rounds"]),
+            witness_bound=int(data["witness_bound"]), mask_bound=int(data["mask_bound"]),
+            message_hash=str(data["message_hash"]), statement=str(data["statement"]),
+            commitments=str(data["commitments"]), responses=str(data["responses"]),
+        )
+
+    def verify(self, message: bytes) -> bool:
+        if (
+            self.version != LATTICE_ZKP_VERSION or self.protocol != LATTICE_ZKP_PROTOCOL
+            or (self.q, self.rows, self.cols, self.rounds, self.witness_bound, self.mask_bound)
+            != (LATTICE_ZKP_Q, LATTICE_ZKP_ROWS, LATTICE_ZKP_COLS, LATTICE_ZKP_ROUNDS, LATTICE_ZKP_WITNESS_BOUND, LATTICE_ZKP_MASK_BOUND)
+        ):
+            return False
+        message_hash = _message_hash(message)
+        if not secrets.compare_digest(self.message_hash, message_hash.hex()):
+            return False
+        try:
+            statement = _unpack_mod_q(_b64decode(self.statement), LATTICE_ZKP_ROWS)
+            commitments = _unpack_mod_q(_b64decode(self.commitments), LATTICE_ZKP_ROUNDS * LATTICE_ZKP_ROWS)
+            responses = _unpack_signed(_b64decode(self.responses), LATTICE_ZKP_ROUNDS * LATTICE_ZKP_COLS)
+        except (KeyError, ValueError, struct.error):
+            return False
+        matrix = _derive_matrix(message_hash)
+        challenges = _challenge_bits(message_hash, statement, commitments)
+        for round_index, challenge in enumerate(challenges):
+            response = responses[round_index * LATTICE_ZKP_COLS:(round_index + 1) * LATTICE_ZKP_COLS]
+            commitment = commitments[round_index * LATTICE_ZKP_ROWS:(round_index + 1) * LATTICE_ZKP_ROWS]
+            expected = [(value + challenge * statement_value) % LATTICE_ZKP_Q for value, statement_value in zip(commitment, statement)]
+            if _matrix_vector_product(matrix, response) != expected:
+                return False
+        return True
+
+
+@dataclass(frozen=True)
+class LatticeZkReceipt:
+    """ML-DSA authenticated sidecar containing the transparent lattice ZKP."""
+
+    version: str
+    protocol: str
+    signature_algorithm: str
+    signer_id: str
+    message_hash: str
+    proof: dict[str, Any]
+    signature: str
+
+    @classmethod
+    def create(
+        cls, message: bytes, witness_key: bytes, private_key: bytes, *, signer_id: str = "ml-dsa-65"
+    ) -> "LatticeZkReceipt":
+        proof = LatticeZkProof.create(message, witness_key)
+        unsigned = {
+            "version": LATTICE_ZKP_VERSION,
+            "protocol": LATTICE_ZKP_PROTOCOL,
+            "signature_algorithm": LATTICE_SIGNATURE_ALGORITHM,
+            "signer_id": signer_id,
+            "message_hash": proof.message_hash,
+            "proof": proof.to_dict(),
+        }
+        signature = LatticeSigner.sign(private_key, _canonical_json_bytes(unsigned))
+        return cls(signature=_b64encode(signature), **unsigned)
+
+    def _unsigned_dict(self) -> dict[str, Any]:
+        return {
+            "version": self.version, "protocol": self.protocol,
+            "signature_algorithm": self.signature_algorithm, "signer_id": self.signer_id,
+            "message_hash": self.message_hash, "proof": self.proof,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**self._unsigned_dict(), "signature": self.signature}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LatticeZkReceipt":
+        return cls(
+            version=str(data["version"]), protocol=str(data["protocol"]),
+            signature_algorithm=str(data["signature_algorithm"]), signer_id=str(data["signer_id"]),
+            message_hash=str(data["message_hash"]), proof=dict(data["proof"]), signature=str(data["signature"]),
+        )
+
+    def save(self, path: str | Path) -> None:
+        Path(path).write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: str | Path) -> "LatticeZkReceipt":
+        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+    def commitment(self) -> bytes:
+        return _sha3_256(_canonical_json_bytes(self.to_dict()))
+
+    def verify(self, message: bytes, public_key: bytes) -> bool:
+        if (
+            self.version != LATTICE_ZKP_VERSION or self.protocol != LATTICE_ZKP_PROTOCOL
+            or self.signature_algorithm != LATTICE_SIGNATURE_ALGORITHM
+        ):
+            return False
+        try:
+            proof = LatticeZkProof.from_dict(self.proof)
+            signature = _b64decode(self.signature)
+        except (KeyError, TypeError, ValueError):
+            return False
+        if not secrets.compare_digest(self.message_hash, proof.message_hash):
+            return False
+        return proof.verify(message) and LatticeSigner.verify(public_key, _canonical_json_bytes(self._unsigned_dict()), signature)
 
 
 class LatticeSigner:

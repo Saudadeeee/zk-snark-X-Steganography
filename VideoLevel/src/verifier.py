@@ -38,7 +38,7 @@ from .core.matrix_embedding import (
 )
 from .core.chaos           import ChaosTransformer
 from .zk_proof             import ZKSnarkBridge, unpack, blob_bit_length
-from .lattice_pq           import LatticeReceipt, lattice_reference_bit_length, unpack_lattice_reference
+from .lattice_pq           import LatticeReceipt, LatticeZkReceipt, lattice_reference_bit_length, unpack_lattice_reference
 from .manifest             import StegoManifest
 from .stream_profile       import analyze_stream_profile
 from .exceptions           import UnsupportedStreamError
@@ -120,7 +120,7 @@ def verify(
     use_analysis_cache: bool = True,
     force_analysis_refresh: bool = False,
     analysis_cache_dir: Optional[str] = None,
-    proof_backend: str = "groth16",
+    proof_backend: str = "lattice_zkp",
     lattice_public_key: Optional[bytes] = None,
     embedding_strategy: str = "t1_sign_flip",
 ) -> VerifyResult:
@@ -170,10 +170,10 @@ def verify(
         raise FileNotFoundError(f"Stego video not found: {stego_video_path}")
     if not os.path.isfile(original_video_path):
         raise FileNotFoundError(f"Original video not found: {original_video_path}")
-    if not os.path.isdir(circuits_dir):
+    if proof_backend == "groth16" and not os.path.isdir(circuits_dir):
         raise FileNotFoundError(f"circuits_dir not found: {circuits_dir}")
-    if proof_backend not in {"groth16", "lattice"}:
-        raise ValueError("proof_backend must be 'groth16' or 'lattice'")
+    if proof_backend not in {"groth16", "lattice", "lattice_zkp"}:
+        raise ValueError("proof_backend must be 'lattice_zkp', 'lattice' (legacy attestation), or 'groth16' (legacy)")
 
     # The embedder persists the final candidate order.  Reusing it prevents a
     # later cache rebuild from changing cost ordering or patchability pruning.
@@ -196,7 +196,7 @@ def verify(
         raise ValueError("unsupported embedding_strategy")
     if proof_backend == "groth16" and (not isinstance(secret_key, bytes) or len(secret_key) != 32):
         raise ValueError("secret_key must be exactly 32 bytes")
-    if proof_backend == "lattice" and (not isinstance(lattice_public_key, bytes) or len(lattice_public_key) != 1952):
+    if proof_backend in {"lattice", "lattice_zkp"} and (not isinstance(lattice_public_key, bytes) or len(lattice_public_key) != 1952):
         raise ValueError("lattice_public_key must be an ML-DSA-65 public key (1952 bytes)")
     if not isinstance(message_length, int) or not 0 < message_length <= MAX_MESSAGE_BYTES:
         raise ValueError(f"message_length must be between 1 and {MAX_MESSAGE_BYTES}")
@@ -295,9 +295,13 @@ def verify(
             public_dict=None, bits_extracted=len(extracted_blob) * 8,
         )
 
-    if proof_backend == "lattice":
+    if proof_backend in {"lattice", "lattice_zkp"}:
         try:
-            receipt = LatticeReceipt.load(f"{stego_video_path}.lattice.json")
+            receipt = (
+                LatticeZkReceipt.load(f"{stego_video_path}.lattice-zkp.json")
+                if proof_backend == "lattice_zkp"
+                else LatticeReceipt.load(f"{stego_video_path}.lattice.json")
+            )
             is_valid = receipt.commitment() == proof_bytes and receipt.verify(message, lattice_public_key)
             proof_dict = receipt.to_dict()
         except (OSError, ValueError, KeyError):
@@ -307,7 +311,9 @@ def verify(
             valid=is_valid,
             message=message if is_valid else None,
             proof_dict=proof_dict,
-            public_dict={"signature_algorithm": "ML-DSA-65"} if is_valid else None,
+            public_dict=({"protocol": "sis-linear-fiat-shamir-v1", "signature_algorithm": "ML-DSA-65"}
+                         if is_valid and proof_backend == "lattice_zkp"
+                         else {"signature_algorithm": "ML-DSA-65"} if is_valid else None),
             bits_extracted=extract_bit_count,
         )
 

@@ -38,7 +38,7 @@ from .bitstream.bitstream_ops import BitstreamReconstructor, BitstreamPatcher
 from .exceptions           import InsufficientCapacityError, UnsupportedStreamError
 from .stream_profile       import analyze_stream_profile
 from .zk_proof             import ZKSnarkBridge, pack
-from .lattice_pq           import LatticeReceipt, pack_lattice_reference
+from .lattice_pq           import LatticeReceipt, LatticeZkReceipt, pack_lattice_reference
 from .manifest             import (
     StegoManifest,
     PayloadMetadata,
@@ -185,16 +185,16 @@ def embed(
     analysis_cache_dir: Optional[str] = None,
     manifest_private_key: Optional[bytes] = None,
     manifest_signer_id: Optional[str] = None,
-    proof_backend: str = "groth16",
+    proof_backend: str = "lattice_zkp",
     lattice_private_key: Optional[bytes] = None,
     embedding_strategy: str = "t1_sign_flip",
 ) -> EmbedResult:
     """
-    Embed a Groth16 ZK proof for `message` into an H.264 video.
+    Embed a transparent lattice ZKP binding for `message` into an H.264 video.
 
     Pipeline:
-        1. Generate ZK proof  (snarkjs Groth16, via Node.js)
-        2. Pack payload blob  [4B len][message][129B proof]
+        1. Generate a short-witness SIS Fiat-Shamir proof in a signed sidecar
+        2. Pack payload blob  [LQ1][4B len][message][32B sidecar commitment]
        2b. [Chaos] Arnold Cat Map scrambles payload bits  (if chaos_key)
         3. Parse H.264 video  extract IDR coefficients + bit offsets
         4. Safety filter      find safe trailing-ones positions
@@ -206,8 +206,9 @@ def embed(
         video_path:   Input H.264 video path.
         message:      Secret message bytes to commit to.
         output_path:  Output stego H.264 video path.
-        circuits_dir: Path to circuits/ directory (ZK build artifacts).
-        secret_key:   32-byte secret key (never embedded, used for commitment).
+        circuits_dir: Legacy Groth16 artifact directory; unused by the default
+                      lattice_zkp backend.
+        secret_key:   32-byte local witness key, never embedded.
         max_modifications_per_block: T1 flips per 4×4 block (default 1).
         ffmpeg_validate: Enable per-position FFmpeg pixel validation.
                          Slower but guarantees no visible artefacts.
@@ -250,17 +251,17 @@ def embed(
     # --- Input validation ---
     if not os.path.isfile(video_path):
         raise FileNotFoundError(f"Input video not found: {video_path}")
-    if not os.path.isdir(circuits_dir):
+    if proof_backend == "groth16" and not os.path.isdir(circuits_dir):
         raise FileNotFoundError(f"circuits_dir not found: {circuits_dir}")
     if not isinstance(message, bytes) or len(message) == 0:
         raise ValueError("message must be non-empty bytes")
     if not isinstance(secret_key, bytes) or len(secret_key) != 32:
         raise ValueError("secret_key must be exactly 32 bytes")
-    if proof_backend not in {"groth16", "lattice"}:
-        raise ValueError("proof_backend must be 'groth16' or 'lattice'")
+    if proof_backend not in {"groth16", "lattice", "lattice_zkp"}:
+        raise ValueError("proof_backend must be 'lattice_zkp', 'lattice' (legacy attestation), or 'groth16' (legacy)")
     if embedding_strategy not in {"t1_sign_flip", MATRIX_EMBEDDING_STRATEGY}:
         raise ValueError("embedding_strategy must be 't1_sign_flip' or 'cost_guided_hamming_7_3'")
-    if proof_backend == "lattice" and lattice_private_key is None:
+    if proof_backend in {"lattice", "lattice_zkp"} and lattice_private_key is None:
         raise ValueError("lattice_private_key is required for the lattice proof backend")
     if manifest_private_key is not None and (
         not isinstance(manifest_private_key, bytes) or len(manifest_private_key) != 32
@@ -286,17 +287,25 @@ def embed(
         )
 
     # 1-2. Create the active proof artifact and compact video payload.
-    receipt: Optional[LatticeReceipt] = None
+    receipt: Optional[LatticeReceipt | LatticeZkReceipt] = None
     bridge: Optional[ZKSnarkBridge] = None
     if proof_backend == "groth16":
         bridge = _get_bridge(circuits_dir)
         proof_dict, public_dict = bridge.generate_proof_for_payload(message, secret_key)
         proof_bytes = bridge.proof_to_bytes(proof_dict)
         payload_blob = pack(message, proof_bytes)
-    else:
+    elif proof_backend == "lattice":
         receipt = LatticeReceipt.create(message, lattice_private_key, signer_id=manifest_signer_id or "ml-dsa-65")
         proof_dict = receipt.to_dict()
         public_dict = {"signature_algorithm": receipt.signature_algorithm, "signer_id": receipt.signer_id}
+        proof_bytes = receipt.commitment()
+        payload_blob = pack_lattice_reference(message, proof_bytes)
+    else:
+        receipt = LatticeZkReceipt.create(
+            message, secret_key, lattice_private_key, signer_id=manifest_signer_id or "ml-dsa-65"
+        )
+        proof_dict = receipt.to_dict()
+        public_dict = {"protocol": receipt.protocol, "signature_algorithm": receipt.signature_algorithm, "signer_id": receipt.signer_id}
         proof_bytes = receipt.commitment()
         payload_blob = pack_lattice_reference(message, proof_bytes)
     original_bit_count = len(payload_blob) * 8
@@ -549,7 +558,7 @@ def embed(
         )
 
     if receipt is not None:
-        receipt.save(f"{output_path}.lattice.json")
+        receipt.save(f"{output_path}.lattice-zkp.json" if proof_backend == "lattice_zkp" else f"{output_path}.lattice.json")
 
     # Save versioned manifest.json
     manifest = StegoManifest(
@@ -575,10 +584,14 @@ def embed(
             profile="baseline",
         ),
         proof=ProofMetadata(
-            proof_system="groth16" if receipt is None else "ml-dsa-65-attestation",
+            proof_system=(
+                "groth16" if receipt is None
+                else "ml-dsa-65-attestation" if proof_backend == "lattice"
+                else "sis-linear-fiat-shamir-v1"
+            ),
             proof_size_bytes=(
                 len(proof_bytes) if receipt is None
-                else len(base64.b64decode(receipt.signature.encode("ascii"), validate=True))
+                else len(json.dumps(receipt.to_dict(), sort_keys=True, separators=(",", ":")).encode("utf-8"))
             ),
             constraint_count=bridge.get_constraint_count() if bridge is not None else 0,
         ),
