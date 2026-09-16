@@ -31,6 +31,19 @@ typedef struct {
     size_t sizes[4];
 } AuCollector;
 
+typedef struct {
+    size_t count;
+    ZksPayloadChunk chunk;
+} ChunkCollector;
+
+static int collect_chunk(const ZksPayloadChunk *chunk, void *opaque) {
+    ChunkCollector *collector = (ChunkCollector *)opaque;
+    CHECK(collector->count == 0);
+    collector->chunk = *chunk;
+    collector->count++;
+    return ZKS_OK;
+}
+
 static int collect_au(const uint8_t *annexb, size_t size, int is_idr, uint64_t sequence, void *opaque) {
     AuCollector *collector = (AuCollector *)opaque;
     (void)annexb;
@@ -94,14 +107,46 @@ static int test_idr_payload_scheduler_is_bounded_and_repeats(void) {
     return 0;
 }
 
+static int test_inband_sei_round_trip_preserves_video_nals(void) {
+    static const uint8_t access_unit[] = {
+        0, 0, 0, 1, 0x69, 0xf0,
+        0, 0, 0, 1, 0x65, 0xaa,
+    };
+    static const uint8_t uuid[16] = {
+        0x9d, 0x4f, 0x11, 0x0d, 0x48, 0xfe, 0x45, 0x20,
+        0x9d, 0xfe, 0x01, 0x57, 0x91, 0x82, 0x45, 0x72,
+    };
+    ZksPayloadChunk chunk = {7u, 3u, {0u, 0u, 1u}};
+    ZksByteBuffer output;
+    ZksAnnexBParser parser;
+    NalCollector nal_collector = {{0}, 0};
+    ChunkCollector chunk_collector = {0};
+
+    zks_byte_buffer_init(&output);
+    CHECK(zks_sei_inject_user_data(access_unit, sizeof(access_unit), uuid, &chunk, &output) == ZKS_OK);
+    zks_annexb_parser_init(&parser, collect_nal, &nal_collector);
+    CHECK(zks_annexb_parser_feed(&parser, output.data, output.size) == ZKS_OK);
+    CHECK(zks_annexb_parser_finish(&parser) == ZKS_OK);
+    zks_annexb_parser_destroy(&parser);
+    CHECK(nal_collector.count == 3);
+    CHECK(nal_collector.types[0] == 9 && nal_collector.types[1] == 6 && nal_collector.types[2] == 5);
+    CHECK(zks_sei_extract_user_data(output.data, output.size, uuid, collect_chunk, &chunk_collector) == ZKS_OK);
+    CHECK(chunk_collector.count == 1);
+    CHECK(chunk_collector.chunk.sequence == 7u && chunk_collector.chunk.size == 3u);
+    CHECK(memcmp(chunk_collector.chunk.data, chunk.data, chunk.size) == 0);
+    zks_byte_buffer_destroy(&output);
+    return 0;
+}
+
 int main(void) {
     int failed = 0;
     failed |= test_incremental_annexb_parser();
     failed |= test_aud_assembler_emits_complete_idr_access_unit();
     failed |= test_idr_payload_scheduler_is_bounded_and_repeats();
+    failed |= test_inband_sei_round_trip_preserves_video_nals();
     if (failed) {
         return 1;
     }
-    puts("native realtime transport: 3/3 passed");
+    puts("native realtime transport: 4/4 passed");
     return 0;
 }
