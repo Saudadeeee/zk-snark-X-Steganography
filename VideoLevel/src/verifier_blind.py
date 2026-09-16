@@ -26,7 +26,7 @@ from .core.matrix_embedding import (
 )
 from .verifier import VerifyResult, _load_sidecar_data
 from .zk_proof import ZKSnarkBridge, unpack, blob_bit_length
-from .lattice_pq import LatticeReceipt, LatticeZkReceipt, lattice_reference_bit_length, unpack_lattice_reference
+from .lattice_pq import LatticeReceipt, lattice_reference_bit_length, unpack_lattice_reference
 from .manifest import compute_file_hash, hash_positions
 from .stream_profile import analyze_stream_profile
 from .exceptions import UnsupportedStreamError
@@ -122,8 +122,9 @@ def verify_near_blind(
         parser=parser,
     )
 
-    is_lattice_zkp = manifest.proof.proof_system == "sis-linear-fiat-shamir-v1"
-    is_lattice = is_lattice_zkp or manifest.proof.proof_system == "ml-dsa-65-attestation"
+    if manifest.proof.proof_system == "sis-linear-fiat-shamir-v1":
+        raise RuntimeError("experimental lattice_zkp artifacts are disabled pending a reviewed lattice-ZK backend")
+    is_lattice = manifest.proof.proof_system == "ml-dsa-65-attestation"
     if not is_lattice:
         if not os.path.isdir(circuits_dir):
             raise FileNotFoundError(f"circuits_dir not found: {circuits_dir}")
@@ -191,20 +192,14 @@ def verify_near_blind(
 
     if is_lattice:
         try:
-            receipt = (
-                LatticeZkReceipt.load(f"{stego_video_path}.lattice-zkp.json")
-                if is_lattice_zkp
-                else LatticeReceipt.load(f"{stego_video_path}.lattice.json")
-            )
+            receipt = LatticeReceipt.load(f"{stego_video_path}.lattice.json")
             is_valid = receipt.commitment() == proof_bytes and receipt.verify(message, manifest_public_key)
             proof_dict = receipt.to_dict()
         except (OSError, ValueError, KeyError):
             is_valid = False
             proof_dict = None
         return VerifyResult(is_valid, message if is_valid else None, proof_dict,
-                            ({"protocol": "sis-linear-fiat-shamir-v1", "signature_algorithm": "ML-DSA-65"}
-                             if is_valid and is_lattice_zkp
-                             else {"signature_algorithm": "ML-DSA-65"} if is_valid else None), extract_bit_count)
+                            {"signature_algorithm": "ML-DSA-65"} if is_valid else None, extract_bit_count)
 
     bridge = _get_bridge(circuits_dir)
     proof_dict = bridge.bytes_to_proof(proof_bytes)

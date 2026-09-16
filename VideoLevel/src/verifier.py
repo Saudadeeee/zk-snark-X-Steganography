@@ -38,8 +38,8 @@ from .core.matrix_embedding import (
 )
 from .core.chaos           import ChaosTransformer
 from .zk_proof             import ZKSnarkBridge, unpack, blob_bit_length
-from .lattice_pq           import LatticeReceipt, LatticeZkReceipt, lattice_reference_bit_length, unpack_lattice_reference
-from .manifest             import StegoManifest
+from .lattice_pq           import LatticeReceipt, lattice_reference_bit_length, unpack_lattice_reference
+from .manifest             import StegoManifest, compute_file_hash, hash_positions
 from .stream_profile       import analyze_stream_profile
 from .exceptions           import UnsupportedStreamError
 
@@ -120,7 +120,7 @@ def verify(
     use_analysis_cache: bool = True,
     force_analysis_refresh: bool = False,
     analysis_cache_dir: Optional[str] = None,
-    proof_backend: str = "lattice_zkp",
+    proof_backend: str = "lattice",
     lattice_public_key: Optional[bytes] = None,
     embedding_strategy: str = "t1_sign_flip",
 ) -> VerifyResult:
@@ -172,15 +172,38 @@ def verify(
         raise FileNotFoundError(f"Original video not found: {original_video_path}")
     if proof_backend == "groth16" and not os.path.isdir(circuits_dir):
         raise FileNotFoundError(f"circuits_dir not found: {circuits_dir}")
-    if proof_backend not in {"groth16", "lattice", "lattice_zkp"}:
-        raise ValueError("proof_backend must be 'lattice_zkp', 'lattice' (legacy attestation), or 'groth16' (legacy)")
+    if proof_backend == "lattice_zkp":
+        raise ValueError("lattice_zkp is experimental and disabled: use a reviewed lattice-ZK backend before enabling it")
+    if proof_backend not in {"groth16", "lattice"}:
+        raise ValueError("proof_backend must be 'lattice' or 'groth16' (legacy)")
 
-    # The embedder persists the final candidate order.  Reusing it prevents a
-    # later cache rebuild from changing cost ordering or patchability pruning.
-    # Near-blind verification additionally authenticates this sidecar; normal
-    # verification still gets proof-level integrity from Groth16/ML-DSA.
+    if proof_backend == "groth16" and (not isinstance(secret_key, bytes) or len(secret_key) != 32):
+        raise ValueError("secret_key must be exactly 32 bytes")
+    if proof_backend == "lattice" and (not isinstance(lattice_public_key, bytes) or len(lattice_public_key) != 1952):
+        raise ValueError("lattice_public_key must be an ML-DSA-65 public key (1952 bytes)")
+
+    # A default lattice verification must never consume extraction coordinates
+    # from an unauthenticated sidecar.  Callers may explicitly pass positions
+    # as their own trusted operating contract; implicit sidecar use requires a
+    # signature, stego hash, and positions hash check first.
     if precomputed_positions is None:
         sidecar_positions, sidecar_payload_bits, sidecar_manifest = _load_sidecar_data(stego_video_path)
+        if proof_backend == "lattice" and sidecar_positions and sidecar_manifest is not None:
+            if sidecar_manifest.proof.proof_system != "ml-dsa-65-attestation":
+                raise RuntimeError("stego manifest does not declare the active lattice attestation backend")
+            if not sidecar_manifest.verify_signature(lattice_public_key):
+                raise RuntimeError("lattice manifest signature verification failed")
+            if sidecar_manifest.video.stego_file_hash != compute_file_hash(stego_video_path):
+                raise RuntimeError("stego file hash does not match the signed manifest")
+            if sidecar_manifest.embedding.positions_count != len(sidecar_positions):
+                raise RuntimeError("positions count does not match the signed manifest")
+            if sidecar_manifest.embedding.positions_hash != hash_positions(sidecar_positions):
+                raise RuntimeError("positions sidecar hash does not match the signed manifest")
+        elif proof_backend == "lattice":
+            # Ignore unauthenticated compatibility sidecars and derive the
+            # position order from the supplied cover instead.
+            sidecar_positions = None
+            sidecar_payload_bits = None
         if sidecar_positions:
             precomputed_positions = sidecar_positions
             if precomputed_payload_bits is None and sidecar_payload_bits is not None:
@@ -194,10 +217,6 @@ def verify(
                 embedding_strategy = signed_strategy
     if embedding_strategy not in {"t1_sign_flip", MATRIX_EMBEDDING_STRATEGY}:
         raise ValueError("unsupported embedding_strategy")
-    if proof_backend == "groth16" and (not isinstance(secret_key, bytes) or len(secret_key) != 32):
-        raise ValueError("secret_key must be exactly 32 bytes")
-    if proof_backend in {"lattice", "lattice_zkp"} and (not isinstance(lattice_public_key, bytes) or len(lattice_public_key) != 1952):
-        raise ValueError("lattice_public_key must be an ML-DSA-65 public key (1952 bytes)")
     if not isinstance(message_length, int) or not 0 < message_length <= MAX_MESSAGE_BYTES:
         raise ValueError(f"message_length must be between 1 and {MAX_MESSAGE_BYTES}")
 
@@ -295,13 +314,9 @@ def verify(
             public_dict=None, bits_extracted=len(extracted_blob) * 8,
         )
 
-    if proof_backend in {"lattice", "lattice_zkp"}:
+    if proof_backend == "lattice":
         try:
-            receipt = (
-                LatticeZkReceipt.load(f"{stego_video_path}.lattice-zkp.json")
-                if proof_backend == "lattice_zkp"
-                else LatticeReceipt.load(f"{stego_video_path}.lattice.json")
-            )
+            receipt = LatticeReceipt.load(f"{stego_video_path}.lattice.json")
             is_valid = receipt.commitment() == proof_bytes and receipt.verify(message, lattice_public_key)
             proof_dict = receipt.to_dict()
         except (OSError, ValueError, KeyError):
@@ -311,9 +326,7 @@ def verify(
             valid=is_valid,
             message=message if is_valid else None,
             proof_dict=proof_dict,
-            public_dict=({"protocol": "sis-linear-fiat-shamir-v1", "signature_algorithm": "ML-DSA-65"}
-                         if is_valid and proof_backend == "lattice_zkp"
-                         else {"signature_algorithm": "ML-DSA-65"} if is_valid else None),
+            public_dict={"signature_algorithm": "ML-DSA-65"} if is_valid else None,
             bits_extracted=extract_bit_count,
         )
 

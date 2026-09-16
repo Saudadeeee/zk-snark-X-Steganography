@@ -1,9 +1,9 @@
 """
-Post-Quantum Lattice-ZKP CAVLC Video Steganography.
-Core CAVLC-based steganography with transparent lattice proofs and ML-DSA.
+Post-Quantum Lattice-Attested CAVLC Video Steganography.
+Core CAVLC-based steganography with ML-DSA lattice authentication.
 """
 
-__version__ = "4.0-lattice-zkp"
+__version__ = "4.0-lattice-attested"
 
 # Public APIs
 from .embedder import embed, EmbedResult

@@ -252,6 +252,10 @@ class LatticeZkProof:
             responses = _unpack_signed(_b64decode(self.responses), LATTICE_ZKP_ROUNDS * LATTICE_ZKP_COLS)
         except (KeyError, ValueError, struct.error):
             return False
+        # The homogeneous zero relation has a universal zero witness and is
+        # therefore never an admissible experimental statement.
+        if not any(statement):
+            return False
         matrix = _derive_matrix(message_hash)
         challenges = _challenge_bits(message_hash, statement, commitments)
         for round_index, challenge in enumerate(challenges):

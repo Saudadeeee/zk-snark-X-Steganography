@@ -1,8 +1,8 @@
-# Post-Quantum Lattice-ZKP Video Steganography
+# Post-Quantum Lattice-Attested Video Steganography
 
-Hide a fixed commitment to a transparent lattice zero-knowledge proof inside H.264 Baseline/CAVLC video by modifying coefficients directly. The proof transcript and its ML-DSA-65 authentication remain in a sidecar; neither uses SEI.
+Hide a fixed commitment to an ML-DSA-65 authenticated lattice sidecar inside H.264 Baseline/CAVLC video by modifying coefficients directly. The signature remains in a sidecar; neither uses SEI.
 
-**Status:** Research prototype. The supported path is direct H.264 Baseline/CAVLC embedding with a signed lattice-ZKP sidecar-assisted near-blind verification.
+**Status:** Research prototype. The supported path is direct H.264 Baseline/CAVLC embedding with a signed lattice-attestation sidecar-assisted near-blind verification. The experimental in-tree lattice-ZKP prototype is disabled because it is not a reviewed, meaningful proof of the intended witness relation.
 **Validated Runtime:** `py -3.12`
 **Current hardening checks:** quick suite `23/23`, hardening `6/6`, and FFmpeg codec fixture `1/1` passed. Full local-asset E2E and benchmarks require revalidation after the circuit/sidecar update.
 **Benchmark Sections:** SEC1-SEC10 (Quality, Capacity, Methods, Security, Performance, Tradeoff, Real-time, Motion/GOP, Statistical, Audit)
@@ -13,8 +13,8 @@ Hide a fixed commitment to a transparent lattice zero-knowledge proof inside H.2
 
 The default system embeds a proof binding into H.264 bitstreams without leaving the compressed-domain workflow. It:
 
-1. Generates a Fiat-Shamir proof of knowledge of a short SIS witness, with the public matrix derived from the payload hash.
-2. Authenticates the transcript with ML-DSA-65 and stores it as `.lattice-zkp.json`.
+1. Generates an ML-DSA-65 signed receipt for the payload hash.
+2. Stores it as `.lattice.json`.
 3. Packs `[LQ1][4B message_length][message][32B sidecar commitment]` into the video.
 4. Optionally applies chaos transforms:
    - Arnold Cat Map on payload bits
@@ -22,7 +22,7 @@ The default system embeds a proof binding into H.264 bitstreams without leaving 
 5. Locates CAVLC-safe candidate positions in IDR frames.
 6. Applies length-preserving coefficient/sign modifications.
 7. Reconstructs a valid H.264 bitstream.
-8. Extracts the reference, verifies the lattice transcript, ML-DSA signature, and sidecar binding.
+8. Extracts the reference, verifies the ML-DSA signature and sidecar binding.
 
 ### New Features (IEEE-ready)
 
@@ -34,13 +34,13 @@ The default system embeds a proof binding into H.264 bitstreams without leaving 
 - **Optimized Extraction**: Parallel IDR parsing with vectorization
 - **GOP Sweep Analysis**: Quality/capacity tradeoff across GOP=1,4,8,16
 
-### Proof and payload format
+### Lattice attestation and payload format
 
-The in-video payload is always `3 + 4 + message_length + 32` bytes. The 32-byte value is SHA3-256 over the exact lattice-ZKP sidecar, so substituting a proof or its ML-DSA signature fails verification.
+The in-video payload is always `3 + 4 + message_length + 32` bytes. The 32-byte value is SHA3-256 over the exact lattice sidecar, so substituting a receipt or its ML-DSA signature fails verification.
 
-The prover derives a ternary vector `x` and the sidecar proves a bounded modular preimage relation for `t = A(message_hash) · x (mod q)` using 128 parallel Fiat-Shamir challenge rounds and rejection sampling. The proof transcript does not serialize `x` or the 32-byte witness key. ML-DSA-65 authenticates the sidecar and the manifest binds the final stego hash and positions hash.
+ML-DSA-65 authenticates the payload hash and the manifest binds the final stego hash and positions hash. This is post-quantum authentication, not a zero-knowledge proof. Codec correctness remains covered by the direct-CAVLC implementation, hashes, signatures, FFmpeg fixtures, and integration tests.
 
-This is an experimental, transparent lattice proof for the stated SIS relation—not a standardized general circuit zkSNARK. Its response bound is not an independently audited parameter set or a formal verifier-enforced ternary-witness claim. It also is not a proof that an H.264 encoder executed every operation correctly. Codec correctness remains covered by the direct-CAVLC implementation, hashes, signatures, FFmpeg fixtures, and integration tests. A production cryptographic claim requires replacing this backend with a reviewed lattice-ZK library/protocol and a third-party audit.
+The source tree retains an experimental Fiat-Shamir lattice preimage prototype for research-only testing. Public `embed()` and `verify()` reject `proof_backend="lattice_zkp"`; a reviewed lattice-ZK library/protocol with a verifier-known, non-trivial statement and an audited parameter set is required before enabling any lattice-ZKP path.
 
 ---
 
@@ -231,7 +231,7 @@ print(result.bits_embedded, result.output_path)
 # Also generates:
 # - data/output/stego.h264.positions.json
 # - data/output/stego.h264.meta.json
-# - data/output/stego.h264.lattice-zkp.json (SIS proof + ML-DSA-65 signature)
+# - data/output/stego.h264.lattice.json (ML-DSA-65 receipt)
 # - data/output/stego.h264.manifest.json (v4.0.0, ML-DSA-65-signed)
 ```
 

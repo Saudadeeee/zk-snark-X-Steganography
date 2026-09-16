@@ -38,7 +38,7 @@ from .bitstream.bitstream_ops import BitstreamReconstructor, BitstreamPatcher
 from .exceptions           import InsufficientCapacityError, UnsupportedStreamError
 from .stream_profile       import analyze_stream_profile
 from .zk_proof             import ZKSnarkBridge, pack
-from .lattice_pq           import LatticeReceipt, LatticeZkReceipt, pack_lattice_reference
+from .lattice_pq           import LatticeReceipt, pack_lattice_reference
 from .manifest             import (
     StegoManifest,
     PayloadMetadata,
@@ -185,15 +185,15 @@ def embed(
     analysis_cache_dir: Optional[str] = None,
     manifest_private_key: Optional[bytes] = None,
     manifest_signer_id: Optional[str] = None,
-    proof_backend: str = "lattice_zkp",
+    proof_backend: str = "lattice",
     lattice_private_key: Optional[bytes] = None,
     embedding_strategy: str = "t1_sign_flip",
 ) -> EmbedResult:
     """
-    Embed a transparent lattice ZKP binding for `message` into an H.264 video.
+    Embed an ML-DSA-authenticated lattice proof binding for `message` into an H.264 video.
 
     Pipeline:
-        1. Generate a short-witness SIS Fiat-Shamir proof in a signed sidecar
+        1. Generate an ML-DSA-65 authenticated lattice sidecar
         2. Pack payload blob  [LQ1][4B len][message][32B sidecar commitment]
        2b. [Chaos] Arnold Cat Map scrambles payload bits  (if chaos_key)
         3. Parse H.264 video  extract IDR coefficients + bit offsets
@@ -207,7 +207,7 @@ def embed(
         message:      Secret message bytes to commit to.
         output_path:  Output stego H.264 video path.
         circuits_dir: Legacy Groth16 artifact directory; unused by the default
-                      lattice_zkp backend.
+                      lattice backend.
         secret_key:   32-byte local witness key, never embedded.
         max_modifications_per_block: T1 flips per 4×4 block (default 1).
         ffmpeg_validate: Enable per-position FFmpeg pixel validation.
@@ -257,11 +257,13 @@ def embed(
         raise ValueError("message must be non-empty bytes")
     if not isinstance(secret_key, bytes) or len(secret_key) != 32:
         raise ValueError("secret_key must be exactly 32 bytes")
-    if proof_backend not in {"groth16", "lattice", "lattice_zkp"}:
-        raise ValueError("proof_backend must be 'lattice_zkp', 'lattice' (legacy attestation), or 'groth16' (legacy)")
+    if proof_backend == "lattice_zkp":
+        raise ValueError("lattice_zkp is experimental and disabled: use a reviewed lattice-ZK backend before enabling it")
+    if proof_backend not in {"groth16", "lattice"}:
+        raise ValueError("proof_backend must be 'lattice' or 'groth16' (legacy)")
     if embedding_strategy not in {"t1_sign_flip", MATRIX_EMBEDDING_STRATEGY}:
         raise ValueError("embedding_strategy must be 't1_sign_flip' or 'cost_guided_hamming_7_3'")
-    if proof_backend in {"lattice", "lattice_zkp"} and lattice_private_key is None:
+    if proof_backend == "lattice" and lattice_private_key is None:
         raise ValueError("lattice_private_key is required for the lattice proof backend")
     if manifest_private_key is not None and (
         not isinstance(manifest_private_key, bytes) or len(manifest_private_key) != 32
@@ -287,25 +289,17 @@ def embed(
         )
 
     # 1-2. Create the active proof artifact and compact video payload.
-    receipt: Optional[LatticeReceipt | LatticeZkReceipt] = None
+    receipt: Optional[LatticeReceipt] = None
     bridge: Optional[ZKSnarkBridge] = None
     if proof_backend == "groth16":
         bridge = _get_bridge(circuits_dir)
         proof_dict, public_dict = bridge.generate_proof_for_payload(message, secret_key)
         proof_bytes = bridge.proof_to_bytes(proof_dict)
         payload_blob = pack(message, proof_bytes)
-    elif proof_backend == "lattice":
+    else:
         receipt = LatticeReceipt.create(message, lattice_private_key, signer_id=manifest_signer_id or "ml-dsa-65")
         proof_dict = receipt.to_dict()
         public_dict = {"signature_algorithm": receipt.signature_algorithm, "signer_id": receipt.signer_id}
-        proof_bytes = receipt.commitment()
-        payload_blob = pack_lattice_reference(message, proof_bytes)
-    else:
-        receipt = LatticeZkReceipt.create(
-            message, secret_key, lattice_private_key, signer_id=manifest_signer_id or "ml-dsa-65"
-        )
-        proof_dict = receipt.to_dict()
-        public_dict = {"protocol": receipt.protocol, "signature_algorithm": receipt.signature_algorithm, "signer_id": receipt.signer_id}
         proof_bytes = receipt.commitment()
         payload_blob = pack_lattice_reference(message, proof_bytes)
     original_bit_count = len(payload_blob) * 8
@@ -558,7 +552,7 @@ def embed(
         )
 
     if receipt is not None:
-        receipt.save(f"{output_path}.lattice-zkp.json" if proof_backend == "lattice_zkp" else f"{output_path}.lattice.json")
+        receipt.save(f"{output_path}.lattice.json")
 
     # Save versioned manifest.json
     manifest = StegoManifest(
@@ -584,11 +578,7 @@ def embed(
             profile="baseline",
         ),
         proof=ProofMetadata(
-            proof_system=(
-                "groth16" if receipt is None
-                else "ml-dsa-65-attestation" if proof_backend == "lattice"
-                else "sis-linear-fiat-shamir-v1"
-            ),
+            proof_system="groth16" if receipt is None else "ml-dsa-65-attestation",
             proof_size_bytes=(
                 len(proof_bytes) if receipt is None
                 else len(json.dumps(receipt.to_dict(), sort_keys=True, separators=(",", ":")).encode("utf-8"))
