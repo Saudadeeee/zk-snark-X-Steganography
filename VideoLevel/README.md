@@ -268,7 +268,7 @@ result = verify(
     stego_video_path="data/output/stego.h264",
     original_video_path="data/encoded/foreman_cif_q22_g1.h264",
     circuits_dir="",
-    secret_key=b"" ,  # unused by lattice_zkp verification
+    secret_key=b"",  # unused by lattice-attestation verification
     lattice_public_key=lattice_public_key,
     message_length=len(message),
     chaos_key=chaos_key,
@@ -283,21 +283,18 @@ Reduced dependency on the original cover video. This mode requires:
 - `manifest.json`
 - `positions.json`
 - a stego asset whose stored operating positions are still valid after reconstruction
-- the Ed25519 public key of the manifest signer
+- the 1952-byte ML-DSA-65 public key of the manifest signer
 
 ```python
-from cryptography.hazmat.primitives import serialization
 from src.verifier_blind import verify_near_blind
 
-manifest_public_key = manifest_signer.public_key().public_bytes(
-    serialization.Encoding.Raw,
-    serialization.PublicFormat.Raw,
-)
+# Reuse the public key returned by LatticeSigner.generate_keypair() at embed time.
+manifest_public_key = lattice_public_key
 
 result = verify_near_blind(
     stego_video_path="data/output/stego.h264",
-    circuits_dir="circuits",
-    secret_key=secret_key,
+    circuits_dir="",
+    secret_key=b"",  # unused by the active lattice-attestation path
     message_length=len(message),
     chaos_key=chaos_key,
     manifest_public_key=manifest_public_key,
