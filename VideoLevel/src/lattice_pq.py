@@ -18,6 +18,7 @@ import hashlib
 import json
 import struct
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from pqcrypto.kem import ml_kem_768
@@ -131,6 +132,13 @@ class LatticeReceipt:
 
     def to_dict(self) -> dict[str, str]:
         return {**self._unsigned_dict(), "signature": self.signature}
+
+    def save(self, path: str | Path) -> None:
+        Path(path).write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: str | Path) -> "LatticeReceipt":
+        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LatticeReceipt":
