@@ -160,6 +160,7 @@ VideoLevel/
 |   |-- statistical_benchmark.py  Error bars, 3 or more runs
 |   `-- sec1_audit.py             Quality guard audit logging
 |-- circuits/                     Circom circuit + Groth16 keys
+|-- native/                       C17 Annex-B relay + optional x264 adapter
 |-- data/
 |   |-- encoded/                  Local H.264 benchmark inputs (ignored)
 |   |-- output/                   Local stego outputs + sidecars (ignored)
@@ -546,6 +547,7 @@ npm run verify-artifacts
 - [`COMPLETION.md`](COMPLETION.md) - Completion summary checklist
 - [`OPERATING_ENVELOPE.md`](OPERATING_ENVELOPE.md) - Supported codec/GOP/QP ranges
 - [`REALTIME.md`](REALTIME.md) - Live Annex-B transport contract and native-backend boundary
+- [`native/README.md`](native/README.md) - C17 build, relay, and selected x264 profile
 - [`ARTIFACT_POLICY.md`](ARTIFACT_POLICY.md) - Cleanup and artifact management
 - [`COMPARATIVE_ANALYSIS.md`](COMPARATIVE_ANALYSIS.md) - Comparison with existing systems
 - [`doc/system_video_embedding_walkthrough.tex`](doc/system_video_embedding_walkthrough.tex) - Detailed Vietnamese system walkthrough

@@ -26,6 +26,11 @@ jobs:
         run: npm --prefix circuits ci --ignore-scripts
       - name: Static Python check
         run: python -m compileall -q src benchmark
+      - name: Build and test native realtime transport
+        run: |
+          cmake -S native -B native/build
+          cmake --build native/build
+          ctest --test-dir native/build --output-on-failure
       - name: Circuit package contract
         run: npm --prefix circuits test
       - name: Security hardening regression tests
