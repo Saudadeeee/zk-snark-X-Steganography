@@ -66,12 +66,24 @@ def t_statement_rejects_ambiguous_or_wrongly_sized_inputs() -> None:
         raise AssertionError("short digest accepted")
 
 
+def t_manifest_preserves_a_future_zkp_statement_identifier() -> None:
+    from src.manifest import ProofMetadata, StegoManifest
+
+    statement_id = _statement().statement_id
+    restored = StegoManifest.from_json(
+        StegoManifest(proof=ProofMetadata(statement_id=statement_id)).to_json()
+    )
+
+    assert restored.proof.statement_id == statement_id
+
+
 def main() -> None:
     section("PQ video ZKP statement contract")
     results = [
         run_test("statement_is_canonical_and_binds_every_video_artifact", t_statement_is_canonical_and_binds_every_video_artifact),
         run_test("statement_id_changes_for_payload_video_positions_or_policy", t_statement_id_changes_for_payload_video_positions_or_policy),
         run_test("statement_rejects_ambiguous_or_wrongly_sized_inputs", t_statement_rejects_ambiguous_or_wrongly_sized_inputs),
+        run_test("manifest_preserves_a_future_zkp_statement_identifier", t_manifest_preserves_a_future_zkp_statement_identifier),
     ]
     raise SystemExit(summarise(results, "PQ video ZKP statement contract"))
 
