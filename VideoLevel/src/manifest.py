@@ -63,6 +63,7 @@ class ProofMetadata:
     constraint_count: int = 0
     prove_time_ms: Optional[float] = None
     verify_time_ms: Optional[float] = None
+    statement_id: Optional[str] = None
 
 
 def canonical_json_bytes(data: dict[str, Any]) -> bytes:
@@ -153,6 +154,7 @@ class StegoManifest:
                 "constraint_count": self.proof.constraint_count,
                 "prove_time_ms": self.proof.prove_time_ms,
                 "verify_time_ms": self.proof.verify_time_ms,
+                "statement_id": self.proof.statement_id,
             },
             "signature": self.signature,
             "signature_algorithm": self.signature_algorithm,
@@ -203,6 +205,7 @@ class StegoManifest:
                 constraint_count=int(proof["constraint_count"]),
                 prove_time_ms=proof.get("prove_time_ms"),
                 verify_time_ms=proof.get("verify_time_ms"),
+                statement_id=proof.get("statement_id"),
             ),
             signature=data.get("signature"),
             signature_algorithm=data.get("signature_algorithm"),

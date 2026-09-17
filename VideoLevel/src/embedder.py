@@ -39,6 +39,7 @@ from .exceptions           import InsufficientCapacityError, UnsupportedStreamEr
 from .stream_profile       import analyze_stream_profile
 from .zk_proof             import ZKSnarkBridge, pack
 from .lattice_pq           import LatticeReceipt, pack_lattice_reference
+from .video_zkp_contract   import build_video_zkp_statement, payload_commitment
 from .manifest             import (
     StegoManifest,
     PayloadMetadata,
@@ -554,6 +555,29 @@ def embed(
     if receipt is not None:
         receipt.save(f"{output_path}.lattice.json")
 
+    cover_file_hash = compute_file_hash(video_path)
+    stego_file_hash = compute_file_hash(output_path)
+    used_positions_hash = hash_positions(used_positions)
+    zkp_statement = None
+    if receipt is not None:
+        # This is a public statement contract for a future reviewed lattice
+        # proof.  It is not itself a proof and does not enable lattice_zkp.
+        zkp_statement = build_video_zkp_statement(
+            session_id=proof_bytes,
+            payload_commitment_hex=payload_commitment(message),
+            cover_hash=cover_file_hash,
+            stego_hash=stego_file_hash,
+            positions_hash=used_positions_hash,
+            policy={
+                "codec": "h264-baseline-cavlc",
+                "embedding_strategy": embedding_strategy,
+                "max_modifications_per_block": max_modifications_per_block,
+                "proof_backend": proof_backend,
+            },
+        )
+        with open(f"{output_path}.pq-statement.json", "w", encoding="utf-8") as file:
+            json.dump(zkp_statement.to_dict(), file, ensure_ascii=True, indent=2, sort_keys=True)
+
     # Save versioned manifest.json
     manifest = StegoManifest(
         payload=PayloadMetadata(
@@ -568,12 +592,12 @@ def embed(
             strategy=embedding_strategy,
             max_modifications_per_block=max_modifications_per_block,
             positions_count=len(used_positions),
-            positions_hash=hash_positions(used_positions),
+            positions_hash=used_positions_hash,
         ),
         video=VideoMetadata(
             file_path=video_path,
-            file_hash=compute_file_hash(video_path),
-            stego_file_hash=compute_file_hash(output_path),
+            file_hash=cover_file_hash,
+            stego_file_hash=stego_file_hash,
             codec="h264",
             profile="baseline",
         ),
@@ -584,6 +608,7 @@ def embed(
                 else len(json.dumps(receipt.to_dict(), sort_keys=True, separators=(",", ":")).encode("utf-8"))
             ),
             constraint_count=bridge.get_constraint_count() if bridge is not None else 0,
+            statement_id=zkp_statement.statement_id if zkp_statement is not None else None,
         ),
     )
     if receipt is not None:

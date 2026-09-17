@@ -110,6 +110,7 @@ def _cleanup_output(base_path: str) -> None:
         f"{base_path}.meta.json",
         f"{base_path}.manifest.json",
         f"{base_path}.lattice-zkp.json",
+        f"{base_path}.pq-statement.json",
         ):
         if os.path.exists(path):
             os.remove(path)
