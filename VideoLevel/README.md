@@ -44,6 +44,9 @@ The source tree retains an experimental Fiat-Shamir lattice preimage prototype f
 
 The pinned Linux-only LaZer research adapter is in [`lazer/`](lazer/README.md). Its current hardware assessment is recorded in [`lazer/EVALUATION.md`](lazer/EVALUATION.md); it is not part of the active video pipeline.
 
+The executable research roadmap and canonical statement contract for a future
+reviewed PQ video-ZKP are in [`PQ_VIDEO_ZKP_PLAN.md`](PQ_VIDEO_ZKP_PLAN.md).
+
 ---
 
 ## Historic Benchmark Snapshot (not revalidated for this revision)
