@@ -26,3 +26,16 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+
+  avx512-qemu-diagnostic:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.avx512-emulation
+    image: zkstego-avx512-qemu-diagnostic:local
+    platform: linux/amd64
+    profiles: ["emulation"]
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

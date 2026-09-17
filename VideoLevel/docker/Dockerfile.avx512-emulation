@@ -1,0 +1,18 @@
+# QEMU/TCG AVX-512 support diagnostic. This image must never be used for
+# throughput, latency, or cryptographic-performance claims.
+FROM ubuntu@sha256:69cecf4bbf72d2d44a9eef1b71fb98c7fb973d78af11399deccef19beb008ad9
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG QEMU_USER_STATIC_VERSION=1:8.2.2+ds-0ubuntu1.18
+
+RUN apt-get update && apt-get install --yes --no-install-recommends \
+    gcc libc6-dev qemu-user-static=${QEMU_USER_STATIC_VERSION} && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY docker/avx512-smoke.c /src/avx512-smoke.c
+RUN gcc -O2 -fno-tree-vectorize -mavx512f /src/avx512-smoke.c -o /opt/avx512-smoke
+COPY docker/avx512-qemu-diagnostic.sh /usr/local/bin/avx512-qemu-diagnostic
+RUN chmod 0755 /usr/local/bin/avx512-qemu-diagnostic
+
+# An explicit qemu-x86_64 invocation avoids the host CPU executing the test.
+ENTRYPOINT ["/usr/local/bin/avx512-qemu-diagnostic"]
