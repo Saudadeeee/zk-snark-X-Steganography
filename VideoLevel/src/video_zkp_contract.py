@@ -22,7 +22,7 @@ VIDEO_ZKP_HASH_ALGORITHMS = {
     "stego_hash": "sha256(file-bytes)",
     "payload_commitment": "sha3-256(domain||opening||payload)",
     "relation_id": "sha256(relation-descriptor-canonical-json)",
-    "registry_root": "sha256(signed-registry-canonical-json)",
+    "registry_root": "sha256(domain||issuer-bound-registry-payload-canonical-json)",
     "statement_id": "sha3-256(domain||canonical-json)",
 }
 _DOMAIN = b"zkstego/pq-video-statement/v1/"

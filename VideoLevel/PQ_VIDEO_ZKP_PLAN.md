@@ -21,8 +21,8 @@ recomputes the canonical statement ID. `src/zkp_registry.py` requires the
 relation to resolve from an ML-DSA-65-signed, verifier-trust-anchored registry.
 Each relation ID is derived from a descriptor of its constraint module,
 verifier key, parameter set, and admissible policy; verifiers must fetch those
-artifacts by their pinned hashes. The statement records the registry's derived
-root and epoch. It is the single byte-level contract that a LaZer prover and
+artifacts by their pinned hashes. The statement records the issuer-bound
+registry payload's derived root and epoch. It is the single byte-level contract that a LaZer prover and
 verifier must consume.
 
 ## Architecture
