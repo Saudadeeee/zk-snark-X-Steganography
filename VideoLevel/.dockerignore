@@ -1,0 +1,17 @@
+.git
+.cache
+.pytest_cache
+__pycache__
+*.py[cod]
+native/build
+data
+benchmark
+doc
+circuits/build/*
+!circuits/build/payload_verify_js/
+!circuits/build/payload_verify_js/**
+circuits/node_modules
+node_modules
+venv
+env
+.env

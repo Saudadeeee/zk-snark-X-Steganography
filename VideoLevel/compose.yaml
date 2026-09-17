@@ -1,0 +1,28 @@
+name: zkstego-pq
+
+services:
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile.pqvideo
+    image: zkstego-pq-video:local
+    platform: linux/amd64
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command: ["test"]
+
+  lazer:
+    build:
+      context: .
+      dockerfile: lazer/Dockerfile
+    image: zkstego-lazer:10eafec
+    platform: linux/amd64
+    profiles: ["lazer"]
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
