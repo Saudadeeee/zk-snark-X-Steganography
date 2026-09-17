@@ -237,7 +237,7 @@ print(result.bits_embedded, result.output_path)
 # - data/output/stego.h264.positions.json
 # - data/output/stego.h264.meta.json
 # - data/output/stego.h264.lattice.json (ML-DSA-65 receipt)
-# - data/output/stego.h264.pq-statement.json (future lattice-ZKP public statement; not a proof)
+# - data/output/stego.h264.pq-statement.json (only when an issuer-verified registered LaZer relation and private opening are supplied; not a proof)
 # - data/output/stego.h264.manifest.json (v4.0.0, ML-DSA-65-signed)
 ```
 

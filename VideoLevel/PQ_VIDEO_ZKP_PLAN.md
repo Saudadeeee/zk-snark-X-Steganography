@@ -7,15 +7,23 @@ knowledge of a witness satisfying a **reviewed lattice relation** bound to:
 
 ```text
 session_id || payload_commitment || cover_hash || stego_hash ||
-positions_hash || embedding/codec policy
+positions_hash || relation_id || registry_root || registry_epoch ||
+embedding/codec policy
 ```
 
 It shall not claim that a proof verifies all H.264 encoder arithmetic unless a
 separate, explicitly implemented codec relation is included. ML-DSA authenticates
 the control plane; ML-KEM establishes transport secrets; neither is called a ZKP.
 
-`src/video_zkp_contract.py` now canonicalizes this public statement. It is the
-single byte-level contract that a LaZer prover and verifier must consume.
+`src/video_zkp_contract.py` now canonicalizes this public statement. Payload
+commitments are salted with a private 32-byte opening, and parsing always
+recomputes the canonical statement ID. `src/zkp_registry.py` requires the
+relation to resolve from an ML-DSA-65-signed, verifier-trust-anchored registry.
+Each relation ID is derived from a descriptor of its constraint module,
+verifier key, parameter set, and admissible policy; verifiers must fetch those
+artifacts by their pinned hashes. The statement records the registry's derived
+root and epoch. It is the single byte-level contract that a LaZer prover and
+verifier must consume.
 
 ## Architecture
 
@@ -39,9 +47,9 @@ that session. This removes the proof/stego-hash circular dependency.
 | Phase | Deliverable | Acceptance gate | Status |
 |---|---|---|---|
 | 0 | Claim/threat-model freeze | No use of “ZKP” for an ML-DSA receipt | Done |
-| 1 | Canonical public statement | Mutation tests cover all six bindings | Done |
+| 1 | Canonical public statement | Mutation tests cover every binding; parser rejects tampering; payload opening remains private | Done |
 | 2 | Reproducible LaZer target | Pinned source, Linux x86-64 AES+AVX-512F host, demo prove+verify transcript retained | Pending hardware |
-| 3 | Reviewed relation | Public registered statement, witness bounds, zero-knowledge/soundness parameters, domain separation reviewed by lattice cryptographer | Not started |
+| 3 | Reviewed relation | Signed registry gate is scaffolded; public registered statement, witness bounds, zero-knowledge/soundness parameters, domain separation reviewed by lattice cryptographer | Not started |
 | 4 | Proof envelope | Versioned binary format, session binding, ML-DSA manifest binding, tamper and replay tests | Not started |
 | 5 | Native video integration | Patched x264 direct-CAVLC encode → FFmpeg decode → extract → LaZer verify fixture | Not started |
 | 6 | Streaming evaluation | p50/p95/p99 latency, bitrate/BER, packet loss/re-encode tests on live transport | Not started |
@@ -71,7 +79,10 @@ is incompatible with a real-time claim unless independently benchmarked.
 3. Build and run the pinned LaZer demo as documented in `lazer/README.md`.
 4. Save the prover/verifier output, CPU model, compiler/Sage versions and image
    digest as a test fixture.
-5. Only then implement Phase 3 against the exact LaZer API and generated
+5. Specify the application relation and publish it in an issuer-signed
+   `lazer-v1` registry. Verifiers must pin that issuer public key out of band;
+   they must not accept a trust anchor supplied by a video sidecar.
+6. Only then implement Phase 3 against the exact LaZer API and generated
    relation parameters—not the disabled in-tree prototype.
 
 ## Publication gates

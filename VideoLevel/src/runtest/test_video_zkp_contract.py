@@ -71,6 +71,13 @@ def t_statement_rejects_ambiguous_or_wrongly_sized_inputs() -> None:
     else:
         raise AssertionError("short digest accepted")
 
+    try:
+        build_video_zkp_statement(bytes(range(32)), "00 " * 20 + "0000", "01" * 32, "02" * 32, "03" * 32, "04" * 32, "05" * 32, 0, {"codec": "h264-baseline-cavlc", "embedding_strategy": "t1_sign_flip", "max_modifications_per_block": 1, "proof_backend": "lattice"})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("non-canonical hexadecimal digest accepted")
+
 
 def t_payload_commitment_is_opening_bound_and_statement_parser_rejects_tampering() -> None:
     from src.video_zkp_contract import VideoZkpStatement, payload_commitment
@@ -78,6 +85,14 @@ def t_payload_commitment_is_opening_bound_and_statement_parser_rejects_tampering
     assert payload_commitment(b"short", b"a" * 32) != payload_commitment(b"short", b"b" * 32)
     encoded = _statement().to_dict()
     assert VideoZkpStatement.from_dict(encoded).statement_id == encoded["statement_id"]
+    encoded["session_id"] = "00 " * 20 + "0000"
+    try:
+        VideoZkpStatement.from_dict(encoded)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("non-canonical session id accepted")
+    encoded = _statement().to_dict()
     encoded["statement_id"] = "00" * 32
     try:
         VideoZkpStatement.from_dict(encoded)

@@ -39,7 +39,8 @@ from .exceptions           import InsufficientCapacityError, UnsupportedStreamEr
 from .stream_profile       import analyze_stream_profile
 from .zk_proof             import ZKSnarkBridge, pack
 from .lattice_pq           import LatticeReceipt, pack_lattice_reference
-from .video_zkp_contract   import build_video_zkp_statement, payload_commitment
+from .video_zkp_contract   import build_video_zkp_statement, payload_commitment, policy_hash
+from .zkp_registry         import REGISTRY_ZKP_SUITE, SignedZkpRelationRegistry
 from .manifest             import (
     StegoManifest,
     PayloadMetadata,
@@ -54,6 +55,25 @@ from .manifest             import (
 @lru_cache(maxsize=4)
 def _get_bridge(circuits_dir: str) -> ZKSnarkBridge:
     return ZKSnarkBridge(circuits_dir)
+
+
+def _resolve_future_zkp_registration(
+    relation_id: str,
+    registry: SignedZkpRelationRegistry,
+    issuer_public_key: bytes,
+    expected_policy_hash: str,
+) -> tuple[str, int]:
+    """Resolve a LaZer relation only from an issuer-authenticated registry.
+
+    The issuer key is a verifier trust anchor supplied out of band; it is never
+    obtained from an untrusted sidecar. The returned root and epoch are what
+    get bound into the public statement.
+    """
+    if not isinstance(registry, SignedZkpRelationRegistry):
+        raise ValueError("zkp_relation_registry must be a SignedZkpRelationRegistry")
+    if not registry.verify(issuer_public_key):
+        raise ValueError("zkp relation registry signature did not verify against the issuer trust anchor")
+    return registry.resolve(relation_id, REGISTRY_ZKP_SUITE, expected_policy_hash)
 
 
 def _prune_patchable_positions(
@@ -189,6 +209,10 @@ def embed(
     proof_backend: str = "lattice",
     lattice_private_key: Optional[bytes] = None,
     embedding_strategy: str = "t1_sign_flip",
+    zkp_relation_id: Optional[str] = None,
+    zkp_relation_registry: Optional[SignedZkpRelationRegistry] = None,
+    zkp_registry_issuer_public_key: Optional[bytes] = None,
+    zkp_payload_opening: Optional[bytes] = None,
 ) -> EmbedResult:
     """
     Embed an ML-DSA-authenticated lattice proof binding for `message` into an H.264 video.
@@ -240,6 +264,14 @@ def embed(
                             Hamming syndrome code over seven independently
                             CAVLC-safe carriers to embed three payload bits
                             with at most one coefficient change.
+        zkp_relation_id, zkp_relation_registry, zkp_registry_issuer_public_key:
+            A relation and ML-DSA-65 issuer-signed registry that resolve it.
+            The public key is the caller's out-of-band issuer trust anchor. These values
+            plus ``zkp_payload_opening`` are required before a *future proof
+            statement* is emitted. They do not enable a ZKP in this release.
+        zkp_payload_opening: Private 32-byte random opening for the payload
+            commitment. The caller must retain it for the future prover; it is
+            never written to the video, manifest, or public statement.
 
     Returns:
         EmbedResult
@@ -272,6 +304,31 @@ def embed(
         raise ValueError("manifest_private_key must be exactly 32 bytes")
     if max_modifications_per_block < 1 or max_modifications_per_block > 8:
         raise ValueError("max_modifications_per_block must be between 1 and 8")
+    zkp_parameters = (
+        zkp_relation_id,
+        zkp_relation_registry,
+        zkp_registry_issuer_public_key,
+        zkp_payload_opening,
+    )
+    if any(value is not None for value in zkp_parameters) and any(value is None for value in zkp_parameters):
+        raise ValueError("all future-ZKP relation, registry, issuer-key, and opening inputs must be supplied together")
+    if zkp_payload_opening is not None and (
+        not isinstance(zkp_payload_opening, bytes) or len(zkp_payload_opening) != 32
+    ):
+        raise ValueError("zkp_payload_opening must be exactly 32 random bytes")
+    if zkp_payload_opening is not None and proof_backend != "lattice":
+        raise ValueError("future-ZKP statement emission requires the lattice attestation backend")
+    zkp_registry_binding: Optional[tuple[str, int]] = None
+    zkp_policy = {
+        "codec": "h264-baseline-cavlc",
+        "embedding_strategy": embedding_strategy,
+        "max_modifications_per_block": max_modifications_per_block,
+        "proof_backend": "lazer",
+    }
+    if zkp_payload_opening is not None:
+        zkp_registry_binding = _resolve_future_zkp_registration(
+            zkp_relation_id, zkp_relation_registry, zkp_registry_issuer_public_key, policy_hash(zkp_policy)
+        )
     if ffmpeg_validate and shutil.which("ffmpeg") is None:
         raise RuntimeError(
             "ffmpeg_validate=True but 'ffmpeg' was not found on PATH."
@@ -559,21 +616,19 @@ def embed(
     stego_file_hash = compute_file_hash(output_path)
     used_positions_hash = hash_positions(used_positions)
     zkp_statement = None
-    if receipt is not None:
+    if receipt is not None and zkp_payload_opening is not None:
         # This is a public statement contract for a future reviewed lattice
-        # proof.  It is not itself a proof and does not enable lattice_zkp.
+        # proof. It is not itself a proof and does not enable lattice_zkp.
         zkp_statement = build_video_zkp_statement(
             session_id=proof_bytes,
-            payload_commitment_hex=payload_commitment(message),
+            payload_commitment_hex=payload_commitment(message, zkp_payload_opening),
             cover_hash=cover_file_hash,
             stego_hash=stego_file_hash,
             positions_hash=used_positions_hash,
-            policy={
-                "codec": "h264-baseline-cavlc",
-                "embedding_strategy": embedding_strategy,
-                "max_modifications_per_block": max_modifications_per_block,
-                "proof_backend": proof_backend,
-            },
+            relation_id=zkp_relation_id,
+            registry_root=zkp_registry_binding[0],
+            registry_epoch=zkp_registry_binding[1],
+            policy=zkp_policy,
         )
         with open(f"{output_path}.pq-statement.json", "w", encoding="utf-8") as file:
             json.dump(zkp_statement.to_dict(), file, ensure_ascii=True, indent=2, sort_keys=True)

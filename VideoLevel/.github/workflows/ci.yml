@@ -36,6 +36,8 @@ jobs:
         run: python src/runtest/test_lazer_backend.py
       - name: Post-quantum video ZKP statement contracts
         run: python src/runtest/test_video_zkp_contract.py
+      - name: Signed future-ZKP relation registry contracts
+        run: python src/runtest/test_zkp_registry.py
       - name: Cost-guided matrix embedding contracts
         run: python src/runtest/test_cost_guided_matrix_embedding.py
       - name: Realtime Annex-B transport contracts
