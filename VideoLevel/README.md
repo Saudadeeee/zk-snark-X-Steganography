@@ -183,6 +183,40 @@ VideoLevel/
 
 ## Quick Start
 
+### Run as an authenticated HTTP service
+
+The delivery API is an actual FastAPI/HTTP surface over the existing `embed()`
+and strict `verify()` functions. It starts fail-closed: choose a long random
+token and set it before starting the service.
+
+```powershell
+$env:ZK_STEGO_API_TOKEN = "replace-with-a-long-random-token"
+py -3.12 -m uvicorn src.api.app:app --host 127.0.0.1 --port 8080
+```
+
+`GET /health` is public. `POST /api/v1/jobs/embed` and
+`POST /api/v1/jobs/verify` accept multipart raw `.h264` uploads and return a
+job id; `GET /api/v1/jobs/{job_id}` polls safe status; and an embed result is
+downloaded at `GET /api/v1/jobs/{job_id}/artifact`. All job routes require
+`Authorization: Bearer <token>`. OpenAPI is available locally at `/docs`.
+
+### Expiring manifest keys
+
+`src.key_policy` issues issuer-signed Ed25519 certificates for manifest public
+keys. A conforming verifier rejects a key after `expires_at`. This is enough for
+offline policy enforcement, but it cannot defeat a copied private key combined
+with a modified clock/verifier. Hard expiration requires an owner-operated
+online lease/revocation service, trusted time, or HSM/TEE policy enforcement;
+it does not require a commercial third party.
+
+### Benchmark delivery report
+
+See [benchmark/DELIVERY_BENCHMARK.md](benchmark/DELIVERY_BENCHMARK.md) for the
+quality, capacity, security, ZKP, time and process-tree resource protocol.
+Run `py -3.12 -m benchmark.resource_benchmark --sections 1 2 3 4 5 6` on each
+target machine; it preserves the resource result locally without overwriting
+the checked benchmark evidence.
+
 ### Requirements
 
 - Python 3.12 recommended

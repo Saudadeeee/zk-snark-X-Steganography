@@ -24,6 +24,7 @@ PHASES = [
     ("Phase 4", "Reconstruct",         "test_phase4_reconstruct.py"),
     ("Phase 5", "Extract + Verify",    "test_phase5_extract_verify.py"),
     ("Phase 6", "Security Hardening",  "test_phase6_security_hardening.py"),
+    ("Phase 7", "HTTP + Key Expiry",   "test_phase7_service_delivery.py"),
 ]
 
 SEP  = '-' * 58
@@ -94,7 +95,7 @@ def main():
     print("  ZK-SNARK Video Steganography — Full Test Suite")
     print(SEP2)
 
-    selected_phases = (PHASES[0], PHASES[-1]) if args.quick else PHASES
+    selected_phases = (PHASES[0], PHASES[-2], PHASES[-1]) if args.quick else PHASES
     summary = []
     for label, desc, filename in selected_phases:
         print(f"\n>>> Running {label} — {desc}")

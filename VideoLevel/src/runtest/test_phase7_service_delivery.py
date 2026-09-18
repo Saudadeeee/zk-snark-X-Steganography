@@ -88,6 +88,47 @@ def t_embed_job_returns_only_safe_public_status():
             assert "contract-message" not in repr(body)
 
 
+def t_verify_job_uses_strict_cover_and_returns_no_message():
+    def verify_handler(**kwargs):
+        assert Path(kwargs["stego_video_path"]).read_bytes().endswith(b"stego")
+        assert Path(kwargs["original_video_path"]).read_bytes().endswith(b"cover")
+        assert kwargs["secret_key"] == b"v" * 32
+        assert kwargs["message_length"] == 8
+        return {"valid": True, "bits_extracted": 1088, "message": b"private"}
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        app = create_app(
+            ApiSettings(api_token="test-token", work_dir=Path(temp_dir)),
+            verify_handler=verify_handler,
+        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/jobs/verify",
+                headers={"Authorization": "Bearer test-token"},
+                data={
+                    "secret_key_b64": base64.b64encode(b"v" * 32).decode("ascii"),
+                    "message_length": "8",
+                },
+                files={
+                    "stego_video": ("stego.h264", b"\x00\x00\x00\x01stego", "video/h264"),
+                    "original_video": ("cover.h264", b"\x00\x00\x00\x01cover", "video/h264"),
+                },
+            )
+            assert response.status_code == 202, response.text
+            job_id = response.json()["job_id"]
+            for _ in range(30):
+                body = client.get(
+                    f"/api/v1/jobs/{job_id}",
+                    headers={"Authorization": "Bearer test-token"},
+                ).json()
+                if body["status"] in {"succeeded", "failed"}:
+                    break
+                time.sleep(0.02)
+            assert body["status"] == "succeeded", body
+            assert body["result"] == {"valid": True, "bits_extracted": 1088}
+            assert "private" not in repr(body)
+
+
 def t_expiring_certificate_rejects_key_after_deadline():
     issuer = Ed25519PrivateKey.generate()
     signer = Ed25519PrivateKey.generate()
@@ -133,6 +174,7 @@ def main():
     results = [
         run_test("health_is_public_but_jobs_require_bearer_token", t_health_is_public_but_jobs_require_bearer_token),
         run_test("embed_job_returns_only_safe_public_status", t_embed_job_returns_only_safe_public_status),
+        run_test("verify_job_uses_strict_cover_and_returns_no_message", t_verify_job_uses_strict_cover_and_returns_no_message),
         run_test("expiring_certificate_rejects_key_after_deadline", t_expiring_certificate_rejects_key_after_deadline),
         run_test("certificate_serialization_is_canonical_and_tamper_evident", t_certificate_serialization_is_canonical_and_tamper_evident),
     ]
