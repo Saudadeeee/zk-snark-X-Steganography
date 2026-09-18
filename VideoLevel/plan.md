@@ -255,7 +255,7 @@ Rules:
 Current implementation status:
 
 - [x] Add experimental trust-plane package under `src/trust`.
-- [x] Add diagnostic runner `benchmark/trust_architecture_diagnostic.py`.
+- [x] Add diagnostic runner `benchmark/diagnostics/trust_architecture_diagnostic.py`.
 - [x] Add interface tests in `src/runtest/test_future_trust_architecture.py`.
 - [x] Register diagnostic-grade runner section `44`.
 - [x] Validate section `44` through `safe_benchmark_runner.py`.

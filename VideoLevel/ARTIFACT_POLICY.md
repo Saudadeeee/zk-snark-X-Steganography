@@ -10,12 +10,12 @@ and which files are rebuildable diagnostics or local cache.
 ### Source and tests
 
 - `src/**`
-- `benchmark/*.py`
+- `benchmark/**/*.py`
 - `src/trust/**`
 - `src/provenance/**`
 - `src/runtest/test_future_trust_architecture.py`
 - `src/runtest/test_phase6_security_hardening.py`
-- `benchmark/trust_architecture_diagnostic.py`
+- `benchmark/diagnostics/trust_architecture_diagnostic.py`
 - `circuits/payload_verify.circom`
 - `circuits/fingerprint_verify.circom`
 - `circuits/detector_receipt.circom`

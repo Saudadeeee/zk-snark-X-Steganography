@@ -19,7 +19,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from benchmark._common import (
     OUTPUT_DIR,
@@ -207,7 +207,7 @@ def plot_ablation(data: dict) -> None:
     ax1.set_xticks(x)
     ax1.set_xticklabels(labels, fontsize=10)
     ax1.set_ylabel("Full-video PSNR (dB)")
-    ax1.set_title("§3A  Ablation: Quality")
+    ax1.set_title("Â§3A  Ablation: Quality")
     for bar, val in zip(bars1, psnr_vals):
         ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.2,
                  f"{val:.2f}", ha="center", va="bottom", fontsize=9, fontweight="bold")
@@ -216,18 +216,18 @@ def plot_ablation(data: dict) -> None:
     ax2.set_xticks(x)
     ax2.set_xticklabels(labels, fontsize=10)
     ax2.set_ylabel("Bits embedded")
-    ax2.set_title("§3A  Ablation: Realized Payload")
+    ax2.set_title("Â§3A  Ablation: Realized Payload")
     for bar, val in zip(bars2, bits_vals):
         ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 8,
                  f"{val}", ha="center", va="bottom", fontsize=9, fontweight="bold")
 
-    fig.suptitle(f"§3A  Internal Ablation Study ({SEQ_LABELS.get(data['sequence'], data['sequence'])})",
+    fig.suptitle(f"Â§3A  Internal Ablation Study ({SEQ_LABELS.get(data['sequence'], data['sequence'])})",
                  fontsize=13, fontweight="bold")
     save_fig(fig, "sec3_ablation")
 
 
 def run(force: bool = False) -> dict:
-    print("\n=== §3A  Internal Ablation Study ===")
+    print("\n=== Â§3A  Internal Ablation Study ===")
     data = collect_data(force=force)
     plot_ablation(data)
     return data

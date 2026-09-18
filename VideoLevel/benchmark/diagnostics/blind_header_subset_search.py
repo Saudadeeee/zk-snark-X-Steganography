@@ -1,8 +1,8 @@
 """
-blind_header_stability_diagnostic.py - Measure per-position readout stability for blind header candidates.
+blind_header_subset_search.py - Search for a stable blind header subset.
 
-This benchmark probes a subset of blind-derived candidate positions and tests
-whether a single embedded bit can be read back reliably after reconstruction.
+This benchmark ranks candidate blind positions by per-bit readout stability and
+stores the best subset for reuse by the blind header/body diagnostic.
 """
 
 import json
@@ -10,19 +10,20 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from benchmark._common import RESULTS_DIR, cache_load, cache_save, load_or_build_benchmark_analysis
 from benchmark.locked_operating_contract import load_best_locked_operating_contract
 from src.blind_sync import derive_blind_positions_validated_pool_proxy
 from src.core.analysis_cache import load_or_build_video_analysis
-from src.bitstream.bitstream_ops import BitstreamReconstructor
 from src.core.pipeline import extract_bits_direct
 from src.core.stego import PayloadEmbedder
+from src.bitstream.bitstream_ops import BitstreamReconstructor
 
-CACHE_KEY = "blind_header_stability_diagnostic"
-SECRET_KEY = bytes(range(32))
-PROBE_LIMIT_FAST = 32
+CACHE_KEY = "blind_header_subset_search"
+SECRET_KEY = b"zk_mv_stego_2026_secret_key!!!!!"
+HEADER_BITS = 32
+PROBE_LIMIT_FAST = 8
 PROBE_LIMIT_FULL = 96
 
 
@@ -41,7 +42,7 @@ def _probe_position(
     t1_override_map,
 ) -> bool:
     payload = bytes([0x80 if embed_bit else 0x00])
-    out_path = Path("data/output") / "_blind_header_probe.h264"
+    out_path = Path("data/output") / "_blind_header_search_probe.h264"
     try:
         embedder = PayloadEmbedder(max_modifications_per_block=1)
         modified, bits_embedded = embedder.embed_payload(
@@ -88,7 +89,7 @@ def _probe_position(
 def collect_data(force: bool = False) -> dict:
     cached = cache_load(CACHE_KEY)
     if cached and not force:
-        print("  [cache hit] blind header stability diagnostic")
+        print("  [cache hit] blind header subset search")
         return cached
 
     contract = load_best_locked_operating_contract(required_bits=1232)
@@ -147,6 +148,7 @@ def collect_data(force: bool = False) -> dict:
         )
 
     rows.sort(key=lambda row: row["score"], reverse=True)
+    subset = [tuple(row["position"]) for row in rows[:HEADER_BITS]]
     perfect = [row for row in rows if row["score"] == 2]
 
     data = {
@@ -155,6 +157,8 @@ def collect_data(force: bool = False) -> dict:
         "probe_limit": probe_limit,
         "perfect_readout_count": len(perfect),
         "perfect_readout_ratio": len(perfect) / max(1, len(rows)),
+        "header_subset_bits": len(subset),
+        "header_subset": [list(pos) for pos in subset],
         "metadata": metadata.__dict__,
         "rows": rows,
     }
@@ -163,11 +167,11 @@ def collect_data(force: bool = False) -> dict:
 
 
 def run(force: bool = False) -> dict:
-    print("\n=== Blind Header Stability Diagnostic ===")
+    print("\n=== Blind Header Subset Search ===")
     data = collect_data(force=force)
     print(
         f"  [{data['sequence']}] perfect_readout={data['perfect_readout_count']}/{data['probe_limit']} "
-        f"({data['perfect_readout_ratio']:.3f})"
+        f"({data['perfect_readout_ratio']:.3f}), header_subset={data['header_subset_bits']} bits"
     )
     print(f"  [saved] {(RESULTS_DIR / f'{CACHE_KEY}.json').name}")
     return data

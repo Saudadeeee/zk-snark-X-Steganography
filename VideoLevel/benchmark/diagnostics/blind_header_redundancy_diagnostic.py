@@ -10,7 +10,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from benchmark._common import RESULTS_DIR, cache_load, cache_save, load_or_build_benchmark_analysis
 from benchmark.locked_operating_contract import load_best_locked_operating_contract

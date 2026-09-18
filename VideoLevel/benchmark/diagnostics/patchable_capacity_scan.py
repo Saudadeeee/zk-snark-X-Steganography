@@ -5,9 +5,9 @@ Outputs:
   - benchmark/results/patchable_capacity_scan.json
 
 Usage:
-  py -3.12 benchmark/patchable_capacity_scan.py
-  py -3.12 benchmark/patchable_capacity_scan.py --force
-  py -3.12 benchmark/patchable_capacity_scan.py --sequences foreman_q22_g1,deadline_q22_g1
+  py -3.12 -m benchmark.diagnostics.patchable_capacity_scan
+  py -3.12 -m benchmark.diagnostics.patchable_capacity_scan --force
+  py -3.12 -m benchmark.diagnostics.patchable_capacity_scan --sequences foreman_q22_g1,deadline_q22_g1
 """
 
 import argparse
@@ -15,7 +15,7 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from benchmark._common import (
     RESULTS_DIR,

@@ -145,6 +145,7 @@ Current committed SEC6 artifact (`benchmark/results/sec6_performance_data.json`)
 ```text
 VideoLevel/
 |-- benchmark/
+|   |-- diagnostics/              Blind-sync and experimental probes
 |   |-- sec1_quality.py           Quality benchmark (PSNR, SSIM)
 |   |-- sec2_capacity.py          Capacity sweep
 |   |-- sec3_methods.py           Method comparison (T1 vs LSB)
@@ -156,7 +157,8 @@ VideoLevel/
 |   |-- sec9_motion_gop.py        Motion-aware GOP selection
 |   |-- sec10_gop_sweep.py        Explicit GOP sweep
 |   |-- statistical_benchmark.py  Error bars, 3 or more runs
-|   `-- sec1_audit.py             Quality guard audit logging
+|   |-- sec1_audit.py             Quality guard audit logging
+|   `-- safe_benchmark_runner.py  Unified paper/diagnostic runner
 |-- circuits/                     Circom circuit + Groth16 keys
 |-- data/
 |   |-- encoded/                  H.264 benchmark inputs

@@ -13,7 +13,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from benchmark._common import OUTPUT_DIR, RESULTS_DIR, cache_load, cache_save, select_best_sec1_operating_asset
 from src.blind_sync import derive_blind_positions_validated_pool_proxy

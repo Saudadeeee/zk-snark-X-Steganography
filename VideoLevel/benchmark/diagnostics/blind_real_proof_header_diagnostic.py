@@ -1,33 +1,32 @@
 """
-blind_body_redundancy_diagnostic.py - Probe blind body readout reliability.
+blind_real_proof_header_diagnostic.py - Isolate header robustness on the real-proof branch.
 
-Uses a working header redundancy scheme, then measures bit-match quality on a
-short blind body segment under different redundancy levels.
+This benchmark focuses only on the 4-byte message-length header while keeping
+the real-proof branch assumptions:
+- same all-intra asset
+- same blind header derivation
+- no proof-prefix or message body mixed into the payload
+
+The goal is to understand which header coding levels are stable before they are
+recombined with the real-proof body branch.
 """
 
-import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from benchmark._common import RESULTS_DIR, SEQUENCES, cache_load, cache_save, load_or_build_benchmark_analysis
-from src.blind_sync import derive_blind_body_positions, derive_blind_header_positions
+from src.blind_sync import derive_blind_header_positions
 from src.bitstream.bitstream_ops import BitstreamReconstructor
 from src.core.pipeline import extract_bits_direct
 from src.core.stego import PayloadEmbedder
 
-CACHE_KEY = "blind_body_redundancy_diagnostic"
-SECRET_KEY = b"zk_mv_stego_2026_secret_key!!!!!"
-MESSAGE = b"Hello ZK-Stego"
+CACHE_KEY = "blind_real_proof_header_diagnostic"
+SECRET_KEY = bytes(range(32))
+MESSAGE = b"ZK-bench-v1.0!"
 HEADER_BITS = 32
-HEADER_REDUNDANCY = 4
-BODY_PROBE_BITS = 64
-BODY_REDUNDANCY_LEVELS = [1, 2, 4]
-
-
-def _fast_mode_enabled() -> bool:
-    return os.environ.get("BLIND_HEADER_FAST", "0") == "1"
+REDUNDANCY_LEVELS = [4, 8, 12]
 
 
 def _bits_to_bytes(bits: list[int]) -> bytes:
@@ -44,7 +43,7 @@ def _bits_to_bytes(bits: list[int]) -> bytes:
 
 
 def _bytes_to_bits(data: bytes) -> list[int]:
-    bits = []
+    bits: list[int] = []
     for byte in data:
         for i in range(7, -1, -1):
             bits.append((byte >> i) & 1)
@@ -52,25 +51,33 @@ def _bytes_to_bits(data: bytes) -> list[int]:
 
 
 def _majority_vote(bits: list[int], redundancy: int) -> list[int]:
-    out = []
+    out: list[int] = []
     for i in range(0, len(bits), redundancy):
         chunk = bits[i:i + redundancy]
         out.append(1 if sum(chunk) > len(chunk) / 2 else 0)
     return out
 
 
+def _repeat_bits(bits: list[int], redundancy: int) -> list[int]:
+    repeated: list[int] = []
+    for bit in bits:
+        repeated.extend([bit] * redundancy)
+    return repeated
+
+
 def collect_data(force: bool = False) -> dict:
     cached = cache_load(CACHE_KEY)
     if cached and not force:
-        print("  [cache hit] blind body redundancy diagnostic")
-        return cached
+        rows = cached.get("rows") if isinstance(cached, dict) else None
+        if isinstance(rows, list) and all(isinstance(row, dict) and "redundancy" in row for row in rows):
+            print("  [cache hit] blind real proof header diagnostic")
+            return cached
+        print("  [cache stale] blind real proof header diagnostic")
 
     seq_name = "coastguard_q22_g1"
     video_path = str(SEQUENCES[seq_name])
-    required_bits = (4 + len(MESSAGE) + 129) * 8
-    message_bits = _bytes_to_bits(MESSAGE)
-    header_source_bits = [(len(MESSAGE).to_bytes(4, "big")[i // 8] >> (7 - (i % 8))) & 1 for i in range(HEADER_BITS)]
-    body_source = message_bits[:BODY_PROBE_BITS]
+    header_bits = _bytes_to_bits(len(MESSAGE).to_bytes(4, "big"))
+
     (
         coefficients,
         frame_verified_data,
@@ -81,30 +88,23 @@ def collect_data(force: bool = False) -> dict:
     ) = load_or_build_benchmark_analysis(video_path, force=force)
 
     rows = []
-    for body_redundancy in BODY_REDUNDANCY_LEVELS:
+    for redundancy in REDUNDANCY_LEVELS:
+        repeated_header_bits = _repeat_bits(header_bits, redundancy)
         header_positions, _ = derive_blind_header_positions(
             video_path,
             SECRET_KEY,
-            header_bits=HEADER_BITS * HEADER_REDUNDANCY,
+            header_bits=len(repeated_header_bits),
             use_analysis_cache=True,
         )
-        repeated_body = []
-        for bit in body_source:
-            repeated_body.extend([bit] * body_redundancy)
-        body_positions, _ = derive_blind_body_positions(
-            video_path,
-            SECRET_KEY,
-            body_bits=len(repeated_body),
-            header_positions=header_positions,
-            use_analysis_cache=True,
-        )
-        positions = header_positions + body_positions
-        payload_bits = []
-        for bit in header_source_bits:
-            payload_bits.extend([bit] * HEADER_REDUNDANCY)
-        payload_bits.extend(repeated_body)
-        payload = _bits_to_bytes(payload_bits)
-        out_path = Path("data/output") / f"_blind_body_{seq_name}_r{body_redundancy}.h264"
+        payload = _bits_to_bytes(repeated_header_bits)
+        out_path = Path("data/output") / f"_blind_real_header_r{redundancy}.h264"
+        row = {
+            "redundancy": redundancy,
+            "required_bits": len(repeated_header_bits),
+            "header_success": False,
+            "decoded_length": None,
+            "length_bit_errors": None,
+        }
         try:
             embedder = PayloadEmbedder(max_modifications_per_block=1)
             modified, bits_embedded = embedder.embed_payload(
@@ -114,7 +114,7 @@ def collect_data(force: bool = False) -> dict:
                 nal_length_map=nal_length_map,
                 t1_override_map=t1_override_map,
                 frame_verified_data=frame_verified_data,
-                pre_validated_positions=positions,
+                pre_validated_positions=header_positions,
             )
             rec = BitstreamReconstructor()
             rec.reconstruct_video(
@@ -128,36 +128,28 @@ def collect_data(force: bool = False) -> dict:
             derived_header, _ = derive_blind_header_positions(
                 str(out_path),
                 SECRET_KEY,
-                header_bits=HEADER_BITS * HEADER_REDUNDANCY,
+                header_bits=len(repeated_header_bits),
                 use_analysis_cache=True,
             )
-            derived_body, _ = derive_blind_body_positions(
-                str(out_path),
-                SECRET_KEY,
-                body_bits=len(repeated_body),
-                header_positions=derived_header,
-                use_analysis_cache=True,
-            )
-            derived_positions = derived_header + derived_body
             blob = extract_bits_direct(
                 str(out_path),
-                derived_positions,
+                derived_header,
                 stego_fvd,
                 stego_nC,
-                len(payload_bits),
+                len(repeated_header_bits),
                 max_modifications_per_block=1,
             )
-            extracted_bits = _bytes_to_bits(blob)[: len(payload_bits)]
-            body_offset = HEADER_BITS * HEADER_REDUNDANCY
-            body_voted = _majority_vote(extracted_bits[body_offset : body_offset + len(repeated_body)], body_redundancy)
-            matches = sum(1 for a, b in zip(body_source, body_voted[: len(body_source)]) if a == b)
-            rows.append(
+            extracted_bits = _bytes_to_bits(blob)[: len(repeated_header_bits)]
+            header_voted = _majority_vote(extracted_bits, redundancy)[:HEADER_BITS]
+            decoded_length = int.from_bytes(_bits_to_bytes(header_voted)[:4], "big")
+            expected_bits = header_bits[:HEADER_BITS]
+            bit_errors = sum(1 for a, b in zip(expected_bits, header_voted) if a != b)
+            row.update(
                 {
-                    "body_redundancy": body_redundancy,
                     "bits_embedded": bits_embedded,
-                    "body_bits_probed": len(body_source),
-                    "body_bits_matched": matches,
-                    "body_match_ratio": matches / max(1, len(body_source)),
+                    "decoded_length": decoded_length,
+                    "header_success": decoded_length == len(MESSAGE),
+                    "length_bit_errors": bit_errors,
                 }
             )
         finally:
@@ -169,23 +161,20 @@ def collect_data(force: bool = False) -> dict:
             ):
                 if path.exists():
                     path.unlink()
+        rows.append(row)
 
-    data = {
-        "sequence": seq_name,
-        "rows": rows,
-    }
+    data = {"sequence": seq_name, "rows": rows}
     cache_save(CACHE_KEY, data)
     return data
 
 
 def run(force: bool = False) -> dict:
-    print("\n=== Blind Body Redundancy Diagnostic ===")
+    print("\n=== Blind Real Proof Header Diagnostic ===")
     data = collect_data(force=force)
     for row in data["rows"]:
         print(
-            f"  body_r={row['body_redundancy']} "
-            f"match={row['body_bits_matched']}/{row['body_bits_probed']} "
-            f"({row['body_match_ratio']:.3f})"
+            f"  r={row['redundancy']} decoded_length={row['decoded_length']} "
+            f"header={row['header_success']} length_bit_errors={row['length_bit_errors']}"
         )
     print(f"  [saved] {(RESULTS_DIR / f'{CACHE_KEY}.json').name}")
     return data

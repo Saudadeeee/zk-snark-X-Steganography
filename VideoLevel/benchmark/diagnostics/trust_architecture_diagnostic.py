@@ -44,7 +44,7 @@ from src.trust.canonical import canonical_json_hash
 from benchmark._common import SEQUENCES, decode_luma_frames
 
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 RESULTS_DIR = ROOT / "benchmark" / "results"
 OUTPUT_PATH = RESULTS_DIR / "trust_architecture_diagnostic.json"
 CIRCUIT_OUT_DIR = ROOT / ".cache" / "future_circuits"
