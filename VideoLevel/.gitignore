@@ -59,6 +59,7 @@ node_modules/
 !benchmark/results/trust_architecture_diagnostic.json
 !src/runtest/test_future_trust_architecture.py
 !src/runtest/test_phase6_security_hardening.py
+!src/runtest/test_phase7_service_delivery.py
 
 # Temporary files
 *.tmp
