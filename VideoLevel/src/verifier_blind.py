@@ -36,7 +36,7 @@ def verify_near_blind(
     use_analysis_cache: bool = True,
     force_analysis_refresh: bool = False,
     analysis_cache_dir: Optional[str] = None,
-    manifest_signing_key: Optional[bytes] = None,
+    manifest_verification_key: Optional[bytes] = None,
 ) -> VerifyResult:
     """
     Verify ZK proof without the original cover video.
@@ -67,12 +67,12 @@ def verify_near_blind(
             "Near-blind verification requires positions.json."
         )
 
-    if manifest_signing_key is not None:
-        if not manifest.verify_signature(manifest_signing_key):
+    if manifest_verification_key is not None:
+        if not manifest.verify_signature(manifest_verification_key):
             raise RuntimeError("Manifest signature verification failed")
     elif manifest.signature:
         logger.warning(
-            "[Manifest] Signature present but no manifest_signing_key was provided; "
+            "[Manifest] Signature present but no manifest_verification_key was provided; "
             "skipping authenticity verification"
         )
 

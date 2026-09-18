@@ -14,9 +14,14 @@ and which files are rebuildable diagnostics or local cache.
 - `src/trust/**`
 - `src/provenance/**`
 - `src/runtest/test_future_trust_architecture.py`
+- `src/runtest/test_phase6_security_hardening.py`
 - `benchmark/trust_architecture_diagnostic.py`
 - `circuits/payload_verify.circom`
+- `circuits/fingerprint_verify.circom`
+- `circuits/detector_receipt.circom`
 - `circuits/package.json`
+- `circuits/package-lock.json`
+- `circuits/test/**`
 - `requirements.txt`
 - `requirements.lock`
 
@@ -120,3 +125,6 @@ The audited current baseline expects the following local tools to be present:
 
 These tools are used for circuit compilation, witness/proof generation, video
 encoding/validation, and benchmark replay.
+
+Install the Node dependencies with `npm ci`, never `npm install`, so the
+committed package lock governs the Circom toolchain.

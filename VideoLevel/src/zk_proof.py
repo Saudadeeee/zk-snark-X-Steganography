@@ -196,7 +196,7 @@ class ZKSnarkBridge:
     WASM_FILE  = "payload_verify.wasm"
     ZKEY_FILE  = "proving_key.zkey"
     VKEY_FILE  = "verification_key.json"
-    CONSTRAINT_COUNT = 18680
+    CONSTRAINT_COUNT = 62553
 
     def __init__(self, circuits_dir: str):
         self.circuits_dir = Path(circuits_dir).resolve()
@@ -293,6 +293,10 @@ class ZKSnarkBridge:
                     f"Witness generation failed:\n{result.stdout}\n{result.stderr}"
                 )
             return witness_path
+        except BaseException:
+            # A failed witness can leave private intermediate data behind.
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
         finally:
             # Always delete input file — it contains secret_key in plaintext bits
             input_path.unlink(missing_ok=True)

@@ -8,6 +8,11 @@ Caches the immutable analysis derived from an original cover video:
   - safe_positions from CAVLCSafetyFilter
 
 This is intended for application/runtime usage, unlike benchmark-only caches.
+
+The cache format is Python pickle and therefore unsafe to deserialize from a
+directory writable by an untrusted party. It is disabled by default; an
+operator who controls the cache directory may explicitly opt in with
+``ZK_STEGO_TRUSTED_PICKLE_CACHE=1``.
 """
 
 from __future__ import annotations
@@ -27,6 +32,11 @@ from .stego import CAVLCSafetyFilter
 ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_CACHE_DIR = ROOT / ".cache" / "video_analysis"
 CACHE_SCHEMA_VERSION = 1
+
+
+def _trusted_pickle_cache_enabled() -> bool:
+    """Return whether the operator explicitly trusts the pickle cache path."""
+    return os.environ.get("ZK_STEGO_TRUSTED_PICKLE_CACHE", "0") == "1"
 
 
 def _cache_path(video_path: str | Path, cache_dir: str | Path | None = None) -> Path:
@@ -125,7 +135,8 @@ def load_or_build_video_analysis(
     cache_path = _cache_path(vp, cache_dir)
     fingerprint = _video_fingerprint(vp)
 
-    if use_cache and not force_refresh and cache_path.exists():
+    use_trusted_cache = use_cache and _trusted_pickle_cache_enabled()
+    if use_trusted_cache and not force_refresh and cache_path.exists():
         try:
             with open(cache_path, "rb") as f:
                 payload = pickle.load(f)
@@ -159,7 +170,7 @@ def load_or_build_video_analysis(
         safe_positions,
     )
 
-    if use_cache:
+    if use_trusted_cache:
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             with open(cache_path, "wb") as f:
@@ -203,7 +214,8 @@ def load_or_build_reconstruction_context(
     cache_path = _cache_path(vp, cache_dir).with_name(_cache_path(vp, cache_dir).stem + "_recon.pkl")
     fingerprint = _video_fingerprint(vp)
 
-    if use_cache and not force_refresh and cache_path.exists():
+    use_trusted_cache = use_cache and _trusted_pickle_cache_enabled()
+    if use_trusted_cache and not force_refresh and cache_path.exists():
         try:
             with open(cache_path, "rb") as f:
                 payload = pickle.load(f)
@@ -214,7 +226,7 @@ def load_or_build_reconstruction_context(
 
     data = _build_reconstruction_context(vp)
 
-    if use_cache:
+    if use_trusted_cache:
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             with open(cache_path, "wb") as f:

@@ -53,10 +53,12 @@ node_modules/
 # Test outputs
 *.json
 !circuits/package.json
+!circuits/package-lock.json
 !circuits/build/verification_key.json
 !benchmark/results/sec*.json
 !benchmark/results/trust_architecture_diagnostic.json
 !src/runtest/test_future_trust_architecture.py
+!src/runtest/test_phase6_security_hardening.py
 
 # Temporary files
 *.tmp

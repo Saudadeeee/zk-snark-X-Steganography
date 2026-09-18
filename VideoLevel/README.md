@@ -4,7 +4,8 @@ Hide a Groth16 zero-knowledge proof inside H.264 baseline video by modifying CAV
 
 **Status:** Research prototype with a frozen benchmark-grade core: locked operating-point embedding plus sidecar-assisted near-blind verification
 **Validated Runtime:** `py -3.12`
-**Tests:** full suite executes `35/35` passing checks with `0` failed and `0` skipped
+**Tests:** committed phase tests cover proof, reconstruction, extraction/verification,
+and security hardening. Video-dependent phases require the documented local assets.
 **Benchmark Sections:** SEC1-SEC10 (Quality, Capacity, Methods, Security, Performance, Tradeoff, Real-time, Motion/GOP, Statistical, Audit)
 
 ---
@@ -210,9 +211,9 @@ Observed native toolchain on the current audit machine:
 Install:
 
 ```bash
-py -3.12 -m pip install -r requirements.txt
+py -3.12 -m pip install -r requirements.lock
 cd circuits
-npm install
+npm ci
 cd ..
 ```
 
@@ -329,8 +330,8 @@ result = verify_near_blind(
 py -3.12 src/runtest/run_all.py --quick
 py -3.12 src/runtest/test_phase4_reconstruct.py
 py -3.12 src/runtest/test_phase5_extract_verify.py
-py -3.12 src/runtest/test_phase6_near_blind_manifest.py
-py -3.12 src/runtest/test_phase7_regression_cases.py
+py -3.12 src/runtest/test_phase6_security_hardening.py
+py -3.12 src/runtest/test_future_trust_architecture.py  # experimental interfaces
 py -3.12 src/runtest/run_all.py
 ```
 
@@ -340,15 +341,6 @@ Test exit codes:
 - `1`: at least one selected test failed.
 - `2`: no assertion failed, but at least one required case was skipped, so the
   phase is incomplete and must not be counted as full evidence.
-
-### Run minimal API demo
-
-```bash
-py -3.12 src/runtest/demo_embed_verify.py
-```
-
-The demo uses the real `embed()` and `verify()` APIs. It exits with code `2`
-when no verified locked SEC1 operating contract is currently available.
 
 ### Run benchmarks
 
@@ -459,10 +451,13 @@ The repo already includes built artifacts. To rebuild:
 
 ```bash
 cd circuits
+npm ci
 npm run compile
-npm run generate_proof_key
-npm run generate_verification_key
 ```
+
+The proving key and verification key are ceremony artifacts, not package scripts.
+Provision them through the trusted-setup workflow before invoking the Python
+proof API.
 
 ---
 

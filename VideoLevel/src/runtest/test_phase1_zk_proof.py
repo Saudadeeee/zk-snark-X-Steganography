@@ -128,6 +128,21 @@ def t_zk_tampered_message_fails():
     assert not ok, "verify should return False for tampered message"
 
 
+def t_zk_rejects_invalid_payload_lengths():
+    if not node_available():
+        SKIP("zk_rejects_invalid_payload_lengths", "node not found on PATH")
+        return
+    circuits = get_circuits_dir()
+    from src.zk_proof import ZKSnarkBridge
+    bridge = ZKSnarkBridge(circuits)
+    for invalid_payload in (b"", b"x" * 1_000_000):
+        try:
+            bridge.generate_proof_for_payload(invalid_payload, SECRET_KEY)
+        except RuntimeError:
+            continue
+        raise AssertionError(f"payload length {len(invalid_payload)} unexpectedly produced a proof")
+
+
 # ── Main ─────────────────────────────────────────────────────────────── #
 
 def main():
@@ -140,6 +155,7 @@ def main():
         run_test("blob_structure",            t_blob_structure),
         run_test("zk_generate_and_verify",    t_zk_generate_and_verify),
         run_test("zk_tampered_message_fails", t_zk_tampered_message_fails),
+        run_test("zk_rejects_invalid_payload_lengths", t_zk_rejects_invalid_payload_lengths),
     ]
     sys.exit(summarise(results, "Phase 1"))
 

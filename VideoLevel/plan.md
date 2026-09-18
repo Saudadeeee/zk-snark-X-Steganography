@@ -41,10 +41,11 @@ Use the real runner and APIs that exist in the codebase.
 
 ```powershell
 py -3.12 src\runtest\run_all.py --quick
+py -3.12 src\runtest\test_phase1_zk_proof.py
 py -3.12 src\runtest\test_phase4_reconstruct.py
 py -3.12 src\runtest\test_phase5_extract_verify.py
-py -3.12 src\runtest\test_phase6_near_blind_manifest.py
-py -3.12 src\runtest\test_phase7_regression_cases.py
+py -3.12 src\runtest\test_phase6_security_hardening.py
+py -3.12 src\runtest\test_future_trust_architecture.py
 ```
 
 Full suite:
@@ -193,29 +194,9 @@ Current API validation:
 
 ### P5 - Minimal runnable demo
 
-Add a real demo only if it uses existing APIs and existing sample assets.
-
-Proposed location:
-
-```text
-src/runtest/demo_embed_verify.py
-```
-
-Requirements:
-
-- [x] Use `src.embedder.embed()` as a Python API.
-- [x] Use `src.verifier.verify()` or `src.verifier_blind.verify_near_blind()`.
-- [x] Fail gracefully if benchmark assets, verified SEC1 contract, or circuit
-      artifacts are missing.
-- [x] Do not pretend `embedder.py` is a CLI.
-
-Implemented:
-
-```text
-src/runtest/demo_embed_verify.py
-```
-
-Current locked contract is available through `akiyo_q22_g1`.
+No standalone demo is committed. The public API examples in `README.md` are
+the supported entry point; they must be run only with the documented assets and
+trusted-setup artifacts.
 
 ---
 

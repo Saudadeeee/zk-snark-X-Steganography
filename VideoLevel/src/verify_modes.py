@@ -88,7 +88,7 @@ def verify_nearblind(
     use_analysis_cache: bool = True,
     force_analysis_refresh: bool = False,
     analysis_cache_dir: Optional[str] = None,
-    manifest_signing_key: Optional[bytes] = None,
+    manifest_verification_key: Optional[bytes] = None,
 ) -> VerifyResult:
     """
     Sidecar-assisted near-blind verification using manifest-driven extraction.
@@ -115,7 +115,7 @@ def verify_nearblind(
         use_analysis_cache=use_analysis_cache,
         force_analysis_refresh=force_analysis_refresh,
         analysis_cache_dir=analysis_cache_dir,
-        manifest_signing_key=manifest_signing_key,
+        manifest_verification_key=manifest_verification_key,
     )
 
 
@@ -163,7 +163,7 @@ def verify_auto(
     original_video_path: Optional[str] = None,
     max_modifications_per_block: int = 1,
     chaos_key: Optional[bytes] = None,
-    manifest_signing_key: Optional[bytes] = None,
+    manifest_verification_key: Optional[bytes] = None,
 ) -> VerifyResult:
     """
     Auto-select verification mode based on available files.
@@ -187,7 +187,7 @@ def verify_auto(
                 message_length=message_length,
                 max_modifications_per_block=max_modifications_per_block,
                 chaos_key=chaos_key,
-                manifest_signing_key=manifest_signing_key,
+                manifest_verification_key=manifest_verification_key,
             )
         except RuntimeError:
             if not original_video_path:

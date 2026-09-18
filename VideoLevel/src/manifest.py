@@ -5,7 +5,7 @@ Versioned manifest structure for embed/verify sidecars.
 
 from __future__ import annotations
 
-import hmac
+import base64
 import hashlib
 import json
 from dataclasses import dataclass, field
@@ -80,7 +80,7 @@ class StegoManifest:
     - embedding: Embedding process metadata
     - video: Source video metadata
     - proof: ZK proof metadata
-    - signature: Optional HMAC/ED25519 signature for authenticity
+    - signature: Optional Ed25519 signature for authenticity
     """
 
     version: str = MANIFEST_VERSION
@@ -92,8 +92,9 @@ class StegoManifest:
     proof: ProofMetadata = field(default_factory=ProofMetadata)
 
     # Optional signing
-    signature: Optional[str] = None  # Base64-encoded signature
-    signer: Optional[str] = None    # Key identifier
+    signature: Optional[str] = None  # Base64-encoded Ed25519 signature
+    signer: Optional[str] = None     # Key identifier
+    signature_scheme: Optional[str] = None
 
     def to_dict(self) -> dict:
         """Convert manifest to JSON-serializable dict."""
@@ -139,6 +140,7 @@ class StegoManifest:
             },
             "signature": self.signature,
             "signer": self.signer,
+            "signature_scheme": self.signature_scheme,
         }
 
     @classmethod
@@ -183,6 +185,7 @@ class StegoManifest:
             ),
             signature=data.get("signature"),
             signer=data.get("signer"),
+            signature_scheme=data.get("signature_scheme"),
         )
 
     def to_json(self, indent: int = 2) -> str:
@@ -210,23 +213,38 @@ class StegoManifest:
         manifest_dict = self.to_dict()
         manifest_dict["signature"] = None
         manifest_dict["signer"] = None
+        manifest_dict["signature_scheme"] = None
         content = json.dumps(manifest_dict, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         return hashlib.sha256(content.encode()).hexdigest()
 
     def verify_signature(self, public_key: bytes) -> bool:
-        """Verify manifest signature using HMAC-SHA256."""
+        """Verify an Ed25519 signature using the signer's 32-byte public key."""
         if not self.signature or not isinstance(public_key, (bytes, bytearray)) or len(public_key) == 0:
             return False
-        expected = hmac.new(bytes(public_key), self.compute_content_hash().encode("utf-8"), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(self.signature, expected)
+        if self.signature_scheme != "ed25519":
+            return False
+        try:
+            from cryptography.exceptions import InvalidSignature
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+            signature = base64.b64decode(self.signature, validate=True)
+            verifier = Ed25519PublicKey.from_public_bytes(bytes(public_key))
+            verifier.verify(signature, self.compute_content_hash().encode("utf-8"))
+            return True
+        except (ImportError, ValueError, TypeError, InvalidSignature):
+            return False
 
     def sign(self, private_key: bytes, signer_id: Optional[str] = None) -> None:
-        """Sign manifest content using HMAC-SHA256."""
-        if not isinstance(private_key, (bytes, bytearray)) or len(private_key) == 0:
-            raise ValueError("private_key must be non-empty bytes")
-        content_hash = self.compute_content_hash()
-        self.signature = hmac.new(bytes(private_key), content_hash.encode("utf-8"), hashlib.sha256).hexdigest()
+        """Sign manifest content with a 32-byte Ed25519 private key."""
+        if not isinstance(private_key, (bytes, bytearray)) or len(private_key) != 32:
+            raise ValueError("private_key must be a 32-byte Ed25519 private key")
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        signer = Ed25519PrivateKey.from_private_bytes(bytes(private_key))
+        raw_signature = signer.sign(self.compute_content_hash().encode("utf-8"))
+        self.signature = base64.b64encode(raw_signature).decode("ascii")
         self.signer = signer_id or "default"
+        self.signature_scheme = "ed25519"
 
 
 def compute_file_hash(file_path: str) -> str:
