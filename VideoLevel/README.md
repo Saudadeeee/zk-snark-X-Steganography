@@ -232,7 +232,9 @@ Current audited Python package set:
 - `matplotlib` 3.10.8
 - `scipy` 1.17.0
 - `scikit-image` 0.26.0
-- `cryptography` 46.0.5
+- `cryptography` 50.0.0
+- `fastapi` 0.131.0, `uvicorn` 0.41.0, `python-multipart` 0.0.32
+- `psutil` 7.2.2 (whole-process resource benchmark)
 
 Observed native toolchain on the current audit machine:
 
