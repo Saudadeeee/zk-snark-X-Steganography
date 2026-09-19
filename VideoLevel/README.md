@@ -219,6 +219,12 @@ Run `py -3.12 -m benchmark.resource_benchmark --sections 1 2 3 4 5 6` on each
 target machine; it preserves the resource result locally without overwriting
 the checked benchmark evidence.
 
+### Realtime CAVLC roadmap
+
+The CAVLC-only realtime design, native patcher contract, theory and acceptance
+metrics are documented in [doc/realtime_cavlc_theory_and_implementation.md](doc/realtime_cavlc_theory_and_implementation.md).
+The tested scheduler is run with `py -3.12 src/runtest/test_phase9_realtime_cavlc.py`.
+
 ### Requirements
 
 - Python 3.12 recommended
