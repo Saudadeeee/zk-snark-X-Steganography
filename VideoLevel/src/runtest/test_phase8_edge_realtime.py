@@ -23,16 +23,16 @@ def _nal(nal_type: int, payload: bytes) -> bytes:
     return b"\x00\x00\x00\x01" + bytes([0x60 | nal_type]) + payload
 
 
-def _native_relay() -> Path:
+def _native_pixel_embed() -> Path:
     root = Path(__file__).resolve().parents[2]
-    relay = root / "native" / "edge-build" / "Release" / "zkstego_annexb_relay.exe"
-    if relay.is_file():
-        return relay
+    executable = root / "native" / "edge-build" / "Release" / "zkstego_pixel_embed.exe"
+    if executable.is_file():
+        return executable
     cmake = "cmake"
     subprocess.run([cmake, "-S", "native", "-B", "native/edge-build"], cwd=root, check=True)
     subprocess.run([cmake, "--build", "native/edge-build", "--config", "Release"], cwd=root, check=True)
-    assert relay.is_file(), "CMake build did not produce native relay"
-    return relay
+    assert executable.is_file(), "CMake build did not produce native pixel embedder"
+    return executable
 
 
 def t_budget_requires_frame_pacing_and_bounded_latency():
@@ -94,16 +94,19 @@ def t_edge_benchmark_rejects_drops_or_over_budget_p95():
     assert assess_realtime(p95_latency_s=0.1, dropped_segments=1, max_latency_s=1.0) == "fail_drops"
 
 
-def t_native_relay_keeps_binary_annexb_bytes_on_windows():
-    relay = _native_relay()
-    source = _nal(7, b"sps\x1a") + _nal(8, b"pps") + _nal(5, b"idr")
+def t_native_pixel_embedder_changes_only_luma_plane():
+    embedder = _native_pixel_embed()
+    luma = bytes([128]) * 16
+    chroma = bytes(range(8))
     result = subprocess.run(
-        [str(relay), "--sei-payload-hex", "CAFE"], input=source,
+        [str(embedder), "--width", "4", "--height", "4", "--payload-hex", "CAFE"],
+        input=luma + chroma,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
     )
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
-    assert len(result.stdout) > len(source)
-    assert b"sps\x1a" in result.stdout
+    assert len(result.stdout) == len(luma) + len(chroma)
+    assert result.stdout[:len(luma)] != luma
+    assert result.stdout[len(luma):] == chroma
 
 
 def main():
@@ -114,7 +117,7 @@ def main():
         run_test("proof_epoch_is_generated_once_for_concurrent_segments", t_proof_epoch_is_generated_once_for_concurrent_segments),
         run_test("annexb_segmenter_emits_complete_idr_segment", t_annexb_segmenter_emits_complete_idr_segment),
         run_test("edge_benchmark_rejects_drops_or_over_budget_p95", t_edge_benchmark_rejects_drops_or_over_budget_p95),
-        run_test("native_relay_keeps_binary_annexb_bytes_on_windows", t_native_relay_keeps_binary_annexb_bytes_on_windows),
+        run_test("native_pixel_embedder_changes_only_luma_plane", t_native_pixel_embedder_changes_only_luma_plane),
     ]
     sys.exit(summarise(results, "Phase 8"))
 

@@ -1,21 +1,10 @@
 #include "zkstego/live.hpp"
 
 #include <cassert>
+#include <cstdlib>
 #include <cstdint>
 #include <iostream>
 #include <vector>
-
-namespace {
-std::vector<std::uint8_t> nal(std::uint8_t type, const char* payload) {
-    std::vector<std::uint8_t> result{0, 0, 0, 1, static_cast<std::uint8_t>(0x60 | type)};
-    while (*payload) result.push_back(static_cast<std::uint8_t>(*payload++));
-    return result;
-}
-
-void append(std::vector<std::uint8_t>& target, const std::vector<std::uint8_t>& source) {
-    target.insert(target.end(), source.begin(), source.end());
-}
-}  // namespace
 
 int main() {
     zkstego::PixelEmbeddingConfig config{16, 16, 8};

@@ -6,12 +6,24 @@
 
 namespace zkstego {
 
-/// Inserts a standards-shaped user-data SEI immediately before the first IDR.
-/// This is edge transport metadata, not a replacement for CAVLC proof embedding.
-std::vector<std::uint8_t> inject_sei_before_idr(
-    const std::vector<std::uint8_t>& annex_b,
-    const std::vector<std::uint8_t>& payload);
+/// Pixel-domain configuration for one Y (luma) plane of a YUV420P frame.
+struct PixelEmbeddingConfig {
+    std::uint32_t width;
+    std::uint32_t height;
+    std::uint8_t quantization_step = 8;
+};
 
-std::size_t count_nal_type(const std::vector<std::uint8_t>& annex_b, std::uint8_t nal_type);
+/// Embed payload bits directly in luma pixels with two QIM cosets. The payload
+/// is not written to H.264 headers, SEI, or other metadata.
+std::vector<std::uint8_t> embed_luma_qim(
+    const std::vector<std::uint8_t>& luma,
+    const std::vector<std::uint8_t>& payload,
+    PixelEmbeddingConfig config);
+
+/// Recover payload bytes from a luma plane produced by embed_luma_qim().
+std::vector<std::uint8_t> extract_luma_qim(
+    const std::vector<std::uint8_t>& luma,
+    std::size_t payload_bytes,
+    PixelEmbeddingConfig config);
 
 }  // namespace zkstego

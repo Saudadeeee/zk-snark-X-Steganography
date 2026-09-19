@@ -1,85 +1,89 @@
 #include "zkstego/live.hpp"
 
-#include <array>
-#include <optional>
+#include <algorithm>
+#include <limits>
+#include <stdexcept>
 
 namespace zkstego {
 namespace {
 
-struct StartCode {
-    std::size_t offset;
-    std::size_t length;
-};
-
-std::optional<StartCode> find_start_code(const std::vector<std::uint8_t>& bytes, std::size_t from) {
-    for (std::size_t i = from; i + 3 <= bytes.size(); ++i) {
-        if (i + 4 <= bytes.size() && bytes[i] == 0 && bytes[i + 1] == 0 &&
-            bytes[i + 2] == 0 && bytes[i + 3] == 1) {
-            return StartCode{i, 4};
-        }
-        if (bytes[i] == 0 && bytes[i + 1] == 0 && bytes[i + 2] == 1 &&
-            (i == 0 || bytes[i - 1] != 0)) {
-            return StartCode{i, 3};
-        }
+void validate(const std::vector<std::uint8_t>& luma, std::size_t payload_bytes, PixelEmbeddingConfig config) {
+    if (config.width == 0 || config.height == 0 || config.width % 2 != 0 || config.height % 2 != 0) {
+        throw std::invalid_argument("YUV420P width and height must be positive even values");
     }
-    return std::nullopt;
+    if (config.quantization_step < 4 || config.quantization_step % 4 != 0) {
+        throw std::invalid_argument("quantization_step must be a multiple of four");
+    }
+    const std::size_t pixels = static_cast<std::size_t>(config.width) * config.height;
+    if (luma.size() != pixels) throw std::invalid_argument("luma plane size does not match dimensions");
+    if (payload_bytes > pixels / 8) throw std::invalid_argument("payload exceeds one-frame pixel capacity");
 }
 
-void append_sei_length(std::vector<std::uint8_t>& output, std::size_t value) {
-    while (value >= 255) {
-        output.push_back(255);
-        value -= 255;
-    }
-    output.push_back(static_cast<std::uint8_t>(value));
+std::size_t position_for_bit(std::size_t bit_index, std::size_t bit_count, std::size_t pixels) {
+    // Equally spaced positions make all locations unique for bit_count <= pixels,
+    // avoiding visual clustering without storing a position sidecar.
+    return (bit_index * pixels) / bit_count;
 }
 
-std::vector<std::uint8_t> make_user_data_sei(const std::vector<std::uint8_t>& payload) {
-    // UUID identifies this as ZKStego edge metadata, not generic encoder data.
-    constexpr std::array<std::uint8_t, 16> uuid{
-        0x5A, 0x4B, 0x53, 0x54, 0x45, 0x47, 0x4F, 0x2D,
-        0x45, 0x44, 0x47, 0x45, 0x2D, 0x30, 0x30, 0x31,
-    };
-    std::vector<std::uint8_t> sei{0, 0, 0, 1, 0x06};
-    append_sei_length(sei, 5);  // user_data_unregistered
-    append_sei_length(sei, uuid.size() + payload.size());
-    sei.insert(sei.end(), uuid.begin(), uuid.end());
-    sei.insert(sei.end(), payload.begin(), payload.end());
-    sei.push_back(0x80);  // rbsp_trailing_bits
-    return sei;
+int circular_distance(int a, int b, int modulus) {
+    const int linear = std::abs(a - b);
+    return std::min(linear, modulus - linear);
+}
+
+std::uint8_t quantize_to_bit(std::uint8_t value, int bit, int step) {
+    const int remainder = bit == 0 ? step / 4 : (3 * step) / 4;
+    const int base = (static_cast<int>(value) / step) * step;
+    int selected = 0;
+    int best_distance = std::numeric_limits<int>::max();
+    for (const int candidate : {base - step + remainder, base + remainder, base + step + remainder}) {
+        if (candidate < 0 || candidate > 255) continue;
+        const int distance = std::abs(candidate - static_cast<int>(value));
+        if (distance < best_distance) {
+            selected = candidate;
+            best_distance = distance;
+        }
+    }
+    return static_cast<std::uint8_t>(selected);
+}
+
+int bit_at(const std::vector<std::uint8_t>& payload, std::size_t bit_index) {
+    return (payload[bit_index / 8] >> (7 - (bit_index % 8))) & 1;
 }
 
 }  // namespace
 
-std::size_t count_nal_type(const std::vector<std::uint8_t>& annex_b, std::uint8_t nal_type) {
-    std::size_t count = 0;
-    for (std::size_t cursor = 0; ; ) {
-        const auto start = find_start_code(annex_b, cursor);
-        if (!start || start->offset + start->length >= annex_b.size()) break;
-        if ((annex_b[start->offset + start->length] & 0x1F) == nal_type) ++count;
-        cursor = start->offset + start->length;
+std::vector<std::uint8_t> embed_luma_qim(
+    const std::vector<std::uint8_t>& luma,
+    const std::vector<std::uint8_t>& payload,
+    PixelEmbeddingConfig config) {
+    validate(luma, payload.size(), config);
+    if (payload.empty()) return luma;
+    std::vector<std::uint8_t> stego = luma;
+    const std::size_t bit_count = payload.size() * 8;
+    for (std::size_t bit = 0; bit < bit_count; ++bit) {
+        const auto position = position_for_bit(bit, bit_count, stego.size());
+        stego[position] = quantize_to_bit(stego[position], bit_at(payload, bit), config.quantization_step);
     }
-    return count;
+    return stego;
 }
 
-std::vector<std::uint8_t> inject_sei_before_idr(
-    const std::vector<std::uint8_t>& annex_b,
-    const std::vector<std::uint8_t>& payload) {
-    if (payload.empty()) return annex_b;
-    for (std::size_t cursor = 0; ; ) {
-        const auto start = find_start_code(annex_b, cursor);
-        if (!start || start->offset + start->length >= annex_b.size()) break;
-        if ((annex_b[start->offset + start->length] & 0x1F) == 5) {
-            const auto sei = make_user_data_sei(payload);
-            std::vector<std::uint8_t> result;
-            result.reserve(annex_b.size() + sei.size());
-            result.insert(result.end(), annex_b.begin(), annex_b.begin() + static_cast<std::ptrdiff_t>(start->offset));
-            result.insert(result.end(), sei.begin(), sei.end());
-            result.insert(result.end(), annex_b.begin() + static_cast<std::ptrdiff_t>(start->offset), annex_b.end());
-            return result;
-        }
-        cursor = start->offset + start->length;
+std::vector<std::uint8_t> extract_luma_qim(
+    const std::vector<std::uint8_t>& luma,
+    std::size_t payload_bytes,
+    PixelEmbeddingConfig config) {
+    validate(luma, payload_bytes, config);
+    std::vector<std::uint8_t> payload(payload_bytes, 0);
+    const std::size_t bit_count = payload_bytes * 8;
+    if (bit_count == 0) return payload;
+    const int step = config.quantization_step;
+    for (std::size_t bit = 0; bit < bit_count; ++bit) {
+        const auto position = position_for_bit(bit, bit_count, luma.size());
+        const int remainder = luma[position] % step;
+        const int zero_distance = circular_distance(remainder, step / 4, step);
+        const int one_distance = circular_distance(remainder, (3 * step) / 4, step);
+        if (one_distance < zero_distance) payload[bit / 8] |= static_cast<std::uint8_t>(1U << (7 - (bit % 8)));
     }
-    return annex_b;
+    return payload;
 }
 
 }  // namespace zkstego
