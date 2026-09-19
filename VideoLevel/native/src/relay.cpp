@@ -7,6 +7,11 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 namespace {
 
 std::vector<std::uint8_t> parse_hex(const std::string& source) {
@@ -25,6 +30,12 @@ std::vector<std::uint8_t> parse_hex(const std::string& source) {
 
 int main(int argc, char** argv) {
     try {
+#ifdef _WIN32
+        // H.264 is arbitrary binary: text mode treats 0x1A as EOF and may
+        // translate newlines, silently corrupting a live camera stream.
+        _setmode(_fileno(stdin), _O_BINARY);
+        _setmode(_fileno(stdout), _O_BINARY);
+#endif
         std::vector<std::uint8_t> payload;
         for (int i = 1; i < argc; ++i) {
             const std::string argument(argv[i]);
