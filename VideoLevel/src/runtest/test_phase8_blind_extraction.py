@@ -1,12 +1,32 @@
-"""Contracts for sidecar-free CAVLC blind extraction."""
+"""Contracts and an end-to-end test for sidecar-free CAVLC blind extraction."""
 
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from src.blind import blind_payload_bits, sign_invariant_positions
-from src.runtest._helpers import run_test, section, summarise
+from src.blind import (
+    blind_payload_bits,
+    embed_blind,
+    sign_invariant_positions,
+    verify_blind,
+)
+from src.embedder import _filter_reconstructed_positions
+from src.runtest._helpers import (
+    get_circuits_dir,
+    get_output,
+    get_video,
+    node_available,
+    run_test,
+    section,
+    summarise,
+    SKIP,
+)
+
+
+SECRET_KEY = b"blind-e2e-key-material-for-cavlc"
+MESSAGE = b"blind-e2e"
 
 
 def t_blind_positions_use_sign_only_and_keep_order():
@@ -19,11 +39,74 @@ def t_blind_payload_size_is_derivable_without_sidecar():
     assert blind_payload_bits(message_length=13) == (4 + 13 + 129) * 8
 
 
+def t_reconstruction_accounting_excludes_unapplied_blocks():
+    used = [(10, 0, ~2), (11, 1, ~3)]
+    filtered, missing = _filter_reconstructed_positions(
+        used_positions=used,
+        modified_block_keys={(10, 0), (11, 1)},
+        applied_block_keys={(10, 0)},
+    )
+    assert filtered == [(10, 0, ~2)]
+    assert missing == {(11, 1)}
+
+
+def _remove_blind_artifacts(output_path: str) -> None:
+    for suffix in ("", ".positions.json", ".meta.json", ".manifest.json", ".lattice.json"):
+        artifact = Path(f"{output_path}{suffix}")
+        if artifact.exists():
+            artifact.unlink()
+
+
+def t_blind_round_trip_without_cover_or_sidecars():
+    if not node_available():
+        SKIP("blind_round_trip_without_cover_or_sidecars", "node not found on PATH")
+        return
+
+    video = get_video("deadline_cif_q22_g1.h264")
+    if not os.path.isfile(video):
+        SKIP("blind_round_trip_without_cover_or_sidecars", "blind E2E video asset unavailable")
+        return
+
+    output = get_output("test_p8_blind_e2e.h264")
+    _remove_blind_artifacts(output)
+    try:
+        embedded = embed_blind(
+            video_path=video,
+            message=MESSAGE,
+            output_path=output,
+            circuits_dir=get_circuits_dir(),
+            secret_key=SECRET_KEY,
+            use_analysis_cache=True,
+        )
+        assert os.path.isfile(output), "blind embed must produce a stego bitstream"
+        assert embedded.bits_embedded == blind_payload_bits(message_length=len(MESSAGE))
+
+        # A blind receiver must not use the original cover or any generated sidecar.
+        for suffix in (".positions.json", ".meta.json", ".manifest.json", ".lattice.json"):
+            sidecar = Path(f"{output}{suffix}")
+            if sidecar.exists():
+                sidecar.unlink()
+
+        verified = verify_blind(
+            stego_video_path=output,
+            circuits_dir=get_circuits_dir(),
+            secret_key=SECRET_KEY,
+            message_length=len(MESSAGE),
+            use_analysis_cache=True,
+        )
+        assert verified.valid, "blind verification must succeed without cover or sidecars"
+        assert verified.message == MESSAGE
+    finally:
+        _remove_blind_artifacts(output)
+
+
 def main():
     section("Phase 8 - Blind CAVLC Contract")
     results = [
         run_test("blind_positions_use_sign_only_and_keep_order", t_blind_positions_use_sign_only_and_keep_order),
         run_test("blind_payload_size_is_derivable_without_sidecar", t_blind_payload_size_is_derivable_without_sidecar),
+        run_test("reconstruction_accounting_excludes_unapplied_blocks", t_reconstruction_accounting_excludes_unapplied_blocks),
+        run_test("blind_round_trip_without_cover_or_sidecars", t_blind_round_trip_without_cover_or_sidecars),
     ]
     sys.exit(summarise(results, "Phase 8"))
 

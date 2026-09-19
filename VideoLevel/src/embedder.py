@@ -146,6 +146,28 @@ def _limit_positions_per_block(
     return limited
 
 
+def _filter_reconstructed_positions(
+    *,
+    used_positions: list[tuple[int, int, int]],
+    modified_block_keys: set[tuple[int, int]],
+    applied_block_keys: set[tuple[int, int]],
+) -> tuple[list[tuple[int, int, int]], set[tuple[int, int]]]:
+    """Keep only positions whose modified block was actually reconstructed.
+
+    A precomputed position list is only a candidate plan.  It must never be
+    reported as embedded merely because it was supplied by a caller: the
+    bitstream reconstructor is the source of truth for whether the block was
+    applied to the output stream.
+    """
+    filtered = [
+        (int(mb), int(blk), int(cidx))
+        for mb, blk, cidx in used_positions
+        if (int(mb), int(blk)) not in modified_block_keys
+        or (int(mb), int(blk)) in applied_block_keys
+    ]
+    return filtered, modified_block_keys - applied_block_keys
+
+
 @dataclass
 class EmbedResult:
     """Result returned by embed()."""
@@ -414,21 +436,15 @@ def embed(
             reconstruction_context=reconstruction_context,
         )
 
-        if trust_precomputed_positions and precomputed_positions is not None:
-            bits_embedded = len(used_positions)
-            applied_position_bits = len(used_positions)
-            break
-
         applied_block_keys = {
             (int(mb), int(blk))
             for mb, blk in reconstruction_stats.get("applied_block_keys", [])
         }
-        filtered_positions = [
-            (mb, blk, cidx)
-            for mb, blk, cidx in used_positions
-            if (mb, blk) not in modified_block_keys or (mb, blk) in applied_block_keys
-        ]
-        missing_modified_blocks = modified_block_keys - applied_block_keys
+        filtered_positions, missing_modified_blocks = _filter_reconstructed_positions(
+            used_positions=used_positions,
+            modified_block_keys=modified_block_keys,
+            applied_block_keys=applied_block_keys,
+        )
         if len(filtered_positions) >= required_bits:
             used_positions = filtered_positions[:required_bits]
             bits_embedded = len(used_positions)
