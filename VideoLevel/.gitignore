@@ -60,7 +60,6 @@ node_modules/
 !src/runtest/test_future_trust_architecture.py
 !src/runtest/test_phase6_security_hardening.py
 !src/runtest/test_phase7_service_delivery.py
-!src/runtest/test_phase8_edge_realtime.py
 !output/
 !output/pdf/
 !output/pdf/zk_stego_theoretical_foundation.pdf
@@ -70,7 +69,6 @@ node_modules/
 *.bak
 .cache/
 .pytest_cache/
-native/edge-build/
 
 benchmark_*/
 

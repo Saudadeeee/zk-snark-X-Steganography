@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\Code\SourceCode\Project\zk-snark-X-Steganography\VideoLevel\native\edge-build\CMakeFiles\2dda67870ae700c8f11256f64f246547\Continuous.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\Code\SourceCode\Project\zk-snark-X-Steganography\VideoLevel\native\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="D:\Code\SourceCode\Project\zk-snark-X-Steganography\VideoLevel\native\edge-build\CMakeFiles\Continuous" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{0C43282A-500C-316E-93DA-61063CC71711}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

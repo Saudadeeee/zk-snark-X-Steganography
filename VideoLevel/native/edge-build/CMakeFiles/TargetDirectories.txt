@@ -1,0 +1,10 @@
+D:/Code/SourceCode/Project/zk-snark-X-Steganography/VideoLevel/native/edge-build/CMakeFiles/zkstego_live.dir
+D:/Code/SourceCode/Project/zk-snark-X-Steganography/VideoLevel/native/edge-build/CMakeFiles/zkstego_pixel_embed.dir
+D:/Code/SourceCode/Project/zk-snark-X-Steganography/VideoLevel/native/edge-build/CMakeFiles/zkstego_live_tests.dir
+D:/Code/SourceCode/Project/zk-snark-X-Steganography/VideoLevel/native/edge-build/CMakeFiles/Experimental.dir
+D:/Code/SourceCode/Project/zk-snark-X-Steganography/VideoLevel/native/edge-build/CMakeFiles/Nightly.dir
+D:/Code/SourceCode/Project/zk-snark-X-Steganography/VideoLevel/native/edge-build/CMakeFiles/Continuous.dir
+D:/Code/SourceCode/Project/zk-snark-X-Steganography/VideoLevel/native/edge-build/CMakeFiles/NightlyMemoryCheck.dir
+D:/Code/SourceCode/Project/zk-snark-X-Steganography/VideoLevel/native/edge-build/CMakeFiles/RUN_TESTS.dir
+D:/Code/SourceCode/Project/zk-snark-X-Steganography/VideoLevel/native/edge-build/CMakeFiles/ALL_BUILD.dir
+D:/Code/SourceCode/Project/zk-snark-X-Steganography/VideoLevel/native/edge-build/CMakeFiles/ZERO_CHECK.dir

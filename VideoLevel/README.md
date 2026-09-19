@@ -219,15 +219,6 @@ Run `py -3.12 -m benchmark.resource_benchmark --sections 1 2 3 4 5 6` on each
 target machine; it preserves the resource result locally without overwriting
 the checked benchmark evidence.
 
-### Edge camera pixel embedding
-
-The local-only edge runtime and native YUV420P luma-QIM embedder are documented
-in [EDGE_DEPLOYMENT.md](EDGE_DEPLOYMENT.md). Proof bytes are embedded in frame
-pixels, not SEI or H.264 metadata. Run
-`py -3.12 -m benchmark.edge_realtime --width 352 --height 288 --frames 300 --fps 30`
-on every target device, then repeat the quality/recovery check through its
-actual camera encoder before deployment.
-
 ### Requirements
 
 - Python 3.12 recommended
