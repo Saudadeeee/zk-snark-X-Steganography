@@ -1,8 +1,8 @@
-"""Measured acceptance benchmark for the edge camera transport path.
+"""Measured acceptance benchmark for native pixel-domain edge embedding.
 
-It measures native Annex-B relay throughput and Python segmenter ingress cost.
-It does not claim CAVLC proof embedding is real-time; that path remains
-separately measured by SEC6/SEC8 until a native CAVLC patcher is available.
+The benchmark sends YUV420P frames through the long-lived native QIM process.
+It reports only raw-pixel embedding latency and quality. Codec robustness is a
+separate acceptance step because it depends on the target H.264 encoder.
 """
 
 from __future__ import annotations
@@ -11,11 +11,10 @@ import argparse
 import json
 import math
 import subprocess
-import sys
 import time
 from pathlib import Path
 
-from src.edge.realtime import AnnexBSegmenter
+import numpy as np
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -39,74 +38,119 @@ def assess_realtime(*, p95_latency_s: float, dropped_segments: int, max_latency_
     return "pass"
 
 
-def _default_relay() -> Path:
-    candidate = ROOT / "native" / "edge-build" / "Release" / "zkstego_annexb_relay.exe"
-    if candidate.exists():
-        return candidate
-    return ROOT / "native" / "build" / "Release" / "zkstego_annexb_relay.exe"
+def assess_pixel_realtime(
+    *, p95_latency_s: float, dropped_frames: int, psnr_db: float,
+    max_latency_s: float, min_psnr_db: float,
+) -> str:
+    result = assess_realtime(
+        p95_latency_s=p95_latency_s,
+        dropped_segments=dropped_frames,
+        max_latency_s=max_latency_s,
+    )
+    if result != "pass":
+        return result
+    return "pass" if psnr_db >= min_psnr_db else "fail_quality"
 
 
-def measure(input_path: Path, relay: Path, *, chunk_bytes: int, fps: float, max_latency_s: float) -> dict:
-    source = input_path.read_bytes()
+def _default_embedder() -> Path:
+    return ROOT / "native" / "edge-build" / "Release" / "zkstego_pixel_embed.exe"
+
+
+def _synthetic_yuv420p(width: int, height: int, frames: int) -> bytes:
+    y = np.arange(width * height, dtype=np.uint32).reshape(height, width)
+    luma = ((y * 17 + (y // width) * 11) % 220 + 16).astype(np.uint8)
+    chroma = np.full(width * height // 2, 128, dtype=np.uint8)
+    frame = luma.tobytes() + chroma.tobytes()
+    return frame * frames
+
+
+def _psnr(reference: np.ndarray, modified: np.ndarray) -> float:
+    mse = float(np.mean((reference.astype(np.float32) - modified.astype(np.float32)) ** 2))
+    return float("inf") if mse == 0 else 10.0 * math.log10((255.0 * 255.0) / mse)
+
+
+def measure(
+    embedder: Path, *, width: int, height: int, frames: int, payload_hex: str,
+    fps: float, max_latency_s: float, min_psnr_db: float,
+) -> dict:
+    source = _synthetic_yuv420p(width, height, frames)
     started = time.perf_counter()
     result = subprocess.run(
-        [str(relay), "--sei-payload-hex", "5a4b535445474f"],
+        [str(embedder), "--width", str(width), "--height", str(height),
+         "--payload-hex", payload_hex, "--metrics"],
         input=source,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
     )
-    relay_s = time.perf_counter() - started
+    wall_s = time.perf_counter() - started
     if result.returncode:
         raise RuntimeError(result.stderr.decode("utf-8", errors="replace").strip())
+    if len(result.stdout) != len(source):
+        raise RuntimeError("native pixel embedder changed raw frame stream length")
+    try:
+        metrics = json.loads(result.stderr.decode("utf-8"))
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"native pixel metrics were invalid: {result.stderr!r}") from error
 
-    segmenter = AnnexBSegmenter()
-    ingress: list[float] = []
-    emitted = 0
-    for offset in range(0, len(source), chunk_bytes):
-        t0 = time.perf_counter()
-        emitted += len(segmenter.feed(source[offset:offset + chunk_bytes]))
-        ingress.append(time.perf_counter() - t0)
-
-    ingress_p95_s = percentile(ingress, 95)
+    luma_bytes = width * height
+    frame_bytes = luma_bytes * 3 // 2
+    original_luma = np.frombuffer(source, dtype=np.uint8).reshape(frames, frame_bytes)[:, :luma_bytes]
+    stego_luma = np.frombuffer(result.stdout, dtype=np.uint8).reshape(frames, frame_bytes)[:, :luma_bytes]
+    psnr_db = _psnr(original_luma, stego_luma)
+    p95_s = float(metrics["p95_embed_ms"]) / 1000.0
     frame_interval_s = 1.0 / fps
+    acceptance = assess_pixel_realtime(
+        p95_latency_s=p95_s,
+        dropped_frames=0,
+        psnr_db=psnr_db,
+        max_latency_s=max_latency_s,
+        min_psnr_db=min_psnr_db,
+    )
     return {
-        "input": str(input_path),
-        "relay": str(relay),
+        "embedder": str(embedder),
+        "pixel_domain": "Y luma QIM; no SEI or H.264 metadata payload",
+        "width": width,
+        "height": height,
+        "frames": frames,
+        "payload_bytes": len(payload_hex) // 2,
         "input_bytes": len(source),
         "output_bytes": len(result.stdout),
-        "relay_wall_s": round(relay_s, 6),
-        "relay_mib_per_s": round((len(source) / (1024 * 1024)) / relay_s, 3) if relay_s else None,
-        "ingress_chunks": len(ingress),
-        "ingress_p95_s": round(ingress_p95_s, 7),
-        "segment_count": emitted,
+        "wall_s": round(wall_s, 6),
+        "stream_mib_per_s": round((len(source) / (1024 * 1024)) / wall_s, 3) if wall_s else None,
+        "native_p95_embed_s": round(p95_s, 7),
+        "psnr_db_raw_y": round(psnr_db, 4),
         "target_fps": fps,
         "frame_interval_s": round(frame_interval_s, 7),
-        "transport_acceptance": assess_realtime(
-            p95_latency_s=ingress_p95_s,
-            dropped_segments=0,
-            max_latency_s=max_latency_s,
-        ),
-        "scope": "Annex-B transport only; CAVLC proof embedding is not included in this acceptance result.",
+        "pixel_acceptance": acceptance,
+        "scope": "Raw YUV420P pixel embedding; validate after the target H.264 encode before claiming codec robustness.",
     }
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Measure edge native relay and segmenter latency")
-    parser.add_argument("--input", type=Path, required=True, help="Raw Annex-B H.264 input")
-    parser.add_argument("--relay", type=Path, default=_default_relay())
-    parser.add_argument("--chunk-bytes", type=int, default=4096)
+    parser = argparse.ArgumentParser(description="Measure native pixel QIM edge embedding")
+    parser.add_argument("--embedder", type=Path, default=_default_embedder())
+    parser.add_argument("--width", type=int, default=352)
+    parser.add_argument("--height", type=int, default=288)
+    parser.add_argument("--frames", type=int, default=300)
+    parser.add_argument("--payload-hex", default="a5" * 129, help="proof bytes encoded as hex")
     parser.add_argument("--fps", type=float, default=30.0)
-    parser.add_argument("--max-latency-s", type=float, default=1.0)
+    parser.add_argument("--max-frame-latency-s", type=float)
+    parser.add_argument("--min-psnr-db", type=float, default=40.0)
     args = parser.parse_args()
-    if args.chunk_bytes < 1 or args.fps <= 0 or args.max_latency_s <= 0:
-        parser.error("chunk size, FPS, and max latency must be positive")
-    if not args.input.is_file() or not args.relay.is_file():
-        parser.error("input and relay must exist")
-    report = measure(args.input, args.relay, chunk_bytes=args.chunk_bytes, fps=args.fps, max_latency_s=args.max_latency_s)
+    if args.width <= 0 or args.height <= 0 or args.width % 2 or args.height % 2 or args.frames < 1 or args.fps <= 0:
+        parser.error("dimensions must be positive even values; frames and FPS must be positive")
+    if not args.embedder.is_file():
+        parser.error("native pixel embedder must exist")
+    max_latency = args.max_frame_latency_s if args.max_frame_latency_s is not None else 1.0 / args.fps
+    report = measure(
+        args.embedder, width=args.width, height=args.height, frames=args.frames,
+        payload_hex=args.payload_hex, fps=args.fps, max_latency_s=max_latency,
+        min_psnr_db=args.min_psnr_db,
+    )
     RESULT.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
-    return 0 if report["transport_acceptance"] == "pass" else 1
+    return 0 if report["pixel_acceptance"] == "pass" else 1
 
 
 if __name__ == "__main__":
