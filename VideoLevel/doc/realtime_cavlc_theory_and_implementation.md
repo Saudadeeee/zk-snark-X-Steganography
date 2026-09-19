@@ -13,6 +13,12 @@ and reports an acceptance result. The current Python CAVLC parser and
 reconstructor remain batch implementations. Therefore the controller is not
 evidence that pixel content has already been patched at camera-frame rate.
 
+The first native data-plane layer is implemented in `native/`: EBSP to RBSP
+conversion, RBSP emulation-prevention insertion, and bounds-checked fixed
+length bit patch application. It is tested with CTest. It is intentionally
+limited to a patch plan because a plan is not portable across arbitrary camera
+frames; native slice and macroblock parsing remains required before deployment.
+
 ## CAVLC embedding theory
 
 For an H.264 Baseline residual 4x4 block, let its quantized transform

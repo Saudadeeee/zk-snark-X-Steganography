@@ -70,6 +70,7 @@ node_modules/
 .cache/
 .pytest_cache/
 native/edge-build/
+native/cavlc-build/
 
 benchmark_*/
 
