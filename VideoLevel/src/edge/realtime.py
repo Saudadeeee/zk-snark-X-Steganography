@@ -146,6 +146,7 @@ class AnnexBSegmenter:
     def __init__(self) -> None:
         self._buffer = bytearray()
         self._prefix = bytearray()
+        self._active_prefix = bytearray()
         self._active = bytearray()
 
     def feed(self, chunk: bytes) -> list[bytes]:
@@ -173,8 +174,9 @@ class AnnexBSegmenter:
                     and len(self._buffer) > code_length
                     and (self._buffer[code_length] & 0x1F) == 5
                 ):
-                    emitted.append(bytes(self._prefix + self._active))
+                    emitted.append(bytes(self._active_prefix + self._active))
                     self._active.clear()
+                    self._active_prefix.clear()
                 break
             nal = bytes(self._buffer[:next_start])
             del self._buffer[:next_start]
@@ -183,7 +185,8 @@ class AnnexBSegmenter:
             nal_type = nal[code_length] & 0x1F
             if nal_type == 5:
                 if self._active:
-                    emitted.append(bytes(self._prefix + self._active))
+                    emitted.append(bytes(self._active_prefix + self._active))
+                self._active_prefix = bytearray(self._prefix)
                 self._active = bytearray(nal)
                 self._prefix.clear()
             elif self._active:
