@@ -18,16 +18,20 @@ void append(std::vector<std::uint8_t>& target, const std::vector<std::uint8_t>& 
 }  // namespace
 
 int main() {
-    std::vector<std::uint8_t> input;
-    append(input, nal(7, "sps"));
-    append(input, nal(8, "pps"));
-    append(input, nal(5, "idr"));
+    zkstego::PixelEmbeddingConfig config{16, 16, 8};
+    std::vector<std::uint8_t> luma(16 * 16, 128);
+    const std::vector<std::uint8_t> payload{0xCA, 0xFE};
 
-    const std::vector<std::uint8_t> payload{0xCA, 0xFE, 0x01};
-    const auto output = zkstego::inject_sei_before_idr(input, payload);
-    assert(output.size() > input.size());
-    assert(zkstego::count_nal_type(output, 6) == 1);
-    assert(zkstego::count_nal_type(output, 5) == 1);
-    assert(zkstego::inject_sei_before_idr(input, {}).size() == input.size());
-    std::cout << "native edge relay: 4/4 passed\n";
+    const auto stego = zkstego::embed_luma_qim(luma, payload, config);
+    assert(stego.size() == luma.size());
+    for (std::size_t i = 0; i < luma.size(); ++i) {
+        assert(std::abs(static_cast<int>(stego[i]) - static_cast<int>(luma[i])) <= 4);
+    }
+
+    std::vector<std::uint8_t> lightly_reencoded = stego;
+    for (std::size_t i = 0; i < lightly_reencoded.size(); i += 3) {
+        ++lightly_reencoded[i];
+    }
+    assert(zkstego::extract_luma_qim(lightly_reencoded, payload.size(), config) == payload);
+    std::cout << "native pixel QIM: 4/4 passed\n";
 }
