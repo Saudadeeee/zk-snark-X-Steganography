@@ -164,6 +164,17 @@ class AnnexBSegmenter:
             code_length = _start_code_at(self._buffer, 0)
             next_start = _find_start_code(self._buffer, code_length)
             if next_start < 0:
+                # An IDR header starts the next independently decodable
+                # segment. Its payload may still be arriving, but the prior
+                # active segment is complete and can leave the camera path
+                # immediately instead of waiting for another NAL boundary.
+                if (
+                    self._active
+                    and len(self._buffer) > code_length
+                    and (self._buffer[code_length] & 0x1F) == 5
+                ):
+                    emitted.append(bytes(self._prefix + self._active))
+                    self._active.clear()
                 break
             nal = bytes(self._buffer[:next_start])
             del self._buffer[:next_start]
