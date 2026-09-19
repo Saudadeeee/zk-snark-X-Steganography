@@ -12,6 +12,7 @@ from src.blind import (
     sign_invariant_positions,
     verify_blind,
 )
+from src.blind_sync import build_blind_sign_candidates
 from src.embedder import _filter_reconstructed_positions
 from src.runtest._helpers import (
     get_circuits_dir,
@@ -32,6 +33,8 @@ MESSAGE = b"blind-e2e"
 def t_blind_positions_use_sign_only_and_keep_order():
     stable = [(17, 3, 2), (18, 5, 7), (19, 1, 1)]
     assert sign_invariant_positions(stable) == [(17, 3, ~2), (18, 5, ~7), (19, 1, ~1)]
+    # Already-tagged CAVLC sign positions are an idempotent representation.
+    assert sign_invariant_positions([(20, 2, ~4)]) == [(20, 2, ~4)]
 
 
 def t_blind_payload_size_is_derivable_without_sidecar():
@@ -48,6 +51,19 @@ def t_reconstruction_accounting_excludes_unapplied_blocks():
     )
     assert filtered == [(10, 0, ~2)]
     assert missing == {(11, 1)}
+
+
+def t_blind_candidates_only_use_validated_cavlc_sign_positions():
+    safe_positions = [
+        (10, 0, 3),
+        (10, 0, ~7),
+        (10, 0, ~9),
+        (11, 1, ~2),
+        (12, 2, 4),
+    ]
+    # One sign position per block prevents a second bit from changing the same
+    # CAVLC block and preserves the extraction schedule.
+    assert build_blind_sign_candidates(safe_positions) == [(10, 0, ~7), (11, 1, ~2)]
 
 
 def _remove_blind_artifacts(output_path: str) -> None:
@@ -106,6 +122,7 @@ def main():
         run_test("blind_positions_use_sign_only_and_keep_order", t_blind_positions_use_sign_only_and_keep_order),
         run_test("blind_payload_size_is_derivable_without_sidecar", t_blind_payload_size_is_derivable_without_sidecar),
         run_test("reconstruction_accounting_excludes_unapplied_blocks", t_reconstruction_accounting_excludes_unapplied_blocks),
+        run_test("blind_candidates_only_use_validated_cavlc_sign_positions", t_blind_candidates_only_use_validated_cavlc_sign_positions),
         run_test("blind_round_trip_without_cover_or_sidecars", t_blind_round_trip_without_cover_or_sidecars),
     ]
     sys.exit(summarise(results, "Phase 8"))

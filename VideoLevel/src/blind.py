@@ -38,7 +38,10 @@ def sign_invariant_positions(
     Sign-only embedding preserves support and magnitude, which is necessary
     for cover-free candidate re-derivation.
     """
-    return [(int(mb), int(block), ~int(index)) for mb, block, index in stable_positions]
+    return [
+        (int(mb), int(block), int(index) if int(index) < 0 else ~int(index))
+        for mb, block, index in stable_positions
+    ]
 
 
 def derive_blind_sign_positions(

@@ -105,6 +105,55 @@ def build_blind_stable_candidates(
     return positions
 
 
+def build_blind_sign_candidates(
+    safe_positions: list[tuple[int, int, int]],
+) -> list[tuple[int, int, int]]:
+    """Select CAVLC-validated trailing-one sign positions for blind mode.
+
+    The normal safety filter emits negative indices only after it verifies that
+    the coefficient is a genuine CAVLC trailing-one sign flag and that a sign
+    flip retains a patchable block.  Arbitrary non-zero AC coefficients do not
+    have that guarantee.  Exactly one position per block preserves the blind
+    one-bit-per-block schedule.
+    """
+    selected: list[tuple[int, int, int]] = []
+    seen_blocks: set[tuple[int, int]] = set()
+    for mb_idx, block_idx, coeff_idx in safe_positions:
+        if int(coeff_idx) >= 0:
+            continue
+        key = (int(mb_idx), int(block_idx))
+        if key in seen_blocks:
+            continue
+        seen_blocks.add(key)
+        selected.append((key[0], key[1], int(coeff_idx)))
+    return selected
+
+
+def _metadata_from_analysis(
+    coefficients: list[tuple[int, int, list[int]]],
+    frame_verified_data: dict,
+    nal_length_map: dict,
+    safe_positions: list[tuple[int, int, int]],
+) -> tuple[BlindPublicMetadata, list[tuple[int, int, int]]]:
+    """Build public metadata from a single already-parsed stream analysis."""
+    stable_candidates = build_blind_stable_candidates(coefficients, nal_length_map)
+    serialized = [[int(mb), int(blk), int(cidx)] for mb, blk, cidx in stable_candidates]
+    candidate_fingerprint = hashlib.sha256(
+        json.dumps(serialized, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    ).hexdigest()
+    metadata = BlindPublicMetadata(
+        version="blind-sync-v1",
+        codec="h264",
+        profile="baseline-cavlc",
+        idr_count=len(frame_verified_data),
+        raw_safe_bits=len(safe_positions),
+        patchable_block_count=sum(1 for bit_len in nal_length_map.values() if bit_len is not None and bit_len > 0),
+        stable_candidate_count=len(stable_candidates),
+        candidate_fingerprint=candidate_fingerprint,
+    )
+    return metadata, stable_candidates
+
+
 def extract_public_metadata(
     video_path: str,
     *,
@@ -129,26 +178,12 @@ def extract_public_metadata(
         cache_dir=analysis_cache_dir,
     )
 
-    stable_candidates = build_blind_stable_candidates(coefficients, nal_length_map)
-    serialized = [
-        [int(mb), int(blk), int(cidx)]
-        for mb, blk, cidx in stable_candidates
-    ]
-    candidate_fingerprint = hashlib.sha256(
-        json.dumps(serialized, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-    ).hexdigest()
-
-    metadata = BlindPublicMetadata(
-        version="blind-sync-v1",
-        codec="h264",
-        profile="baseline-cavlc",
-        idr_count=len(frame_verified_data),
-        raw_safe_bits=len(safe_positions),
-        patchable_block_count=sum(1 for bit_len in nal_length_map.values() if bit_len is not None and bit_len > 0),
-        stable_candidate_count=len(stable_candidates),
-        candidate_fingerprint=candidate_fingerprint,
+    return _metadata_from_analysis(
+        coefficients,
+        frame_verified_data,
+        nal_length_map,
+        safe_positions,
     )
-    return metadata, stable_candidates
 
 
 def derive_seed_base(metadata: BlindPublicMetadata) -> bytes:
@@ -529,11 +564,24 @@ def derive_blind_positions(
     """
     Derive ordered positions from stego-visible metadata and a secret key.
     """
-    metadata, stable_candidates = extract_public_metadata(
+    (
+        coefficients,
+        frame_verified_data,
+        _nC_map,
+        nal_length_map,
+        _t1_override_map,
+        safe_positions,
+    ) = load_or_build_video_analysis(
         video_path,
-        use_analysis_cache=use_analysis_cache,
-        force_analysis_refresh=force_analysis_refresh,
-        analysis_cache_dir=analysis_cache_dir,
+        use_cache=use_analysis_cache,
+        force_refresh=force_analysis_refresh,
+        cache_dir=analysis_cache_dir,
+    )
+    metadata, _stable_candidates = _metadata_from_analysis(
+        coefficients,
+        frame_verified_data,
+        nal_length_map,
+        safe_positions,
     )
     seed_base = derive_seed_base(metadata)
     ordering_key = derive_ordering_key(secret_key, seed_base)
@@ -542,5 +590,5 @@ def derive_blind_positions(
         payload = f"{pos[0]}:{pos[1]}:{pos[2]}".encode("ascii")
         return hmac.new(ordering_key, payload, hashlib.sha256).digest()
 
-    ordered = sorted(stable_candidates, key=_score)
+    ordered = sorted(build_blind_sign_candidates(safe_positions), key=_score)
     return ordered[:required_bits], metadata
