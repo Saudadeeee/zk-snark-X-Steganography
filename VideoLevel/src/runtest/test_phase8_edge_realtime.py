@@ -15,7 +15,7 @@ from src.edge.realtime import (
     EdgeRealtimeBudget,
     ProofEpochCoordinator,
 )
-from benchmark.edge_realtime import assess_realtime, percentile
+from benchmark.edge_realtime import assess_pixel_realtime, assess_realtime, percentile
 from src.runtest._helpers import run_test, section, summarise
 
 
@@ -92,6 +92,8 @@ def t_edge_benchmark_rejects_drops_or_over_budget_p95():
     assert assess_realtime(p95_latency_s=0.5, dropped_segments=0, max_latency_s=1.0) == "pass"
     assert assess_realtime(p95_latency_s=1.1, dropped_segments=0, max_latency_s=1.0) == "fail_latency"
     assert assess_realtime(p95_latency_s=0.1, dropped_segments=1, max_latency_s=1.0) == "fail_drops"
+    assert assess_pixel_realtime(p95_latency_s=0.01, dropped_frames=0, psnr_db=45.0, max_latency_s=0.02, min_psnr_db=40.0) == "pass"
+    assert assess_pixel_realtime(p95_latency_s=0.01, dropped_frames=0, psnr_db=39.9, max_latency_s=0.02, min_psnr_db=40.0) == "fail_quality"
 
 
 def t_native_pixel_embedder_changes_only_luma_plane():
