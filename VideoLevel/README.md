@@ -219,6 +219,15 @@ Run `py -3.12 -m benchmark.resource_benchmark --sections 1 2 3 4 5 6` on each
 target machine; it preserves the resource result locally without overwriting
 the checked benchmark evidence.
 
+### Edge camera transport
+
+The local-only edge runtime, native Annex-B relay build, and measured realtime
+acceptance protocol are documented in [EDGE_DEPLOYMENT.md](EDGE_DEPLOYMENT.md).
+The relay is a binary-safe camera transport with proof epoch metadata; it is
+not presented as real-time CAVLC embedding. Run
+`py -3.12 -m benchmark.edge_realtime --input <camera.h264> --fps 30` on each
+target edge device before deployment.
+
 ### Requirements
 
 - Python 3.12 recommended

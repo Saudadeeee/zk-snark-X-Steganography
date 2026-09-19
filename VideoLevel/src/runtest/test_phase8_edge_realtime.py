@@ -23,6 +23,18 @@ def _nal(nal_type: int, payload: bytes) -> bytes:
     return b"\x00\x00\x00\x01" + bytes([0x60 | nal_type]) + payload
 
 
+def _native_relay() -> Path:
+    root = Path(__file__).resolve().parents[2]
+    relay = root / "native" / "edge-build" / "Release" / "zkstego_annexb_relay.exe"
+    if relay.is_file():
+        return relay
+    cmake = "cmake"
+    subprocess.run([cmake, "-S", "native", "-B", "native/edge-build"], cwd=root, check=True)
+    subprocess.run([cmake, "--build", "native/edge-build", "--config", "Release"], cwd=root, check=True)
+    assert relay.is_file(), "CMake build did not produce native relay"
+    return relay
+
+
 def t_budget_requires_frame_pacing_and_bounded_latency():
     budget = EdgeRealtimeBudget(fps=30.0, max_segment_latency_s=1.0, max_queue_segments=2)
     assert round(budget.frame_interval_ms, 3) == 33.333
@@ -83,8 +95,7 @@ def t_edge_benchmark_rejects_drops_or_over_budget_p95():
 
 
 def t_native_relay_keeps_binary_annexb_bytes_on_windows():
-    relay = Path(__file__).resolve().parents[2] / "native" / "edge-build" / "Release" / "zkstego_annexb_relay.exe"
-    assert relay.is_file(), "build native relay before running this test"
+    relay = _native_relay()
     source = _nal(7, b"sps\x1a") + _nal(8, b"pps") + _nal(5, b"idr")
     result = subprocess.run(
         [str(relay), "--sei-payload-hex", "CAFE"], input=source,
