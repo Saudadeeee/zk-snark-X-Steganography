@@ -1,9 +1,11 @@
 """Contracts for the bounded-latency edge camera runtime."""
 
 import os
+import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -80,6 +82,19 @@ def t_edge_benchmark_rejects_drops_or_over_budget_p95():
     assert assess_realtime(p95_latency_s=0.1, dropped_segments=1, max_latency_s=1.0) == "fail_drops"
 
 
+def t_native_relay_keeps_binary_annexb_bytes_on_windows():
+    relay = Path(__file__).resolve().parents[2] / "native" / "edge-build" / "Release" / "zkstego_annexb_relay.exe"
+    assert relay.is_file(), "build native relay before running this test"
+    source = _nal(7, b"sps\x1a") + _nal(8, b"pps") + _nal(5, b"idr")
+    result = subprocess.run(
+        [str(relay), "--sei-payload-hex", "CAFE"], input=source,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    assert len(result.stdout) > len(source)
+    assert b"sps\x1a" in result.stdout
+
+
 def main():
     section("Phase 8 - Edge Realtime Runtime")
     results = [
@@ -88,6 +103,7 @@ def main():
         run_test("proof_epoch_is_generated_once_for_concurrent_segments", t_proof_epoch_is_generated_once_for_concurrent_segments),
         run_test("annexb_segmenter_emits_complete_idr_segment", t_annexb_segmenter_emits_complete_idr_segment),
         run_test("edge_benchmark_rejects_drops_or_over_budget_p95", t_edge_benchmark_rejects_drops_or_over_budget_p95),
+        run_test("native_relay_keeps_binary_annexb_bytes_on_windows", t_native_relay_keeps_binary_annexb_bytes_on_windows),
     ]
     sys.exit(summarise(results, "Phase 8"))
 
