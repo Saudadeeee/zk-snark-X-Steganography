@@ -70,6 +70,7 @@ node_modules/
 *.bak
 .cache/
 .pytest_cache/
+native/edge-build/
 
 benchmark_*/
 
