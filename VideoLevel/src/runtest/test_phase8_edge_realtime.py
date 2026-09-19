@@ -13,6 +13,7 @@ from src.edge.realtime import (
     EdgeRealtimeBudget,
     ProofEpochCoordinator,
 )
+from benchmark.edge_realtime import assess_realtime, percentile
 from src.runtest._helpers import run_test, section, summarise
 
 
@@ -72,6 +73,13 @@ def t_annexb_segmenter_emits_complete_idr_segment():
     assert produced[0].startswith(_nal(7, b"sps"))
 
 
+def t_edge_benchmark_rejects_drops_or_over_budget_p95():
+    assert percentile([0.01, 0.02, 0.03, 0.04], 95) == 0.04
+    assert assess_realtime(p95_latency_s=0.5, dropped_segments=0, max_latency_s=1.0) == "pass"
+    assert assess_realtime(p95_latency_s=1.1, dropped_segments=0, max_latency_s=1.0) == "fail_latency"
+    assert assess_realtime(p95_latency_s=0.1, dropped_segments=1, max_latency_s=1.0) == "fail_drops"
+
+
 def main():
     section("Phase 8 - Edge Realtime Runtime")
     results = [
@@ -79,6 +87,7 @@ def main():
         run_test("bounded_queue_drops_oldest_segment_not_camera_thread", t_bounded_queue_drops_oldest_segment_not_camera_thread),
         run_test("proof_epoch_is_generated_once_for_concurrent_segments", t_proof_epoch_is_generated_once_for_concurrent_segments),
         run_test("annexb_segmenter_emits_complete_idr_segment", t_annexb_segmenter_emits_complete_idr_segment),
+        run_test("edge_benchmark_rejects_drops_or_over_budget_p95", t_edge_benchmark_rejects_drops_or_over_budget_p95),
     ]
     sys.exit(summarise(results, "Phase 8"))
 
