@@ -22,6 +22,10 @@ and which files are rebuildable diagnostics or local cache.
 - `circuits/package.json`
 - `circuits/package-lock.json`
 - `circuits/test/**`
+- `native/CMakeLists.txt`
+- `native/include/**`
+- `native/src/**`
+- `native/tests/**`
 - `requirements.txt`
 - `requirements.lock`
 
@@ -32,6 +36,7 @@ and which files are rebuildable diagnostics or local cache.
 - `system.txt`
 - `PAPER_EVIDENCE.md`
 - `OPERATING_ENVELOPE.md`
+- `EDGE_DEPLOYMENT.md`
 - `ARTIFACT_POLICY.md`
 - `COMPARATIVE_ANALYSIS.md`
 - `COMPLETION.md`
@@ -83,6 +88,8 @@ specific paper table depends on them:
 - `circuits/node_modules/**`
 - `circuits/build/*.zkey`
 - `circuits/build/*.wasm`
+- `native/**/build/**`
+- `native/**/edge-build/**`
 - local scratch scripts such as `debug_*.py`, `tmp*.py`, `check_*.py`
 
 ## Cleanup Commands
