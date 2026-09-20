@@ -186,6 +186,7 @@ class BitstreamPatcher:
             matched_nal_coeffs = None  # Coefficients decoded directly from the NAL
             orig_bits = None
             matched_trailing_ones = None  # T1 override that produced the correct round-trip
+            matched_trailing_one_count = 0
 
             # Use TraceableCAVLCParser's pre-computed nC exclusively when available.
             # This nC matches FFmpeg's H.264 spec computation from running neighbor TC values.
@@ -219,6 +220,7 @@ class BitstreamPatcher:
                         matched_nal_coeffs = nal_coeffs
                         orig_bits = candidate
                         matched_trailing_ones = None  # No override needed
+                        matched_trailing_one_count = t1_decoded
                         break
                     # If standard encode fails, try with T1 override = decoded trailing_ones.
                     # Some original encoders choose a smaller T1 than the maximum possible.
@@ -232,6 +234,7 @@ class BitstreamPatcher:
                         matched_nal_coeffs = nal_coeffs
                         orig_bits = candidate_t1
                         matched_trailing_ones = t1_decoded
+                        matched_trailing_one_count = t1_decoded
                         break
                 except Exception as e:
                     logger.debug("nC candidate %d decode/encode failed for %s: %s", nC_try, key, e)
@@ -255,6 +258,39 @@ class BitstreamPatcher:
                 continue
 
             nC = matched_nC  # Confirmed correct nC via round-trip decode-encode
+
+            # A trailing-one sign flag is an explicitly fixed, one-bit CAVLC
+            # field.  Patch that flag directly instead of re-encoding the full
+            # block: this prevents a parser/view mismatch from moving a one-bit
+            # sign change into a different coefficient syntax field.
+            changed_indices = [
+                i for i in range(min(len(original_coeffs), len(new_coeffs)))
+                if original_coeffs[i] != new_coeffs[i]
+                and original_coeffs[i] != 0
+                and abs(original_coeffs[i]) == abs(new_coeffs[i])
+            ]
+            if len(changed_indices) == 1 and matched_trailing_one_count > 0:
+                sign_indices: list[int] = []
+                for i in range(len(matched_nal_coeffs) - 1, -1, -1):
+                    if matched_nal_coeffs[i] == 0:
+                        continue
+                    if abs(matched_nal_coeffs[i]) != 1:
+                        break
+                    sign_indices.append(i)
+                    if len(sign_indices) >= matched_trailing_one_count:
+                        break
+                target_index = changed_indices[0]
+                if target_index in sign_indices:
+                    sign_offsets = _trailing_one_sign_offsets(
+                        original_nal.rbsp_byte, start_bit, nC=nC,
+                        max_num_coeff=offset_data.get('max_num_coeff', 16),
+                    )
+                    sign_order = sign_indices.index(target_index)
+                    if sign_order < len(sign_offsets):
+                        rbsp_bits[sign_offsets[sign_order]] = 1 if new_coeffs[target_index] < 0 else 0
+                        patched_count += 1
+                        successful_block_keys.append(key)
+                        continue
             # Use matched_nal_coeffs as the ground-truth original coefficients
             # from NAL, not the extractor's (potentially wrong) version.
 
@@ -444,6 +480,33 @@ class BitstreamPatcher:
             padded[arr.size:] = 0
             arr = padded
         return np.packbits(arr).tobytes()
+
+
+def _trailing_one_sign_offsets(
+    rbsp_bytes: bytes,
+    start_bit: int,
+    *,
+    nC: int,
+    max_num_coeff: int,
+) -> list[int]:
+    """Return absolute RBSP offsets of a block's trailing-one sign flags.
+
+    CAVLC places these fixed one-bit flags immediately after ``coeff_token``.
+    Patching them directly preserves every other syntax bit in the block.
+    """
+    bits = BitArray(rbsp_bytes)
+    raw = bits[start_bit:]
+    arr = np.asarray(raw, dtype=np.uint8)
+    pad = (-arr.size) % 8
+    if pad:
+        arr = np.pad(arr, (0, pad))
+    packed = np.packbits(arr).tobytes()
+    reader = BitstreamReader(packed)
+    decoder = CAVLCDecoder(reader)
+    _total_coeffs, trailing_ones = decoder._decode_coeff_token(nC)
+    if trailing_ones < 0 or trailing_ones > max_num_coeff:
+        raise ValueError("invalid CAVLC trailing-one count")
+    return [start_bit + reader.pos + index for index in range(trailing_ones)]
 
     def validate_block_patchability(self, rbsp_bytes: bytes, block_key, offset_data: Dict,
                                     end_to_block_retro: Dict | None = None):
