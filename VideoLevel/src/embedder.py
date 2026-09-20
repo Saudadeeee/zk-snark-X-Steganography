@@ -186,6 +186,27 @@ class EmbedResult:
     used_positions:      Optional[list[tuple[int, int, int]]] = None  # Final positions actually used for embedding
 
 
+def _resolve_video_analysis(
+    video_path: str,
+    *,
+    use_analysis_cache: bool,
+    force_analysis_refresh: bool,
+    analysis_cache_dir: Optional[str],
+    precomputed_analysis: Optional[tuple],
+) -> tuple:
+    """Return caller-supplied immutable analysis or load it exactly once."""
+    if precomputed_analysis is not None:
+        if len(precomputed_analysis) != 6:
+            raise ValueError("precomputed_analysis must contain the six analysis values")
+        return precomputed_analysis
+    return load_or_build_video_analysis(
+        video_path,
+        use_cache=use_analysis_cache,
+        force_refresh=force_analysis_refresh,
+        cache_dir=analysis_cache_dir,
+    )
+
+
 def embed(
     video_path:   str,
     message:      bytes,
@@ -200,6 +221,7 @@ def embed(
     use_analysis_cache: bool = True,
     force_analysis_refresh: bool = False,
     analysis_cache_dir: Optional[str] = None,
+    precomputed_analysis: Optional[tuple] = None,
 ) -> EmbedResult:
     """
     Embed a Groth16 ZK proof for `message` into an H.264 video.
@@ -240,6 +262,9 @@ def embed(
                             Strongly recommended for app/runtime usage.
         force_analysis_refresh: Ignore cached cover analysis and rebuild it.
         analysis_cache_dir: Optional custom directory for analysis cache files.
+        precomputed_analysis: Existing immutable video analysis to reuse. This
+                            prevents a second full-video cache load in callers
+                            which already derived an embedding schedule.
 
     Returns:
         EmbedResult
@@ -298,11 +323,12 @@ def embed(
         nal_length_map,
         t1_override_map,
         safe_positions,
-    ) = load_or_build_video_analysis(
+    ) = _resolve_video_analysis(
         video_path,
         use_cache=use_analysis_cache,
         force_refresh=force_analysis_refresh,
-        cache_dir=analysis_cache_dir,
+        analysis_cache_dir=analysis_cache_dir,
+        precomputed_analysis=precomputed_analysis,
     )
     raw_safe_bits = len(safe_positions)
     ffmpeg_validated_bits: Optional[int] = None

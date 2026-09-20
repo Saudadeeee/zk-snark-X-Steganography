@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from .blind_sync import derive_blind_positions
+from .blind_sync import derive_blind_positions, derive_blind_positions_from_analysis
 from .core.analysis_cache import load_or_build_video_analysis
 from .core.pipeline import extract_bits_direct
 from .embedder import EmbedResult, embed
@@ -64,6 +64,19 @@ def derive_blind_sign_positions(
     return sign_invariant_positions(positions)
 
 
+def _derive_blind_sign_positions_from_analysis(
+    analysis: tuple,
+    secret_key: bytes,
+    required_bits: int,
+) -> list[tuple[int, int, int]]:
+    positions, _metadata = derive_blind_positions_from_analysis(
+        analysis,
+        secret_key=secret_key,
+        required_bits=required_bits,
+    )
+    return sign_invariant_positions(positions)
+
+
 def embed_blind(
     video_path: str,
     message: bytes,
@@ -83,13 +96,16 @@ def embed_blind(
     if not isinstance(message, bytes) or not message:
         raise ValueError("message must be non-empty bytes")
     required_bits = blind_payload_bits(message_length=len(message))
-    positions = derive_blind_sign_positions(
+    analysis = load_or_build_video_analysis(
         video_path,
+        use_analysis_cache=use_analysis_cache,
+        force_refresh=force_analysis_refresh,
+        cache_dir=analysis_cache_dir,
+    )
+    positions = _derive_blind_sign_positions_from_analysis(
+        analysis,
         secret_key,
         required_bits,
-        use_analysis_cache=use_analysis_cache,
-        force_analysis_refresh=force_analysis_refresh,
-        analysis_cache_dir=analysis_cache_dir,
     )
     if len(positions) < required_bits:
         raise RuntimeError(
@@ -107,6 +123,7 @@ def embed_blind(
         use_analysis_cache=use_analysis_cache,
         force_analysis_refresh=force_analysis_refresh,
         analysis_cache_dir=analysis_cache_dir,
+        precomputed_analysis=analysis,
     )
 
 

@@ -649,9 +649,29 @@ def derive_blind_positions(
     force_analysis_refresh: bool = False,
     analysis_cache_dir: Optional[str] = None,
 ) -> tuple[list[tuple[int, int, int]], BlindPublicMetadata]:
-    """
-    Derive ordered positions from stego-visible metadata and a secret key.
-    """
+    """Load video analysis then derive ordered sidecar-free positions."""
+    analysis = load_or_build_video_analysis(
+        video_path,
+        use_cache=use_analysis_cache,
+        force_refresh=force_analysis_refresh,
+        cache_dir=analysis_cache_dir,
+    )
+    return derive_blind_positions_from_analysis(
+        analysis,
+        secret_key=secret_key,
+        required_bits=required_bits,
+    )
+
+
+def derive_blind_positions_from_analysis(
+    analysis: tuple,
+    *,
+    secret_key: bytes,
+    required_bits: int,
+) -> tuple[list[tuple[int, int, int]], BlindPublicMetadata]:
+    """Derive blind positions from one already-loaded video analysis."""
+    if len(analysis) != 6:
+        raise ValueError("analysis must contain the six video-analysis values")
     (
         coefficients,
         frame_verified_data,
@@ -659,12 +679,7 @@ def derive_blind_positions(
         nal_length_map,
         _t1_override_map,
         safe_positions,
-    ) = load_or_build_video_analysis(
-        video_path,
-        use_cache=use_analysis_cache,
-        force_refresh=force_analysis_refresh,
-        cache_dir=analysis_cache_dir,
-    )
+    ) = analysis
     metadata, _stable_candidates = _metadata_from_analysis(
         coefficients,
         frame_verified_data,
