@@ -1888,6 +1888,20 @@ def plot_psnr_vs_qp(data: dict) -> None:
 # -------------------------------------------------------------------------
 # Main
 # -------------------------------------------------------------------------
+def _require_full_payload(data: dict) -> None:
+    """Reject quality charts that do not represent a complete embedding run."""
+    incomplete = []
+    for sequence, result in data.items():
+        required = result.get("required_bits")
+        embedded = result.get("embedded_bits")
+        if required is None or embedded is None or int(embedded) < int(required):
+            incomplete.append(f"{sequence}={embedded}/{required}")
+    if incomplete:
+        raise RuntimeError(
+            "SEC1 quality benchmark has incomplete payload embedding: " + ", ".join(incomplete)
+        )
+
+
 def run(
     force: bool = False,
     include_sequences: set[str] | None = None,
@@ -1899,6 +1913,7 @@ def run(
         include_sequences=include_sequences,
         include_unstable_sequences=include_unstable_sequences,
     )
+    _require_full_payload(data)
     plot_psnr_timeline(data)
     plot_ssim_timeline(data)
     plot_avg_quality_bar(data)
