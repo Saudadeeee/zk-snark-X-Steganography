@@ -19,6 +19,7 @@ from src.blind_sync import (
 )
 from src.bitstream.bitstream_ops import _trailing_one_sign_offsets
 from src.embedder import _filter_reconstructed_positions
+from src.embedder import _resolve_video_analysis
 from src.runtest._helpers import (
     get_circuits_dir,
     get_output,
@@ -107,6 +108,17 @@ def t_blind_candidate_filter_uses_direct_global_block_lookup():
     ) == [(100, 0, ~7)]
 
 
+def t_embed_analysis_resolver_reuses_supplied_analysis_without_loading():
+    supplied = ([], {}, {}, {}, {}, [])
+    assert _resolve_video_analysis(
+        "unused.h264",
+        use_analysis_cache=True,
+        force_analysis_refresh=False,
+        analysis_cache_dir=None,
+        precomputed_analysis=supplied,
+    ) is supplied
+
+
 def t_blind_candidates_can_require_high_frequency_ac_signs():
     safe_positions = [(10, 0, ~7), (11, 1, ~8), (12, 2, ~12)]
     assert build_blind_sign_candidates(safe_positions, min_coefficient_index=8) == [
@@ -184,6 +196,7 @@ def main():
         run_test("blind_candidates_only_use_validated_cavlc_sign_positions", t_blind_candidates_only_use_validated_cavlc_sign_positions),
         run_test("blind_candidates_exclude_signs_that_cannot_be_patched_in_both_states", t_blind_candidates_exclude_signs_that_cannot_be_patched_in_both_states),
         run_test("blind_candidate_filter_uses_direct_global_block_lookup", t_blind_candidate_filter_uses_direct_global_block_lookup),
+        run_test("embed_analysis_resolver_reuses_supplied_analysis_without_loading", t_embed_analysis_resolver_reuses_supplied_analysis_without_loading),
         run_test("blind_candidates_can_require_high_frequency_ac_signs", t_blind_candidates_can_require_high_frequency_ac_signs),
         run_test("blind_operating_point_excludes_the_lowest_ac_band", t_blind_operating_point_excludes_the_lowest_ac_band),
         run_test("blind_sign_patch_targets_only_the_cavlc_sign_flag", t_blind_sign_patch_targets_only_the_cavlc_sign_flag),
