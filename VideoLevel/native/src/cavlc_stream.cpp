@@ -72,6 +72,8 @@ std::vector<AnnexBNalUnit> split_annex_b(const std::vector<std::uint8_t>& annex_
         const auto header = annex_b[header_offset];
         AnnexBNalUnit unit;
         unit.start_offset = start;
+        unit.start_code_size = marker_length;
+        unit.forbidden_zero_bit = static_cast<std::uint8_t>((header >> 7) & 0x01);
         unit.nal_ref_idc = static_cast<std::uint8_t>((header >> 5) & 0x03);
         unit.nal_unit_type = static_cast<std::uint8_t>(header & 0x1f);
         unit.payload.assign(annex_b.begin() + static_cast<std::ptrdiff_t>(header_offset + 1),
@@ -79,6 +81,31 @@ std::vector<AnnexBNalUnit> split_annex_b(const std::vector<std::uint8_t>& annex_
         units.push_back(std::move(unit));
     }
     return units;
+}
+
+std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units) {
+    std::size_t total_size = 0;
+    for (const auto& unit : units) {
+        if (unit.start_code_size != 3 && unit.start_code_size != 4) {
+            throw std::invalid_argument("Annex-B NAL start code must be three or four bytes");
+        }
+        if (unit.forbidden_zero_bit > 1 || unit.nal_ref_idc > 3 || unit.nal_unit_type > 31) {
+            throw std::invalid_argument("Annex-B NAL header fields are out of range");
+        }
+        total_size += unit.start_code_size + 1 + unit.payload.size();
+    }
+
+    std::vector<std::uint8_t> annex_b;
+    annex_b.reserve(total_size);
+    for (const auto& unit : units) {
+        annex_b.insert(annex_b.end(), unit.start_code_size - 1, 0x00);
+        annex_b.push_back(0x01);
+        const auto header = static_cast<std::uint8_t>(
+            (unit.forbidden_zero_bit << 7) | (unit.nal_ref_idc << 5) | unit.nal_unit_type);
+        annex_b.push_back(header);
+        annex_b.insert(annex_b.end(), unit.payload.begin(), unit.payload.end());
+    }
+    return annex_b;
 }
 
 std::vector<std::uint8_t> apply_fixed_length_patches(
@@ -100,6 +127,20 @@ std::vector<std::uint8_t> apply_fixed_length_patches(
         }
     }
     return output;
+}
+
+std::vector<std::uint8_t> patch_annex_b_nal_rbsp(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::size_t nal_index,
+    const std::vector<FixedLengthBitPatch>& patches) {
+    auto units = split_annex_b(annex_b);
+    if (nal_index >= units.size()) {
+        throw std::out_of_range("Annex-B NAL index is outside the segment");
+    }
+    auto rbsp = units[nal_index].rbsp();
+    rbsp = apply_fixed_length_patches(rbsp, patches);
+    units[nal_index].payload = rbsp_to_ebsp(rbsp);
+    return assemble_annex_b(units);
 }
 
 }  // namespace zkstego

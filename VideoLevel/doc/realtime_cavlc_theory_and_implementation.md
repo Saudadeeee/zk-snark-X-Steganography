@@ -13,9 +13,11 @@ and reports an acceptance result. The current Python CAVLC parser and
 reconstructor remain batch implementations. Therefore the controller is not
 evidence that pixel content has already been patched at camera-frame rate.
 
-The first native data-plane layer is implemented in `native/`: EBSP to RBSP
-conversion, RBSP emulation-prevention insertion, and bounds-checked fixed
-length bit patch application. It is tested with CTest. It is intentionally
+The first native data-plane layer is implemented in `native/`: Annex-B NAL
+splitting and lossless reassembly, EBSP to RBSP conversion, RBSP
+emulation-prevention insertion, and bounds-checked fixed-length patching of a
+selected NAL RBSP. It is tested with CTest, including preservation of
+unmodified NALs during a patched-IDR segment round trip. It is intentionally
 limited to a patch plan because a plan is not portable across arbitrary camera
 frames; native slice and macroblock parsing remains required before deployment.
 
@@ -81,8 +83,9 @@ It must:
    retain exact start/end bit offsets.
 3. Derive deterministic, key-ordered safe candidates; one modification per
    block by default.
-4. Re-encode only length-invariant blocks, then rewrite RBSP and emulation
-   prevention bytes without changing unrelated NAL units.
+4. Re-encode only length-invariant blocks, then rewrite the selected RBSP,
+   regenerate emulation-prevention bytes, and preserve unrelated Annex-B NAL
+   units byte-for-byte.
 5. Return an unchanged segment when its validated capacity is insufficient;
    report that condition as a controlled drop/failure, never partial silent
    embedding.
