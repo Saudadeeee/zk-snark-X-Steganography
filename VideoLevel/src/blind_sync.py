@@ -69,7 +69,7 @@ DEFAULT_BLIND_HEADER_CONTRACT = BlindOperatingContract(
 # Blind extraction must be able to re-derive this policy from the stego stream.
 # Indices are CAVLC zig-zag positions; index 0 is DC and low indices carry the
 # most visible AC energy.  The operating path uses only the high-frequency tail.
-BLIND_MIN_SIGN_COEFFICIENT_INDEX = 8
+BLIND_MIN_SIGN_COEFFICIENT_INDEX = 7
 
 
 def _stable_candidate_index(coeffs: list[int], trailing_positions: set[int]) -> Optional[int]:
