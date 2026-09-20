@@ -13,6 +13,7 @@ from src.blind import (
     verify_blind,
 )
 from src.blind_sync import BLIND_MIN_SIGN_COEFFICIENT_INDEX, build_blind_sign_candidates
+from src.bitstream.bitstream_ops import _trailing_one_sign_offsets
 from src.embedder import _filter_reconstructed_positions
 from src.runtest._helpers import (
     get_circuits_dir,
@@ -93,6 +94,12 @@ def t_blind_operating_point_excludes_the_lowest_ac_band():
     assert BLIND_MIN_SIGN_COEFFICIENT_INDEX == 7
 
 
+def t_blind_sign_patch_targets_only_the_cavlc_sign_flag():
+    # nC=0, TotalCoeff=1, TrailingOnes=1: coeff_token is three bits, followed
+    # by the one-bit trailing-one sign flag.
+    assert _trailing_one_sign_offsets(bytes([0b00010100]), 0, nC=0, max_num_coeff=16) == [3]
+
+
 def _remove_blind_artifacts(output_path: str) -> None:
     for suffix in ("", ".positions.json", ".meta.json", ".manifest.json", ".lattice.json"):
         artifact = Path(f"{output_path}{suffix}")
@@ -153,6 +160,7 @@ def main():
         run_test("blind_candidates_exclude_signs_that_cannot_be_patched_in_both_states", t_blind_candidates_exclude_signs_that_cannot_be_patched_in_both_states),
         run_test("blind_candidates_can_require_high_frequency_ac_signs", t_blind_candidates_can_require_high_frequency_ac_signs),
         run_test("blind_operating_point_excludes_the_lowest_ac_band", t_blind_operating_point_excludes_the_lowest_ac_band),
+        run_test("blind_sign_patch_targets_only_the_cavlc_sign_flag", t_blind_sign_patch_targets_only_the_cavlc_sign_flag),
         run_test("blind_round_trip_without_cover_or_sidecars", t_blind_round_trip_without_cover_or_sidecars),
     ]
     sys.exit(summarise(results, "Phase 8"))
