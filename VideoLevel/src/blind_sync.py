@@ -66,6 +66,11 @@ DEFAULT_BLIND_HEADER_CONTRACT = BlindOperatingContract(
     metadata_bound=False,
 )
 
+# Blind extraction must be able to re-derive this policy from the stego stream.
+# Indices are CAVLC zig-zag positions; index 0 is DC and low indices carry the
+# most visible AC energy.  The operating path uses only the high-frequency tail.
+BLIND_MIN_SIGN_COEFFICIENT_INDEX = 8
+
 
 def _stable_candidate_index(coeffs: list[int], trailing_positions: set[int]) -> Optional[int]:
     """
@@ -113,6 +118,7 @@ def build_blind_sign_candidates(
     safe_positions: list[tuple[int, int, int]],
     *,
     is_flip_patchable: Callable[[tuple[int, int, int]], bool] | None = None,
+    min_coefficient_index: int = 1,
 ) -> list[tuple[int, int, int]]:
     """Select CAVLC-validated trailing-one sign positions for blind mode.
 
@@ -122,15 +128,17 @@ def build_blind_sign_candidates(
     have that guarantee.  Exactly one position per block preserves the blind
     one-bit-per-block schedule.
     """
+    if min_coefficient_index < 1:
+        raise ValueError("blind sign candidates must exclude the DC coefficient")
+
     selected: list[tuple[int, int, int]] = []
     seen_blocks: set[tuple[int, int]] = set()
     for mb_idx, block_idx, coeff_idx in safe_positions:
         if int(coeff_idx) >= 0:
             continue
-        # ``~0`` encodes the luma DC coefficient.  A DC sign flip is syntactically
-        # fixed-length but has a disproportionate visual cost, so it cannot be an
-        # operating-point candidate for blind video embedding.
-        if ~int(coeff_idx) == 0:
+        # ``~0`` encodes luma DC; low zig-zag indices carry the strongest image
+        # energy.  Both parties apply this fixed threshold before key ordering.
+        if ~int(coeff_idx) < min_coefficient_index:
             continue
         key = (int(mb_idx), int(block_idx))
         if key in seen_blocks:
@@ -706,7 +714,13 @@ def derive_blind_positions(
         payload = f"{pos[0]}:{pos[1]}:{pos[2]}".encode("ascii")
         return hmac.new(ordering_key, payload, hashlib.sha256).digest()
 
-    ordered = sorted(build_blind_sign_candidates(safe_positions), key=_score)
+    ordered = sorted(
+        build_blind_sign_candidates(
+            safe_positions,
+            min_coefficient_index=BLIND_MIN_SIGN_COEFFICIENT_INDEX,
+        ),
+        key=_score,
+    )
     reconstruction_context = load_or_build_reconstruction_context(
         video_path,
         use_cache=use_analysis_cache,
