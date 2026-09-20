@@ -127,6 +127,11 @@ def build_blind_sign_candidates(
     for mb_idx, block_idx, coeff_idx in safe_positions:
         if int(coeff_idx) >= 0:
             continue
+        # ``~0`` encodes the luma DC coefficient.  A DC sign flip is syntactically
+        # fixed-length but has a disproportionate visual cost, so it cannot be an
+        # operating-point candidate for blind video embedding.
+        if ~int(coeff_idx) == 0:
+            continue
         key = (int(mb_idx), int(block_idx))
         if key in seen_blocks:
             continue
