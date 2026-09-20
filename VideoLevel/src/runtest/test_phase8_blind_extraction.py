@@ -27,6 +27,11 @@ from src.runtest._helpers import (
 
 
 SECRET_KEY = b"blind-e2e-key-material-for-cavlc"
+# Blind extraction must be validated on an asset with capacity headroom.  The
+# 300-frame fixture can expose exactly 1,096 sign flags, which is only enough
+# for a four-byte message plus the fixed Groth16 envelope; analysis variation
+# correctly makes that edge case fail closed.  The 600-frame fixture leaves
+# room for a normal integration message and exercises the same CAVLC path.
 MESSAGE = b"blind-e2e"
 
 
@@ -78,7 +83,7 @@ def t_blind_round_trip_without_cover_or_sidecars():
         SKIP("blind_round_trip_without_cover_or_sidecars", "node not found on PATH")
         return
 
-    video = get_video("deadline_cif_q22_g1.h264")
+    video = get_video("deadline_cif_q22_g1_600f.h264")
     if not os.path.isfile(video):
         SKIP("blind_round_trip_without_cover_or_sidecars", "blind E2E video asset unavailable")
         return
