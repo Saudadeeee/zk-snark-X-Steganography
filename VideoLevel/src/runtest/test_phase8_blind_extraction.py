@@ -81,6 +81,14 @@ def t_blind_candidates_exclude_signs_that_cannot_be_patched_in_both_states():
     ) == [(10, 0, ~2), (12, 2, ~4)]
 
 
+def t_blind_candidates_can_require_high_frequency_ac_signs():
+    safe_positions = [(10, 0, ~7), (11, 1, ~8), (12, 2, ~12)]
+    assert build_blind_sign_candidates(safe_positions, min_coefficient_index=8) == [
+        (11, 1, ~8),
+        (12, 2, ~12),
+    ]
+
+
 def _remove_blind_artifacts(output_path: str) -> None:
     for suffix in ("", ".positions.json", ".meta.json", ".manifest.json", ".lattice.json"):
         artifact = Path(f"{output_path}{suffix}")
@@ -139,6 +147,7 @@ def main():
         run_test("reconstruction_accounting_excludes_unapplied_blocks", t_reconstruction_accounting_excludes_unapplied_blocks),
         run_test("blind_candidates_only_use_validated_cavlc_sign_positions", t_blind_candidates_only_use_validated_cavlc_sign_positions),
         run_test("blind_candidates_exclude_signs_that_cannot_be_patched_in_both_states", t_blind_candidates_exclude_signs_that_cannot_be_patched_in_both_states),
+        run_test("blind_candidates_can_require_high_frequency_ac_signs", t_blind_candidates_can_require_high_frequency_ac_signs),
         run_test("blind_round_trip_without_cover_or_sidecars", t_blind_round_trip_without_cover_or_sidecars),
     ]
     sys.exit(summarise(results, "Phase 8"))
