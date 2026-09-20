@@ -98,7 +98,7 @@ def embed_blind(
     required_bits = blind_payload_bits(message_length=len(message))
     analysis = load_or_build_video_analysis(
         video_path,
-        use_analysis_cache=use_analysis_cache,
+        use_cache=use_analysis_cache,
         force_refresh=force_analysis_refresh,
         cache_dir=analysis_cache_dir,
     )
