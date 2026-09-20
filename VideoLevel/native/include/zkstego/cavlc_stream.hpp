@@ -3,13 +3,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace zkstego {
 
 class RbspBitReader {
 public:
-    explicit RbspBitReader(const std::vector<std::uint8_t>& bytes) : bytes_(bytes) {}
+    explicit RbspBitReader(std::vector<std::uint8_t> bytes) : bytes_(std::move(bytes)) {}
     [[nodiscard]] std::uint8_t read_bit() {
         if (position_ >= bytes_.size() * 8) throw std::out_of_range("RBSP bit read past end");
         const auto bit = static_cast<std::uint8_t>((bytes_[position_ / 8] >> (7 - position_ % 8)) & 1U);
@@ -27,8 +28,15 @@ public:
         while (read_bit() == 0) { if (++zeros > 31) throw std::invalid_argument("invalid RBSP ue(v)"); }
         return zeros == 0 ? 0 : ((1U << zeros) - 1U + read_bits(zeros));
     }
+    [[nodiscard]] std::int32_t read_se() {
+        const auto code_num = read_ue();
+        if ((code_num & 1U) != 0U) {
+            return static_cast<std::int32_t>((code_num + 1U) / 2U);
+        }
+        return -static_cast<std::int32_t>(code_num / 2U);
+    }
 private:
-    const std::vector<std::uint8_t>& bytes_;
+    std::vector<std::uint8_t> bytes_;
     std::size_t position_{};
 };
 
