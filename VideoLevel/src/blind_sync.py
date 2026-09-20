@@ -17,7 +17,6 @@ import json
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from .bitstream.bitstream_ops import BitstreamPatcher
 from .core.analysis_cache import (
     load_or_build_reconstruction_context,
     load_or_build_video_analysis,
@@ -301,8 +300,6 @@ def _filter_flip_patchable_sign_candidates(
 
     coeff_map = {(int(mb), int(blk)): list(values) for mb, blk, values in coefficients}
     idr_offsets = sorted(int(offset) for offset in frame_verified_data)
-    idr_nals = [nal for nal in reconstruction_context.get("nal_units", []) if int(nal.nal_unit_type) == 5]
-    nal_by_offset = dict(zip(idr_offsets, idr_nals))
     retained: list[tuple[int, int, int]] = []
 
     for candidate in candidates:
@@ -310,9 +307,8 @@ def _filter_flip_patchable_sign_candidates(
         if encoded_idx >= 0:
             continue
         idr_offset = next((offset for offset in reversed(idr_offsets) if offset <= mb), None)
-        nal = nal_by_offset.get(idr_offset) if idr_offset is not None else None
         original_coeffs = coeff_map.get((mb, blk))
-        if nal is None or original_coeffs is None:
+        if idr_offset is None or original_coeffs is None:
             continue
         real_idx = ~encoded_idx
         if real_idx < 0 or real_idx >= len(original_coeffs) or original_coeffs[real_idx] == 0:
@@ -331,39 +327,12 @@ def _filter_flip_patchable_sign_candidates(
         if local_key not in local_offsets or local_key not in local_blocks:
             continue
 
-        # Work from the patcher's own parsed block values.  This is important
-        # when a trace parser and the bitstream decoder disagree on a level
-        # representation but agree on the CAVLC sign flag.
+        # Sign-only candidates have already passed CAVLCSafetyFilter's
+        # bit-length and patchability checks.  Direct sign-flag patching does
+        # not re-encode a block, so constructing two whole patched NALs here is
+        # unnecessary and makes the sender/receiver preflight O(N * RBSP).
         base = list(local_blocks[local_key])
         if real_idx >= len(base) or base[real_idx] == 0:
-            continue
-        flipped = list(base)
-        flipped[real_idx] = -flipped[real_idx]
-
-        first = BitstreamPatcher().patch_slice(
-            nal,
-            [(mb, blk, flipped)],
-            sps=None,
-            pps=None,
-            global_mb_offset=idr_offset,
-            pre_computed_offsets=local_offsets,
-            pre_computed_blocks=local_blocks,
-        )
-        if (mb, blk) not in getattr(first, "applied_block_keys", []):
-            continue
-
-        reverse_blocks = dict(local_blocks)
-        reverse_blocks[local_key] = flipped
-        second = BitstreamPatcher().patch_slice(
-            first,
-            [(mb, blk, base)],
-            sps=None,
-            pps=None,
-            global_mb_offset=idr_offset,
-            pre_computed_offsets=local_offsets,
-            pre_computed_blocks=reverse_blocks,
-        )
-        if (mb, blk) not in getattr(second, "applied_block_keys", []):
             continue
 
         retained.append((mb, blk, encoded_idx))
