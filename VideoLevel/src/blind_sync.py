@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from .core.analysis_cache import (
-    load_or_build_reconstruction_context,
     load_or_build_video_analysis,
 )
 from .core.chaos import ChaosTransformer
@@ -279,7 +278,6 @@ def _filter_flip_patchable_sign_candidates(
     *,
     coefficients: list[tuple[int, int, list[int]]],
     frame_verified_data: dict,
-    reconstruction_context: dict,
     required_bits: int,
 ) -> list[tuple[int, int, int]]:
     """Keep sign candidates that the patcher can flip and then flip back.
@@ -690,17 +688,10 @@ def derive_blind_positions(
         ),
         key=_score,
     )
-    reconstruction_context = load_or_build_reconstruction_context(
-        video_path,
-        use_cache=use_analysis_cache,
-        force_refresh=force_analysis_refresh,
-        cache_dir=analysis_cache_dir,
-    )
     patchable = _filter_flip_patchable_sign_candidates(
         ordered,
         coefficients=coefficients,
         frame_verified_data=frame_verified_data,
-        reconstruction_context=reconstruction_context,
         required_bits=required_bits,
     )
     return patchable, metadata
