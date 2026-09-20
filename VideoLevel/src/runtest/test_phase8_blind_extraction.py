@@ -60,6 +60,7 @@ def t_reconstruction_accounting_excludes_unapplied_blocks():
 
 def t_blind_candidates_only_use_validated_cavlc_sign_positions():
     safe_positions = [
+        (9, 0, ~0),
         (10, 0, 3),
         (10, 0, ~7),
         (10, 0, ~9),
