@@ -26,7 +26,13 @@ RESULT = ROOT / "benchmark" / "results" / "resource_benchmark.json"
 
 def _tree_usage(process: psutil.Process) -> tuple[int, float]:
     rss, cpu = 0, 0.0
-    processes = [process, *process.children(recursive=True)]
+    try:
+        processes = [process, *process.children(recursive=True)]
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        # The child can terminate after the caller's poll() but before psutil
+        # enumerates its descendants.  A missing final sample is preferable to
+        # turning an otherwise completed benchmark into a monitor failure.
+        return rss, cpu
     for item in processes:
         try:
             memory = item.memory_info()
