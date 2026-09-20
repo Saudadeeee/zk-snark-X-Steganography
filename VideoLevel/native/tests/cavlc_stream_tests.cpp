@@ -26,4 +26,15 @@ int main() {
     assert(nals[1].nal_unit_type == 8);
     assert(nals[2].is_idr());
     assert(nals[2].rbsp() == std::vector<std::uint8_t>({0x88, 0x00, 0x00, 0x01}));
+    assert(zkstego::assemble_annex_b(nals) == annex_b);
+
+    const auto patched_annex_b = zkstego::patch_annex_b_nal_rbsp(
+        annex_b,
+        2,
+        {{8, {1, 1, 1, 1, 1, 1, 1, 1}}});
+    const auto patched_nals = zkstego::split_annex_b(patched_annex_b);
+    assert(patched_nals.size() == 3);
+    assert(patched_nals[0].payload == nals[0].payload);
+    assert(patched_nals[1].payload == nals[1].payload);
+    assert(patched_nals[2].rbsp() == std::vector<std::uint8_t>({0x88, 0xff, 0x00, 0x01}));
 }
