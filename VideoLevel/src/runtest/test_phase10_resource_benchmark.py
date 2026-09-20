@@ -7,6 +7,7 @@ import psutil
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from benchmark import sec1_quality
 from benchmark.resource_benchmark import _tree_usage
 from benchmark.sec1_quality import _require_full_payload
 from src.runtest._helpers import run_test, section, summarise
@@ -31,11 +32,16 @@ def t_quality_benchmark_rejects_zero_payload_result():
     raise AssertionError("quality benchmark must reject a result without its full payload")
 
 
+def t_quality_benchmark_defaults_to_real_proof_pipeline():
+    assert sec1_quality.USE_REAL_PROOF_EMBED_PIPELINE is True
+
+
 def main():
     section("Phase 10 - Resource Benchmark Contract")
     results = [
         run_test("tree_usage_tolerates_process_exit_race", t_tree_usage_tolerates_process_exit_race),
         run_test("quality_benchmark_rejects_zero_payload_result", t_quality_benchmark_rejects_zero_payload_result),
+        run_test("quality_benchmark_defaults_to_real_proof_pipeline", t_quality_benchmark_defaults_to_real_proof_pipeline),
     ]
     sys.exit(summarise(results, "Phase 10"))
 
