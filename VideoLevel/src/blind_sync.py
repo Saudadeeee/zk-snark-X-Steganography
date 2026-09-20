@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+from bisect import bisect_right
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -304,32 +305,28 @@ def _filter_flip_patchable_sign_candidates(
         mb, blk, encoded_idx = (int(candidate[0]), int(candidate[1]), int(candidate[2]))
         if encoded_idx >= 0:
             continue
-        idr_offset = next((offset for offset in reversed(idr_offsets) if offset <= mb), None)
+        idr_index = bisect_right(idr_offsets, mb) - 1
+        if idr_index < 0:
+            continue
+        idr_offset = idr_offsets[idr_index]
         original_coeffs = coeff_map.get((mb, blk))
-        if idr_offset is None or original_coeffs is None:
+        if original_coeffs is None:
             continue
         real_idx = ~encoded_idx
         if real_idx < 0 or real_idx >= len(original_coeffs) or original_coeffs[real_idx] == 0:
             continue
 
         global_offsets, global_blocks, _rbsp = frame_verified_data[idr_offset]
-        local_offsets = {
-            (int(global_mb) - idr_offset, int(global_blk)): data
-            for (global_mb, global_blk), data in global_offsets.items()
-        }
-        local_blocks = {
-            (int(global_mb) - idr_offset, int(global_blk)): list(values)
-            for (global_mb, global_blk), values in global_blocks.items()
-        }
-        local_key = (mb - idr_offset, blk)
-        if local_key not in local_offsets or local_key not in local_blocks:
+        if global_offsets.get((mb, blk)) is None:
             continue
 
         # Sign-only candidates have already passed CAVLCSafetyFilter's
         # bit-length and patchability checks.  Direct sign-flag patching does
         # not re-encode a block, so constructing two whole patched NALs here is
         # unnecessary and makes the sender/receiver preflight O(N * RBSP).
-        base = list(local_blocks[local_key])
+        base = global_blocks.get((mb, blk))
+        if base is None:
+            continue
         if real_idx >= len(base) or base[real_idx] == 0:
             continue
 
