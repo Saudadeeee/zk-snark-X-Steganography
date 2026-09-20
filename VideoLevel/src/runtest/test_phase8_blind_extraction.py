@@ -95,9 +95,9 @@ def t_blind_operating_point_excludes_the_lowest_ac_band():
 
 
 def t_blind_sign_patch_targets_only_the_cavlc_sign_flag():
-    # nC=0, TotalCoeff=1, TrailingOnes=1: coeff_token is three bits, followed
+    # nC=0, TotalCoeff=1, TrailingOnes=1: coeff_token is two bits, followed
     # by the one-bit trailing-one sign flag.
-    assert _trailing_one_sign_offsets(bytes([0b00010100]), 0, nC=0, max_num_coeff=16) == [3]
+    assert _trailing_one_sign_offsets(bytes.fromhex("4180"), 0, nC=0, max_num_coeff=16) == [2]
 
 
 def _remove_blind_artifacts(output_path: str) -> None:
