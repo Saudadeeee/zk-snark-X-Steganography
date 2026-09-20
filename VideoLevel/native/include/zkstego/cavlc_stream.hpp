@@ -2,9 +2,35 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 namespace zkstego {
+
+class RbspBitReader {
+public:
+    explicit RbspBitReader(const std::vector<std::uint8_t>& bytes) : bytes_(bytes) {}
+    [[nodiscard]] std::uint8_t read_bit() {
+        if (position_ >= bytes_.size() * 8) throw std::out_of_range("RBSP bit read past end");
+        const auto bit = static_cast<std::uint8_t>((bytes_[position_ / 8] >> (7 - position_ % 8)) & 1U);
+        ++position_;
+        return bit;
+    }
+    [[nodiscard]] std::uint32_t read_bits(std::size_t count) {
+        if (count > 32) throw std::invalid_argument("RBSP read_bits count exceeds 32");
+        std::uint32_t value = 0;
+        for (std::size_t i = 0; i < count; ++i) value = (value << 1U) | read_bit();
+        return value;
+    }
+    [[nodiscard]] std::uint32_t read_ue() {
+        std::size_t zeros = 0;
+        while (read_bit() == 0) { if (++zeros > 31) throw std::invalid_argument("invalid RBSP ue(v)"); }
+        return zeros == 0 ? 0 : ((1U << zeros) - 1U + read_bits(zeros));
+    }
+private:
+    const std::vector<std::uint8_t>& bytes_;
+    std::size_t position_{};
+};
 
 struct FixedLengthBitPatch {
     std::size_t bit_offset;
