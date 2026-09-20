@@ -5,6 +5,11 @@
 #include <vector>
 
 int main() {
+    zkstego::RbspBitReader reader({0b10100110});
+    assert(reader.read_bits(3) == 0b101);
+    assert(reader.read_bit() == 0);
+    assert(reader.read_ue() == 2);  // remaining bits: 0110 -> ue(v)=2
+
     const std::vector<std::uint8_t> ebsp{0x12, 0x00, 0x00, 0x03, 0x01, 0x34};
     const auto rbsp = zkstego::ebsp_to_rbsp(ebsp);
     assert((rbsp == std::vector<std::uint8_t>{0x12, 0x00, 0x00, 0x01, 0x34}));
