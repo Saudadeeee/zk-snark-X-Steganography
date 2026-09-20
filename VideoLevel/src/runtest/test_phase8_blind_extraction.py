@@ -12,7 +12,11 @@ from src.blind import (
     sign_invariant_positions,
     verify_blind,
 )
-from src.blind_sync import BLIND_MIN_SIGN_COEFFICIENT_INDEX, build_blind_sign_candidates
+from src.blind_sync import (
+    BLIND_MIN_SIGN_COEFFICIENT_INDEX,
+    _filter_flip_patchable_sign_candidates,
+    build_blind_sign_candidates,
+)
 from src.bitstream.bitstream_ops import _trailing_one_sign_offsets
 from src.embedder import _filter_reconstructed_positions
 from src.runtest._helpers import (
@@ -80,6 +84,27 @@ def t_blind_candidates_exclude_signs_that_cannot_be_patched_in_both_states():
         safe_positions,
         is_flip_patchable=lambda pos: pos in patchable,
     ) == [(10, 0, ~2), (12, 2, ~4)]
+
+
+def t_blind_candidate_filter_uses_direct_global_block_lookup():
+    class GetOnlyDict(dict):
+        def items(self):
+            raise AssertionError("blind candidate filtering must not copy every block map")
+
+    coefficients = [(100, 0, [0, 0, 0, 0, 0, 0, 0, 1])]
+    frame_verified_data = {
+        100: (
+            GetOnlyDict({(100, 0): {"start_bit": 0}}),
+            GetOnlyDict({(100, 0): [0, 0, 0, 0, 0, 0, 0, 1]}),
+            b"",
+        )
+    }
+    assert _filter_flip_patchable_sign_candidates(
+        [(100, 0, ~7)],
+        coefficients=coefficients,
+        frame_verified_data=frame_verified_data,
+        required_bits=1,
+    ) == [(100, 0, ~7)]
 
 
 def t_blind_candidates_can_require_high_frequency_ac_signs():
@@ -158,6 +183,7 @@ def main():
         run_test("reconstruction_accounting_excludes_unapplied_blocks", t_reconstruction_accounting_excludes_unapplied_blocks),
         run_test("blind_candidates_only_use_validated_cavlc_sign_positions", t_blind_candidates_only_use_validated_cavlc_sign_positions),
         run_test("blind_candidates_exclude_signs_that_cannot_be_patched_in_both_states", t_blind_candidates_exclude_signs_that_cannot_be_patched_in_both_states),
+        run_test("blind_candidate_filter_uses_direct_global_block_lookup", t_blind_candidate_filter_uses_direct_global_block_lookup),
         run_test("blind_candidates_can_require_high_frequency_ac_signs", t_blind_candidates_can_require_high_frequency_ac_signs),
         run_test("blind_operating_point_excludes_the_lowest_ac_band", t_blind_operating_point_excludes_the_lowest_ac_band),
         run_test("blind_sign_patch_targets_only_the_cavlc_sign_flag", t_blind_sign_patch_targets_only_the_cavlc_sign_flag),
