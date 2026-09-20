@@ -8,8 +8,16 @@
 int main() {
     zkstego::RbspBitReader reader({0b10100110});
     CHECK(reader.read_bits(3) == 0b101);
+    CHECK(reader.position() == 3);
+    CHECK(reader.remaining_bits() == 5);
     CHECK(reader.read_bit() == 0);
     CHECK(reader.read_ue() == 2);  // remaining bits: 0110 -> ue(v)=2
+    CHECK(reader.remaining_bits() == 1);
+
+    zkstego::RbspBitReader skipping_reader({0b10100110});
+    skipping_reader.skip_bits(5);
+    CHECK(skipping_reader.position() == 5);
+    CHECK(skipping_reader.read_bits(3) == 0b110);
 
     zkstego::RbspBitReader signed_reader({0b01100000});
     CHECK(signed_reader.read_se() == -1);  // ue(v)=2 maps to se(v)=-1
