@@ -37,4 +37,12 @@ int main() {
     assert(patched_nals[0].payload == nals[0].payload);
     assert(patched_nals[1].payload == nals[1].payload);
     assert(patched_nals[2].rbsp() == std::vector<std::uint8_t>({0x88, 0xff, 0x00, 0x01}));
+
+    const auto patched_segment = zkstego::patch_annex_b_rbsp_plan(
+        annex_b,
+        {{0, {{0, {1}}}}, {2, {{8, {1, 1, 1, 1, 1, 1, 1, 1}}}}});
+    const auto segment_nals = zkstego::split_annex_b(patched_segment);
+    assert(segment_nals[0].rbsp() == std::vector<std::uint8_t>({0xc2, 0x00, 0x1e}));
+    assert(segment_nals[1].payload == nals[1].payload);
+    assert(segment_nals[2].rbsp() == std::vector<std::uint8_t>({0x88, 0xff, 0x00, 0x01}));
 }
