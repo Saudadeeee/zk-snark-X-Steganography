@@ -11,6 +11,11 @@ struct FixedLengthBitPatch {
     std::vector<std::uint8_t> bits;
 };
 
+struct AnnexBRbspPatchPlan {
+    std::size_t nal_index;
+    std::vector<FixedLengthBitPatch> patches;
+};
+
 struct AnnexBNalUnit {
     std::size_t start_offset{};
     std::size_t start_code_size{};
@@ -34,5 +39,8 @@ std::vector<std::uint8_t> patch_annex_b_nal_rbsp(
     const std::vector<std::uint8_t>& annex_b,
     std::size_t nal_index,
     const std::vector<FixedLengthBitPatch>& patches);
+std::vector<std::uint8_t> patch_annex_b_rbsp_plan(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<AnnexBRbspPatchPlan>& plan);
 
 }  // namespace zkstego

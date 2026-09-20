@@ -143,4 +143,22 @@ std::vector<std::uint8_t> patch_annex_b_nal_rbsp(
     return assemble_annex_b(units);
 }
 
+std::vector<std::uint8_t> patch_annex_b_rbsp_plan(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<AnnexBRbspPatchPlan>& plan) {
+    auto units = split_annex_b(annex_b);
+    std::vector<bool> touched(units.size(), false);
+    for (const auto& entry : plan) {
+        if (entry.nal_index >= units.size()) {
+            throw std::out_of_range("Annex-B patch plan NAL index is outside the segment");
+        }
+        auto rbsp = touched[entry.nal_index]
+            ? ebsp_to_rbsp(units[entry.nal_index].payload)
+            : units[entry.nal_index].rbsp();
+        units[entry.nal_index].payload = rbsp_to_ebsp(apply_fixed_length_patches(rbsp, entry.patches));
+        touched[entry.nal_index] = true;
+    }
+    return assemble_annex_b(units);
+}
+
 }  // namespace zkstego
