@@ -14,14 +14,8 @@ int main() {
     zkstego::RbspBitReader signed_reader({0b01100000});
     CHECK(signed_reader.read_se() == -1);  // ue(v)=2 maps to se(v)=-1
 
-    bool rejected_out_of_range_signed_value = false;
-    try {
-        zkstego::RbspBitReader out_of_range_reader({0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xff, 0xff});
-        static_cast<void>(out_of_range_reader.read_se());
-    } catch (const std::out_of_range&) {
-        rejected_out_of_range_signed_value = true;
-    }
-    CHECK(rejected_out_of_range_signed_value);
+    zkstego::RbspBitReader signed_minimum_reader({0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xff, 0xff});
+    CHECK(signed_minimum_reader.read_se() == -2147483647);
 
     const std::vector<std::uint8_t> ebsp{0x12, 0x00, 0x00, 0x03, 0x01, 0x34};
     const auto rbsp = zkstego::ebsp_to_rbsp(ebsp);
