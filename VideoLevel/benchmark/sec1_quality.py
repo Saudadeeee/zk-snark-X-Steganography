@@ -47,9 +47,10 @@ STEGO_OUTPUTS = {
 }
 
 CACHE_KEY = "sec1_quality_data"
-# Default to quality-oriented benchmark mode.
-# Set SEC1_USE_REAL_PROOF_PIPELINE=1 to force real-proof embedding path.
-USE_REAL_PROOF_EMBED_PIPELINE = os.environ.get("SEC1_USE_REAL_PROOF_PIPELINE", "0") == "1"
+# Quality figures must exercise the public proof-embedding path by default.
+# Set SEC1_USE_REAL_PROOF_PIPELINE=0 only for local algorithm experiments;
+# those synthetic runs are not system benchmark evidence.
+USE_REAL_PROOF_EMBED_PIPELINE = os.environ.get("SEC1_USE_REAL_PROOF_PIPELINE", "1") == "1"
 REAL_PROOF_MESSAGE = b"ZK-bench-v1.0!"
 REAL_PROOF_FFMPEG_VALIDATE = False
 REAL_PROOF_SMART_DISTRIBUTED = True
