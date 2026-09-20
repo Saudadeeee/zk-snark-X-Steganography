@@ -494,19 +494,13 @@ def _trailing_one_sign_offsets(
     CAVLC places these fixed one-bit flags immediately after ``coeff_token``.
     Patching them directly preserves every other syntax bit in the block.
     """
-    bits = BitArray(rbsp_bytes)
-    raw = bits[start_bit:]
-    arr = np.asarray(raw, dtype=np.uint8)
-    pad = (-arr.size) % 8
-    if pad:
-        arr = np.pad(arr, (0, pad))
-    packed = np.packbits(arr).tobytes()
-    reader = BitstreamReader(packed)
+    reader = BitstreamReader(rbsp_bytes)
+    reader.seek(start_bit)
     decoder = CAVLCDecoder(reader)
     _total_coeffs, trailing_ones = decoder._decode_coeff_token(nC)
     if trailing_ones < 0 or trailing_ones > max_num_coeff:
         raise ValueError("invalid CAVLC trailing-one count")
-    return [start_bit + reader.pos + index for index in range(trailing_ones)]
+    return [reader.pos + index for index in range(trailing_ones)]
 
     def validate_block_patchability(self, rbsp_bytes: bytes, block_key, offset_data: Dict,
                                     end_to_block_retro: Dict | None = None):
