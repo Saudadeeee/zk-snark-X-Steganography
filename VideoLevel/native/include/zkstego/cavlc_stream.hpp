@@ -11,6 +11,12 @@ namespace zkstego {
 class RbspBitReader {
 public:
     explicit RbspBitReader(std::vector<std::uint8_t> bytes) : bytes_(std::move(bytes)) {}
+    [[nodiscard]] std::size_t position() const noexcept { return position_; }
+    [[nodiscard]] std::size_t remaining_bits() const noexcept { return bytes_.size() * 8 - position_; }
+    void skip_bits(std::size_t count) {
+        if (count > remaining_bits()) throw std::out_of_range("RBSP bit skip past end");
+        position_ += count;
+    }
     [[nodiscard]] std::uint8_t read_bit() {
         if (position_ >= bytes_.size() * 8) throw std::out_of_range("RBSP bit read past end");
         const auto bit = static_cast<std::uint8_t>((bytes_[position_ / 8] >> (7 - position_ % 8)) & 1U);
