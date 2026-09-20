@@ -14,4 +14,16 @@ int main() {
     const auto patched = zkstego::apply_fixed_length_patches(source, {{2, {0, 1, 1}}});
     assert(patched.size() == source.size());
     assert(patched[0] == 0b10011000);
+
+    const std::vector<std::uint8_t> annex_b{
+        0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1e,
+        0x00, 0x00, 0x01, 0x68, 0xce, 0x06,
+        0x00, 0x00, 0x01, 0x65, 0x88, 0x00, 0x00, 0x03, 0x01,
+    };
+    const auto nals = zkstego::split_annex_b(annex_b);
+    assert(nals.size() == 3);
+    assert(nals[0].nal_unit_type == 7 && nals[0].payload == std::vector<std::uint8_t>({0x42, 0x00, 0x1e}));
+    assert(nals[1].nal_unit_type == 8);
+    assert(nals[2].is_idr());
+    assert(nals[2].rbsp() == std::vector<std::uint8_t>({0x88, 0x00, 0x00, 0x01}));
 }

@@ -4,6 +4,21 @@
 
 namespace zkstego {
 
+namespace {
+
+std::size_t start_code_length_at(const std::vector<std::uint8_t>& bytes, std::size_t offset) {
+    if (offset + 3 <= bytes.size() && bytes[offset] == 0 && bytes[offset + 1] == 0 && bytes[offset + 2] == 1) {
+        return 3;
+    }
+    if (offset + 4 <= bytes.size() && bytes[offset] == 0 && bytes[offset + 1] == 0 &&
+        bytes[offset + 2] == 0 && bytes[offset + 3] == 1) {
+        return 4;
+    }
+    return 0;
+}
+
+}  // namespace
+
 std::vector<std::uint8_t> ebsp_to_rbsp(const std::vector<std::uint8_t>& ebsp) {
     std::vector<std::uint8_t> rbsp;
     rbsp.reserve(ebsp.size());
@@ -33,6 +48,37 @@ std::vector<std::uint8_t> rbsp_to_ebsp(const std::vector<std::uint8_t>& rbsp) {
         zeros = byte == 0 ? zeros + 1 : 0;
     }
     return ebsp;
+}
+
+std::vector<std::uint8_t> AnnexBNalUnit::rbsp() const {
+    return ebsp_to_rbsp(payload);
+}
+
+std::vector<AnnexBNalUnit> split_annex_b(const std::vector<std::uint8_t>& annex_b) {
+    std::vector<AnnexBNalUnit> units;
+    std::size_t cursor = 0;
+    while (cursor < annex_b.size()) {
+        const auto marker_length = start_code_length_at(annex_b, cursor);
+        if (marker_length == 0) {
+            ++cursor;
+            continue;
+        }
+        const auto start = cursor;
+        const auto header_offset = cursor + marker_length;
+        if (header_offset >= annex_b.size()) break;
+        cursor = header_offset + 1;
+        while (cursor < annex_b.size() && start_code_length_at(annex_b, cursor) == 0) ++cursor;
+
+        const auto header = annex_b[header_offset];
+        AnnexBNalUnit unit;
+        unit.start_offset = start;
+        unit.nal_ref_idc = static_cast<std::uint8_t>((header >> 5) & 0x03);
+        unit.nal_unit_type = static_cast<std::uint8_t>(header & 0x1f);
+        unit.payload.assign(annex_b.begin() + static_cast<std::ptrdiff_t>(header_offset + 1),
+                            annex_b.begin() + static_cast<std::ptrdiff_t>(cursor));
+        units.push_back(std::move(unit));
+    }
+    return units;
 }
 
 std::vector<std::uint8_t> apply_fixed_length_patches(
