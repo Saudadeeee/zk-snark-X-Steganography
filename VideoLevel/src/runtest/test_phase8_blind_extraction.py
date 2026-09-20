@@ -12,7 +12,7 @@ from src.blind import (
     sign_invariant_positions,
     verify_blind,
 )
-from src.blind_sync import build_blind_sign_candidates
+from src.blind_sync import BLIND_MIN_SIGN_COEFFICIENT_INDEX, build_blind_sign_candidates
 from src.embedder import _filter_reconstructed_positions
 from src.runtest._helpers import (
     get_circuits_dir,
@@ -89,6 +89,10 @@ def t_blind_candidates_can_require_high_frequency_ac_signs():
     ]
 
 
+def t_blind_operating_point_excludes_the_lowest_ac_band():
+    assert BLIND_MIN_SIGN_COEFFICIENT_INDEX == 7
+
+
 def _remove_blind_artifacts(output_path: str) -> None:
     for suffix in ("", ".positions.json", ".meta.json", ".manifest.json", ".lattice.json"):
         artifact = Path(f"{output_path}{suffix}")
@@ -148,6 +152,7 @@ def main():
         run_test("blind_candidates_only_use_validated_cavlc_sign_positions", t_blind_candidates_only_use_validated_cavlc_sign_positions),
         run_test("blind_candidates_exclude_signs_that_cannot_be_patched_in_both_states", t_blind_candidates_exclude_signs_that_cannot_be_patched_in_both_states),
         run_test("blind_candidates_can_require_high_frequency_ac_signs", t_blind_candidates_can_require_high_frequency_ac_signs),
+        run_test("blind_operating_point_excludes_the_lowest_ac_band", t_blind_operating_point_excludes_the_lowest_ac_band),
         run_test("blind_round_trip_without_cover_or_sidecars", t_blind_round_trip_without_cover_or_sidecars),
     ]
     sys.exit(summarise(results, "Phase 8"))
