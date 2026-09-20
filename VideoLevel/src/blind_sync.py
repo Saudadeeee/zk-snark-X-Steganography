@@ -15,9 +15,13 @@ import hashlib
 import hmac
 import json
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
-from .core.analysis_cache import load_or_build_video_analysis
+from .bitstream.bitstream_ops import BitstreamPatcher
+from .core.analysis_cache import (
+    load_or_build_reconstruction_context,
+    load_or_build_video_analysis,
+)
 from .core.chaos import ChaosTransformer
 from .core.stego import CAVLCSafetyFilter
 
@@ -107,6 +111,8 @@ def build_blind_stable_candidates(
 
 def build_blind_sign_candidates(
     safe_positions: list[tuple[int, int, int]],
+    *,
+    is_flip_patchable: Callable[[tuple[int, int, int]], bool] | None = None,
 ) -> list[tuple[int, int, int]]:
     """Select CAVLC-validated trailing-one sign positions for blind mode.
 
@@ -124,8 +130,15 @@ def build_blind_sign_candidates(
         key = (int(mb_idx), int(block_idx))
         if key in seen_blocks:
             continue
+        candidate = (key[0], key[1], int(coeff_idx))
+        # A blind receiver cannot consult a sidecar to learn that an attempted
+        # sign flip was rejected during reconstruction.  Callers may therefore
+        # supply a symmetric (both-sign-states) patchability predicate and only
+        # admit positions that remain representable in either payload state.
+        if is_flip_patchable is not None and not is_flip_patchable(candidate):
+            continue
         seen_blocks.add(key)
-        selected.append((key[0], key[1], int(coeff_idx)))
+        selected.append(candidate)
     return selected
 
 
@@ -247,6 +260,104 @@ def _filter_signbit_positions(
     positions: list[tuple[int, int, int]],
 ) -> list[tuple[int, int, int]]:
     return [pos for pos in positions if int(pos[2]) < 0]
+
+
+def _filter_flip_patchable_sign_candidates(
+    candidates: list[tuple[int, int, int]],
+    *,
+    coefficients: list[tuple[int, int, list[int]]],
+    frame_verified_data: dict,
+    reconstruction_context: dict,
+    required_bits: int,
+) -> list[tuple[int, int, int]]:
+    """Keep sign candidates that the patcher can flip and then flip back.
+
+    The direct CAVLC safety check validates codeword length, but a blind
+    schedule also needs the bitstream patcher to accept the block in *both*
+    possible sign states.  Otherwise the embedder can skip an attempted bit
+    while a sidecar-free receiver has no way to remove that position from its
+    deterministic schedule.
+
+    Validation is deliberately bounded: ordered candidates are checked only
+    until the requested schedule is full.  It operates entirely on the video
+    being processed (cover at embed time, stego at verify time) and writes no
+    sidecar or output file.
+    """
+    if required_bits <= 0:
+        return []
+
+    coeff_map = {(int(mb), int(blk)): list(values) for mb, blk, values in coefficients}
+    idr_offsets = sorted(int(offset) for offset in frame_verified_data)
+    idr_nals = [nal for nal in reconstruction_context.get("nal_units", []) if int(nal.nal_unit_type) == 5]
+    nal_by_offset = dict(zip(idr_offsets, idr_nals))
+    retained: list[tuple[int, int, int]] = []
+
+    for candidate in candidates:
+        mb, blk, encoded_idx = (int(candidate[0]), int(candidate[1]), int(candidate[2]))
+        if encoded_idx >= 0:
+            continue
+        idr_offset = next((offset for offset in reversed(idr_offsets) if offset <= mb), None)
+        nal = nal_by_offset.get(idr_offset) if idr_offset is not None else None
+        original_coeffs = coeff_map.get((mb, blk))
+        if nal is None or original_coeffs is None:
+            continue
+        real_idx = ~encoded_idx
+        if real_idx < 0 or real_idx >= len(original_coeffs) or original_coeffs[real_idx] == 0:
+            continue
+
+        global_offsets, global_blocks, _rbsp = frame_verified_data[idr_offset]
+        local_offsets = {
+            (int(global_mb) - idr_offset, int(global_blk)): data
+            for (global_mb, global_blk), data in global_offsets.items()
+        }
+        local_blocks = {
+            (int(global_mb) - idr_offset, int(global_blk)): list(values)
+            for (global_mb, global_blk), values in global_blocks.items()
+        }
+        local_key = (mb - idr_offset, blk)
+        if local_key not in local_offsets or local_key not in local_blocks:
+            continue
+
+        # Work from the patcher's own parsed block values.  This is important
+        # when a trace parser and the bitstream decoder disagree on a level
+        # representation but agree on the CAVLC sign flag.
+        base = list(local_blocks[local_key])
+        if real_idx >= len(base) or base[real_idx] == 0:
+            continue
+        flipped = list(base)
+        flipped[real_idx] = -flipped[real_idx]
+
+        first = BitstreamPatcher().patch_slice(
+            nal,
+            [(mb, blk, flipped)],
+            sps=None,
+            pps=None,
+            global_mb_offset=idr_offset,
+            pre_computed_offsets=local_offsets,
+            pre_computed_blocks=local_blocks,
+        )
+        if (mb, blk) not in getattr(first, "applied_block_keys", []):
+            continue
+
+        reverse_blocks = dict(local_blocks)
+        reverse_blocks[local_key] = flipped
+        second = BitstreamPatcher().patch_slice(
+            first,
+            [(mb, blk, base)],
+            sps=None,
+            pps=None,
+            global_mb_offset=idr_offset,
+            pre_computed_offsets=local_offsets,
+            pre_computed_blocks=reverse_blocks,
+        )
+        if (mb, blk) not in getattr(second, "applied_block_keys", []):
+            continue
+
+        retained.append((mb, blk, encoded_idx))
+        if len(retained) >= required_bits:
+            break
+
+    return retained
 
 
 def _filter_bottom_zone(
@@ -591,4 +702,17 @@ def derive_blind_positions(
         return hmac.new(ordering_key, payload, hashlib.sha256).digest()
 
     ordered = sorted(build_blind_sign_candidates(safe_positions), key=_score)
-    return ordered[:required_bits], metadata
+    reconstruction_context = load_or_build_reconstruction_context(
+        video_path,
+        use_cache=use_analysis_cache,
+        force_refresh=force_analysis_refresh,
+        cache_dir=analysis_cache_dir,
+    )
+    patchable = _filter_flip_patchable_sign_candidates(
+        ordered,
+        coefficients=coefficients,
+        frame_verified_data=frame_verified_data,
+        reconstruction_context=reconstruction_context,
+        required_bits=required_bits,
+    )
+    return patchable, metadata
