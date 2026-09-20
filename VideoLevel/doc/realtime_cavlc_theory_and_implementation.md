@@ -15,9 +15,10 @@ evidence that pixel content has already been patched at camera-frame rate.
 
 The first native data-plane layer is implemented in `native/`: Annex-B NAL
 splitting and lossless reassembly, EBSP to RBSP conversion, RBSP
-emulation-prevention insertion, and bounds-checked fixed-length patching of a
-selected NAL RBSP. It is tested with CTest, including preservation of
-unmodified NALs during a patched-IDR segment round trip. It is intentionally
+emulation-prevention insertion, and bounds-checked fixed-length patch plans
+across multiple NAL RBSPs in one segment transform. It is tested with CTest,
+including preservation of unmodified NALs during a patched-IDR segment round
+trip. It is intentionally
 limited to a patch plan because a plan is not portable across arbitrary camera
 frames; native slice and macroblock parsing remains required before deployment.
 
@@ -36,8 +37,10 @@ The candidate must satisfy all of the following:
 
 1. It is an AC coefficient, never DC.
 2. Its magnitude is nonzero and its support does not change.
-3. It is not a trailing-one coefficient, because CAVLC treats those levels
-   specially.
+3. In the blind sign channel, it is a genuine CAVLC trailing-one sign flag;
+   the flag offset is immediately after `coeff_token` and changing it must not
+   alter any other CAVLC syntax bit. (The conventional LSB channel instead
+   excludes trailing ones.)
 4. Its re-encoded block has the same bit length as the source block.
 5. The replacement must preserve a decodable slice and pass visual-quality
    policy.
