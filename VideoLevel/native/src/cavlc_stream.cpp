@@ -63,6 +63,16 @@ constexpr std::array coeff_token_n2_3{
     CoeffTokenCode{"00000000000111", 16, 0}, CoeffTokenCode{"00000000000110", 16, 1}, CoeffTokenCode{"00000000000101", 16, 2}, CoeffTokenCode{"00000000000100", 16, 3},
 };
 
+constexpr std::array coeff_token_n4_5{
+    CoeffTokenCode{"1111", 0, 0}, CoeffTokenCode{"1110", 1, 1}, CoeffTokenCode{"1101", 2, 2}, CoeffTokenCode{"1100", 3, 3}, CoeffTokenCode{"1011", 4, 3}, CoeffTokenCode{"1010", 5, 3}, CoeffTokenCode{"1001", 6, 3}, CoeffTokenCode{"1000", 7, 3},
+    CoeffTokenCode{"01111", 2, 1}, CoeffTokenCode{"01100", 3, 1}, CoeffTokenCode{"01110", 3, 2}, CoeffTokenCode{"01010", 4, 1}, CoeffTokenCode{"01011", 4, 2}, CoeffTokenCode{"01000", 5, 1}, CoeffTokenCode{"01001", 5, 2}, CoeffTokenCode{"01101", 8, 3},
+    CoeffTokenCode{"011111", 1, 0}, CoeffTokenCode{"011011", 2, 0}, CoeffTokenCode{"011000", 3, 0}, CoeffTokenCode{"011110", 6, 1}, CoeffTokenCode{"011101", 6, 2}, CoeffTokenCode{"011010", 7, 1}, CoeffTokenCode{"011001", 7, 2}, CoeffTokenCode{"011100", 9, 3},
+    CoeffTokenCode{"0101111", 4, 0}, CoeffTokenCode{"0101011", 5, 0}, CoeffTokenCode{"0101001", 6, 0}, CoeffTokenCode{"0101000", 7, 0}, CoeffTokenCode{"0101110", 8, 1}, CoeffTokenCode{"0101101", 8, 2}, CoeffTokenCode{"0101010", 9, 2}, CoeffTokenCode{"0101100", 10, 3},
+    CoeffTokenCode{"01001111", 8, 0}, CoeffTokenCode{"01001011", 9, 0}, CoeffTokenCode{"01001110", 9, 1}, CoeffTokenCode{"01001010", 10, 1}, CoeffTokenCode{"01001101", 10, 2}, CoeffTokenCode{"01001001", 11, 2}, CoeffTokenCode{"01001100", 11, 3}, CoeffTokenCode{"01001000", 12, 3},
+    CoeffTokenCode{"010001111", 10, 0}, CoeffTokenCode{"010001011", 11, 0}, CoeffTokenCode{"010001110", 11, 1}, CoeffTokenCode{"010001000", 12, 0}, CoeffTokenCode{"010001010", 12, 1}, CoeffTokenCode{"010001101", 12, 2}, CoeffTokenCode{"010000111", 13, 1}, CoeffTokenCode{"010001001", 13, 2}, CoeffTokenCode{"010001100", 13, 3},
+    CoeffTokenCode{"0100001101", 13, 0}, CoeffTokenCode{"0100001001", 14, 0}, CoeffTokenCode{"0100001100", 14, 1}, CoeffTokenCode{"0100001011", 14, 2}, CoeffTokenCode{"0100001010", 14, 3}, CoeffTokenCode{"0100000101", 15, 0}, CoeffTokenCode{"0100001000", 15, 1}, CoeffTokenCode{"0100000111", 15, 2}, CoeffTokenCode{"0100000110", 15, 3}, CoeffTokenCode{"0100000001", 16, 0}, CoeffTokenCode{"0100000100", 16, 1}, CoeffTokenCode{"0100000011", 16, 2}, CoeffTokenCode{"0100000010", 16, 3},
+};
+
 }  // namespace
 
 H264BaselineSps parse_baseline_sps(const std::vector<std::uint8_t>& rbsp) {
@@ -164,8 +174,8 @@ CavlcCoeffToken parse_cavlc_coeff_token(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit,
     const int n_c) {
-    if (n_c < 0 || n_c > 3) {
-        throw std::invalid_argument("native coeff_token parser currently supports nC zero through three only");
+    if (n_c < 0 || n_c > 5) {
+        throw std::invalid_argument("native coeff_token parser currently supports nC zero through five only");
     }
     RbspBitReader reader(rbsp);
     reader.skip_bits(start_bit);
@@ -173,7 +183,7 @@ CavlcCoeffToken parse_cavlc_coeff_token(
     bits.reserve(16);
     for (std::size_t length = 1; length <= 16; ++length) {
         bits.push_back(reader.read_bit() == 0 ? '0' : '1');
-        const auto& table = n_c <= 1 ? coeff_token_n0_1 : coeff_token_n2_3;
+        const auto& table = n_c <= 1 ? coeff_token_n0_1 : n_c <= 3 ? coeff_token_n2_3 : coeff_token_n4_5;
         for (const auto& code : table) {
             if (bits == code.bits) {
                 CavlcCoeffToken token;
