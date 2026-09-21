@@ -101,6 +101,10 @@ int main() {
     CHECK(trailing_one_levels.values.empty());
     CHECK((trailing_one_levels.trailing_one_values == std::vector<std::int32_t>{1}));
     CHECK(trailing_one_levels.next_bit_offset == 3);
+    const auto trailing_one_coefficients = zkstego::reconstruct_cavlc_block(
+        trailing_one_levels, {0}, 16);
+    CHECK((trailing_one_coefficients == std::vector<std::int32_t>{
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
 
     const auto n2_token = zkstego::parse_cavlc_coeff_token({0xa1, 0x80}, 0, 2);
     CHECK(n2_token.total_coefficients == 1);
