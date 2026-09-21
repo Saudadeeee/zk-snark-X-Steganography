@@ -14,7 +14,7 @@ from src.bitstream.cavlc import get_run_before_table
 from src.bitstream.h264 import NALUnitType, iter_annex_b_nal_units
 from src.bitstream.bitstream_ops import BitstreamPatcher
 from src.core.pipeline import iter_idr_slices, iter_idr_trace_results, iter_idr_luma_analysis
-from src.blind_sync import iter_blind_sign_candidates_from_idr_analysis
+from src.blind_sync import iter_blind_sign_candidates_from_idr_analysis, select_blind_candidates_bounded
 from src.runtest._helpers import run_test, section, summarise
 
 
@@ -189,6 +189,19 @@ def t_bitstream_patcher_exposes_lazy_patchability_contract():
     assert callable(patcher.get_unpatchable_blocks)
 
 
+def t_bounded_blind_selector_matches_full_hmac_ordering():
+    candidates = [(5, 2, ~7), (1, 4, ~8), (3, 1, ~9), (9, 0, ~10)]
+    ordering_key = b"k" * 32
+    selected = select_blind_candidates_bounded(iter(candidates), ordering_key, required_bits=2)
+    import hashlib
+    import hmac
+    expected = sorted(
+        candidates,
+        key=lambda pos: hmac.new(ordering_key, f"{pos[0]}:{pos[1]}:{pos[2]}".encode("ascii"), hashlib.sha256).digest(),
+    )[:2]
+    assert selected == expected
+
+
 def main():
     section("Phase 9 - Realtime CAVLC Controller")
     results = [
@@ -202,6 +215,7 @@ def main():
         run_test("streaming_blind_candidates_are_filtered_per_idr_record", t_streaming_blind_candidates_are_filtered_per_idr_record),
         run_test("streaming_blind_candidates_prefer_sign_only_gate", t_streaming_blind_candidates_prefer_sign_only_gate),
         run_test("bitstream_patcher_exposes_lazy_patchability_contract", t_bitstream_patcher_exposes_lazy_patchability_contract),
+        run_test("bounded_blind_selector_matches_full_hmac_ordering", t_bounded_blind_selector_matches_full_hmac_ordering),
     ]
     sys.exit(summarise(results, "Phase 9"))
 
