@@ -80,6 +80,16 @@ struct H264BaselinePps {
     bool redundant_pic_cnt_present_flag{};
 };
 
+struct H264BaselineIdrSliceHeader {
+    std::uint32_t first_mb_in_slice{};
+    std::uint32_t slice_type{};
+    std::uint32_t pic_parameter_set_id{};
+    std::uint32_t frame_num{};
+    std::uint32_t idr_pic_id{};
+    std::int32_t slice_qp_delta{};
+    std::size_t data_bit_offset{};
+};
+
 struct AnnexBNalUnit {
     std::size_t start_offset{};
     std::size_t start_code_size{};
@@ -96,6 +106,10 @@ std::vector<std::uint8_t> ebsp_to_rbsp(const std::vector<std::uint8_t>& ebsp);
 std::vector<std::uint8_t> rbsp_to_ebsp(const std::vector<std::uint8_t>& rbsp);
 H264BaselineSps parse_baseline_sps(const std::vector<std::uint8_t>& rbsp);
 H264BaselinePps parse_baseline_pps(const std::vector<std::uint8_t>& rbsp);
+H264BaselineIdrSliceHeader parse_baseline_idr_slice_header(
+    const std::vector<std::uint8_t>& rbsp,
+    const H264BaselineSps& sps,
+    const H264BaselinePps& pps);
 std::vector<AnnexBNalUnit> split_annex_b(const std::vector<std::uint8_t>& annex_b);
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units);
 std::vector<std::uint8_t> apply_fixed_length_patches(

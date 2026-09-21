@@ -73,6 +73,47 @@ H264BaselinePps parse_baseline_pps(const std::vector<std::uint8_t>& rbsp) {
     return pps;
 }
 
+H264BaselineIdrSliceHeader parse_baseline_idr_slice_header(
+    const std::vector<std::uint8_t>& rbsp,
+    const H264BaselineSps& sps,
+    const H264BaselinePps& pps) {
+    if (!sps.frame_mbs_only_flag || pps.entropy_coding_mode_flag || pps.num_slice_groups_minus1 != 0) {
+        throw std::invalid_argument("native IDR parser requires frame-only CAVLC without slice groups");
+    }
+    if (sps.pic_order_cnt_type != 2) {
+        throw std::invalid_argument("native IDR parser currently requires pic_order_cnt_type 2");
+    }
+    RbspBitReader reader(rbsp);
+    H264BaselineIdrSliceHeader header;
+    header.first_mb_in_slice = reader.read_ue();
+    header.slice_type = reader.read_ue();
+    if (header.slice_type > 4) {
+        header.slice_type -= 5;
+    }
+    header.pic_parameter_set_id = reader.read_ue();
+    header.frame_num = reader.read_bits(static_cast<std::size_t>(sps.log2_max_frame_num_minus4) + 4);
+    header.idr_pic_id = reader.read_ue();
+    if (pps.redundant_pic_cnt_present_flag) {
+        static_cast<void>(reader.read_ue());
+    }
+    const auto slice_type_modulo = header.slice_type % 5;
+    if (slice_type_modulo != 2 && slice_type_modulo != 4) {
+        throw std::invalid_argument("native IDR parser currently supports I and SI slices only");
+    }
+    static_cast<void>(reader.read_bit());  // no_output_of_prior_pics_flag
+    static_cast<void>(reader.read_bit());  // long_term_reference_flag
+    header.slice_qp_delta = reader.read_se();
+    if (pps.deblocking_filter_control_present_flag) {
+        const auto disable_deblocking_filter_idc = reader.read_ue();
+        if (disable_deblocking_filter_idc != 1) {
+            static_cast<void>(reader.read_se());
+            static_cast<void>(reader.read_se());
+        }
+    }
+    header.data_bit_offset = reader.position();
+    return header;
+}
+
 std::vector<std::uint8_t> ebsp_to_rbsp(const std::vector<std::uint8_t>& ebsp) {
     std::vector<std::uint8_t> rbsp;
     rbsp.reserve(ebsp.size());
