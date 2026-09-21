@@ -482,26 +482,6 @@ class BitstreamPatcher:
         return np.packbits(arr).tobytes()
 
 
-def _trailing_one_sign_offsets(
-    rbsp_bytes: bytes,
-    start_bit: int,
-    *,
-    nC: int,
-    max_num_coeff: int,
-) -> list[int]:
-    """Return absolute RBSP offsets of a block's trailing-one sign flags.
-
-    CAVLC places these fixed one-bit flags immediately after ``coeff_token``.
-    Patching them directly preserves every other syntax bit in the block.
-    """
-    reader = BitstreamReader(rbsp_bytes)
-    reader.seek(start_bit)
-    decoder = CAVLCDecoder(reader)
-    _total_coeffs, trailing_ones = decoder._decode_coeff_token(nC)
-    if trailing_ones < 0 or trailing_ones > max_num_coeff:
-        raise ValueError("invalid CAVLC trailing-one count")
-    return [reader.pos + index for index in range(trailing_ones)]
-
     def validate_block_patchability(self, rbsp_bytes: bytes, block_key, offset_data: Dict,
                                     end_to_block_retro: Dict | None = None):
         """
@@ -793,6 +773,27 @@ def _trailing_one_sign_offsets(
         bits = temp_writer.get_bits_as_list()
 
         return bits
+
+
+def _trailing_one_sign_offsets(
+    rbsp_bytes: bytes,
+    start_bit: int,
+    *,
+    nC: int,
+    max_num_coeff: int,
+) -> list[int]:
+    """Return absolute RBSP offsets of a block's trailing-one sign flags.
+
+    CAVLC places these fixed one-bit flags immediately after ``coeff_token``.
+    Patching them directly preserves every other syntax bit in the block.
+    """
+    reader = BitstreamReader(rbsp_bytes)
+    reader.seek(start_bit)
+    decoder = CAVLCDecoder(reader)
+    _total_coeffs, trailing_ones = decoder._decode_coeff_token(nC)
+    if trailing_ones < 0 or trailing_ones > max_num_coeff:
+        raise ValueError("invalid CAVLC trailing-one count")
+    return [reader.pos + index for index in range(trailing_ones)]
 
 
 # =============================================================================
