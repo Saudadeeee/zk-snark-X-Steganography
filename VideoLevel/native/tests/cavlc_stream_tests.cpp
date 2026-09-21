@@ -90,6 +90,17 @@ int main() {
     CHECK(first_luma_generic_tail.total_zeros == first_luma_tail.total_zeros);
     CHECK(first_luma_generic_tail.runs == first_luma_tail.runs);
     CHECK(first_luma_generic_tail.next_bit_offset == first_luma_tail.next_bit_offset);
+    const auto first_luma_block = zkstego::decode_cavlc_luma_block(
+        {0x88, 0x84, 0x3f, 0xe0, 0xb8, 0x60, 0x1e, 0x5c,
+         0x07, 0x29, 0x80, 0x00, 0x80, 0x8a, 0x64, 0x50},
+        macroblock.residual_bit_offset,
+        0);
+    CHECK(first_luma_block.token.total_coefficients == 4);
+    CHECK((first_luma_block.levels.values == std::vector<std::int32_t>{2, 2, -2, -24}));
+    CHECK((first_luma_block.tail.runs == std::vector<std::uint32_t>{0, 3, 0, 0}));
+    CHECK(first_luma_block.tail.next_bit_offset == 117);
+    CHECK((first_luma_block.coefficients == std::vector<std::int32_t>{
+        -24, -2, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
     const auto first_luma_coefficients = zkstego::reconstruct_cavlc_tc4_no_trailing(
         first_luma_levels.values, first_luma_tail.runs);
     CHECK((first_luma_coefficients == std::vector<std::int32_t>{
