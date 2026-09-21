@@ -90,6 +90,12 @@ struct H264BaselineIdrSliceHeader {
     std::size_t data_bit_offset{};
 };
 
+struct CavlcCoeffToken {
+    std::uint32_t total_coefficients{};
+    std::uint32_t trailing_ones{};
+    std::vector<std::size_t> sign_bit_offsets;
+};
+
 struct AnnexBNalUnit {
     std::size_t start_offset{};
     std::size_t start_code_size{};
@@ -110,6 +116,10 @@ H264BaselineIdrSliceHeader parse_baseline_idr_slice_header(
     const std::vector<std::uint8_t>& rbsp,
     const H264BaselineSps& sps,
     const H264BaselinePps& pps);
+CavlcCoeffToken parse_cavlc_coeff_token(
+    const std::vector<std::uint8_t>& rbsp,
+    std::size_t start_bit,
+    int n_c);
 std::vector<AnnexBNalUnit> split_annex_b(const std::vector<std::uint8_t>& annex_b);
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units);
 std::vector<std::uint8_t> apply_fixed_length_patches(

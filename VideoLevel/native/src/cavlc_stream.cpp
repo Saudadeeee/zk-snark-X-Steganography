@@ -1,6 +1,8 @@
 #include "zkstego/cavlc_stream.hpp"
 
+#include <array>
 #include <stdexcept>
+#include <string>
 
 namespace zkstego {
 
@@ -16,6 +18,31 @@ std::size_t start_code_length_at(const std::vector<std::uint8_t>& bytes, std::si
     }
     return 0;
 }
+
+struct CoeffTokenCode {
+    const char* bits;
+    std::uint8_t total_coefficients;
+    std::uint8_t trailing_ones;
+};
+
+constexpr std::array coeff_token_n0_1{
+    CoeffTokenCode{"1", 0, 0}, CoeffTokenCode{"000101", 1, 0}, CoeffTokenCode{"01", 1, 1},
+    CoeffTokenCode{"00000111", 2, 0}, CoeffTokenCode{"000100", 2, 1}, CoeffTokenCode{"0011", 2, 2},
+    CoeffTokenCode{"000000111", 3, 0}, CoeffTokenCode{"00000110", 3, 1}, CoeffTokenCode{"0000101", 3, 2}, CoeffTokenCode{"00011", 3, 3},
+    CoeffTokenCode{"0000000111", 4, 0}, CoeffTokenCode{"000000110", 4, 1}, CoeffTokenCode{"00000101", 4, 2}, CoeffTokenCode{"000011", 4, 3},
+    CoeffTokenCode{"00000000111", 5, 0}, CoeffTokenCode{"0000000110", 5, 1}, CoeffTokenCode{"000000101", 5, 2}, CoeffTokenCode{"0000100", 5, 3},
+    CoeffTokenCode{"0000000001111", 6, 0}, CoeffTokenCode{"00000000110", 6, 1}, CoeffTokenCode{"0000000101", 6, 2}, CoeffTokenCode{"00000100", 6, 3},
+    CoeffTokenCode{"0000000001011", 7, 0}, CoeffTokenCode{"0000000001110", 7, 1}, CoeffTokenCode{"00000000101", 7, 2}, CoeffTokenCode{"000000100", 7, 3},
+    CoeffTokenCode{"0000000001000", 8, 0}, CoeffTokenCode{"0000000001010", 8, 1}, CoeffTokenCode{"0000000001101", 8, 2}, CoeffTokenCode{"0000000100", 8, 3},
+    CoeffTokenCode{"00000000001111", 9, 0}, CoeffTokenCode{"00000000001110", 9, 1}, CoeffTokenCode{"0000000001001", 9, 2}, CoeffTokenCode{"00000000100", 9, 3},
+    CoeffTokenCode{"00000000001011", 10, 0}, CoeffTokenCode{"00000000001010", 10, 1}, CoeffTokenCode{"00000000001101", 10, 2}, CoeffTokenCode{"0000000001100", 10, 3},
+    CoeffTokenCode{"000000000001111", 11, 0}, CoeffTokenCode{"000000000001110", 11, 1}, CoeffTokenCode{"00000000001001", 11, 2}, CoeffTokenCode{"00000000001100", 11, 3},
+    CoeffTokenCode{"000000000001011", 12, 0}, CoeffTokenCode{"000000000001010", 12, 1}, CoeffTokenCode{"000000000001101", 12, 2}, CoeffTokenCode{"00000000001000", 12, 3},
+    CoeffTokenCode{"0000000000000111", 13, 0}, CoeffTokenCode{"0000000000001010", 13, 1}, CoeffTokenCode{"000000000001001", 13, 2}, CoeffTokenCode{"000000000001100", 13, 3},
+    CoeffTokenCode{"0000000000000100", 14, 0}, CoeffTokenCode{"0000000000000110", 14, 1}, CoeffTokenCode{"0000000000000101", 14, 2}, CoeffTokenCode{"000000000001000", 14, 3},
+    CoeffTokenCode{"0000000000001111", 15, 0}, CoeffTokenCode{"0000000000001110", 15, 1}, CoeffTokenCode{"0000000000001101", 15, 2}, CoeffTokenCode{"0000000000001100", 15, 3},
+    CoeffTokenCode{"0000000000001011", 16, 0}, CoeffTokenCode{"0000000000001001", 16, 1}, CoeffTokenCode{"0000000000000011", 16, 2}, CoeffTokenCode{"0000000000001000", 16, 3},
+};
 
 }  // namespace
 
@@ -112,6 +139,35 @@ H264BaselineIdrSliceHeader parse_baseline_idr_slice_header(
     }
     header.data_bit_offset = reader.position();
     return header;
+}
+
+CavlcCoeffToken parse_cavlc_coeff_token(
+    const std::vector<std::uint8_t>& rbsp,
+    const std::size_t start_bit,
+    const int n_c) {
+    if (n_c < 0 || n_c > 1) {
+        throw std::invalid_argument("native coeff_token parser currently supports nC 0 or 1 only");
+    }
+    RbspBitReader reader(rbsp);
+    reader.skip_bits(start_bit);
+    std::string bits;
+    bits.reserve(16);
+    for (std::size_t length = 1; length <= 16; ++length) {
+        bits.push_back(reader.read_bit() == 0 ? '0' : '1');
+        for (const auto& code : coeff_token_n0_1) {
+            if (bits == code.bits) {
+                CavlcCoeffToken token;
+                token.total_coefficients = code.total_coefficients;
+                token.trailing_ones = code.trailing_ones;
+                token.sign_bit_offsets.reserve(token.trailing_ones);
+                for (std::size_t index = 0; index < token.trailing_ones; ++index) {
+                    token.sign_bit_offsets.push_back(reader.position() + index);
+                }
+                return token;
+            }
+        }
+    }
+    throw std::invalid_argument("invalid CAVLC coeff_token for nC 0 or 1");
 }
 
 std::vector<std::uint8_t> ebsp_to_rbsp(const std::vector<std::uint8_t>& ebsp) {
