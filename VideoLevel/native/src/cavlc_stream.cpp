@@ -331,15 +331,69 @@ std::vector<std::int32_t> reconstruct_cavlc_block(
     return coefficients;
 }
 
-CavlcResidualTail decode_cavlc_tail_tc4(
+CavlcResidualTail decode_cavlc_luma_residual_tail(
     const std::vector<std::uint8_t>& rbsp,
-    const std::size_t start_bit) {
+    const std::size_t start_bit,
+    const std::uint32_t total_coefficients) {
     struct VlcCode { const char* bits; std::uint8_t value; };
-    constexpr std::array total_zeros_codes{
+    constexpr std::array total_zeros_tc1{
+        VlcCode{"1", 0}, VlcCode{"011", 1}, VlcCode{"010", 2}, VlcCode{"0011", 3}, VlcCode{"0010", 4},
+        VlcCode{"00011", 5}, VlcCode{"00010", 6}, VlcCode{"000011", 7}, VlcCode{"000010", 8},
+        VlcCode{"0000011", 9}, VlcCode{"0000010", 10}, VlcCode{"00000011", 11}, VlcCode{"00000010", 12},
+        VlcCode{"000000011", 13}, VlcCode{"000000010", 14}, VlcCode{"000000001", 15},
+    };
+    constexpr std::array total_zeros_tc2{
+        VlcCode{"111", 0}, VlcCode{"110", 1}, VlcCode{"101", 2}, VlcCode{"100", 3}, VlcCode{"011", 4},
+        VlcCode{"0101", 5}, VlcCode{"0100", 6}, VlcCode{"0011", 7}, VlcCode{"0010", 8}, VlcCode{"00011", 9},
+        VlcCode{"00010", 10}, VlcCode{"000011", 11}, VlcCode{"000010", 12}, VlcCode{"000001", 13}, VlcCode{"000000", 14},
+    };
+    constexpr std::array total_zeros_tc3{
+        VlcCode{"111", 1}, VlcCode{"110", 2}, VlcCode{"101", 3}, VlcCode{"100", 6}, VlcCode{"011", 7},
+        VlcCode{"0101", 0}, VlcCode{"0100", 4}, VlcCode{"0011", 5}, VlcCode{"0010", 8}, VlcCode{"00011", 9},
+        VlcCode{"00010", 10}, VlcCode{"00001", 12}, VlcCode{"000001", 11}, VlcCode{"000000", 13},
+    };
+    constexpr std::array total_zeros_tc4{
         VlcCode{"111", 1}, VlcCode{"110", 4}, VlcCode{"101", 5}, VlcCode{"100", 6}, VlcCode{"011", 8},
         VlcCode{"0101", 2}, VlcCode{"0100", 3}, VlcCode{"0011", 7}, VlcCode{"0010", 9}, VlcCode{"00011", 0},
         VlcCode{"00010", 10}, VlcCode{"00001", 11}, VlcCode{"00000", 12},
     };
+    constexpr std::array total_zeros_tc5{
+        VlcCode{"111", 3}, VlcCode{"110", 4}, VlcCode{"101", 5}, VlcCode{"100", 6}, VlcCode{"011", 7},
+        VlcCode{"0101", 0}, VlcCode{"0100", 1}, VlcCode{"0011", 2}, VlcCode{"0010", 8}, VlcCode{"0001", 10},
+        VlcCode{"00001", 9}, VlcCode{"00000", 11},
+    };
+    constexpr std::array total_zeros_tc6{
+        VlcCode{"111", 2}, VlcCode{"110", 3}, VlcCode{"101", 4}, VlcCode{"100", 5}, VlcCode{"011", 6},
+        VlcCode{"010", 7}, VlcCode{"001", 9}, VlcCode{"0001", 8}, VlcCode{"00001", 1}, VlcCode{"000001", 0},
+        VlcCode{"000000", 10},
+    };
+    constexpr std::array total_zeros_tc7{
+        VlcCode{"11", 5}, VlcCode{"101", 2}, VlcCode{"100", 3}, VlcCode{"011", 4}, VlcCode{"010", 6},
+        VlcCode{"001", 8}, VlcCode{"0001", 7}, VlcCode{"00001", 1}, VlcCode{"000001", 0}, VlcCode{"000000", 9},
+    };
+    constexpr std::array total_zeros_tc8{
+        VlcCode{"11", 4}, VlcCode{"10", 5}, VlcCode{"011", 3}, VlcCode{"010", 6}, VlcCode{"001", 7},
+        VlcCode{"0001", 1}, VlcCode{"00001", 2}, VlcCode{"000001", 0}, VlcCode{"000000", 8},
+    };
+    constexpr std::array total_zeros_tc9{
+        VlcCode{"11", 3}, VlcCode{"10", 4}, VlcCode{"01", 6}, VlcCode{"001", 5}, VlcCode{"0001", 2},
+        VlcCode{"00001", 7}, VlcCode{"000001", 0}, VlcCode{"000000", 1},
+    };
+    constexpr std::array total_zeros_tc10{
+        VlcCode{"11", 3}, VlcCode{"10", 4}, VlcCode{"01", 5}, VlcCode{"001", 2}, VlcCode{"0001", 6},
+        VlcCode{"00001", 0}, VlcCode{"00000", 1},
+    };
+    constexpr std::array total_zeros_tc11{
+        VlcCode{"1", 4}, VlcCode{"001", 2}, VlcCode{"010", 3}, VlcCode{"011", 5}, VlcCode{"0000", 0}, VlcCode{"0001", 1},
+    };
+    constexpr std::array total_zeros_tc12{
+        VlcCode{"1", 3}, VlcCode{"01", 2}, VlcCode{"001", 4}, VlcCode{"0000", 0}, VlcCode{"0001", 1},
+    };
+    constexpr std::array total_zeros_tc13{
+        VlcCode{"1", 2}, VlcCode{"01", 3}, VlcCode{"000", 0}, VlcCode{"001", 1},
+    };
+    constexpr std::array total_zeros_tc14{VlcCode{"1", 2}, VlcCode{"00", 0}, VlcCode{"01", 1}};
+    constexpr std::array total_zeros_tc15{VlcCode{"0", 0}, VlcCode{"1", 1}};
     constexpr std::array run_before_zeros1_codes{
         VlcCode{"1", 0}, VlcCode{"0", 1},
     };
@@ -374,15 +428,37 @@ CavlcResidualTail decode_cavlc_tail_tc4(
         }
         throw std::invalid_argument("invalid CAVLC tail VLC");
     };
+    if (total_coefficients == 0 || total_coefficients > 16) {
+        throw std::invalid_argument("luma total_coefficients must be in [1, 16]");
+    }
     RbspBitReader reader(rbsp);
     reader.skip_bits(start_bit);
     CavlcResidualTail tail;
-    tail.total_zeros = decode(reader, total_zeros_codes);
-    if (tail.total_zeros > 12) {
-        throw std::invalid_argument("TC=4 total_zeros exceeds luma block bound");
+    switch (total_coefficients) {
+        case 1: tail.total_zeros = decode(reader, total_zeros_tc1); break;
+        case 2: tail.total_zeros = decode(reader, total_zeros_tc2); break;
+        case 3: tail.total_zeros = decode(reader, total_zeros_tc3); break;
+        case 4: tail.total_zeros = decode(reader, total_zeros_tc4); break;
+        case 5: tail.total_zeros = decode(reader, total_zeros_tc5); break;
+        case 6: tail.total_zeros = decode(reader, total_zeros_tc6); break;
+        case 7: tail.total_zeros = decode(reader, total_zeros_tc7); break;
+        case 8: tail.total_zeros = decode(reader, total_zeros_tc8); break;
+        case 9: tail.total_zeros = decode(reader, total_zeros_tc9); break;
+        case 10: tail.total_zeros = decode(reader, total_zeros_tc10); break;
+        case 11: tail.total_zeros = decode(reader, total_zeros_tc11); break;
+        case 12: tail.total_zeros = decode(reader, total_zeros_tc12); break;
+        case 13: tail.total_zeros = decode(reader, total_zeros_tc13); break;
+        case 14: tail.total_zeros = decode(reader, total_zeros_tc14); break;
+        case 15: tail.total_zeros = decode(reader, total_zeros_tc15); break;
+        case 16: break;
+        default: throw std::invalid_argument("unsupported luma total_coefficients");
+    }
+    const auto max_total_zeros = 16U - total_coefficients;
+    if (tail.total_zeros > max_total_zeros) {
+        throw std::invalid_argument("CAVLC total_zeros exceeds luma block bound");
     }
     auto zeros_left = tail.total_zeros;
-    for (std::size_t index = 0; index < 3; ++index) {
+    for (std::uint32_t index = 1; index < total_coefficients; ++index) {
         std::uint32_t run = 0;
         if (zeros_left == 1) {
             run = decode(reader, run_before_zeros1_codes);
@@ -406,6 +482,12 @@ CavlcResidualTail decode_cavlc_tail_tc4(
     tail.runs.push_back(zeros_left);
     tail.next_bit_offset = reader.position();
     return tail;
+}
+
+CavlcResidualTail decode_cavlc_tail_tc4(
+    const std::vector<std::uint8_t>& rbsp,
+    const std::size_t start_bit) {
+    return decode_cavlc_luma_residual_tail(rbsp, start_bit, 4);
 }
 
 std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
