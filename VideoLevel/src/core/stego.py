@@ -659,7 +659,10 @@ class PayloadEmbedder:
                 frame_verified_data=frame_verified_data,
             )
 
-        # Build coeff lookup: (mb_idx, block_idx) -> mutable coefficients list.
+        # Build a coefficient lookup only for selected blocks in the trusted
+        # prevalidated path.  Blind sign embedding has one position per block;
+        # copying every decoded 4x4 block here previously duplicated the whole
+        # video analysis just to change a short payload.
         # We iterate safe_positions directly (already in the correct interleaved order
         # from get_safe_positions / sort_blocks_interleaved) so that the embedding order
         # EXACTLY matches the extraction order in extract_bits_direct.
@@ -670,7 +673,16 @@ class PayloadEmbedder:
         # an ALL-blocks frame may have mb395-blocks that are NOT safe, pushing the first
         # safe block of that frame to a later round, whereas the SAFE-only sort visits
         # the first safe block at round 0.  The mismatch scrambles embed/extract order.
-        coeff_dict = {(mb, blk): list(cs) for mb, blk, cs in coefficients}
+        if pre_validated_positions is not None:
+            required_keys = {(int(mb), int(blk)) for mb, blk, _ in safe_positions}
+            original_coeffs = {
+                (int(mb), int(blk)): cs
+                for mb, blk, cs in coefficients
+                if (int(mb), int(blk)) in required_keys
+            }
+        else:
+            original_coeffs = {(int(mb), int(blk)): cs for mb, blk, cs in coefficients}
+        coeff_dict: Dict[Tuple[int, int], List[int]] = {}
 
         bits_embedded = 0
         self.last_used_safe_positions = []
@@ -694,7 +706,10 @@ class PayloadEmbedder:
                     ffmpeg_skipped += 1
                     continue  # skip unsafe position
 
-            current_coeffs = coeff_dict[block_key]
+            original_coeffs_for_block = original_coeffs.get(block_key)
+            if original_coeffs_for_block is None:
+                continue
+            current_coeffs = coeff_dict.setdefault(block_key, list(original_coeffs_for_block))
             payload_bit = payload_bits[bits_embedded]
 
             if coeff_idx >= 0:
@@ -723,9 +738,8 @@ class PayloadEmbedder:
 
         # Build modified list: only blocks whose coefficients actually changed
         modified = []
-        orig_dict = {(mb, blk): cs for mb, blk, cs in coefficients}
         for key in modified_keys:
-            orig = orig_dict[key]
+            orig = original_coeffs[key]
             new_cs = coeff_dict[key]
             if any(o != n for o, n in zip(orig, new_cs)):
                 modified.append((key[0], key[1], new_cs))
