@@ -183,6 +183,36 @@ def select_blind_candidates_bounded(
     return [position for _score, position in sorted(heap, key=lambda entry: -entry[0])]
 
 
+def select_streaming_blind_positions(
+    analysis_records: Iterable[tuple],
+    *,
+    secret_key: bytes,
+    required_bits: int,
+    safety_filter: CAVLCSafetyFilter | None = None,
+) -> list[tuple[int, int, int]]:
+    """Select the sidecar-free sign schedule without retaining video analysis.
+
+    Version two deliberately derives ordering from a fixed, domain-separated
+    key rather than batch metadata. Candidate membership is sign-invariant, so
+    an extractor can independently scan the stego stream and obtain the same
+    schedule. Only the requested number of HMAC-lowest positions is retained.
+    """
+    if not isinstance(secret_key, bytes) or len(secret_key) != 32:
+        raise ValueError("secret_key must be exactly 32 bytes")
+    if required_bits <= 0:
+        return []
+    ordering_key = b"blind-stream-v2\x00" + secret_key
+    candidates = iter_blind_sign_candidates_from_idr_analysis(
+        analysis_records,
+        safety_filter=safety_filter,
+    )
+    return select_blind_candidates_bounded(
+        candidates,
+        ordering_key,
+        required_bits=required_bits,
+    )
+
+
 def iter_blind_sign_candidates_from_idr_analysis(
     analysis_records: Iterable[tuple],
     *,
