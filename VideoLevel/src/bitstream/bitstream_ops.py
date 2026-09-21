@@ -213,6 +213,7 @@ class BitstreamPatcher:
                         continue  # Wrong nC: decoder consumed wrong number of bits
                     # Verify round-trip: encode(decode(bits)) == bits
                     nal_coeffs = list(block.levels)
+                    t1_decoded = block.trailing_ones
                     # First try without T1 override (encoder chooses max T1)
                     candidate = self._encode_coefficients_to_bits(nal_coeffs, nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16))
                     if len(candidate) == original_length and list(candidate) == actual_nal_bits:
@@ -224,7 +225,6 @@ class BitstreamPatcher:
                         break
                     # If standard encode fails, try with T1 override = decoded trailing_ones.
                     # Some original encoders choose a smaller T1 than the maximum possible.
-                    t1_decoded = block.trailing_ones
                     candidate_t1 = self._encode_coefficients_to_bits(
                         nal_coeffs, nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16),
                         override_trailing_ones=t1_decoded
