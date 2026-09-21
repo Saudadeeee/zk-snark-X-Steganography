@@ -19,6 +19,33 @@ std::size_t start_code_length_at(const std::vector<std::uint8_t>& bytes, std::si
 
 }  // namespace
 
+H264BaselineSps parse_baseline_sps(const std::vector<std::uint8_t>& rbsp) {
+    RbspBitReader reader(rbsp);
+    H264BaselineSps sps;
+    sps.profile_idc = static_cast<std::uint8_t>(reader.read_bits(8));
+    static_cast<void>(reader.read_bits(8));  // constraint flags and reserved bits
+    sps.level_idc = static_cast<std::uint8_t>(reader.read_bits(8));
+    sps.sequence_parameter_set_id = reader.read_ue();
+    if (sps.profile_idc != 66 && sps.profile_idc != 77 && sps.profile_idc != 88) {
+        throw std::invalid_argument("native SPS parser currently supports CAVLC baseline/main profiles only");
+    }
+    sps.log2_max_frame_num_minus4 = reader.read_ue();
+    sps.pic_order_cnt_type = reader.read_ue();
+    if (sps.pic_order_cnt_type == 0) {
+        sps.log2_max_pic_order_cnt_lsb_minus4 = reader.read_ue();
+    } else if (sps.pic_order_cnt_type == 1) {
+        throw std::invalid_argument("native SPS parser does not yet support pic_order_cnt_type 1");
+    } else if (sps.pic_order_cnt_type != 2) {
+        throw std::invalid_argument("invalid SPS pic_order_cnt_type");
+    }
+    static_cast<void>(reader.read_ue());  // max_num_ref_frames
+    static_cast<void>(reader.read_bit());  // gaps_in_frame_num_value_allowed_flag
+    sps.pic_width_in_mbs_minus1 = reader.read_ue();
+    sps.pic_height_in_map_units_minus1 = reader.read_ue();
+    sps.frame_mbs_only_flag = reader.read_bit() != 0;
+    return sps;
+}
+
 std::vector<std::uint8_t> ebsp_to_rbsp(const std::vector<std::uint8_t>& ebsp) {
     std::vector<std::uint8_t> rbsp;
     rbsp.reserve(ebsp.size());

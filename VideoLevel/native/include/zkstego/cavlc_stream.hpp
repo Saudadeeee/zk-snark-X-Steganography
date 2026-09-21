@@ -56,6 +56,18 @@ struct AnnexBRbspPatchPlan {
     std::vector<FixedLengthBitPatch> patches;
 };
 
+struct H264BaselineSps {
+    std::uint8_t profile_idc{};
+    std::uint8_t level_idc{};
+    std::uint32_t sequence_parameter_set_id{};
+    std::uint32_t log2_max_frame_num_minus4{};
+    std::uint32_t pic_order_cnt_type{};
+    std::uint32_t log2_max_pic_order_cnt_lsb_minus4{};
+    bool frame_mbs_only_flag{};
+    std::uint32_t pic_width_in_mbs_minus1{};
+    std::uint32_t pic_height_in_map_units_minus1{};
+};
+
 struct AnnexBNalUnit {
     std::size_t start_offset{};
     std::size_t start_code_size{};
@@ -70,6 +82,7 @@ struct AnnexBNalUnit {
 
 std::vector<std::uint8_t> ebsp_to_rbsp(const std::vector<std::uint8_t>& ebsp);
 std::vector<std::uint8_t> rbsp_to_ebsp(const std::vector<std::uint8_t>& rbsp);
+H264BaselineSps parse_baseline_sps(const std::vector<std::uint8_t>& rbsp);
 std::vector<AnnexBNalUnit> split_annex_b(const std::vector<std::uint8_t>& annex_b);
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units);
 std::vector<std::uint8_t> apply_fixed_length_patches(
