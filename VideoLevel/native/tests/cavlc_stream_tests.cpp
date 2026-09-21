@@ -55,6 +55,11 @@ int main() {
     CHECK(idr_header.slice_qp_delta == -3);
     CHECK(idr_header.data_bit_offset == 24);
 
+    const auto token = zkstego::parse_cavlc_coeff_token({0x41, 0x80}, 0, 0);
+    CHECK(token.total_coefficients == 1);
+    CHECK(token.trailing_ones == 1);
+    CHECK(token.sign_bit_offsets == std::vector<std::size_t>{2});
+
     const std::vector<std::uint8_t> ebsp{0x12, 0x00, 0x00, 0x03, 0x01, 0x34};
     const auto rbsp = zkstego::ebsp_to_rbsp(ebsp);
     CHECK((rbsp == std::vector<std::uint8_t>{0x12, 0x00, 0x00, 0x01, 0x34}));
