@@ -21,6 +21,7 @@ from src.core.pipeline import (
     patch_selected_sign_positions_streaming,
 )
 from src.blind_sync import iter_blind_sign_candidates_from_idr_analysis, select_blind_candidates_bounded
+from src.blind_sync import select_streaming_blind_positions
 from src.runtest._helpers import run_test, section, summarise
 
 
@@ -307,6 +308,30 @@ def t_bounded_blind_selector_matches_full_hmac_ordering():
     assert selected == expected
 
 
+def t_streaming_blind_positions_use_a_stable_key_domain():
+    records = [
+        (0, [], {}, {}, {}),
+    ]
+
+    class SafetyFilter:
+        @staticmethod
+        def get_safe_sign_positions(*_args, **_kwargs):
+            return [(5, 2, ~7), (1, 4, ~8), (3, 1, ~9)]
+
+    selected = select_streaming_blind_positions(
+        records,
+        secret_key=b"s" * 32,
+        required_bits=2,
+        safety_filter=SafetyFilter(),
+    )
+    expected = select_blind_candidates_bounded(
+        [(5, 2, ~7), (1, 4, ~8), (3, 1, ~9)],
+        b"blind-stream-v2\x00" + b"s" * 32,
+        required_bits=2,
+    )
+    assert selected == expected
+
+
 def main():
     section("Phase 9 - Realtime CAVLC Controller")
     results = [
@@ -323,6 +348,7 @@ def main():
         run_test("streaming_blind_candidates_prefer_sign_only_gate", t_streaming_blind_candidates_prefer_sign_only_gate),
         run_test("bitstream_patcher_exposes_lazy_patchability_contract", t_bitstream_patcher_exposes_lazy_patchability_contract),
         run_test("bounded_blind_selector_matches_full_hmac_ordering", t_bounded_blind_selector_matches_full_hmac_ordering),
+        run_test("streaming_blind_positions_use_a_stable_key_domain", t_streaming_blind_positions_use_a_stable_key_domain),
     ]
     sys.exit(summarise(results, "Phase 9"))
 
