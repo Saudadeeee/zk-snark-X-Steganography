@@ -19,6 +19,7 @@ from src.core.pipeline import (
     iter_idr_trace_results,
     iter_idr_luma_analysis,
     patch_selected_sign_positions_streaming,
+    extract_selected_sign_bits_streaming,
 )
 from src.blind_sync import iter_blind_sign_candidates_from_idr_analysis, select_blind_candidates_bounded
 from src.blind_sync import select_streaming_blind_positions
@@ -162,6 +163,45 @@ def t_streaming_sign_patcher_writes_only_verified_idr_patch():
         )
         assert output.read_bytes().endswith(b"\x00\x00\x00\x01\x65\xaa")
     assert stats == {"idr_slices": 1, "selected_positions": 1, "applied_positions": 1}
+
+
+def t_streaming_sign_extractor_preserves_requested_schedule_order():
+    class Reconstructor:
+        @staticmethod
+        def _parse_sps_from_nal(_nal):
+            return SimpleNamespace(pic_width_in_mbs_minus1=0, pic_height_in_map_units_minus1=0)
+
+        @staticmethod
+        def _parse_pps_from_nal(_nal):
+            return SimpleNamespace()
+
+    class Traceable:
+        def extract_with_offsets(self, _nal, _sps, _pps, global_mb_idx):
+            return {
+                "blocks": {
+                    (0, 0): [0] * 7 + [-1] + [0] * 8,
+                    (0, 1): [0] * 8 + [1] + [0] * 7,
+                },
+                "offsets": {
+                    (0, 0): {"nC": 0, "bit_length": 3},
+                    (0, 1): {"nC": 0, "bit_length": 3},
+                },
+            }
+
+    with tempfile.TemporaryDirectory() as directory:
+        source = Path(directory) / "stego.h264"
+        source.write_bytes(
+            b"\x00\x00\x00\x01\x67\x42"
+            b"\x00\x00\x00\x01\x68\xce"
+            b"\x00\x00\x00\x01\x65\x41\x80"
+        )
+        extracted = extract_selected_sign_bits_streaming(
+            str(source),
+            [(0, 1, ~8), (0, 0, ~7)],
+            reconstructor=Reconstructor(),
+            traceable_factory=Traceable,
+        )
+    assert extracted == bytes([0b01000000])
 
 
 def t_annex_b_iterator_streams_nals_and_removes_epb():
@@ -340,6 +380,7 @@ def main():
         run_test("cavlc_run_before_tables_match_h264_reference_vlcs", t_cavlc_run_before_tables_match_h264_reference_vlcs),
         run_test("patcher_keeps_decoded_trailing_one_count_on_standard_round_trip", t_patcher_keeps_decoded_trailing_one_count_on_standard_round_trip),
         run_test("streaming_sign_patcher_writes_only_verified_idr_patch", t_streaming_sign_patcher_writes_only_verified_idr_patch),
+        run_test("streaming_sign_extractor_preserves_requested_schedule_order", t_streaming_sign_extractor_preserves_requested_schedule_order),
         run_test("annex_b_iterator_streams_nals_and_removes_epb", t_annex_b_iterator_streams_nals_and_removes_epb),
         run_test("idr_iterator_tracks_streaming_macroblock_offsets", t_idr_iterator_tracks_streaming_macroblock_offsets),
         run_test("idr_trace_iterator_releases_each_slice_result_to_caller", t_idr_trace_iterator_releases_each_slice_result_to_caller),
