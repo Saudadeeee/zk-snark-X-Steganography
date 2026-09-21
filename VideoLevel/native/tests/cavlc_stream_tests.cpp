@@ -68,11 +68,13 @@ int main() {
         0);
     CHECK(first_luma_token.total_coefficients == 4);
     CHECK(first_luma_token.trailing_ones == 0);
+    CHECK(first_luma_token.level_bit_offset == 72);
 
     const auto token = zkstego::parse_cavlc_coeff_token({0x41, 0x80}, 0, 0);
     CHECK(token.total_coefficients == 1);
     CHECK(token.trailing_ones == 1);
     CHECK(token.sign_bit_offsets == std::vector<std::size_t>{2});
+    CHECK(token.level_bit_offset == 3);
 
     const auto n2_token = zkstego::parse_cavlc_coeff_token({0xa1, 0x80}, 0, 2);
     CHECK(n2_token.total_coefficients == 1);
