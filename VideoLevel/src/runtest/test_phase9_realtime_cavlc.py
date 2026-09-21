@@ -5,12 +5,14 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from src.realtime_cavlc import CAVLCRealtimeBudget, RealtimeCAVLCScheduler
 from src.bitstream.cavlc import get_run_before_table
 from src.bitstream.h264 import NALUnitType, iter_annex_b_nal_units
+from src.core.pipeline import iter_idr_slices
 from src.runtest._helpers import run_test, section, summarise
 
 
@@ -67,6 +69,29 @@ def t_annex_b_iterator_streams_nals_and_removes_epb():
     assert units[1].rbsp_byte == b"\x00\x00\x01\x80"
 
 
+def t_idr_iterator_tracks_streaming_macroblock_offsets():
+    class Reconstructor:
+        @staticmethod
+        def _parse_sps_from_nal(_nal):
+            return SimpleNamespace(pic_width_in_mbs_minus1=1, pic_height_in_map_units_minus1=2)
+
+        @staticmethod
+        def _parse_pps_from_nal(_nal):
+            return object()
+
+    with tempfile.TemporaryDirectory() as directory:
+        fixture = Path(directory) / "fixture.h264"
+        fixture.write_bytes(
+            b"\x00\x00\x01\x67\x01"
+            b"\x00\x00\x01\x68\x02"
+            b"\x00\x00\x01\x65\x03"
+            b"\x00\x00\x01\x41\x04"
+            b"\x00\x00\x01\x65\x05"
+        )
+        slices = list(iter_idr_slices(str(fixture), Reconstructor()))
+    assert [offset for _nal, _sps, _pps, offset in slices] == [0, 12]
+
+
 def main():
     section("Phase 9 - Realtime CAVLC Controller")
     results = [
@@ -74,6 +99,7 @@ def main():
         run_test("scheduler_reuses_one_proof_per_epoch_and_reports_budget", t_scheduler_reuses_one_proof_per_epoch_and_reports_budget),
         run_test("cavlc_run_before_tables_match_h264_reference_vlcs", t_cavlc_run_before_tables_match_h264_reference_vlcs),
         run_test("annex_b_iterator_streams_nals_and_removes_epb", t_annex_b_iterator_streams_nals_and_removes_epb),
+        run_test("idr_iterator_tracks_streaming_macroblock_offsets", t_idr_iterator_tracks_streaming_macroblock_offsets),
     ]
     sys.exit(summarise(results, "Phase 9"))
 
