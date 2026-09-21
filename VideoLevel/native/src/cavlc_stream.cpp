@@ -73,6 +73,13 @@ constexpr std::array coeff_token_n4_5{
     CoeffTokenCode{"0100001101", 13, 0}, CoeffTokenCode{"0100001001", 14, 0}, CoeffTokenCode{"0100001100", 14, 1}, CoeffTokenCode{"0100001011", 14, 2}, CoeffTokenCode{"0100001010", 14, 3}, CoeffTokenCode{"0100000101", 15, 0}, CoeffTokenCode{"0100001000", 15, 1}, CoeffTokenCode{"0100000111", 15, 2}, CoeffTokenCode{"0100000110", 15, 3}, CoeffTokenCode{"0100000001", 16, 0}, CoeffTokenCode{"0100000100", 16, 1}, CoeffTokenCode{"0100000011", 16, 2}, CoeffTokenCode{"0100000010", 16, 3},
 };
 
+constexpr std::array coeff_token_chroma_dc{
+    CoeffTokenCode{"1", 1, 1}, CoeffTokenCode{"01", 0, 0}, CoeffTokenCode{"001", 2, 2}, CoeffTokenCode{"000010", 4, 0},
+    CoeffTokenCode{"000011", 3, 0}, CoeffTokenCode{"000100", 2, 0}, CoeffTokenCode{"000101", 3, 3}, CoeffTokenCode{"000110", 2, 1},
+    CoeffTokenCode{"000111", 1, 0}, CoeffTokenCode{"0000000", 4, 3}, CoeffTokenCode{"0000010", 3, 2}, CoeffTokenCode{"0000011", 3, 1},
+    CoeffTokenCode{"00000010", 4, 2}, CoeffTokenCode{"00000011", 4, 1},
+};
+
 }  // namespace
 
 H264BaselineSps parse_baseline_sps(const std::vector<std::uint8_t>& rbsp) {
@@ -174,8 +181,8 @@ CavlcCoeffToken parse_cavlc_coeff_token(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit,
     const int n_c) {
-    if (n_c < 0 || n_c > 7) {
-        throw std::invalid_argument("native coeff_token parser currently supports nC zero through seven only");
+    if (n_c < -2 || n_c > 7) {
+        throw std::invalid_argument("native coeff_token parser received an unsupported nC context");
     }
     RbspBitReader reader(rbsp);
     reader.skip_bits(start_bit);
@@ -183,6 +190,20 @@ CavlcCoeffToken parse_cavlc_coeff_token(
     bits.reserve(16);
     for (std::size_t length = 1; length <= 16; ++length) {
         bits.push_back(reader.read_bit() == 0 ? '0' : '1');
+        if (n_c == -1) {
+            for (const auto& code : coeff_token_chroma_dc) {
+                if (bits == code.bits) {
+                    CavlcCoeffToken token;
+                    token.total_coefficients = code.total_coefficients;
+                    token.trailing_ones = code.trailing_ones;
+                    for (std::size_t index = 0; index < token.trailing_ones; ++index) {
+                        token.sign_bit_offsets.push_back(reader.position() + index);
+                    }
+                    return token;
+                }
+            }
+            continue;
+        }
         const auto& table = n_c <= 1 ? coeff_token_n0_1 : n_c <= 3 ? coeff_token_n2_3 : coeff_token_n4_5;
         for (const auto& code : table) {
             if (bits == code.bits) {
