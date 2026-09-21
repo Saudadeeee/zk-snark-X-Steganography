@@ -2,12 +2,15 @@
 
 import os
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from src.realtime_cavlc import CAVLCRealtimeBudget, RealtimeCAVLCScheduler
 from src.bitstream.cavlc import get_run_before_table
+from src.bitstream.h264 import NALUnitType, iter_annex_b_nal_units
 from src.runtest._helpers import run_test, section, summarise
 
 
@@ -51,12 +54,26 @@ def t_cavlc_run_before_tables_match_h264_reference_vlcs():
     assert get_run_before_table(7)["00000000001"] == 14
 
 
+def t_annex_b_iterator_streams_nals_and_removes_epb():
+    with tempfile.TemporaryDirectory() as directory:
+        fixture = Path(directory) / "fixture.h264"
+        fixture.write_bytes(
+            b"\x00\x00\x00\x01\x67\x42\xc0"
+            b"\x00\x00\x01\x65\x00\x00\x03\x01\x80"
+        )
+        units = list(iter_annex_b_nal_units(str(fixture), chunk_size=2))
+    assert [unit.nal_unit_type for unit in units] == [NALUnitType.SPS, NALUnitType.SLICE_IDR]
+    assert units[0].rbsp_byte == b"\x42\xc0"
+    assert units[1].rbsp_byte == b"\x00\x00\x01\x80"
+
+
 def main():
     section("Phase 9 - Realtime CAVLC Controller")
     results = [
         run_test("scheduler_keeps_only_fresh_segments_under_pressure", t_scheduler_keeps_only_fresh_segments_under_pressure),
         run_test("scheduler_reuses_one_proof_per_epoch_and_reports_budget", t_scheduler_reuses_one_proof_per_epoch_and_reports_budget),
         run_test("cavlc_run_before_tables_match_h264_reference_vlcs", t_cavlc_run_before_tables_match_h264_reference_vlcs),
+        run_test("annex_b_iterator_streams_nals_and_removes_epb", t_annex_b_iterator_streams_nals_and_removes_epb),
     ]
     sys.exit(summarise(results, "Phase 9"))
 
