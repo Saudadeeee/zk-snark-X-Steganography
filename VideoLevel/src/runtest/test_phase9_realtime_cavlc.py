@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from src.realtime_cavlc import CAVLCRealtimeBudget, RealtimeCAVLCScheduler
 from src.bitstream.cavlc import get_run_before_table
 from src.bitstream.h264 import NALUnitType, iter_annex_b_nal_units
+from src.bitstream import bitstream_ops
 from src.bitstream.bitstream_ops import BitstreamPatcher
 from src.core.pipeline import iter_idr_slices, iter_idr_trace_results, iter_idr_luma_analysis
 from src.blind_sync import iter_blind_sign_candidates_from_idr_analysis, select_blind_candidates_bounded
@@ -56,6 +57,51 @@ def t_cavlc_run_before_tables_match_h264_reference_vlcs():
         "11": 0, "000": 1, "001": 2, "011": 3, "010": 4, "101": 5, "100": 6,
     }
     assert get_run_before_table(7)["00000000001"] == 14
+
+
+def t_patcher_keeps_decoded_trailing_one_count_on_standard_round_trip():
+    """A standard exact round-trip must not discard a trailing-one sign flip."""
+    original_decoder = bitstream_ops.CAVLCDecoder
+
+    class Decoder:
+        def __init__(self, reader):
+            self.reader = reader
+
+        def _decode_coeff_token(self, _n_c):
+            self.reader.pos = 2
+            return 1, 1
+
+        def decode_block_cavlc(self, _n_c, max_num_coeff=16):
+            self.reader.pos = 3
+            return SimpleNamespace(levels=[1] + [0] * (max_num_coeff - 1), trailing_ones=1)
+
+    bitstream_ops.CAVLCDecoder = Decoder
+    try:
+        patcher = BitstreamPatcher()
+        patcher._encode_coefficients_to_bits = lambda *_args, **_kwargs: [0, 1, 0]
+        nal = SimpleNamespace(
+            forbidden_zero_bit=0,
+            nal_ref_idc=3,
+            nal_unit_type=NALUnitType.SLICE_IDR,
+            rbsp_byte=bytes.fromhex("4180"),
+            start_pos=0,
+            start_code_size=4,
+        )
+        patched = patcher.patch_slice(
+            nal,
+            [(0, 0, [-1] + [0] * 15)],
+            sps=SimpleNamespace(),
+            pps=SimpleNamespace(),
+            pre_computed_offsets={(0, 0): {
+                "start_bit": 0, "end_bit": 3, "bit_length": 3, "nC": 0,
+                "max_num_coeff": 16,
+            }},
+            pre_computed_blocks={(0, 0): [1] + [0] * 15},
+        )
+    finally:
+        bitstream_ops.CAVLCDecoder = original_decoder
+    assert patched.applied_block_keys == [(0, 0)]
+    assert patched.rbsp_byte[0] == 0x61
 
 
 def t_annex_b_iterator_streams_nals_and_removes_epb():
@@ -208,6 +254,7 @@ def main():
         run_test("scheduler_keeps_only_fresh_segments_under_pressure", t_scheduler_keeps_only_fresh_segments_under_pressure),
         run_test("scheduler_reuses_one_proof_per_epoch_and_reports_budget", t_scheduler_reuses_one_proof_per_epoch_and_reports_budget),
         run_test("cavlc_run_before_tables_match_h264_reference_vlcs", t_cavlc_run_before_tables_match_h264_reference_vlcs),
+        run_test("patcher_keeps_decoded_trailing_one_count_on_standard_round_trip", t_patcher_keeps_decoded_trailing_one_count_on_standard_round_trip),
         run_test("annex_b_iterator_streams_nals_and_removes_epb", t_annex_b_iterator_streams_nals_and_removes_epb),
         run_test("idr_iterator_tracks_streaming_macroblock_offsets", t_idr_iterator_tracks_streaming_macroblock_offsets),
         run_test("idr_trace_iterator_releases_each_slice_result_to_caller", t_idr_trace_iterator_releases_each_slice_result_to_caller),
