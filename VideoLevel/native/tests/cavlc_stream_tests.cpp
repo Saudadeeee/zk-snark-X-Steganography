@@ -45,6 +45,16 @@ int main() {
     CHECK(pps.pic_init_qp_minus26 == -4);
     CHECK(pps.deblocking_filter_control_present_flag);
 
+    const auto idr_header = zkstego::parse_baseline_idr_slice_header(
+        {0x88, 0x84, 0x3f, 0xe0, 0xb8, 0x60, 0x1e, 0x5c}, sps, pps);
+    CHECK(idr_header.first_mb_in_slice == 0);
+    CHECK(idr_header.slice_type == 2);
+    CHECK(idr_header.pic_parameter_set_id == 0);
+    CHECK(idr_header.frame_num == 0);
+    CHECK(idr_header.idr_pic_id == 0);
+    CHECK(idr_header.slice_qp_delta == -3);
+    CHECK(idr_header.data_bit_offset == 24);
+
     const std::vector<std::uint8_t> ebsp{0x12, 0x00, 0x00, 0x03, 0x01, 0x34};
     const auto rbsp = zkstego::ebsp_to_rbsp(ebsp);
     CHECK((rbsp == std::vector<std::uint8_t>{0x12, 0x00, 0x00, 0x01, 0x34}));
