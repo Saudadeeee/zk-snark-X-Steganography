@@ -15,7 +15,7 @@ References:
 import logging
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import List, Optional, Tuple, Dict
+from typing import Dict, Iterator, List, Optional, Tuple
 from .bitstream_io import BitstreamReader
 
 logger = logging.getLogger(__name__)
@@ -162,6 +162,87 @@ class NALParser:
                 result.append(data[i])
                 i += 1
         return bytes(result)
+
+
+def iter_annex_b_nal_units(
+    video_path: str,
+    *,
+    chunk_size: int = 64 * 1024,
+) -> Iterator[NALUnit]:
+    """Yield Annex-B NAL units without retaining the whole video in memory.
+
+    The yielded object has the same RBSP representation as :class:`NALParser`.
+    This iterator is deliberately byte-stream based so an Annex-B start code can
+    straddle a file-read boundary.  It is the low-level building block for the
+    realtime/edge pipeline; callers must not retain yielded units if they need
+    bounded memory.
+    """
+    if chunk_size < 1:
+        raise ValueError("chunk_size must be positive")
+
+    def _remove_emulation_prevention(payload: bytes) -> bytes:
+        cleaned = bytearray()
+        index = 0
+        while index < len(payload):
+            if index + 2 < len(payload) and payload[index:index + 2] == b"\x00\x00" and payload[index + 2] == 0x03:
+                cleaned.extend(payload[index:index + 2])
+                index += 3
+            else:
+                cleaned.append(payload[index])
+                index += 1
+        return bytes(cleaned)
+
+    def _build_nal(raw_nal: bytes, start_pos: int, start_code_size: int) -> Optional[NALUnit]:
+        if not raw_nal:
+            return None
+        header = raw_nal[0]
+        try:
+            unit_type = NALUnitType(header & 0x1F)
+        except ValueError:
+            unit_type = NALUnitType.UNKNOWN
+        return NALUnit(
+            forbidden_zero_bit=(header >> 7) & 1,
+            nal_ref_idc=(header >> 5) & 3,
+            nal_unit_type=unit_type,
+            rbsp_byte=_remove_emulation_prevention(raw_nal[1:]),
+            start_pos=start_pos,
+            size=len(raw_nal),
+            start_code_size=start_code_size,
+        )
+
+    pending = bytearray()
+    in_nal = False
+    nal_start_pos = 0
+    nal_start_code_size = 0
+    file_position = 0
+    with open(video_path, "rb") as source:
+        while chunk := source.read(chunk_size):
+            for value in chunk:
+                pending.append(value)
+                file_position += 1
+                start_code_size = 0
+                if pending.endswith(b"\x00\x00\x00\x01"):
+                    start_code_size = 4
+                elif pending.endswith(b"\x00\x00\x01"):
+                    start_code_size = 3
+                if start_code_size == 0:
+                    continue
+                if in_nal:
+                    nal = _build_nal(
+                        bytes(pending[:-start_code_size]),
+                        nal_start_pos,
+                        nal_start_code_size,
+                    )
+                    if nal is not None:
+                        yield nal
+                in_nal = True
+                nal_start_pos = file_position - start_code_size
+                nal_start_code_size = start_code_size
+                pending.clear()
+    if in_nal:
+        nal = _build_nal(bytes(pending), nal_start_pos, nal_start_code_size)
+        if nal is not None:
+            yield nal
 
 @dataclass
 class SPSData:
