@@ -171,6 +171,17 @@ def iter_blind_sign_candidates_from_idr_analysis(
         raise ValueError("blind sign candidates must exclude the DC coefficient")
     active_filter = safety_filter or CAVLCSafetyFilter()
     for _idr_offset, coefficients, n_c_map, nal_length_map, frame_verified_data in analysis_records:
+        sign_positions = getattr(active_filter, "get_safe_sign_positions", None)
+        if sign_positions is not None:
+            for candidate in sign_positions(
+                coefficients,
+                nC_map=n_c_map,
+                nal_length_map=nal_length_map,
+                frame_verified_data=frame_verified_data,
+            ):
+                if ~int(candidate[2]) >= min_coefficient_index:
+                    yield candidate
+            continue
         safe_positions = active_filter.get_safe_positions(
             coefficients,
             nC_map=n_c_map,

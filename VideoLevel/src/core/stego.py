@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from ..bitstream.cavlc import CAVLCEncoder, CAVLCDecoder
 from ..bitstream.bitstream_io import BitstreamWriter, BitstreamReader
-from ..bitstream.bitstream_ops import BitstreamPatcher
+from ..bitstream.bitstream_ops import BitstreamPatcher, _trailing_one_sign_offsets
 from ..exceptions import SafetyFilterError, EmbeddingError
 
 logger = logging.getLogger(__name__)
@@ -523,6 +523,47 @@ class CAVLCSafetyFilter:
         # round-robin. This keeps embed/extract ordering deterministic while
         # distributing payload across the full timeline.
         return sort_blocks_interleaved(safe_positions, _CIF_MB_COUNT)
+
+    def get_safe_sign_positions(
+        self,
+        coefficients: List[Tuple[int, int, List[int]]],
+        *,
+        nC_map: Optional[Dict[Tuple[int, int], int]] = None,
+        nal_length_map: Optional[Dict[Tuple[int, int], int]] = None,
+        frame_verified_data: Optional[Dict] = None,
+    ) -> List[Tuple[int, int, int]]:
+        """Return only tracked CAVLC trailing-one sign flags, fail-closed."""
+        if not coefficients or not frame_verified_data:
+            return []
+        nC_map = nC_map or {}
+        nal_length_map = nal_length_map or {}
+        idr_offsets = sorted(int(offset) for offset in frame_verified_data)
+        positions: List[Tuple[int, int, int]] = []
+        for mb_idx, block_idx, coeffs in coefficients:
+            block_key = (int(mb_idx), int(block_idx))
+            if block_idx >= 16 or nal_length_map.get(block_key) in (None, -1, 0):
+                continue
+            matching_offsets = [offset for offset in idr_offsets if offset <= mb_idx]
+            if not matching_offsets:
+                continue
+            global_offsets, _global_blocks, rbsp_bytes = frame_verified_data[matching_offsets[-1]]
+            offset_data = global_offsets.get(block_key)
+            if not offset_data or "start_bit" not in offset_data:
+                continue
+            try:
+                sign_offsets = _trailing_one_sign_offsets(
+                    rbsp_bytes,
+                    int(offset_data["start_bit"]),
+                    nC=int(nC_map.get(block_key, offset_data.get("nC", 0))),
+                    max_num_coeff=int(offset_data.get("max_num_coeff", 16)),
+                )
+            except (IndexError, ValueError, EOFError):
+                continue
+            nonzero_indices = [index for index, value in enumerate(coeffs) if value != 0]
+            if not sign_offsets or len(nonzero_indices) < len(sign_offsets):
+                continue
+            positions.extend((block_key[0], block_key[1], ~index) for index in nonzero_indices[-len(sign_offsets):])
+        return sort_blocks_interleaved(positions, _CIF_MB_COUNT)
 
 
 # =============================================================================
