@@ -12,11 +12,42 @@ Public API:
         → bytes
 """
 
-from ..bitstream.h264          import H264BitstreamParser, TraceableCAVLCParser
+from ..bitstream.h264          import H264BitstreamParser, TraceableCAVLCParser, iter_annex_b_nal_units
 from ..bitstream.bitstream_ops import BitstreamReconstructor, BitstreamPatcher, BitArray
 from ..bitstream.bitstream_io  import BitstreamReader
 from ..bitstream.cavlc         import CAVLCDecoder
 from .stego                    import sort_blocks_interleaved, _CIF_MB_COUNT
+
+
+def iter_idr_slices(video_path: str, reconstructor: BitstreamReconstructor):
+    """Yield IDR NALs with their active parameter sets and global MB offset.
+
+    The iterator updates SPS/PPS context as it walks Annex-B data and keeps no
+    historical IDR/NAL collection.  It is intentionally a small, stateless
+    primitive for the later streaming metadata and patch passes.
+    """
+    sps = pps = None
+    mb_count_per_slice: int | None = None
+    global_mb_idx = 0
+    for nal in iter_annex_b_nal_units(video_path):
+        nal_type = int(nal.nal_unit_type)
+        if nal_type == 7:
+            sps = reconstructor._parse_sps_from_nal(nal)
+            mb_count_per_slice = (
+                (sps.pic_width_in_mbs_minus1 + 1) *
+                (sps.pic_height_in_map_units_minus1 + 1)
+            )
+        elif nal_type == 8:
+            pps = reconstructor._parse_pps_from_nal(nal)
+        elif nal_type == 5:
+            if sps is None or pps is None or mb_count_per_slice is None:
+                raise RuntimeError("IDR encountered before a usable SPS/PPS context")
+            yield nal, sps, pps, global_mb_idx
+            global_mb_idx += mb_count_per_slice
+        elif nal_type == 1:
+            if mb_count_per_slice is None:
+                raise RuntimeError("non-IDR slice encountered before SPS context")
+            global_mb_idx += mb_count_per_slice
 
 def extract_all_idr_blocks(video_path: str, reconstructor: BitstreamReconstructor,
                             verbose: bool = False,
