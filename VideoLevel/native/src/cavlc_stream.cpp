@@ -286,6 +286,52 @@ CavlcDecodedLevels decode_cavlc_non_trailing_levels(
     return decoded;
 }
 
+CavlcResidualTail decode_cavlc_tail_tc4(
+    const std::vector<std::uint8_t>& rbsp,
+    const std::size_t start_bit) {
+    struct VlcCode { const char* bits; std::uint8_t value; };
+    constexpr std::array total_zeros_codes{
+        VlcCode{"111", 1}, VlcCode{"110", 4}, VlcCode{"101", 5}, VlcCode{"100", 6}, VlcCode{"011", 8},
+        VlcCode{"0101", 2}, VlcCode{"0100", 3}, VlcCode{"0011", 7}, VlcCode{"0010", 9}, VlcCode{"00011", 0},
+        VlcCode{"00010", 10}, VlcCode{"00001", 11}, VlcCode{"00000", 12},
+    };
+    constexpr std::array run_before_zeros3_codes{
+        VlcCode{"11", 0}, VlcCode{"10", 1}, VlcCode{"01", 2}, VlcCode{"00", 3},
+    };
+    const auto decode = [](RbspBitReader& reader, const auto& table) -> std::uint32_t {
+        std::string bits;
+        bits.reserve(8);
+        for (std::size_t length = 1; length <= 8; ++length) {
+            bits.push_back(reader.read_bit() == 0 ? '0' : '1');
+            for (const auto& code : table) {
+                if (bits == code.bits) return code.value;
+            }
+        }
+        throw std::invalid_argument("invalid CAVLC tail VLC");
+    };
+    RbspBitReader reader(rbsp);
+    reader.skip_bits(start_bit);
+    CavlcResidualTail tail;
+    tail.total_zeros = decode(reader, total_zeros_codes);
+    if (tail.total_zeros > 12) {
+        throw std::invalid_argument("TC=4 total_zeros exceeds luma block bound");
+    }
+    auto zeros_left = tail.total_zeros;
+    for (std::size_t index = 0; index < 3; ++index) {
+        std::uint32_t run = 0;
+        if (zeros_left == 3) {
+            run = decode(reader, run_before_zeros3_codes);
+        } else if (zeros_left != 0) {
+            throw std::invalid_argument("native TC=4 tail parser currently supports zero-run state 3 only");
+        }
+        tail.runs.push_back(run);
+        zeros_left -= run;
+    }
+    tail.runs.push_back(zeros_left);
+    tail.next_bit_offset = reader.position();
+    return tail;
+}
+
 H264BaselineIMacroblockHeader parse_baseline_i_macroblock_header(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit) {
