@@ -242,6 +242,10 @@ def iter_blind_sign_candidates_from_idr_analysis(
                 nal_length_map=nal_length_map,
                 frame_verified_data=frame_verified_data,
             )
+            # Macroblock ids are global and never recur in a later IDR, so a
+            # cross-IDR cache cannot improve correctness. Releasing it here
+            # keeps the validated streaming path bounded by one IDR.
+            active_filter._lazy_patchability_cache.clear()
             seen_blocks: set[tuple[int, int]] = set()
             for candidate in raw_positions:
                 mb_idx, block_idx, coefficient_idx = (int(value) for value in candidate)

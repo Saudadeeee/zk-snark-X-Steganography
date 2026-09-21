@@ -349,10 +349,13 @@ def t_streaming_blind_candidates_use_validated_filter_for_real_cavlc_filter():
             raise AssertionError("fast sign scan omits patchability validation")
 
         def get_safe_positions(self, *_args, **_kwargs):
+            self._lazy_patchability_cache[(5, 2)] = (0, None, None)
             return [(5, 2, ~7), (5, 2, ~8), (6, 2, 3)]
 
     records = [(0, [], {}, {}, {})]
-    assert list(iter_blind_sign_candidates_from_idr_analysis(records, safety_filter=SafetyFilter())) == [(5, 2, ~7)]
+    safety_filter = SafetyFilter()
+    assert list(iter_blind_sign_candidates_from_idr_analysis(records, safety_filter=safety_filter)) == [(5, 2, ~7)]
+    assert safety_filter._lazy_patchability_cache == {}
 
 
 def t_bitstream_patcher_exposes_lazy_patchability_contract():
