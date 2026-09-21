@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <array>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -96,6 +97,14 @@ struct CavlcCoeffToken {
     std::vector<std::size_t> sign_bit_offsets;
 };
 
+struct H264BaselineIMacroblockHeader {
+    std::uint32_t mb_type{};
+    std::uint32_t coded_block_pattern{};
+    std::int32_t mb_qp_delta{};
+    std::array<std::int8_t, 16> intra_4x4_prediction_modes{};
+    std::size_t residual_bit_offset{};
+};
+
 struct AnnexBNalUnit {
     std::size_t start_offset{};
     std::size_t start_code_size{};
@@ -120,6 +129,9 @@ CavlcCoeffToken parse_cavlc_coeff_token(
     const std::vector<std::uint8_t>& rbsp,
     std::size_t start_bit,
     int n_c);
+H264BaselineIMacroblockHeader parse_baseline_i_macroblock_header(
+    const std::vector<std::uint8_t>& rbsp,
+    std::size_t start_bit);
 std::vector<AnnexBNalUnit> split_annex_b(const std::vector<std::uint8_t>& annex_b);
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units);
 std::vector<std::uint8_t> apply_fixed_length_patches(

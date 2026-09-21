@@ -221,6 +221,58 @@ CavlcCoeffToken parse_cavlc_coeff_token(
     throw std::invalid_argument("invalid CAVLC coeff_token for nC 0 or 1");
 }
 
+H264BaselineIMacroblockHeader parse_baseline_i_macroblock_header(
+    const std::vector<std::uint8_t>& rbsp,
+    const std::size_t start_bit) {
+    constexpr std::array<std::uint8_t, 48> intra_cbp_map{
+        47, 31, 15, 0, 23, 27, 29, 30, 7, 11, 13, 14, 39, 43, 45, 46,
+        16, 3, 5, 10, 12, 19, 21, 26, 28, 35, 37, 42, 44, 1, 2, 4,
+        8, 17, 18, 20, 24, 6, 9, 22, 25, 32, 33, 34, 36, 40, 38, 41,
+    };
+    RbspBitReader reader(rbsp);
+    reader.skip_bits(start_bit);
+    H264BaselineIMacroblockHeader header;
+    header.intra_4x4_prediction_modes.fill(-1);
+    header.mb_type = reader.read_ue();
+    if (header.mb_type == 25) {
+        throw std::invalid_argument("native I macroblock parser does not support I_PCM");
+    }
+    if (header.mb_type > 25) {
+        throw std::invalid_argument("invalid I-slice macroblock type");
+    }
+    if (header.mb_type == 0) {
+        for (std::size_t index = 0; index < header.intra_4x4_prediction_modes.size(); ++index) {
+            if (reader.read_bit() == 0) {
+                header.intra_4x4_prediction_modes[index] = static_cast<std::int8_t>(reader.read_bits(3));
+            }
+        }
+        const auto chroma_mode = reader.read_ue();
+        if (chroma_mode > 3) {
+            throw std::invalid_argument("invalid intra chroma prediction mode");
+        }
+        const auto mapped_cbp = reader.read_ue();
+        if (mapped_cbp >= intra_cbp_map.size()) {
+            throw std::invalid_argument("invalid intra coded block pattern");
+        }
+        header.coded_block_pattern = intra_cbp_map[mapped_cbp];
+    } else {
+        const auto chroma_mode = reader.read_ue();
+        if (chroma_mode > 3) {
+            throw std::invalid_argument("invalid intra chroma prediction mode");
+        }
+        const auto type_offset = header.mb_type - 1;
+        const auto luma_cbp = type_offset / 12 == 0 ? 0U : 15U;
+        const auto chroma_index = (type_offset % 12) / 4;
+        const auto chroma_cbp = chroma_index == 0 ? 0U : chroma_index == 1 ? 1U : 3U;
+        header.coded_block_pattern = (chroma_cbp << 4U) | luma_cbp;
+    }
+    if (header.coded_block_pattern != 0 || header.mb_type != 0) {
+        header.mb_qp_delta = reader.read_se();
+    }
+    header.residual_bit_offset = reader.position();
+    return header;
+}
+
 std::vector<std::uint8_t> ebsp_to_rbsp(const std::vector<std::uint8_t>& ebsp) {
     std::vector<std::uint8_t> rbsp;
     rbsp.reserve(ebsp.size());
