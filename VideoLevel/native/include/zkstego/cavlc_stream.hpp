@@ -146,6 +146,10 @@ CavlcCoeffToken parse_cavlc_coeff_token(
 CavlcDecodedLevels decode_cavlc_non_trailing_levels(
     const std::vector<std::uint8_t>& rbsp,
     const CavlcCoeffToken& token);
+std::vector<std::int32_t> reconstruct_cavlc_block(
+    const CavlcDecodedLevels& decoded_levels,
+    const std::vector<std::uint32_t>& runs,
+    std::size_t max_num_coefficients);
 CavlcResidualTail decode_cavlc_tail_tc4(
     const std::vector<std::uint8_t>& rbsp,
     std::size_t start_bit);

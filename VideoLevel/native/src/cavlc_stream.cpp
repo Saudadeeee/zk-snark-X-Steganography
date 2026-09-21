@@ -295,6 +295,42 @@ CavlcDecodedLevels decode_cavlc_non_trailing_levels(
     return decoded;
 }
 
+std::vector<std::int32_t> reconstruct_cavlc_block(
+    const CavlcDecodedLevels& decoded_levels,
+    const std::vector<std::uint32_t>& runs,
+    const std::size_t max_num_coefficients) {
+    if (max_num_coefficients == 0) {
+        throw std::invalid_argument("CAVLC reconstruction requires a non-empty block");
+    }
+    const auto total_coefficients = decoded_levels.trailing_one_values.size() + decoded_levels.values.size();
+    if (total_coefficients != runs.size()) {
+        throw std::invalid_argument("CAVLC level and run counts differ");
+    }
+
+    std::vector<std::int32_t> reverse_scan_levels;
+    reverse_scan_levels.reserve(total_coefficients);
+    reverse_scan_levels.insert(
+        reverse_scan_levels.end(), decoded_levels.trailing_one_values.begin(), decoded_levels.trailing_one_values.end());
+    reverse_scan_levels.insert(reverse_scan_levels.end(), decoded_levels.values.begin(), decoded_levels.values.end());
+
+    std::vector<std::int32_t> coefficients;
+    coefficients.reserve(max_num_coefficients);
+    for (std::size_t reverse_index = 0; reverse_index < total_coefficients; ++reverse_index) {
+        const auto index = total_coefficients - 1 - reverse_index;
+        const auto run = runs[index];
+        if (run > max_num_coefficients - coefficients.size()) {
+            throw std::invalid_argument("CAVLC run expands beyond block");
+        }
+        coefficients.insert(coefficients.end(), run, 0);
+        if (coefficients.size() >= max_num_coefficients) {
+            throw std::invalid_argument("CAVLC coefficient expands beyond block");
+        }
+        coefficients.push_back(reverse_scan_levels[index]);
+    }
+    coefficients.resize(max_num_coefficients, 0);
+    return coefficients;
+}
+
 CavlcResidualTail decode_cavlc_tail_tc4(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit) {
@@ -380,23 +416,9 @@ std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
     if (decoded_non_trailing_levels.size() != kTotalCoefficients || runs.size() != kTotalCoefficients) {
         throw std::invalid_argument("TC=4 reconstruction requires exactly four levels and runs");
     }
-
-    std::vector<std::int32_t> coefficients;
-    coefficients.reserve(kBlockCoefficients);
-    for (std::size_t reverse_index = 0; reverse_index < kTotalCoefficients; ++reverse_index) {
-        const auto index = kTotalCoefficients - 1 - reverse_index;
-        const auto run = runs[index];
-        if (run > kBlockCoefficients - coefficients.size()) {
-            throw std::invalid_argument("CAVLC run expands beyond 4x4 block");
-        }
-        coefficients.insert(coefficients.end(), run, 0);
-        if (coefficients.size() >= kBlockCoefficients) {
-            throw std::invalid_argument("CAVLC coefficient expands beyond 4x4 block");
-        }
-        coefficients.push_back(decoded_non_trailing_levels[index]);
-    }
-    coefficients.resize(kBlockCoefficients, 0);
-    return coefficients;
+    CavlcDecodedLevels decoded;
+    decoded.values = decoded_non_trailing_levels;
+    return reconstruct_cavlc_block(decoded, runs, kBlockCoefficients);
 }
 
 H264BaselineIMacroblockHeader parse_baseline_i_macroblock_header(
