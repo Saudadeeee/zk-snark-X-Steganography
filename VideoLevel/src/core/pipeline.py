@@ -72,6 +72,57 @@ def iter_idr_trace_results(
         )
         yield nal, sps, pps, global_mb_idx, result
 
+
+def iter_idr_luma_analysis(
+    video_path: str,
+    reconstructor: BitstreamReconstructor,
+    *,
+    traceable_factory=TraceableCAVLCParser,
+):
+    """Yield the CAVLC analysis needed for one IDR slice at a time.
+
+    Each record is ``(idr_offset, coefficients, n_c_map, nal_length_map,
+    frame_verified_data)``.  Keys are global macroblock coordinates, matching
+    the legacy full-video analysis contract, while all maps are bounded to the
+    yielded IDR.  The caller must release each record before advancing to keep
+    memory bounded.
+    """
+    for nal, _sps, _pps, idr_offset, result in iter_idr_trace_results(
+        video_path,
+        reconstructor,
+        traceable_factory=traceable_factory,
+    ):
+        blocks = result.get("blocks", {})
+        offsets = result.get("offsets", {})
+        coefficients = []
+        for (local_mb, block_idx), values in sorted(blocks.items()):
+            if block_idx < 16 and any(value != 0 for value in values):
+                coefficients.append((idr_offset + int(local_mb), int(block_idx), list(values)))
+
+        global_offsets = {
+            (idr_offset + int(local_mb), int(block_idx)): value
+            for (local_mb, block_idx), value in offsets.items()
+        }
+        global_blocks = {
+            (idr_offset + int(local_mb), int(block_idx)): value
+            for (local_mb, block_idx), value in blocks.items()
+        }
+        n_c_map = {}
+        nal_length_map = {}
+        for (local_mb, block_idx), offset_data in offsets.items():
+            if block_idx >= 16:
+                continue
+            global_key = (idr_offset + int(local_mb), int(block_idx))
+            if "nC" in offset_data:
+                n_c_map[global_key] = int(offset_data["nC"])
+            if "bit_length" in offset_data:
+                nal_length_map[global_key] = int(offset_data["bit_length"])
+
+        frame_verified_data = {
+            idr_offset: (global_offsets, global_blocks, nal.rbsp_byte),
+        }
+        yield idr_offset, coefficients, n_c_map, nal_length_map, frame_verified_data
+
 def extract_all_idr_blocks(video_path: str, reconstructor: BitstreamReconstructor,
                             verbose: bool = False,
                             parser: H264BitstreamParser | None = None):
