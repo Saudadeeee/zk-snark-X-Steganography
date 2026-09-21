@@ -20,6 +20,7 @@ from src.blind_sync import (
 from src.bitstream.bitstream_ops import _trailing_one_sign_offsets
 from src.embedder import _filter_reconstructed_positions
 from src.embedder import _resolve_video_analysis
+from src.core.stego import PayloadEmbedder
 from src.runtest._helpers import (
     get_circuits_dir,
     get_output,
@@ -51,6 +52,18 @@ def t_blind_positions_use_sign_only_and_keep_order():
 def t_blind_payload_size_is_derivable_without_sidecar():
     # [4-byte message length][message][129-byte Groth16 proof]
     assert blind_payload_bits(message_length=13) == (4 + 13 + 129) * 8
+
+
+def t_prevalidated_embed_materializes_only_selected_blocks():
+    coefficients = [(mb, 0, [1] + [0] * 15) for mb in range(128)]
+    embedder = PayloadEmbedder(max_modifications_per_block=1)
+    modified, bits_embedded = embedder.embed_payload(
+        coefficients,
+        b"\x80",
+        pre_validated_positions=[(127, 0, ~0)],
+    )
+    assert bits_embedded == 1
+    assert modified == [(127, 0, [-1] + [0] * 15)]
 
 
 def t_reconstruction_accounting_excludes_unapplied_blocks():
@@ -192,6 +205,7 @@ def main():
     results = [
         run_test("blind_positions_use_sign_only_and_keep_order", t_blind_positions_use_sign_only_and_keep_order),
         run_test("blind_payload_size_is_derivable_without_sidecar", t_blind_payload_size_is_derivable_without_sidecar),
+        run_test("prevalidated_embed_materializes_only_selected_blocks", t_prevalidated_embed_materializes_only_selected_blocks),
         run_test("reconstruction_accounting_excludes_unapplied_blocks", t_reconstruction_accounting_excludes_unapplied_blocks),
         run_test("blind_candidates_only_use_validated_cavlc_sign_positions", t_blind_candidates_only_use_validated_cavlc_sign_positions),
         run_test("blind_candidates_exclude_signs_that_cannot_be_patched_in_both_states", t_blind_candidates_exclude_signs_that_cannot_be_patched_in_both_states),
