@@ -174,8 +174,8 @@ CavlcCoeffToken parse_cavlc_coeff_token(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit,
     const int n_c) {
-    if (n_c < 0 || n_c > 5) {
-        throw std::invalid_argument("native coeff_token parser currently supports nC zero through five only");
+    if (n_c < 0 || n_c > 7) {
+        throw std::invalid_argument("native coeff_token parser currently supports nC zero through seven only");
     }
     RbspBitReader reader(rbsp);
     reader.skip_bits(start_bit);
