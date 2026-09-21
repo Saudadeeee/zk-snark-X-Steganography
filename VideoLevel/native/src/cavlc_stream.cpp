@@ -332,6 +332,33 @@ CavlcResidualTail decode_cavlc_tail_tc4(
     return tail;
 }
 
+std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
+    const std::vector<std::int32_t>& decoded_non_trailing_levels,
+    const std::vector<std::uint32_t>& runs) {
+    constexpr std::size_t kBlockCoefficients = 16;
+    constexpr std::size_t kTotalCoefficients = 4;
+    if (decoded_non_trailing_levels.size() != kTotalCoefficients || runs.size() != kTotalCoefficients) {
+        throw std::invalid_argument("TC=4 reconstruction requires exactly four levels and runs");
+    }
+
+    std::vector<std::int32_t> coefficients;
+    coefficients.reserve(kBlockCoefficients);
+    for (std::size_t reverse_index = 0; reverse_index < kTotalCoefficients; ++reverse_index) {
+        const auto index = kTotalCoefficients - 1 - reverse_index;
+        const auto run = runs[index];
+        if (run > kBlockCoefficients - coefficients.size()) {
+            throw std::invalid_argument("CAVLC run expands beyond 4x4 block");
+        }
+        coefficients.insert(coefficients.end(), run, 0);
+        if (coefficients.size() >= kBlockCoefficients) {
+            throw std::invalid_argument("CAVLC coefficient expands beyond 4x4 block");
+        }
+        coefficients.push_back(decoded_non_trailing_levels[index]);
+    }
+    coefficients.resize(kBlockCoefficients, 0);
+    return coefficients;
+}
+
 H264BaselineIMacroblockHeader parse_baseline_i_macroblock_header(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit) {
