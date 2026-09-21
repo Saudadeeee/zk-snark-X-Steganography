@@ -101,6 +101,11 @@ int main() {
     CHECK(first_luma_block.tail.next_bit_offset == 117);
     CHECK((first_luma_block.coefficients == std::vector<std::int32_t>{
         -24, -2, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
+    const auto empty_luma_block = zkstego::decode_cavlc_luma_block({0x80}, 0, 0);
+    CHECK(empty_luma_block.token.total_coefficients == 0);
+    CHECK(empty_luma_block.tail.runs.empty());
+    CHECK(empty_luma_block.tail.next_bit_offset == 1);
+    CHECK(empty_luma_block.coefficients == std::vector<std::int32_t>(16, 0));
     const auto first_luma_coefficients = zkstego::reconstruct_cavlc_tc4_no_trailing(
         first_luma_levels.values, first_luma_tail.runs);
     CHECK((first_luma_coefficients == std::vector<std::int32_t>{
