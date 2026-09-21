@@ -295,13 +295,33 @@ CavlcResidualTail decode_cavlc_tail_tc4(
         VlcCode{"0101", 2}, VlcCode{"0100", 3}, VlcCode{"0011", 7}, VlcCode{"0010", 9}, VlcCode{"00011", 0},
         VlcCode{"00010", 10}, VlcCode{"00001", 11}, VlcCode{"00000", 12},
     };
+    constexpr std::array run_before_zeros1_codes{
+        VlcCode{"1", 0}, VlcCode{"0", 1},
+    };
+    constexpr std::array run_before_zeros2_codes{
+        VlcCode{"1", 0}, VlcCode{"01", 1}, VlcCode{"00", 2},
+    };
     constexpr std::array run_before_zeros3_codes{
         VlcCode{"11", 0}, VlcCode{"10", 1}, VlcCode{"01", 2}, VlcCode{"00", 3},
     };
+    constexpr std::array run_before_zeros4_codes{
+        VlcCode{"11", 0}, VlcCode{"10", 1}, VlcCode{"01", 2}, VlcCode{"001", 3}, VlcCode{"000", 4},
+    };
+    constexpr std::array run_before_zeros5_codes{
+        VlcCode{"11", 0}, VlcCode{"10", 1}, VlcCode{"01", 2}, VlcCode{"001", 3}, VlcCode{"0001", 4}, VlcCode{"0000", 5},
+    };
+    constexpr std::array run_before_zeros6_codes{
+        VlcCode{"11", 0}, VlcCode{"10", 1}, VlcCode{"01", 2}, VlcCode{"001", 3}, VlcCode{"0001", 4}, VlcCode{"00001", 5}, VlcCode{"00000", 6},
+    };
+    constexpr std::array run_before_zeros7_plus_codes{
+        VlcCode{"111", 0}, VlcCode{"110", 1}, VlcCode{"101", 2}, VlcCode{"100", 3}, VlcCode{"011", 4},
+        VlcCode{"010", 5}, VlcCode{"001", 6}, VlcCode{"0001", 7}, VlcCode{"00001", 8}, VlcCode{"000001", 9},
+        VlcCode{"0000001", 10}, VlcCode{"00000001", 11}, VlcCode{"000000001", 12}, VlcCode{"0000000001", 13}, VlcCode{"00000000001", 14},
+    };
     const auto decode = [](RbspBitReader& reader, const auto& table) -> std::uint32_t {
         std::string bits;
-        bits.reserve(8);
-        for (std::size_t length = 1; length <= 8; ++length) {
+        bits.reserve(14);
+        for (std::size_t length = 1; length <= 14; ++length) {
             bits.push_back(reader.read_bit() == 0 ? '0' : '1');
             for (const auto& code : table) {
                 if (bits == code.bits) return code.value;
@@ -319,11 +339,22 @@ CavlcResidualTail decode_cavlc_tail_tc4(
     auto zeros_left = tail.total_zeros;
     for (std::size_t index = 0; index < 3; ++index) {
         std::uint32_t run = 0;
-        if (zeros_left == 3) {
+        if (zeros_left == 1) {
+            run = decode(reader, run_before_zeros1_codes);
+        } else if (zeros_left == 2) {
+            run = decode(reader, run_before_zeros2_codes);
+        } else if (zeros_left == 3) {
             run = decode(reader, run_before_zeros3_codes);
-        } else if (zeros_left != 0) {
-            throw std::invalid_argument("native TC=4 tail parser currently supports zero-run state 3 only");
+        } else if (zeros_left == 4) {
+            run = decode(reader, run_before_zeros4_codes);
+        } else if (zeros_left == 5) {
+            run = decode(reader, run_before_zeros5_codes);
+        } else if (zeros_left == 6) {
+            run = decode(reader, run_before_zeros6_codes);
+        } else if (zeros_left >= 7) {
+            run = decode(reader, run_before_zeros7_plus_codes);
         }
+        if (run > zeros_left) throw std::invalid_argument("CAVLC run exceeds remaining zeros");
         tail.runs.push_back(run);
         zeros_left -= run;
     }
