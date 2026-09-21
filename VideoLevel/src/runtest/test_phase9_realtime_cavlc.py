@@ -169,6 +169,20 @@ def t_streaming_blind_candidates_are_filtered_per_idr_record():
     assert list(iter_blind_sign_candidates_from_idr_analysis(records, safety_filter=SafetyFilter())) == [(5, 2, ~7)]
 
 
+def t_streaming_blind_candidates_prefer_sign_only_gate():
+    class SafetyFilter:
+        @staticmethod
+        def get_safe_sign_positions(*_args, **_kwargs):
+            return [(5, 2, ~7)]
+
+        @staticmethod
+        def get_safe_positions(*_args, **_kwargs):
+            raise AssertionError("generic LSB gate must not run in sign-only mode")
+
+    records = [(0, [], {}, {}, {})]
+    assert list(iter_blind_sign_candidates_from_idr_analysis(records, safety_filter=SafetyFilter())) == [(5, 2, ~7)]
+
+
 def t_bitstream_patcher_exposes_lazy_patchability_contract():
     patcher = BitstreamPatcher()
     assert callable(patcher.validate_block_patchability)
@@ -186,6 +200,7 @@ def main():
         run_test("idr_trace_iterator_releases_each_slice_result_to_caller", t_idr_trace_iterator_releases_each_slice_result_to_caller),
         run_test("idr_luma_analysis_uses_global_keys_without_retaining_other_slices", t_idr_luma_analysis_uses_global_keys_without_retaining_other_slices),
         run_test("streaming_blind_candidates_are_filtered_per_idr_record", t_streaming_blind_candidates_are_filtered_per_idr_record),
+        run_test("streaming_blind_candidates_prefer_sign_only_gate", t_streaming_blind_candidates_prefer_sign_only_gate),
         run_test("bitstream_patcher_exposes_lazy_patchability_contract", t_bitstream_patcher_exposes_lazy_patchability_contract),
     ]
     sys.exit(summarise(results, "Phase 9"))
