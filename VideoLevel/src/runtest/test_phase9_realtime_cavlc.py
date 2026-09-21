@@ -12,7 +12,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from src.realtime_cavlc import CAVLCRealtimeBudget, RealtimeCAVLCScheduler
 from src.bitstream.cavlc import get_run_before_table
 from src.bitstream.h264 import NALUnitType, iter_annex_b_nal_units
+from src.bitstream.bitstream_ops import BitstreamPatcher
 from src.core.pipeline import iter_idr_slices, iter_idr_trace_results, iter_idr_luma_analysis
+from src.blind_sync import iter_blind_sign_candidates_from_idr_analysis
 from src.runtest._helpers import run_test, section, summarise
 
 
@@ -155,6 +157,24 @@ def t_idr_luma_analysis_uses_global_keys_without_retaining_other_slices():
     assert set(records[1][4]) == {1}
 
 
+def t_streaming_blind_candidates_are_filtered_per_idr_record():
+    class SafetyFilter:
+        @staticmethod
+        def get_safe_positions(*_args, **_kwargs):
+            return [(5, 2, ~7), (5, 2, 3)]
+
+    coefficients = [(5, 2, [0] * 7 + [1] + [0] * 8)]
+    frame_data = {0: ({(5, 2): {"start_bit": 0}}, {(5, 2): [0] * 7 + [1] + [0] * 8}, b"")}
+    records = [(0, coefficients, {(5, 2): 0}, {(5, 2): 1}, frame_data)]
+    assert list(iter_blind_sign_candidates_from_idr_analysis(records, safety_filter=SafetyFilter())) == [(5, 2, ~7)]
+
+
+def t_bitstream_patcher_exposes_lazy_patchability_contract():
+    patcher = BitstreamPatcher()
+    assert callable(patcher.validate_block_patchability)
+    assert callable(patcher.get_unpatchable_blocks)
+
+
 def main():
     section("Phase 9 - Realtime CAVLC Controller")
     results = [
@@ -165,6 +185,8 @@ def main():
         run_test("idr_iterator_tracks_streaming_macroblock_offsets", t_idr_iterator_tracks_streaming_macroblock_offsets),
         run_test("idr_trace_iterator_releases_each_slice_result_to_caller", t_idr_trace_iterator_releases_each_slice_result_to_caller),
         run_test("idr_luma_analysis_uses_global_keys_without_retaining_other_slices", t_idr_luma_analysis_uses_global_keys_without_retaining_other_slices),
+        run_test("streaming_blind_candidates_are_filtered_per_idr_record", t_streaming_blind_candidates_are_filtered_per_idr_record),
+        run_test("bitstream_patcher_exposes_lazy_patchability_contract", t_bitstream_patcher_exposes_lazy_patchability_contract),
     ]
     sys.exit(summarise(results, "Phase 9"))
 
