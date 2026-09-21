@@ -14,7 +14,12 @@ from src.bitstream.cavlc import get_run_before_table
 from src.bitstream.h264 import NALUnitType, iter_annex_b_nal_units
 from src.bitstream import bitstream_ops
 from src.bitstream.bitstream_ops import BitstreamPatcher
-from src.core.pipeline import iter_idr_slices, iter_idr_trace_results, iter_idr_luma_analysis
+from src.core.pipeline import (
+    iter_idr_slices,
+    iter_idr_trace_results,
+    iter_idr_luma_analysis,
+    patch_selected_sign_positions_streaming,
+)
 from src.blind_sync import iter_blind_sign_candidates_from_idr_analysis, select_blind_candidates_bounded
 from src.runtest._helpers import run_test, section, summarise
 
@@ -102,6 +107,60 @@ def t_patcher_keeps_decoded_trailing_one_count_on_standard_round_trip():
         bitstream_ops.CAVLCDecoder = original_decoder
     assert patched.applied_block_keys == [(0, 0)]
     assert patched.rbsp_byte[0] == 0x61
+
+
+def t_streaming_sign_patcher_writes_only_verified_idr_patch():
+    class Reconstructor:
+        @staticmethod
+        def _parse_sps_from_nal(_nal):
+            return SimpleNamespace(pic_width_in_mbs_minus1=0, pic_height_in_map_units_minus1=0)
+
+        @staticmethod
+        def _parse_pps_from_nal(_nal):
+            return SimpleNamespace()
+
+        @staticmethod
+        def _add_emulation_prevention(rbsp):
+            return rbsp
+
+    class Traceable:
+        def extract_with_offsets(self, _nal, _sps, _pps, global_mb_idx):
+            assert global_mb_idx == 0
+            return {
+                "blocks": {(0, 0): [0] * 7 + [1] + [0] * 8},
+                "offsets": {(0, 0): {"start_bit": 0, "end_bit": 3, "bit_length": 3, "nC": 0}},
+            }
+
+    class Patcher:
+        def patch_slice(self, nal, modifications, **_kwargs):
+            assert modifications == [(0, 0, [0] * 7 + [-1] + [0] * 8)]
+            return SimpleNamespace(
+                forbidden_zero_bit=nal.forbidden_zero_bit,
+                nal_ref_idc=nal.nal_ref_idc,
+                nal_unit_type=nal.nal_unit_type,
+                rbsp_byte=b"\xaa",
+                start_code_size=nal.start_code_size,
+                applied_block_keys=[(0, 0)],
+            )
+
+    with tempfile.TemporaryDirectory() as directory:
+        source = Path(directory) / "cover.h264"
+        output = Path(directory) / "stego.h264"
+        source.write_bytes(
+            b"\x00\x00\x00\x01\x67\x42"
+            b"\x00\x00\x00\x01\x68\xce"
+            b"\x00\x00\x00\x01\x65\x41\x80"
+        )
+        stats = patch_selected_sign_positions_streaming(
+            str(source),
+            str(output),
+            {(0, 0, ~7): 1},
+            reconstructor=Reconstructor(),
+            traceable_factory=Traceable,
+            patcher_factory=Patcher,
+        )
+        assert output.read_bytes().endswith(b"\x00\x00\x00\x01\x65\xaa")
+    assert stats == {"idr_slices": 1, "selected_positions": 1, "applied_positions": 1}
 
 
 def t_annex_b_iterator_streams_nals_and_removes_epb():
@@ -255,6 +314,7 @@ def main():
         run_test("scheduler_reuses_one_proof_per_epoch_and_reports_budget", t_scheduler_reuses_one_proof_per_epoch_and_reports_budget),
         run_test("cavlc_run_before_tables_match_h264_reference_vlcs", t_cavlc_run_before_tables_match_h264_reference_vlcs),
         run_test("patcher_keeps_decoded_trailing_one_count_on_standard_round_trip", t_patcher_keeps_decoded_trailing_one_count_on_standard_round_trip),
+        run_test("streaming_sign_patcher_writes_only_verified_idr_patch", t_streaming_sign_patcher_writes_only_verified_idr_patch),
         run_test("annex_b_iterator_streams_nals_and_removes_epb", t_annex_b_iterator_streams_nals_and_removes_epb),
         run_test("idr_iterator_tracks_streaming_macroblock_offsets", t_idr_iterator_tracks_streaming_macroblock_offsets),
         run_test("idr_trace_iterator_releases_each_slice_result_to_caller", t_idr_trace_iterator_releases_each_slice_result_to_caller),
