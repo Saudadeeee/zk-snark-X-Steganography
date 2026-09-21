@@ -49,6 +49,29 @@ def iter_idr_slices(video_path: str, reconstructor: BitstreamReconstructor):
                 raise RuntimeError("non-IDR slice encountered before SPS context")
             global_mb_idx += mb_count_per_slice
 
+
+def iter_idr_trace_results(
+    video_path: str,
+    reconstructor: BitstreamReconstructor,
+    *,
+    traceable_factory=TraceableCAVLCParser,
+):
+    """Decode and yield one IDR trace result at a time.
+
+    Consumers own the yielded result and should release it before advancing the
+    iterator when operating under an edge-memory budget.  The factory seam is
+    intentional: it keeps the streaming offset contract independently testable.
+    """
+    for nal, sps, pps, global_mb_idx in iter_idr_slices(video_path, reconstructor):
+        traceable = traceable_factory()
+        result = traceable.extract_with_offsets(
+            nal,
+            sps,
+            pps,
+            global_mb_idx=global_mb_idx,
+        )
+        yield nal, sps, pps, global_mb_idx, result
+
 def extract_all_idr_blocks(video_path: str, reconstructor: BitstreamReconstructor,
                             verbose: bool = False,
                             parser: H264BitstreamParser | None = None):
