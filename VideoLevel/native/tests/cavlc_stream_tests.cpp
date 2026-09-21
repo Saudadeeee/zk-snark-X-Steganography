@@ -82,6 +82,10 @@ int main() {
     CHECK(first_luma_tail.total_zeros == 3);
     CHECK((first_luma_tail.runs == std::vector<std::uint32_t>{0, 3, 0, 0}));
     CHECK(first_luma_tail.next_bit_offset == 117);
+    const auto first_luma_coefficients = zkstego::reconstruct_cavlc_tc4_no_trailing(
+        first_luma_levels.values, first_luma_tail.runs);
+    CHECK((first_luma_coefficients == std::vector<std::int32_t>{
+        -24, -2, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
 
     const auto token = zkstego::parse_cavlc_coeff_token({0x41, 0x80}, 0, 0);
     CHECK(token.total_coefficients == 1);
