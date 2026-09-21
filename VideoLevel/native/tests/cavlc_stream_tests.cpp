@@ -61,6 +61,13 @@ int main() {
     CHECK(macroblock.coded_block_pattern == 47);
     CHECK(macroblock.mb_qp_delta == 0);
     CHECK(macroblock.residual_bit_offset == 62);
+    const auto first_luma_token = zkstego::parse_cavlc_coeff_token(
+        {0x88, 0x84, 0x3f, 0xe0, 0xb8, 0x60, 0x1e, 0x5c,
+         0x07, 0x29, 0x80, 0x00, 0x80, 0x8a, 0x64, 0x50},
+        macroblock.residual_bit_offset,
+        0);
+    CHECK(first_luma_token.total_coefficients == 4);
+    CHECK(first_luma_token.trailing_ones == 0);
 
     const auto token = zkstego::parse_cavlc_coeff_token({0x41, 0x80}, 0, 0);
     CHECK(token.total_coefficients == 1);
