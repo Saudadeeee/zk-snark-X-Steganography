@@ -87,6 +87,11 @@ int main() {
     CHECK((first_luma_coefficients == std::vector<std::int32_t>{
         -24, -2, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
 
+    const auto varied_runs_tail = zkstego::decode_cavlc_tail_tc4({0xd9, 0x80}, 0);
+    CHECK(varied_runs_tail.total_zeros == 4);
+    CHECK((varied_runs_tail.runs == std::vector<std::uint32_t>{0, 3, 0, 1}));
+    CHECK(varied_runs_tail.next_bit_offset == 9);
+
     const auto token = zkstego::parse_cavlc_coeff_token({0x41, 0x80}, 0, 0);
     CHECK(token.total_coefficients == 1);
     CHECK(token.trailing_ones == 1);
