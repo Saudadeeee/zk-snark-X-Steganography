@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import heapq
 import json
 from bisect import bisect_right
 from dataclasses import dataclass
@@ -152,6 +153,34 @@ def build_blind_sign_candidates(
         seen_blocks.add(key)
         selected.append(candidate)
     return selected
+
+
+def select_blind_candidates_bounded(
+    candidates: Iterable[tuple[int, int, int]],
+    ordering_key: bytes,
+    *,
+    required_bits: int,
+) -> list[tuple[int, int, int]]:
+    """Select the HMAC-lowest candidates while retaining only ``required_bits``.
+
+    The returned order is identical to sorting the complete candidate stream by
+    the blind ordering score, but the max-heap makes storage O(required_bits).
+    """
+    if required_bits <= 0:
+        return []
+    if not ordering_key:
+        raise ValueError("ordering_key must be non-empty")
+    heap: list[tuple[int, tuple[int, int, int]]] = []
+    for candidate in candidates:
+        position = (int(candidate[0]), int(candidate[1]), int(candidate[2]))
+        payload = f"{position[0]}:{position[1]}:{position[2]}".encode("ascii")
+        score = int.from_bytes(hmac.new(ordering_key, payload, hashlib.sha256).digest(), "big")
+        entry = (-score, position)
+        if len(heap) < required_bits:
+            heapq.heappush(heap, entry)
+        elif score < -heap[0][0]:
+            heapq.heapreplace(heap, entry)
+    return [position for _score, position in sorted(heap, key=lambda entry: -entry[0])]
 
 
 def iter_blind_sign_candidates_from_idr_analysis(
