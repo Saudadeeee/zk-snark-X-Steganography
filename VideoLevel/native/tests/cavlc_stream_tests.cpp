@@ -97,6 +97,10 @@ int main() {
     CHECK(token.trailing_ones == 1);
     CHECK(token.sign_bit_offsets == std::vector<std::size_t>{2});
     CHECK(token.level_bit_offset == 3);
+    const auto trailing_one_levels = zkstego::decode_cavlc_non_trailing_levels({0x41, 0x80}, token);
+    CHECK(trailing_one_levels.values.empty());
+    CHECK((trailing_one_levels.trailing_one_values == std::vector<std::int32_t>{1}));
+    CHECK(trailing_one_levels.next_bit_offset == 3);
 
     const auto n2_token = zkstego::parse_cavlc_coeff_token({0xa1, 0x80}, 0, 2);
     CHECK(n2_token.total_coefficients == 1);
