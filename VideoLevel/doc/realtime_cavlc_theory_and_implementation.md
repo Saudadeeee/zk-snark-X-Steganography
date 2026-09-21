@@ -18,9 +18,12 @@ splitting and lossless reassembly, EBSP to RBSP conversion, RBSP
 emulation-prevention insertion, and bounds-checked fixed-length patch plans
 across multiple NAL RBSPs in one segment transform. It is tested with CTest,
 including preservation of unmodified NALs during a patched-IDR segment round
-trip. It is intentionally
-limited to a patch plan because a plan is not portable across arbitrary camera
-frames; native slice and macroblock parsing remains required before deployment.
+trip. It also decodes the luma `total_zeros`/`run_before` residual tail for
+every CAVLC `TotalCoeff` value from 1 through 16; the test suite exercises all
+table columns and one tail from a real IDR RBSP. It is intentionally limited to
+a patch plan and isolated residual primitives: native slice traversal,
+candidate selection, full block re-encoding, and camera-segment E2E validation
+remain required before deployment.
 
 ## CAVLC embedding theory
 
