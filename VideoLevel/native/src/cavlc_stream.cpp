@@ -229,9 +229,18 @@ CavlcDecodedLevels decode_cavlc_non_trailing_levels(
     if (token.trailing_ones > token.total_coefficients) {
         throw std::invalid_argument("CAVLC trailing-one count exceeds total coefficients");
     }
+    if (token.sign_bit_offsets.size() != token.trailing_ones) {
+        throw std::invalid_argument("CAVLC trailing-one sign offsets are inconsistent");
+    }
+    CavlcDecodedLevels decoded;
+    decoded.trailing_one_values.reserve(token.trailing_ones);
+    for (const auto sign_bit_offset : token.sign_bit_offsets) {
+        RbspBitReader sign_reader(rbsp);
+        sign_reader.skip_bits(sign_bit_offset);
+        decoded.trailing_one_values.push_back(sign_reader.read_bit() == 0 ? 1 : -1);
+    }
     RbspBitReader reader(rbsp);
     reader.skip_bits(token.level_bit_offset);
-    CavlcDecodedLevels decoded;
     const auto count = token.total_coefficients - token.trailing_ones;
     decoded.values.reserve(count);
     std::uint32_t suffix_length = token.total_coefficients > 10 && token.trailing_ones < 3 ? 1 : 0;

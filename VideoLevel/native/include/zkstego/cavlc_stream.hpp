@@ -99,6 +99,8 @@ struct CavlcCoeffToken {
 };
 
 struct CavlcDecodedLevels {
+    // CAVLC signals trailing-one signs before the remaining levels, in reverse scan order.
+    std::vector<std::int32_t> trailing_one_values;
     std::vector<std::int32_t> values;
     std::size_t next_bit_offset{};
 };
