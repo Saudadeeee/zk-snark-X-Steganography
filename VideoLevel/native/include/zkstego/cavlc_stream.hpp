@@ -153,6 +153,10 @@ std::vector<std::int32_t> reconstruct_cavlc_block(
 CavlcResidualTail decode_cavlc_tail_tc4(
     const std::vector<std::uint8_t>& rbsp,
     std::size_t start_bit);
+CavlcResidualTail decode_cavlc_luma_residual_tail(
+    const std::vector<std::uint8_t>& rbsp,
+    std::size_t start_bit,
+    std::uint32_t total_coefficients);
 std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
     const std::vector<std::int32_t>& decoded_non_trailing_levels,
     const std::vector<std::uint32_t>& runs);

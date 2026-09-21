@@ -92,6 +92,33 @@ int main() {
     CHECK((varied_runs_tail.runs == std::vector<std::uint32_t>{0, 3, 0, 1}));
     CHECK(varied_runs_tail.next_bit_offset == 9);
 
+    struct TotalZerosCase {
+        std::uint32_t total_coefficients;
+        std::uint8_t encoded_byte;
+        std::size_t encoded_bits;
+    };
+    const std::vector<TotalZerosCase> total_zeros_zero_cases{
+        {1, 0x80, 1}, {2, 0xe0, 3}, {3, 0x50, 4}, {4, 0x18, 5},
+        {5, 0x50, 4}, {6, 0x04, 6}, {7, 0x04, 6}, {8, 0x04, 6},
+        {9, 0x04, 6}, {10, 0x08, 5}, {11, 0x00, 4}, {12, 0x00, 4},
+        {13, 0x00, 3}, {14, 0x00, 2}, {15, 0x00, 1},
+    };
+    for (const auto& test_case : total_zeros_zero_cases) {
+        const auto tail = zkstego::decode_cavlc_luma_residual_tail(
+            {test_case.encoded_byte}, 0, test_case.total_coefficients);
+        CHECK(tail.total_zeros == 0);
+        CHECK(tail.runs == std::vector<std::uint32_t>(test_case.total_coefficients, 0));
+        CHECK(tail.next_bit_offset == test_case.encoded_bits);
+    }
+    const auto tc1_maximum_zeros_tail = zkstego::decode_cavlc_luma_residual_tail({0x00, 0x80}, 0, 1);
+    CHECK(tc1_maximum_zeros_tail.total_zeros == 15);
+    CHECK((tc1_maximum_zeros_tail.runs == std::vector<std::uint32_t>{15}));
+    CHECK(tc1_maximum_zeros_tail.next_bit_offset == 9);
+    const auto tc16_tail = zkstego::decode_cavlc_luma_residual_tail({0xff}, 0, 16);
+    CHECK(tc16_tail.total_zeros == 0);
+    CHECK(tc16_tail.runs == std::vector<std::uint32_t>(16, 0));
+    CHECK(tc16_tail.next_bit_offset == 0);
+
     const auto token = zkstego::parse_cavlc_coeff_token({0x41, 0x80}, 0, 0);
     CHECK(token.total_coefficients == 1);
     CHECK(token.trailing_ones == 1);
