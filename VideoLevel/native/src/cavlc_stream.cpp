@@ -46,6 +46,33 @@ H264BaselineSps parse_baseline_sps(const std::vector<std::uint8_t>& rbsp) {
     return sps;
 }
 
+H264BaselinePps parse_baseline_pps(const std::vector<std::uint8_t>& rbsp) {
+    RbspBitReader reader(rbsp);
+    H264BaselinePps pps;
+    pps.pic_parameter_set_id = reader.read_ue();
+    pps.sequence_parameter_set_id = reader.read_ue();
+    pps.entropy_coding_mode_flag = reader.read_bit() != 0;
+    if (pps.entropy_coding_mode_flag) {
+        throw std::invalid_argument("native CAVLC path rejects CABAC PPS");
+    }
+    static_cast<void>(reader.read_bit());  // bottom_field_pic_order_in_frame_present_flag
+    pps.num_slice_groups_minus1 = reader.read_ue();
+    if (pps.num_slice_groups_minus1 != 0) {
+        throw std::invalid_argument("native CAVLC path does not support PPS slice groups");
+    }
+    pps.num_ref_idx_l0_default_active_minus1 = reader.read_ue();
+    pps.num_ref_idx_l1_default_active_minus1 = reader.read_ue();
+    static_cast<void>(reader.read_bit());  // weighted_pred_flag
+    static_cast<void>(reader.read_bits(2));  // weighted_bipred_idc
+    pps.pic_init_qp_minus26 = reader.read_se();
+    static_cast<void>(reader.read_se());  // pic_init_qs_minus26
+    static_cast<void>(reader.read_se());  // chroma_qp_index_offset
+    pps.deblocking_filter_control_present_flag = reader.read_bit() != 0;
+    static_cast<void>(reader.read_bit());  // constrained_intra_pred_flag
+    pps.redundant_pic_cnt_present_flag = reader.read_bit() != 0;
+    return pps;
+}
+
 std::vector<std::uint8_t> ebsp_to_rbsp(const std::vector<std::uint8_t>& ebsp) {
     std::vector<std::uint8_t> rbsp;
     rbsp.reserve(ebsp.size());
