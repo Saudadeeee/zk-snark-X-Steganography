@@ -25,6 +25,18 @@ int main() {
     zkstego::RbspBitReader signed_minimum_reader({0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xff, 0xff});
     CHECK(signed_minimum_reader.read_se() == -2147483647);
 
+    const auto sps = zkstego::parse_baseline_sps({
+        0x42, 0xc0, 0x0d, 0xdc, 0x16, 0x09, 0x6f, 0xfc,
+        0x02, 0x00, 0x01, 0xd4, 0x40, 0x00, 0x00, 0xfa,
+        0x40, 0x00, 0x3a, 0x98, 0x03, 0xc5, 0x0a, 0xe0,
+    });
+    CHECK(sps.profile_idc == 66);
+    CHECK(sps.log2_max_frame_num_minus4 == 0);
+    CHECK(sps.pic_order_cnt_type == 2);
+    CHECK(sps.frame_mbs_only_flag);
+    CHECK(sps.pic_width_in_mbs_minus1 == 21);
+    CHECK(sps.pic_height_in_map_units_minus1 == 17);
+
     const std::vector<std::uint8_t> ebsp{0x12, 0x00, 0x00, 0x03, 0x01, 0x34};
     const auto rbsp = zkstego::ebsp_to_rbsp(ebsp);
     CHECK((rbsp == std::vector<std::uint8_t>{0x12, 0x00, 0x00, 0x01, 0x34}));
