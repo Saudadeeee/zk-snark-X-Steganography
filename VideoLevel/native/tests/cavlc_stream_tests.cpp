@@ -37,6 +37,14 @@ int main() {
     CHECK(sps.pic_width_in_mbs_minus1 == 21);
     CHECK(sps.pic_height_in_map_units_minus1 == 17);
 
+    const auto pps = zkstego::parse_baseline_pps({0xce, 0x04, 0xcb, 0x20});
+    CHECK(pps.pic_parameter_set_id == 0);
+    CHECK(pps.sequence_parameter_set_id == 0);
+    CHECK(!pps.entropy_coding_mode_flag);
+    CHECK(pps.num_slice_groups_minus1 == 0);
+    CHECK(pps.pic_init_qp_minus26 == -4);
+    CHECK(pps.deblocking_filter_control_present_flag);
+
     const std::vector<std::uint8_t> ebsp{0x12, 0x00, 0x00, 0x03, 0x01, 0x34};
     const auto rbsp = zkstego::ebsp_to_rbsp(ebsp);
     CHECK((rbsp == std::vector<std::uint8_t>{0x12, 0x00, 0x00, 0x01, 0x34}));
