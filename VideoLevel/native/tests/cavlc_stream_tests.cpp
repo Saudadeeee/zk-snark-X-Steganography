@@ -65,6 +65,11 @@ int main() {
     CHECK(n2_token.trailing_ones == 1);
     CHECK(n2_token.sign_bit_offsets == std::vector<std::size_t>{2});
 
+    const auto n4_token = zkstego::parse_cavlc_coeff_token({0xe8, 0x00}, 0, 4);
+    CHECK(n4_token.total_coefficients == 1);
+    CHECK(n4_token.trailing_ones == 1);
+    CHECK(n4_token.sign_bit_offsets == std::vector<std::size_t>{4});
+
     const std::vector<std::uint8_t> ebsp{0x12, 0x00, 0x00, 0x03, 0x01, 0x34};
     const auto rbsp = zkstego::ebsp_to_rbsp(ebsp);
     CHECK((rbsp == std::vector<std::uint8_t>{0x12, 0x00, 0x00, 0x01, 0x34}));
