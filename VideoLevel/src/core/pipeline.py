@@ -256,6 +256,74 @@ def patch_selected_sign_positions_streaming(
     }
 
 
+def extract_selected_sign_bits_streaming(
+    video_path: str,
+    positions: list[tuple[int, int, int]],
+    *,
+    reconstructor: BitstreamReconstructor | None = None,
+    traceable_factory=TraceableCAVLCParser,
+) -> bytes:
+    """Extract sign bits in caller-provided schedule order without a sidecar.
+
+    The schedule must contain exactly one sign position per block. Each IDR is
+    traced and released independently; missing or no-longer-nonzero positions
+    are a hard error because returning a shifted partial payload would make
+    proof verification diagnostically ambiguous.
+    """
+    if not positions:
+        raise ValueError("positions must not be empty")
+    requested: list[tuple[int, int, int]] = []
+    seen_blocks: set[tuple[int, int]] = set()
+    for raw_position in positions:
+        if len(raw_position) != 3:
+            raise ValueError("each position must contain macroblock, block, and coefficient")
+        mb_idx, block_idx, coefficient_idx = (int(value) for value in raw_position)
+        if coefficient_idx >= 0:
+            raise ValueError("streaming blind extractor accepts CAVLC sign positions only")
+        block_key = (mb_idx, block_idx)
+        if block_key in seen_blocks:
+            raise ValueError("streaming blind extractor accepts at most one position per block")
+        seen_blocks.add(block_key)
+        requested.append((mb_idx, block_idx, coefficient_idx))
+
+    remaining = set(requested)
+    extracted: dict[tuple[int, int, int], int] = {}
+    active_reconstructor = reconstructor or BitstreamReconstructor()
+    for _idr_offset, coefficients, _n_c_map, _nal_lengths, _frame_data in iter_idr_luma_analysis(
+        video_path,
+        active_reconstructor,
+        traceable_factory=traceable_factory,
+    ):
+        coefficient_map = {
+            (int(mb_idx), int(block_idx)): values
+            for mb_idx, block_idx, values in coefficients
+        }
+        for position in tuple(remaining):
+            mb_idx, block_idx, coefficient_idx = position
+            values = coefficient_map.get((mb_idx, block_idx))
+            if values is None:
+                continue
+            real_index = ~coefficient_idx
+            if real_index < 1 or real_index >= len(values):
+                continue
+            value = int(values[real_index])
+            if value == 0:
+                continue
+            extracted[position] = 0 if value > 0 else 1
+            remaining.remove(position)
+        if not remaining:
+            break
+
+    if remaining:
+        raise RuntimeError(f"streaming CAVLC extraction could not recover {len(remaining)} selected positions")
+    bits = [extracted[position] for position in requested]
+    padded = bits + [0] * ((8 - len(bits) % 8) % 8)
+    return bytes(
+        sum(padded[offset + bit_index] << (7 - bit_index) for bit_index in range(8))
+        for offset in range(0, len(padded), 8)
+    )
+
+
 def iter_idr_luma_analysis(
     video_path: str,
     reconstructor: BitstreamReconstructor,
