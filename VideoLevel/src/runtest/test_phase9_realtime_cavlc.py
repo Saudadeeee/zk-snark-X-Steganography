@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from src.realtime_cavlc import CAVLCRealtimeBudget, RealtimeCAVLCScheduler
 from src.bitstream.cavlc import get_run_before_table
 from src.bitstream.h264 import NALUnitType, iter_annex_b_nal_units
-from src.core.pipeline import iter_idr_slices, iter_idr_trace_results
+from src.core.pipeline import iter_idr_slices, iter_idr_trace_results, iter_idr_luma_analysis
 from src.runtest._helpers import run_test, section, summarise
 
 
@@ -122,6 +122,39 @@ def t_idr_trace_iterator_releases_each_slice_result_to_caller():
     assert seen_offsets == [0, 1]
 
 
+def t_idr_luma_analysis_uses_global_keys_without_retaining_other_slices():
+    class Reconstructor:
+        @staticmethod
+        def _parse_sps_from_nal(_nal):
+            return SimpleNamespace(pic_width_in_mbs_minus1=0, pic_height_in_map_units_minus1=0)
+
+        @staticmethod
+        def _parse_pps_from_nal(_nal):
+            return object()
+
+    class Traceable:
+        def extract_with_offsets(self, _nal, _sps, _pps, *, global_mb_idx):
+            return {
+                "blocks": {(0, 0): [2] + [0] * 15, (0, 16): [1] * 16},
+                "offsets": {(0, 0): {"nC": 3, "bit_length": 9}},
+            }
+
+    with tempfile.TemporaryDirectory() as directory:
+        fixture = Path(directory) / "fixture.h264"
+        fixture.write_bytes(
+            b"\x00\x00\x01\x67\x01"
+            b"\x00\x00\x01\x68\x02"
+            b"\x00\x00\x01\x65\x03"
+            b"\x00\x00\x01\x65\x04"
+        )
+        records = list(iter_idr_luma_analysis(str(fixture), Reconstructor(), traceable_factory=Traceable))
+    assert [record[0] for record in records] == [0, 1]
+    assert records[1][1] == [(1, 0, [2] + [0] * 15)]
+    assert records[1][2] == {(1, 0): 3}
+    assert records[1][3] == {(1, 0): 9}
+    assert set(records[1][4]) == {1}
+
+
 def main():
     section("Phase 9 - Realtime CAVLC Controller")
     results = [
@@ -131,6 +164,7 @@ def main():
         run_test("annex_b_iterator_streams_nals_and_removes_epb", t_annex_b_iterator_streams_nals_and_removes_epb),
         run_test("idr_iterator_tracks_streaming_macroblock_offsets", t_idr_iterator_tracks_streaming_macroblock_offsets),
         run_test("idr_trace_iterator_releases_each_slice_result_to_caller", t_idr_trace_iterator_releases_each_slice_result_to_caller),
+        run_test("idr_luma_analysis_uses_global_keys_without_retaining_other_slices", t_idr_luma_analysis_uses_global_keys_without_retaining_other_slices),
     ]
     sys.exit(summarise(results, "Phase 9"))
 
