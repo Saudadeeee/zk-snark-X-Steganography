@@ -490,6 +490,25 @@ CavlcResidualTail decode_cavlc_tail_tc4(
     return decode_cavlc_luma_residual_tail(rbsp, start_bit, 4);
 }
 
+CavlcDecodedLumaBlock decode_cavlc_luma_block(
+    const std::vector<std::uint8_t>& rbsp,
+    const std::size_t start_bit,
+    const int n_c) {
+    constexpr std::size_t kLumaBlockCoefficients = 16;
+    CavlcDecodedLumaBlock block;
+    block.token = parse_cavlc_coeff_token(rbsp, start_bit, n_c);
+    block.levels = decode_cavlc_non_trailing_levels(rbsp, block.token);
+    if (block.token.total_coefficients == 0) {
+        block.tail.next_bit_offset = block.levels.next_bit_offset;
+    } else {
+        block.tail = decode_cavlc_luma_residual_tail(
+            rbsp, block.levels.next_bit_offset, block.token.total_coefficients);
+    }
+    block.coefficients = reconstruct_cavlc_block(
+        block.levels, block.tail.runs, kLumaBlockCoefficients);
+    return block;
+}
+
 std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
     const std::vector<std::int32_t>& decoded_non_trailing_levels,
     const std::vector<std::uint32_t>& runs) {
