@@ -12,6 +12,10 @@ Public API:
         → bytes
 """
 
+import os
+import tempfile
+from pathlib import Path
+
 from ..bitstream.h264          import H264BitstreamParser, TraceableCAVLCParser, iter_annex_b_nal_units
 from ..bitstream.bitstream_ops import BitstreamReconstructor, BitstreamPatcher, BitArray
 from ..bitstream.bitstream_io  import BitstreamReader
@@ -71,6 +75,185 @@ def iter_idr_trace_results(
             global_mb_idx=global_mb_idx,
         )
         yield nal, sps, pps, global_mb_idx, result
+
+
+def patch_selected_sign_positions_streaming(
+    video_path: str,
+    output_path: str,
+    position_bits: dict[tuple[int, int, int], int],
+    *,
+    reconstructor: BitstreamReconstructor | None = None,
+    traceable_factory=TraceableCAVLCParser,
+    patcher_factory=BitstreamPatcher,
+) -> dict[str, int]:
+    """Patch pre-selected CAVLC trailing-one signs one IDR slice at a time.
+
+    ``position_bits`` maps global ``(macroblock, block, ~coefficient_index)``
+    tuples to bits. The function retains only one trace result and one NAL at a
+    time, writes to a temporary sibling file, and atomically publishes output
+    only after every selected position was either already in the requested
+    state or was confirmed as patched. It deliberately rejects non-sign and
+    duplicate-block requests.
+    """
+    source = Path(video_path)
+    destination = Path(output_path)
+    if not source.is_file():
+        raise FileNotFoundError(f"video not found: {video_path}")
+    if not position_bits:
+        raise ValueError("position_bits must not be empty")
+
+    selected_by_mb: dict[int, list[tuple[int, int, int]]] = {}
+    selected_blocks: set[tuple[int, int]] = set()
+    for raw_position, raw_bit in position_bits.items():
+        if len(raw_position) != 3:
+            raise ValueError("each selected position must contain macroblock, block, and coefficient")
+        mb_idx, block_idx, coefficient_idx = (int(value) for value in raw_position)
+        bit = int(raw_bit)
+        if coefficient_idx >= 0:
+            raise ValueError("streaming blind patcher accepts CAVLC sign positions only")
+        if bit not in (0, 1):
+            raise ValueError("each payload bit must be 0 or 1")
+        block_key = (mb_idx, block_idx)
+        if block_key in selected_blocks:
+            raise ValueError("streaming blind patcher accepts at most one position per block")
+        selected_blocks.add(block_key)
+        selected_by_mb.setdefault(mb_idx, []).append((block_idx, coefficient_idx, bit))
+
+    active_reconstructor = reconstructor or BitstreamReconstructor()
+    patcher = patcher_factory()
+    sps = pps = None
+    mb_count_per_slice: int | None = None
+    global_mb_idx = 0
+    idr_slices = 0
+    satisfied_positions: set[tuple[int, int, int]] = set()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    handle = tempfile.NamedTemporaryFile(
+        mode="wb",
+        prefix=".zkstego-stream-",
+        suffix=".h264",
+        dir=destination.parent,
+        delete=False,
+    )
+    temporary_path = Path(handle.name)
+
+    def write_nal(nal) -> None:
+        start_code = b"\x00\x00\x01" if getattr(nal, "start_code_size", 4) == 3 else b"\x00\x00\x00\x01"
+        header = (
+            (int(nal.forbidden_zero_bit) << 7)
+            | (int(nal.nal_ref_idc) << 5)
+            | int(nal.nal_unit_type)
+        )
+        handle.write(start_code)
+        handle.write(bytes([header]))
+        handle.write(active_reconstructor._add_emulation_prevention(nal.rbsp_byte))
+
+    try:
+        for nal in iter_annex_b_nal_units(str(source)):
+            nal_type = int(nal.nal_unit_type)
+            if nal_type == 7:
+                sps = active_reconstructor._parse_sps_from_nal(nal)
+                mb_count_per_slice = (
+                    (sps.pic_width_in_mbs_minus1 + 1)
+                    * (sps.pic_height_in_map_units_minus1 + 1)
+                )
+                write_nal(nal)
+                continue
+            if nal_type == 8:
+                pps = active_reconstructor._parse_pps_from_nal(nal)
+                write_nal(nal)
+                continue
+            if nal_type != 5:
+                write_nal(nal)
+                if nal_type == 1:
+                    if mb_count_per_slice is None:
+                        raise RuntimeError("non-IDR slice encountered before SPS")
+                    global_mb_idx += mb_count_per_slice
+                continue
+            if sps is None or pps is None or mb_count_per_slice is None:
+                raise RuntimeError("IDR encountered before usable SPS/PPS")
+
+            positions_in_slice = [
+                (mb_global, positions)
+                for mb_global, positions in selected_by_mb.items()
+                if global_mb_idx <= mb_global < global_mb_idx + mb_count_per_slice
+            ]
+            if not positions_in_slice:
+                write_nal(nal)
+                idr_slices += 1
+                global_mb_idx += mb_count_per_slice
+                continue
+
+            trace = traceable_factory().extract_with_offsets(
+                nal, sps, pps, global_mb_idx=global_mb_idx)
+            blocks = trace.get("blocks", {})
+            offsets = trace.get("offsets", {})
+            modifications: list[tuple[int, int, list[int]]] = []
+            for mb_global, positions in positions_in_slice:
+                local_mb = mb_global - global_mb_idx
+                for block_idx, coefficient_idx, bit in positions:
+                    local_key = (local_mb, block_idx)
+                    coefficients = blocks.get(local_key)
+                    if coefficients is None or local_key not in offsets:
+                        continue
+                    real_index = ~coefficient_idx
+                    if real_index < 1 or real_index >= len(coefficients):
+                        continue
+                    original = int(coefficients[real_index])
+                    if original == 0:
+                        continue
+                    requested_position = (mb_global, block_idx, coefficient_idx)
+                    replacement = abs(original) if bit == 0 else -abs(original)
+                    if replacement == original:
+                        satisfied_positions.add(requested_position)
+                        continue
+                    modified = list(coefficients)
+                    modified[real_index] = replacement
+                    modifications.append((mb_global, block_idx, modified))
+
+            output_nal = nal
+            if modifications:
+                output_nal = patcher.patch_slice(
+                    nal,
+                    modifications,
+                    sps=sps,
+                    pps=pps,
+                    global_mb_offset=global_mb_idx,
+                    pre_computed_offsets=offsets,
+                    pre_computed_blocks=blocks,
+                )
+                applied_blocks = {
+                    (int(mb_idx), int(block_idx))
+                    for mb_idx, block_idx in getattr(output_nal, "applied_block_keys", [])
+                }
+                for mb_idx, block_idx, _coefficients in modifications:
+                    position = next(
+                        (position for position in position_bits if position[:2] == (mb_idx, block_idx)),
+                        None,
+                    )
+                    if position is not None and (mb_idx, block_idx) in applied_blocks:
+                        satisfied_positions.add(position)
+            write_nal(output_nal)
+            idr_slices += 1
+            global_mb_idx += mb_count_per_slice
+
+        handle.close()
+        if len(satisfied_positions) != len(position_bits):
+            missing = len(position_bits) - len(satisfied_positions)
+            raise RuntimeError(f"streaming CAVLC patch did not apply {missing} selected positions")
+        os.replace(temporary_path, destination)
+    except Exception:
+        handle.close()
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+    return {
+        "idr_slices": idr_slices,
+        "selected_positions": len(position_bits),
+        "applied_positions": len(satisfied_positions),
+    }
 
 
 def iter_idr_luma_analysis(
