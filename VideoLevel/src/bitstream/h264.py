@@ -13,12 +13,14 @@ References:
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Dict, Iterator, List, Optional, Tuple
 from .bitstream_io import BitstreamReader
 
 logger = logging.getLogger(__name__)
+_ANNEX_B_START_CODE = re.compile(b"\x00\x00(?:\x00)?\x01")
 
 class NALUnitType(IntEnum):
     """NAL unit types (H.264 Table 7-1)"""
@@ -210,37 +212,51 @@ def iter_annex_b_nal_units(
             start_code_size=start_code_size,
         )
 
-    pending = bytearray()
-    in_nal = False
-    nal_start_pos = 0
-    nal_start_code_size = 0
-    file_position = 0
+    def _find_start_codes(data: bytes) -> list[tuple[int, int]]:
+        return [(match.start(), match.end() - match.start()) for match in _ANNEX_B_START_CODE.finditer(data)]
+
+    pending = b""
+    pending_start_pos = 0
+    found_first_start_code = False
     with open(video_path, "rb") as source:
         while chunk := source.read(chunk_size):
-            for value in chunk:
-                pending.append(value)
-                file_position += 1
-                start_code_size = 0
-                if pending.endswith(b"\x00\x00\x00\x01"):
-                    start_code_size = 4
-                elif pending.endswith(b"\x00\x00\x01"):
-                    start_code_size = 3
-                if start_code_size == 0:
-                    continue
-                if in_nal:
-                    nal = _build_nal(
-                        bytes(pending[:-start_code_size]),
-                        nal_start_pos,
-                        nal_start_code_size,
-                    )
-                    if nal is not None:
-                        yield nal
-                in_nal = True
-                nal_start_pos = file_position - start_code_size
-                nal_start_code_size = start_code_size
-                pending.clear()
-    if in_nal:
-        nal = _build_nal(bytes(pending), nal_start_pos, nal_start_code_size)
+            pending += chunk
+            positions = _find_start_codes(pending)
+            if not positions:
+                if not found_first_start_code:
+                    # Retain only a possible start-code prefix before the first NAL.
+                    drop = max(0, len(pending) - 3)
+                    pending_start_pos += drop
+                    pending = pending[drop:]
+                continue
+            if not found_first_start_code and positions[0][0] > 0:
+                drop = positions[0][0]
+                pending_start_pos += drop
+                pending = pending[drop:]
+                positions = [(offset - drop, size) for offset, size in positions]
+            found_first_start_code = True
+            for (start, start_code_size), (next_start, _next_start_code_size) in zip(positions, positions[1:]):
+                nal = _build_nal(
+                    pending[start + start_code_size:next_start],
+                    pending_start_pos + start,
+                    start_code_size,
+                )
+                if nal is not None:
+                    yield nal
+            last_start, _last_start_code_size = positions[-1]
+            pending_start_pos += last_start
+            pending = pending[last_start:]
+    if found_first_start_code:
+        positions = _find_start_codes(pending)
+        if positions:
+            start, start_code_size = positions[-1]
+            nal = _build_nal(
+                pending[start + start_code_size:],
+                pending_start_pos + start,
+                start_code_size,
+            )
+        else:
+            nal = None
         if nal is not None:
             yield nal
 
