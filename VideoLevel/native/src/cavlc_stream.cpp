@@ -223,6 +223,69 @@ CavlcCoeffToken parse_cavlc_coeff_token(
     throw std::invalid_argument("invalid CAVLC coeff_token for nC 0 or 1");
 }
 
+CavlcDecodedLevels decode_cavlc_non_trailing_levels(
+    const std::vector<std::uint8_t>& rbsp,
+    const CavlcCoeffToken& token) {
+    if (token.trailing_ones > token.total_coefficients) {
+        throw std::invalid_argument("CAVLC trailing-one count exceeds total coefficients");
+    }
+    RbspBitReader reader(rbsp);
+    reader.skip_bits(token.level_bit_offset);
+    CavlcDecodedLevels decoded;
+    const auto count = token.total_coefficients - token.trailing_ones;
+    decoded.values.reserve(count);
+    std::uint32_t suffix_length = token.total_coefficients > 10 && token.trailing_ones < 3 ? 1 : 0;
+    for (std::uint32_t index = 0; index < count; ++index) {
+        std::uint32_t level_prefix = 0;
+        while (reader.read_bit() == 0) {
+            if (++level_prefix > 24) {
+                throw std::invalid_argument("CAVLC level_prefix exceeds supported range");
+            }
+        }
+        std::uint32_t level_code = 0;
+        if (suffix_length == 0) {
+            if (level_prefix < 14) {
+                level_code = level_prefix;
+            } else if (level_prefix == 14) {
+                level_code = 14 + reader.read_bits(4);
+            } else {
+                level_code = 30;
+                if (level_prefix >= 16) {
+                    level_code += (1U << (level_prefix - 3)) - 4096U;
+                }
+                level_code += reader.read_bits(level_prefix - 3);
+            }
+        } else if (level_prefix < 15) {
+            level_code = (level_prefix << suffix_length) + reader.read_bits(suffix_length);
+        } else {
+            level_code = 15U << suffix_length;
+            if (level_prefix >= 16) {
+                level_code += (1U << (level_prefix - 3)) - 4096U;
+            }
+            level_code += reader.read_bits(level_prefix - 3);
+        }
+        const auto sign = level_code & 1U;
+        std::uint32_t absolute = 0;
+        if (index == 0 && token.trailing_ones == 3) {
+            absolute = ((level_code - sign) >> 1U) + 2U;
+        } else {
+            absolute = (level_code - sign + 2U) >> 1U;
+        }
+        if (absolute > static_cast<std::uint32_t>(INT32_MAX)) {
+            throw std::out_of_range("CAVLC level exceeds int32 range");
+        }
+        decoded.values.push_back(sign == 0 ? static_cast<std::int32_t>(absolute) : -static_cast<std::int32_t>(absolute));
+        if (suffix_length == 0) {
+            suffix_length = 1;
+        }
+        if (absolute > (3U << (suffix_length - 1)) && suffix_length < 6) {
+            ++suffix_length;
+        }
+    }
+    decoded.next_bit_offset = reader.position();
+    return decoded;
+}
+
 H264BaselineIMacroblockHeader parse_baseline_i_macroblock_header(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit) {

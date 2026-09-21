@@ -98,6 +98,11 @@ struct CavlcCoeffToken {
     std::size_t level_bit_offset{};
 };
 
+struct CavlcDecodedLevels {
+    std::vector<std::int32_t> values;
+    std::size_t next_bit_offset{};
+};
+
 struct H264BaselineIMacroblockHeader {
     std::uint32_t mb_type{};
     std::uint32_t coded_block_pattern{};
@@ -130,6 +135,9 @@ CavlcCoeffToken parse_cavlc_coeff_token(
     const std::vector<std::uint8_t>& rbsp,
     std::size_t start_bit,
     int n_c);
+CavlcDecodedLevels decode_cavlc_non_trailing_levels(
+    const std::vector<std::uint8_t>& rbsp,
+    const CavlcCoeffToken& token);
 H264BaselineIMacroblockHeader parse_baseline_i_macroblock_header(
     const std::vector<std::uint8_t>& rbsp,
     std::size_t start_bit);
