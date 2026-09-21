@@ -16,7 +16,7 @@ import hmac
 import json
 from bisect import bisect_right
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Iterable, Iterator, Optional
 
 from .core.analysis_cache import (
     load_or_build_video_analysis,
@@ -152,6 +152,41 @@ def build_blind_sign_candidates(
         seen_blocks.add(key)
         selected.append(candidate)
     return selected
+
+
+def iter_blind_sign_candidates_from_idr_analysis(
+    analysis_records: Iterable[tuple],
+    *,
+    min_coefficient_index: int = BLIND_MIN_SIGN_COEFFICIENT_INDEX,
+    safety_filter: CAVLCSafetyFilter | None = None,
+) -> Iterator[tuple[int, int, int]]:
+    """Yield validated sign candidates one IDR analysis record at a time.
+
+    ``analysis_records`` follows ``iter_idr_luma_analysis``: each item contains
+    the per-IDR coefficients, nC map, NAL lengths and verified slice data.  No
+    candidate collection is retained across records, allowing the caller to
+    stream candidates into a bounded selector.
+    """
+    if min_coefficient_index < 1:
+        raise ValueError("blind sign candidates must exclude the DC coefficient")
+    active_filter = safety_filter or CAVLCSafetyFilter()
+    for _idr_offset, coefficients, n_c_map, nal_length_map, frame_verified_data in analysis_records:
+        safe_positions = active_filter.get_safe_positions(
+            coefficients,
+            nC_map=n_c_map,
+            nal_length_map=nal_length_map,
+            frame_verified_data=frame_verified_data,
+        )
+        candidates = build_blind_sign_candidates(
+            safe_positions,
+            min_coefficient_index=min_coefficient_index,
+        )
+        yield from _filter_flip_patchable_sign_candidates(
+            candidates,
+            coefficients=coefficients,
+            frame_verified_data=frame_verified_data,
+            required_bits=len(candidates),
+        )
 
 
 def _metadata_from_analysis(
