@@ -14,6 +14,7 @@ from src.bitstream.cavlc import get_run_before_table
 from src.bitstream.h264 import NALUnitType, iter_annex_b_nal_units
 from src.bitstream import bitstream_ops
 from src.bitstream.bitstream_ops import BitstreamPatcher
+from src.core.stego import CAVLCSafetyFilter
 from src.core.pipeline import (
     iter_idr_slices,
     iter_idr_trace_results,
@@ -329,6 +330,31 @@ def t_streaming_blind_candidates_prefer_sign_only_gate():
     assert list(iter_blind_sign_candidates_from_idr_analysis(records, safety_filter=SafetyFilter())) == [(5, 2, ~7)]
 
 
+def t_streaming_blind_candidates_keep_one_sign_per_block():
+    class SafetyFilter:
+        @staticmethod
+        def get_safe_sign_positions(*_args, **_kwargs):
+            return [(5, 2, ~7), (5, 2, ~8), (6, 2, ~9)]
+
+    records = [(0, [], {}, {}, {})]
+    assert list(iter_blind_sign_candidates_from_idr_analysis(records, safety_filter=SafetyFilter())) == [
+        (5, 2, ~7),
+        (6, 2, ~9),
+    ]
+
+
+def t_streaming_blind_candidates_use_validated_filter_for_real_cavlc_filter():
+    class SafetyFilter(CAVLCSafetyFilter):
+        def get_safe_sign_positions(self, *_args, **_kwargs):
+            raise AssertionError("fast sign scan omits patchability validation")
+
+        def get_safe_positions(self, *_args, **_kwargs):
+            return [(5, 2, ~7), (5, 2, ~8), (6, 2, 3)]
+
+    records = [(0, [], {}, {}, {})]
+    assert list(iter_blind_sign_candidates_from_idr_analysis(records, safety_filter=SafetyFilter())) == [(5, 2, ~7)]
+
+
 def t_bitstream_patcher_exposes_lazy_patchability_contract():
     patcher = BitstreamPatcher()
     assert callable(patcher.validate_block_patchability)
@@ -387,6 +413,8 @@ def main():
         run_test("idr_luma_analysis_uses_global_keys_without_retaining_other_slices", t_idr_luma_analysis_uses_global_keys_without_retaining_other_slices),
         run_test("streaming_blind_candidates_are_filtered_per_idr_record", t_streaming_blind_candidates_are_filtered_per_idr_record),
         run_test("streaming_blind_candidates_prefer_sign_only_gate", t_streaming_blind_candidates_prefer_sign_only_gate),
+        run_test("streaming_blind_candidates_keep_one_sign_per_block", t_streaming_blind_candidates_keep_one_sign_per_block),
+        run_test("streaming_blind_candidates_use_validated_filter_for_real_cavlc_filter", t_streaming_blind_candidates_use_validated_filter_for_real_cavlc_filter),
         run_test("bitstream_patcher_exposes_lazy_patchability_contract", t_bitstream_patcher_exposes_lazy_patchability_contract),
         run_test("bounded_blind_selector_matches_full_hmac_ordering", t_bounded_blind_selector_matches_full_hmac_ordering),
         run_test("streaming_blind_positions_use_a_stable_key_domain", t_streaming_blind_positions_use_a_stable_key_domain),

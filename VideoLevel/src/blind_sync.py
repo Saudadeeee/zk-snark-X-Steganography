@@ -230,16 +230,47 @@ def iter_blind_sign_candidates_from_idr_analysis(
         raise ValueError("blind sign candidates must exclude the DC coefficient")
     active_filter = safety_filter or CAVLCSafetyFilter()
     for _idr_offset, coefficients, n_c_map, nal_length_map, frame_verified_data in analysis_records:
+        # The production safety filter's fast sign scanner establishes only
+        # sign-offset membership.  Blind embedding additionally requires the
+        # patcher's bit-exact round-trip/retroactive-boundary validation; its
+        # generic validated path supplies that contract.  Keep the lighter
+        # sign-only seam for injected test or specialised filters.
+        if isinstance(active_filter, CAVLCSafetyFilter):
+            raw_positions = active_filter.get_safe_positions(
+                coefficients,
+                nC_map=n_c_map,
+                nal_length_map=nal_length_map,
+                frame_verified_data=frame_verified_data,
+            )
+            seen_blocks: set[tuple[int, int]] = set()
+            for candidate in raw_positions:
+                mb_idx, block_idx, coefficient_idx = (int(value) for value in candidate)
+                if coefficient_idx >= 0 or ~coefficient_idx < min_coefficient_index:
+                    continue
+                block_key = (mb_idx, block_idx)
+                if block_key in seen_blocks:
+                    continue
+                seen_blocks.add(block_key)
+                yield (mb_idx, block_idx, coefficient_idx)
+            continue
+
         sign_positions = getattr(active_filter, "get_safe_sign_positions", None)
         if sign_positions is not None:
+            seen_blocks: set[tuple[int, int]] = set()
             for candidate in sign_positions(
                 coefficients,
                 nC_map=n_c_map,
                 nal_length_map=nal_length_map,
                 frame_verified_data=frame_verified_data,
             ):
-                if ~int(candidate[2]) >= min_coefficient_index:
-                    yield candidate
+                mb_idx, block_idx, coefficient_idx = (int(value) for value in candidate)
+                if ~coefficient_idx < min_coefficient_index:
+                    continue
+                block_key = (mb_idx, block_idx)
+                if block_key in seen_blocks:
+                    continue
+                seen_blocks.add(block_key)
+                yield (mb_idx, block_idx, coefficient_idx)
             continue
         safe_positions = active_filter.get_safe_positions(
             coefficients,
