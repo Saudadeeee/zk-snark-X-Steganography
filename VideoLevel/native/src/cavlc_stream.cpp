@@ -199,6 +199,7 @@ CavlcCoeffToken parse_cavlc_coeff_token(
                     for (std::size_t index = 0; index < token.trailing_ones; ++index) {
                         token.sign_bit_offsets.push_back(reader.position() + index);
                     }
+                    token.level_bit_offset = reader.position() + token.trailing_ones;
                     return token;
                 }
             }
@@ -214,6 +215,7 @@ CavlcCoeffToken parse_cavlc_coeff_token(
                 for (std::size_t index = 0; index < token.trailing_ones; ++index) {
                     token.sign_bit_offsets.push_back(reader.position() + index);
                 }
+                token.level_bit_offset = reader.position() + token.trailing_ones;
                 return token;
             }
         }

@@ -95,6 +95,7 @@ struct CavlcCoeffToken {
     std::uint32_t total_coefficients{};
     std::uint32_t trailing_ones{};
     std::vector<std::size_t> sign_bit_offsets;
+    std::size_t level_bit_offset{};
 };
 
 struct H264BaselineIMacroblockHeader {
