@@ -75,6 +75,13 @@ int main() {
         first_luma_token);
     CHECK((first_luma_levels.values == std::vector<std::int32_t>{2, 2, -2, -24}));
     CHECK(first_luma_levels.next_bit_offset == 109);
+    const auto first_luma_tail = zkstego::decode_cavlc_tail_tc4(
+        {0x88, 0x84, 0x3f, 0xe0, 0xb8, 0x60, 0x1e, 0x5c,
+         0x07, 0x29, 0x80, 0x00, 0x80, 0x8a, 0x64, 0x50},
+        first_luma_levels.next_bit_offset);
+    CHECK(first_luma_tail.total_zeros == 3);
+    CHECK((first_luma_tail.runs == std::vector<std::uint32_t>{0, 3, 0, 0}));
+    CHECK(first_luma_tail.next_bit_offset == 117);
 
     const auto token = zkstego::parse_cavlc_coeff_token({0x41, 0x80}, 0, 0);
     CHECK(token.total_coefficients == 1);
