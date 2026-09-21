@@ -55,6 +55,13 @@ int main() {
     CHECK(idr_header.slice_qp_delta == -3);
     CHECK(idr_header.data_bit_offset == 24);
 
+    const auto macroblock = zkstego::parse_baseline_i_macroblock_header(
+        {0x88, 0x84, 0x3f, 0xe0, 0xb8, 0x60, 0x1e, 0x5c}, idr_header.data_bit_offset);
+    CHECK(macroblock.mb_type == 0);
+    CHECK(macroblock.coded_block_pattern == 47);
+    CHECK(macroblock.mb_qp_delta == 0);
+    CHECK(macroblock.residual_bit_offset == 62);
+
     const auto token = zkstego::parse_cavlc_coeff_token({0x41, 0x80}, 0, 0);
     CHECK(token.total_coefficients == 1);
     CHECK(token.trailing_ones == 1);
