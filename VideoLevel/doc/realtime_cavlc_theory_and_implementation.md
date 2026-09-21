@@ -121,6 +121,17 @@ The native patcher must add an E2E camera fixture and replace this controller
 only acceptance with measured CAVLC segment results before realtime can be
 claimed.
 
+### Current measured boundary
+
+On the current audit machine, the Python streaming sign-candidate pass over
+the first 10 IDR slices of `deadline_cif_q22_g1_600f.h264` (16,768,616 bytes)
+selected 1,096 keyed positions in 1.997 seconds (5.008 slices/s). Its bounded
+selector retained only the requested positions and the observed working set
+stayed below 45 MB during a full-file scan. This is evidence for bounded
+candidate-selection memory, not a realtime claim: 5.008 slices/s is below a
+30 FPS camera target and the measurement excludes native patch/write, proof,
+and decoder validation.
+
 ## Blind extraction relationship
 
 Blind extraction and realtime use the same sign-invariant candidate policy.
