@@ -154,6 +154,11 @@ def t_streaming_sign_patcher_writes_only_verified_idr_patch():
             b"\x00\x00\x00\x01\x68\xce"
             b"\x00\x00\x00\x01\x65\x41\x80"
         )
+        decoder_inputs = []
+
+        def decoder_validator(path):
+            decoder_inputs.append((path, path.exists()))
+
         stats = patch_selected_sign_positions_streaming(
             str(source),
             str(output),
@@ -161,8 +166,12 @@ def t_streaming_sign_patcher_writes_only_verified_idr_patch():
             reconstructor=Reconstructor(),
             traceable_factory=Traceable,
             patcher_factory=Patcher,
+            decoder_validator=decoder_validator,
         )
         assert output.read_bytes().endswith(b"\x00\x00\x00\x01\x65\xaa")
+        assert len(decoder_inputs) == 1
+        assert decoder_inputs[0][0] != output
+        assert decoder_inputs[0][1]
     assert stats == {"idr_slices": 1, "selected_positions": 1, "applied_positions": 1}
 
 

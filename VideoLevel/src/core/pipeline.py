@@ -13,6 +13,7 @@ Public API:
 """
 
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -21,6 +22,23 @@ from ..bitstream.bitstream_ops import BitstreamReconstructor, BitstreamPatcher, 
 from ..bitstream.bitstream_io  import BitstreamReader
 from ..bitstream.cavlc         import CAVLCDecoder
 from .stego                    import sort_blocks_interleaved, _CIF_MB_COUNT
+
+
+def validate_h264_decode(video_path: Path) -> None:
+    """Fail if FFmpeg observes even one H.264 decoder error.
+
+    FFmpeg otherwise commonly exits zero after concealing damaged frames, so
+    ``-xerror`` is required for a publishing gate.
+    """
+    completed = subprocess.run(
+        ["ffmpeg", "-v", "error", "-xerror", "-i", str(video_path), "-f", "null", "-"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "unknown FFmpeg failure").strip()
+        raise RuntimeError(f"FFmpeg decoder validation failed: {detail[:1000]}")
 
 
 def iter_idr_slices(video_path: str, reconstructor: BitstreamReconstructor):
@@ -85,6 +103,7 @@ def patch_selected_sign_positions_streaming(
     reconstructor: BitstreamReconstructor | None = None,
     traceable_factory=TraceableCAVLCParser,
     patcher_factory=BitstreamPatcher,
+    decoder_validator=validate_h264_decode,
 ) -> dict[str, int]:
     """Patch pre-selected CAVLC trailing-one signs one IDR slice at a time.
 
@@ -92,8 +111,9 @@ def patch_selected_sign_positions_streaming(
     tuples to bits. The function retains only one trace result and one NAL at a
     time, writes to a temporary sibling file, and atomically publishes output
     only after every selected position was either already in the requested
-    state or was confirmed as patched. It deliberately rejects non-sign and
-    duplicate-block requests.
+    state or was confirmed as patched and FFmpeg accepts the temporary stream
+    with ``-xerror``. It deliberately rejects non-sign and duplicate-block
+    requests.
     """
     source = Path(video_path)
     destination = Path(output_path)
@@ -240,6 +260,7 @@ def patch_selected_sign_positions_streaming(
         if len(satisfied_positions) != len(position_bits):
             missing = len(position_bits) - len(satisfied_positions)
             raise RuntimeError(f"streaming CAVLC patch did not apply {missing} selected positions")
+        decoder_validator(temporary_path)
         os.replace(temporary_path, destination)
     except Exception:
         handle.close()
