@@ -1,5 +1,6 @@
 #include "zkstego/cavlc_stream.hpp"
 
+#include <array>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -44,6 +45,37 @@ int main(int argc, char* argv[]) {
                     units.at(idr.nal_index).rbsp(),
                     idr.first_macroblock.residual_bit_offset,
                     idr.first_macroblock.coded_block_pattern & 0x0fU);
+                auto residual_end = macroblock.next_bit_offset;
+                std::uint32_t cb_chroma_dc_tc = 0;
+                std::uint32_t cr_chroma_dc_tc = 0;
+                std::array<std::uint32_t, 8> chroma_ac_total_coefficients{};
+                if (((idr.first_macroblock.coded_block_pattern >> 4U) & 0x03U) >= 1U) {
+                    const auto cb_chroma_dc = zkstego::decode_cavlc_chroma_dc_block(
+                        units.at(idr.nal_index).rbsp(), residual_end);
+                    const auto cr_chroma_dc = zkstego::decode_cavlc_chroma_dc_block(
+                        units.at(idr.nal_index).rbsp(), cb_chroma_dc.tail.next_bit_offset);
+                    cb_chroma_dc_tc = cb_chroma_dc.token.total_coefficients;
+                    cr_chroma_dc_tc = cr_chroma_dc.token.total_coefficients;
+                    residual_end = cr_chroma_dc.tail.next_bit_offset;
+                }
+                if (((idr.first_macroblock.coded_block_pattern >> 4U) & 0x03U) >= 2U) {
+                    for (std::size_t component = 0; component < 2; ++component) {
+                        for (std::size_t local_index = 0; local_index < 4; ++local_index) {
+                            const auto x = local_index % 2;
+                            const auto y = local_index / 2;
+                            const auto n_a = x == 0 ? 0U : chroma_ac_total_coefficients[component * 4 + local_index - 1];
+                            const auto n_b = y == 0 ? 0U : chroma_ac_total_coefficients[component * 4 + local_index - 2];
+                            const auto n_c = x != 0 && y != 0 ? static_cast<int>((n_a + n_b + 1U) / 2U)
+                                           : x != 0 ? static_cast<int>(n_a)
+                                                    : y != 0 ? static_cast<int>(n_b)
+                                                             : 0;
+                            const auto block = zkstego::decode_cavlc_chroma_ac_block(
+                                units.at(idr.nal_index).rbsp(), residual_end, n_c);
+                            chroma_ac_total_coefficients[component * 4 + local_index] = block.token.total_coefficients;
+                            residual_end = block.tail.next_bit_offset;
+                        }
+                    }
+                }
                 ++decoded_first_luma_macroblocks;
                 if (&idr == &idrs.front() || &idr == &idrs.back()) {
                     std::cout << "nal=" << idr.nal_index
@@ -53,7 +85,13 @@ int main(int argc, char* argv[]) {
                         if (block_index != 0) std::cout << ',';
                         std::cout << macroblock.blocks[block_index].token.total_coefficients;
                     }
-                    std::cout << '\n';
+                    std::cout << " chroma_dc_tc=" << cb_chroma_dc_tc << ',' << cr_chroma_dc_tc
+                              << " chroma_ac_tc=";
+                    for (std::size_t block_index = 0; block_index < chroma_ac_total_coefficients.size(); ++block_index) {
+                        if (block_index != 0) std::cout << ',';
+                        std::cout << chroma_ac_total_coefficients[block_index];
+                    }
+                    std::cout << " residual_end=" << residual_end << '\n';
                 }
             }
             if (!macroblock_mode || &idr == &idrs.front() || &idr == &idrs.back()) {
