@@ -34,6 +34,8 @@ int main(int argc, char* argv[]) {
                       << " data_bit_offset=" << idr.slice_header.data_bit_offset
                       << " cbp=" << idr.first_macroblock.coded_block_pattern
                       << " residual_bit_offset=" << idr.first_macroblock.residual_bit_offset
+                      << " first_luma_tc=" << idr.first_luma_block.token.total_coefficients
+                      << " first_luma_end=" << idr.first_luma_block.tail.next_bit_offset
                       << '\n';
         }
     } catch (const std::exception& error) {
