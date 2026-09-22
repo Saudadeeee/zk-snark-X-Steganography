@@ -681,9 +681,11 @@ std::vector<H264BaselineIdrNalHeader> inspect_baseline_idr_headers(
         if (sps_it == sps_by_id.end()) {
             throw std::invalid_argument("PPS references an unavailable SPS");
         }
+        const auto slice_header = parse_baseline_idr_slice_header(rbsp, sps_it->second, pps_it->second);
         inspected.push_back(H264BaselineIdrNalHeader{
             nal_index,
-            parse_baseline_idr_slice_header(rbsp, sps_it->second, pps_it->second),
+            slice_header,
+            parse_baseline_i_macroblock_header(rbsp, slice_header.data_bit_offset),
         });
     }
     return inspected;

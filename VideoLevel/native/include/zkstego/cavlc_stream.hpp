@@ -130,6 +130,7 @@ struct H264BaselineIMacroblockHeader {
 struct H264BaselineIdrNalHeader {
     std::size_t nal_index{};
     H264BaselineIdrSliceHeader slice_header;
+    H264BaselineIMacroblockHeader first_macroblock;
 };
 
 struct AnnexBNalUnit {

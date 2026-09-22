@@ -81,6 +81,8 @@ int main() {
     CHECK(inspected_idrs.size() == 1);
     CHECK(inspected_idrs[0].nal_index == 2);
     CHECK(inspected_idrs[0].slice_header.data_bit_offset == 24);
+    CHECK(inspected_idrs[0].first_macroblock.mb_type == 0);
+    CHECK(inspected_idrs[0].first_macroblock.residual_bit_offset == 62);
 
     const auto macroblock = zkstego::parse_baseline_i_macroblock_header(
         {0x88, 0x84, 0x3f, 0xe0, 0xb8, 0x60, 0x1e, 0x5c}, idr_header.data_bit_offset);

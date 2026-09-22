@@ -32,6 +32,8 @@ int main(int argc, char* argv[]) {
                       << " first_mb=" << idr.slice_header.first_mb_in_slice
                       << " slice_type=" << idr.slice_header.slice_type
                       << " data_bit_offset=" << idr.slice_header.data_bit_offset
+                      << " cbp=" << idr.first_macroblock.coded_block_pattern
+                      << " residual_bit_offset=" << idr.first_macroblock.residual_bit_offset
                       << '\n';
         }
     } catch (const std::exception& error) {
