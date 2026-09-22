@@ -1,6 +1,7 @@
 #include "zkstego/cavlc_stream.hpp"
 
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 #define CHECK(condition) do { if (!(condition)) return __LINE__; } while (false)
@@ -234,6 +235,39 @@ int main() {
     CHECK(n4_empty_token.total_coefficients == 0);
     CHECK(n4_empty_token.trailing_ones == 0);
     CHECK(n4_empty_token.level_bit_offset == 4);
+
+    // Representative entries from every TotalCoeff row of H.264 Table 9-5(c)
+    // (nC=4..7).  The table is variable length, so a six-bit-only decoder is
+    // not sufficient here.
+    const auto bits_to_bytes = [](std::string_view bits) {
+        std::vector<std::uint8_t> bytes((bits.size() + 7U) / 8U);
+        for (std::size_t bit_index = 0; bit_index < bits.size(); ++bit_index) {
+            if (bits[bit_index] == '1') {
+                bytes[bit_index / 8U] |= static_cast<std::uint8_t>(1U << (7U - bit_index % 8U));
+            }
+        }
+        return bytes;
+    };
+    struct N4TokenCase {
+        std::string_view bits;
+        std::uint32_t total_coefficients;
+        std::uint32_t trailing_ones;
+    };
+    const std::vector<N4TokenCase> n4_token_cases{
+        {"1111", 0, 0}, {"001111", 1, 0}, {"001011", 2, 0},
+        {"001000", 3, 0}, {"0001111", 4, 0}, {"0001011", 5, 0},
+        {"0001001", 6, 0}, {"0001000", 7, 0}, {"00001111", 8, 0},
+        {"00001011", 9, 0}, {"000001111", 10, 0}, {"000001011", 11, 0},
+        {"000001000", 12, 0}, {"0000001101", 13, 0}, {"0000001001", 14, 0},
+        {"0000000101", 15, 0}, {"0000000001", 16, 0},
+        {"1110", 1, 1}, {"1101", 2, 2}, {"1100", 3, 3},
+    };
+    for (const auto& test_case : n4_token_cases) {
+        const auto parsed = zkstego::parse_cavlc_coeff_token(bits_to_bytes(test_case.bits), 0, 4);
+        CHECK(parsed.total_coefficients == test_case.total_coefficients);
+        CHECK(parsed.trailing_ones == test_case.trailing_ones);
+        CHECK(parsed.level_bit_offset == test_case.bits.size() + test_case.trailing_ones);
+    }
 
     const auto n4_long_token = zkstego::parse_cavlc_coeff_token({0x00, 0x80}, 0, 4);
     CHECK(n4_long_token.total_coefficients == 16);

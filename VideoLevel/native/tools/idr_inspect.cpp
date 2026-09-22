@@ -12,6 +12,12 @@ int main(int argc, char* argv[]) {
         std::cerr << "usage: zkstego_idr_inspect <annex-b-h264> [--verbose|--macroblock]\n";
         return 2;
     }
+    const bool verbose = argc == 3 && std::string(argv[2]) == "--verbose";
+    const bool macroblock_mode = argc == 3 && std::string(argv[2]) == "--macroblock";
+    if (argc == 3 && !verbose && !macroblock_mode) {
+        std::cerr << "unknown option: " << argv[2] << '\n';
+        return 2;
+    }
     const std::string input_path = argv[1];
     std::ifstream input(input_path, std::ios::binary);
     if (!input) {
@@ -23,24 +29,22 @@ int main(int argc, char* argv[]) {
     try {
         const auto idrs = zkstego::inspect_baseline_idr_headers(annex_b);
         std::cout << "idr_count=" << idrs.size() << '\n';
-        const bool verbose = argc == 3 && std::string(argv[2]) == "--verbose";
-        const bool macroblock_mode = argc == 3 && std::string(argv[2]) == "--macroblock";
-        if (argc == 3 && !verbose && !macroblock_mode) {
-            std::cerr << "unknown option: " << argv[2] << '\n';
-            return 2;
-        }
         const auto units = zkstego::split_annex_b(annex_b);
-        std::size_t decoded_luma_macroblocks = 0;
+        std::size_t decoded_first_luma_macroblocks = 0;
         for (const auto& idr : idrs) {
             if (!verbose && !macroblock_mode && &idr != &idrs.front() && &idr != &idrs.back()) {
                 continue;
             }
             if (macroblock_mode) {
+                if (idr.first_macroblock.mb_type != 0) {
+                    throw std::invalid_argument(
+                        "--macroblock currently supports I4x4 macroblocks only; encountered I16x16 syntax");
+                }
                 const auto macroblock = zkstego::decode_cavlc_luma_macroblock(
                     units.at(idr.nal_index).rbsp(),
                     idr.first_macroblock.residual_bit_offset,
                     idr.first_macroblock.coded_block_pattern & 0x0fU);
-                ++decoded_luma_macroblocks;
+                ++decoded_first_luma_macroblocks;
                 if (&idr == &idrs.front() || &idr == &idrs.back()) {
                     std::cout << "nal=" << idr.nal_index
                               << " luma_macroblock_end=" << macroblock.next_bit_offset
@@ -65,7 +69,7 @@ int main(int argc, char* argv[]) {
             }
         }
         if (macroblock_mode) {
-            std::cout << "decoded_luma_macroblocks=" << decoded_luma_macroblocks << '\n';
+            std::cout << "decoded_first_luma_macroblocks=" << decoded_first_luma_macroblocks << '\n';
         }
     } catch (const std::exception& error) {
         std::cerr << "native IDR inspection failed: " << error.what() << '\n';
