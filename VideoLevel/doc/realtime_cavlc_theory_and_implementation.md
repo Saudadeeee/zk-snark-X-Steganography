@@ -155,12 +155,13 @@ not claim realtime, edge-ready, or usable blind embedding.
 ### Native header traversal baseline
 
 The native `zkstego_idr_inspect` tool scanned the 600-IDR
-`deadline_cif_q22_g1_600f.h264` fixture in 607.079 ms on the audit machine
-(about 988 IDR headers per second). It parsed the stream's SPS/PPS and all
-IDR headers, including parameter-set selection, but did not traverse
-macroblocks, decode residuals, select candidates, patch signs, or validate an
-output decoder. This is a functional and performance baseline for the native
-data plane only; it does not establish a realtime steganography claim.
+`deadline_cif_q22_g1_600f.h264` fixture in 501.974 ms on the audit machine.
+It parsed the stream's SPS/PPS and all IDR headers, selected parameter sets,
+parsed the first I-macroblock, and decoded its first luma CAVLC 4x4 residual
+block. It did not traverse later macroblocks or residual blocks, select blind
+candidates, patch signs, or validate an output decoder. This is a functional
+and performance baseline for one native residual block per IDR only; it does
+not establish a realtime steganography claim.
 
 ## Blind extraction relationship
 
