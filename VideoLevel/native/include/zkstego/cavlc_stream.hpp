@@ -188,6 +188,10 @@ CavlcDecodedLumaBlock decode_cavlc_luma_block(
 CavlcDecodedLumaBlock decode_cavlc_chroma_dc_block(
     const std::vector<std::uint8_t>& rbsp,
     std::size_t start_bit);
+CavlcDecodedLumaBlock decode_cavlc_chroma_ac_block(
+    const std::vector<std::uint8_t>& rbsp,
+    std::size_t start_bit,
+    int n_c);
 CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
     const std::vector<std::uint8_t>& rbsp,
     std::size_t start_bit,

@@ -303,6 +303,13 @@ int main() {
     CHECK(chroma_dc_block.tail.runs == std::vector<std::uint32_t>{0});
     CHECK(chroma_dc_block.tail.next_bit_offset == 3);
     CHECK(chroma_dc_block.coefficients == std::vector<std::int32_t>({1, 0, 0, 0}));
+    const auto chroma_ac_block = zkstego::decode_cavlc_chroma_ac_block({0x60}, 0, 0);
+    CHECK(chroma_ac_block.token.total_coefficients == 1);
+    CHECK(chroma_ac_block.levels.trailing_one_values == std::vector<std::int32_t>{1});
+    CHECK(chroma_ac_block.tail.total_zeros == 0);
+    CHECK(chroma_ac_block.tail.next_bit_offset == 3);
+    CHECK(chroma_ac_block.coefficients == std::vector<std::int32_t>(
+        {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
 
     const std::vector<std::uint8_t> ebsp{0x12, 0x00, 0x00, 0x03, 0x01, 0x34};
     const auto rbsp = zkstego::ebsp_to_rbsp(ebsp);
