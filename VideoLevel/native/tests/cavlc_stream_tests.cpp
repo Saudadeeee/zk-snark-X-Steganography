@@ -139,7 +139,7 @@ int main() {
     long_prefix_token.level_bit_offset = 0;
     const auto long_prefix_levels = zkstego::decode_cavlc_non_trailing_levels(
         {0x00, 0x02, 0x00}, long_prefix_token);
-    CHECK((long_prefix_levels.values == std::vector<std::int32_t>{-15}));
+    CHECK((long_prefix_levels.values == std::vector<std::int32_t>{8}));
     CHECK(long_prefix_levels.next_bit_offset == 19);
     const auto empty_luma_macroblock = zkstego::decode_cavlc_luma_macroblock({0xf0}, 0, 1);
     CHECK(empty_luma_macroblock.next_bit_offset == 4);
@@ -218,14 +218,18 @@ int main() {
     CHECK(n6_token.trailing_ones == 1);
     CHECK(n6_token.sign_bit_offsets == std::vector<std::size_t>{4});
 
-    const auto n8_empty_token = zkstego::parse_cavlc_coeff_token({0x0c}, 0, 8);
+    const auto n8_empty_token = zkstego::parse_cavlc_coeff_token({0x00}, 0, 8);
     CHECK(n8_empty_token.total_coefficients == 0);
     CHECK(n8_empty_token.trailing_ones == 0);
-    const auto n8_token = zkstego::parse_cavlc_coeff_token({0x04, 0x00}, 0, 8);
+    const auto n8_token = zkstego::parse_cavlc_coeff_token({0x14, 0x00}, 0, 8);
     CHECK(n8_token.total_coefficients == 1);
     CHECK(n8_token.trailing_ones == 1);
     CHECK(n8_token.sign_bit_offsets == std::vector<std::size_t>{6});
     CHECK(n8_token.level_bit_offset == 7);
+    const auto n8_tc14_token = zkstego::parse_cavlc_coeff_token({0xe0}, 0, 8);
+    CHECK(n8_tc14_token.total_coefficients == 14);
+    CHECK(n8_tc14_token.trailing_ones == 0);
+    CHECK(n8_tc14_token.level_bit_offset == 6);
 
     const auto chroma_dc_token = zkstego::parse_cavlc_coeff_token({0x80}, 0, -1);
     CHECK(chroma_dc_token.total_coefficients == 1);

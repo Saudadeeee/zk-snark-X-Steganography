@@ -168,8 +168,8 @@ uses CAVLC's four coded-8x8-group order, derives `nC` from already decoded
 left/top 4x4 neighbours, and has unit coverage for empty coded blocks. A
 regression test also covers the `level_prefix == 14` CAVLC level-code branch.
 It is not yet connected to the IDR inspector: an attempted run over the first
-non-empty real macroblock stopped fail-closed at luma block 3 (bit 197,
-`nC=5`) with an invalid coeff-token. That result prevents claiming full native
+non-empty real macroblock stopped fail-closed at luma block 4 (bit 311,
+`nC=14`) with an invalid coeff-token. That result prevents claiming full native
 macroblock traversal until the remaining bit-exact residual decoding issue is
 resolved against real fixtures.
 

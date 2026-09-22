@@ -192,19 +192,14 @@ CavlcCoeffToken parse_cavlc_coeff_token(
     RbspBitReader reader(rbsp);
     reader.skip_bits(start_bit);
     if (n_c >= 8) {
-        // H.264 Table 9-5: a fixed six-bit coeff_token. Values 0/1 encode
-        // TC=1 with T1=0/1; value 3 is the special empty block; from TC=2
-        // onward the high bits encode TC-1 and the low two bits encode T1.
+        // H.264 Table 9-5(e): a fixed six-bit coeff_token with TotalCoeff
+        // in the high four bits and TrailingOnes in the low two bits.
         const auto code = reader.read_bits(6);
         CavlcCoeffToken token;
-        if (code == 3) {
-            token.total_coefficients = 0;
-        } else {
-            token.total_coefficients = code / 4U + 1U;
-            token.trailing_ones = code % 4U;
-            if (token.trailing_ones > 3 || token.trailing_ones > token.total_coefficients) {
-                throw std::invalid_argument("invalid fixed-length CAVLC coeff_token");
-            }
+        token.total_coefficients = code >> 2U;
+        token.trailing_ones = code & 0x3U;
+        if (token.trailing_ones > token.total_coefficients) {
+            throw std::invalid_argument("invalid fixed-length CAVLC coeff_token");
         }
         token.sign_bit_offsets.reserve(token.trailing_ones);
         for (std::size_t index = 0; index < token.trailing_ones; ++index) {
@@ -283,9 +278,9 @@ CavlcDecodedLevels decode_cavlc_non_trailing_levels(
             if (level_prefix < 14) {
                 level_code = level_prefix;
             } else if (level_prefix == 14) {
-                level_code = 29 + reader.read_bits(4);
+                level_code = 14 + reader.read_bits(4);
             } else {
-                level_code = 15;
+                level_code = 30;
                 if (level_prefix >= 16) {
                     level_code += (1U << (level_prefix - 3)) - 4096U;
                 }
@@ -585,12 +580,21 @@ CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
             try {
                 block = decode_cavlc_luma_block(rbsp, bit_offset, n_c);
             } catch (const std::exception& error) {
+                std::string decoded_summary;
+                for (std::size_t prior_index = 0; prior_index < macroblock.blocks.size(); ++prior_index) {
+                    const auto& prior = macroblock.blocks[prior_index];
+                    if (prior.token.level_bit_offset == 0 && prior.tail.next_bit_offset == 0) continue;
+                    decoded_summary += " b" + std::to_string(prior_index) +
+                        "=TC" + std::to_string(prior.token.total_coefficients) +
+                        "/T1" + std::to_string(prior.token.trailing_ones) +
+                        "/end" + std::to_string(prior.tail.next_bit_offset);
+                }
                 throw std::invalid_argument(
                     "CAVLC luma block " + std::to_string(block_index) +
                     " (bit=" + std::to_string(bit_offset) +
                     ", nA=" + std::to_string(n_a) +
                     ", nB=" + std::to_string(n_b) +
-                    ", nC=" + std::to_string(n_c) + "): " + error.what());
+                    ", nC=" + std::to_string(n_c) + "): " + error.what() + decoded_summary);
             }
             total_coefficients[block_index] = block.token.total_coefficients;
             bit_offset = block.tail.next_bit_offset;
