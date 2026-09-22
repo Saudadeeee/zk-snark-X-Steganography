@@ -141,6 +141,17 @@ int main() {
         {0x00, 0x02, 0x00}, long_prefix_token);
     CHECK((long_prefix_levels.values == std::vector<std::int32_t>{8}));
     CHECK(long_prefix_levels.next_bit_offset == 19);
+
+    // H.264 9.2.2: the first non-trailing level receives the levelCode += 2
+    // adjustment when TrailingOnes is less than three.  A level_prefix of zero
+    // therefore decodes to +2, not +1.
+    zkstego::CavlcCoeffToken first_level_adjustment_token;
+    first_level_adjustment_token.total_coefficients = 1;
+    first_level_adjustment_token.level_bit_offset = 0;
+    const auto first_level_adjustment = zkstego::decode_cavlc_non_trailing_levels(
+        {0x80}, first_level_adjustment_token);
+    CHECK((first_level_adjustment.values == std::vector<std::int32_t>{2}));
+    CHECK(first_level_adjustment.next_bit_offset == 1);
     const auto empty_luma_macroblock = zkstego::decode_cavlc_luma_macroblock({0xf0}, 0, 1);
     CHECK(empty_luma_macroblock.next_bit_offset == 4);
     CHECK(empty_luma_macroblock.blocks[0].token.total_coefficients == 0);
