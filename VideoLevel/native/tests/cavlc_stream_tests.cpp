@@ -55,6 +55,20 @@ int main() {
     CHECK(idr_header.slice_qp_delta == -3);
     CHECK(idr_header.data_bit_offset == 24);
 
+    zkstego::H264BaselineSps poc_type_zero_sps;
+    poc_type_zero_sps.frame_mbs_only_flag = true;
+    poc_type_zero_sps.pic_order_cnt_type = 0;
+    poc_type_zero_sps.log2_max_frame_num_minus4 = 0;
+    poc_type_zero_sps.log2_max_pic_order_cnt_lsb_minus4 = 0;
+    zkstego::H264BaselinePps poc_type_zero_pps;
+    const auto poc_type_zero_header = zkstego::parse_baseline_idr_slice_header(
+        {0xb9, 0xd4, 0x80}, poc_type_zero_sps, poc_type_zero_pps);
+    CHECK(poc_type_zero_header.frame_num == 3);
+    CHECK(poc_type_zero_header.idr_pic_id == 0);
+    CHECK(poc_type_zero_header.pic_order_cnt_lsb == 5);
+    CHECK(poc_type_zero_header.slice_qp_delta == 0);
+    CHECK(poc_type_zero_header.data_bit_offset == 17);
+
     const auto macroblock = zkstego::parse_baseline_i_macroblock_header(
         {0x88, 0x84, 0x3f, 0xe0, 0xb8, 0x60, 0x1e, 0x5c}, idr_header.data_bit_offset);
     CHECK(macroblock.mb_type == 0);

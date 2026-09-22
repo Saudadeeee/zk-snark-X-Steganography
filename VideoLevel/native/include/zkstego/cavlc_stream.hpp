@@ -87,6 +87,7 @@ struct H264BaselineIdrSliceHeader {
     std::uint32_t pic_parameter_set_id{};
     std::uint32_t frame_num{};
     std::uint32_t idr_pic_id{};
+    std::uint32_t pic_order_cnt_lsb{};
     std::int32_t slice_qp_delta{};
     std::size_t data_bit_offset{};
 };

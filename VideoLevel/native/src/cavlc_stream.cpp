@@ -143,8 +143,8 @@ H264BaselineIdrSliceHeader parse_baseline_idr_slice_header(
     if (!sps.frame_mbs_only_flag || pps.entropy_coding_mode_flag || pps.num_slice_groups_minus1 != 0) {
         throw std::invalid_argument("native IDR parser requires frame-only CAVLC without slice groups");
     }
-    if (sps.pic_order_cnt_type != 2) {
-        throw std::invalid_argument("native IDR parser currently requires pic_order_cnt_type 2");
+    if (sps.pic_order_cnt_type != 0 && sps.pic_order_cnt_type != 2) {
+        throw std::invalid_argument("native IDR parser requires pic_order_cnt_type 0 or 2");
     }
     RbspBitReader reader(rbsp);
     H264BaselineIdrSliceHeader header;
@@ -156,6 +156,10 @@ H264BaselineIdrSliceHeader parse_baseline_idr_slice_header(
     header.pic_parameter_set_id = reader.read_ue();
     header.frame_num = reader.read_bits(static_cast<std::size_t>(sps.log2_max_frame_num_minus4) + 4);
     header.idr_pic_id = reader.read_ue();
+    if (sps.pic_order_cnt_type == 0) {
+        header.pic_order_cnt_lsb = reader.read_bits(
+            static_cast<std::size_t>(sps.log2_max_pic_order_cnt_lsb_minus4) + 4);
+    }
     if (pps.redundant_pic_cnt_present_flag) {
         static_cast<void>(reader.read_ue());
     }
