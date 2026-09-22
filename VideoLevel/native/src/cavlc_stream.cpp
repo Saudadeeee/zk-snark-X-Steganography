@@ -3,6 +3,7 @@
 #include <array>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 namespace zkstego {
 
@@ -640,6 +641,52 @@ std::vector<AnnexBNalUnit> split_annex_b(const std::vector<std::uint8_t>& annex_
         units.push_back(std::move(unit));
     }
     return units;
+}
+
+std::vector<H264BaselineIdrNalHeader> inspect_baseline_idr_headers(
+    const std::vector<std::uint8_t>& annex_b) {
+    std::unordered_map<std::uint32_t, H264BaselineSps> sps_by_id;
+    std::unordered_map<std::uint32_t, H264BaselinePps> pps_by_id;
+    std::vector<H264BaselineIdrNalHeader> inspected;
+    const auto units = split_annex_b(annex_b);
+
+    for (std::size_t nal_index = 0; nal_index < units.size(); ++nal_index) {
+        const auto& nal = units[nal_index];
+        const auto rbsp = nal.rbsp();
+        if (nal.nal_unit_type == 7) {
+            const auto sps = parse_baseline_sps(rbsp);
+            sps_by_id.insert_or_assign(sps.sequence_parameter_set_id, sps);
+            continue;
+        }
+        if (nal.nal_unit_type == 8) {
+            const auto pps = parse_baseline_pps(rbsp);
+            pps_by_id.insert_or_assign(pps.pic_parameter_set_id, pps);
+            continue;
+        }
+        if (!nal.is_idr()) {
+            continue;
+        }
+
+        // The PPS id is the third Exp-Golomb field in every slice header and
+        // can be read before selecting its SPS-dependent frame-number width.
+        RbspBitReader prefix_reader(rbsp);
+        static_cast<void>(prefix_reader.read_ue());  // first_mb_in_slice
+        static_cast<void>(prefix_reader.read_ue());  // slice_type
+        const auto pps_id = prefix_reader.read_ue();
+        const auto pps_it = pps_by_id.find(pps_id);
+        if (pps_it == pps_by_id.end()) {
+            throw std::invalid_argument("IDR references an unavailable PPS");
+        }
+        const auto sps_it = sps_by_id.find(pps_it->second.sequence_parameter_set_id);
+        if (sps_it == sps_by_id.end()) {
+            throw std::invalid_argument("PPS references an unavailable SPS");
+        }
+        inspected.push_back(H264BaselineIdrNalHeader{
+            nal_index,
+            parse_baseline_idr_slice_header(rbsp, sps_it->second, pps_it->second),
+        });
+    }
+    return inspected;
 }
 
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units) {

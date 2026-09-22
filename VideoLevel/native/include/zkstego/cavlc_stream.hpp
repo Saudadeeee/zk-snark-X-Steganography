@@ -127,6 +127,11 @@ struct H264BaselineIMacroblockHeader {
     std::size_t residual_bit_offset{};
 };
 
+struct H264BaselineIdrNalHeader {
+    std::size_t nal_index{};
+    H264BaselineIdrSliceHeader slice_header;
+};
+
 struct AnnexBNalUnit {
     std::size_t start_offset{};
     std::size_t start_code_size{};
@@ -175,6 +180,8 @@ std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
 H264BaselineIMacroblockHeader parse_baseline_i_macroblock_header(
     const std::vector<std::uint8_t>& rbsp,
     std::size_t start_bit);
+std::vector<H264BaselineIdrNalHeader> inspect_baseline_idr_headers(
+    const std::vector<std::uint8_t>& annex_b);
 std::vector<AnnexBNalUnit> split_annex_b(const std::vector<std::uint8_t>& annex_b);
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units);
 std::vector<std::uint8_t> apply_fixed_length_patches(
