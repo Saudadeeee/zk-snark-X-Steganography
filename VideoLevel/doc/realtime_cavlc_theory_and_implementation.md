@@ -165,13 +165,20 @@ not establish a realtime steganography claim.
 
 The native library now also has a luma-I4x4 macroblock traversal primitive. It
 uses CAVLC's four coded-8x8-group order, derives `nC` from already decoded
-left/top 4x4 neighbours, and has unit coverage for empty coded blocks. A
-regression test also covers the `level_prefix == 14` CAVLC level-code branch.
-It is not yet connected to the IDR inspector: an attempted run over the first
-non-empty real macroblock stopped fail-closed at luma block 11 (bit 613,
-`nC=6`) with an invalid coeff-token. That result prevents claiming full native
-macroblock traversal until the remaining bit-exact residual decoding issue is
-resolved against real fixtures.
+left/top 4x4 neighbours, and has unit coverage for empty coded blocks. The
+implementation additionally has regression coverage for the first-level
+adjustment required by H.264 9.2.2 and the empty `nC=4..7` coeff-token
+(`1111`). These two details are essential because an incorrect level adjustment
+can change subsequent suffix lengths, while a missing empty-block token
+desynchronizes the rest of a macroblock.
+
+`zkstego_idr_inspect --macroblock` now exercises this primitive against every
+IDR's first macroblock. On `foreman_cif_q18_g1_300f.h264`, it decoded all
+300/300 first luma macroblocks (each 16 luma 4x4 blocks) in 135.755 ms on the
+audit machine. This confirms the first-macroblock luma path for that fixture;
+it does **not** establish complete slice traversal, chroma residual support,
+bit-exact rewrite, blind extraction, decoder-valid output, or a realtime
+claim. Those remain release gates.
 
 ## Blind extraction relationship
 
