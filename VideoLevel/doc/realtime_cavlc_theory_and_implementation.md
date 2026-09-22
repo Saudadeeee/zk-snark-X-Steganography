@@ -163,6 +163,16 @@ candidates, patch signs, or validate an output decoder. This is a functional
 and performance baseline for one native residual block per IDR only; it does
 not establish a realtime steganography claim.
 
+The native library now also has a luma-I4x4 macroblock traversal primitive. It
+uses CAVLC's four coded-8x8-group order, derives `nC` from already decoded
+left/top 4x4 neighbours, and has unit coverage for empty coded blocks. A
+regression test also covers the `level_prefix == 14` CAVLC level-code branch.
+It is not yet connected to the IDR inspector: an attempted run over the first
+non-empty real macroblock stopped fail-closed at luma block 5 (bit 197,
+`nC=5`) with an invalid coeff-token. That result prevents claiming full native
+macroblock traversal until the remaining bit-exact residual decoding issue is
+resolved against real fixtures.
+
 ## Blind extraction relationship
 
 Blind extraction and realtime use the same sign-invariant candidate policy.

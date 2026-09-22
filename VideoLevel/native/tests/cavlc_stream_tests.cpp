@@ -134,6 +134,19 @@ int main() {
     CHECK(first_luma_block.tail.next_bit_offset == 117);
     CHECK((first_luma_block.coefficients == std::vector<std::int32_t>{
         -24, -2, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
+    zkstego::CavlcCoeffToken long_prefix_token;
+    long_prefix_token.total_coefficients = 1;
+    long_prefix_token.level_bit_offset = 0;
+    const auto long_prefix_levels = zkstego::decode_cavlc_non_trailing_levels(
+        {0x00, 0x02, 0x00}, long_prefix_token);
+    CHECK((long_prefix_levels.values == std::vector<std::int32_t>{-15}));
+    CHECK(long_prefix_levels.next_bit_offset == 19);
+    const auto empty_luma_macroblock = zkstego::decode_cavlc_luma_macroblock({0xf0}, 0, 1);
+    CHECK(empty_luma_macroblock.next_bit_offset == 4);
+    CHECK(empty_luma_macroblock.blocks[0].token.total_coefficients == 0);
+    CHECK(empty_luma_macroblock.blocks[1].token.total_coefficients == 0);
+    CHECK(empty_luma_macroblock.blocks[4].token.total_coefficients == 0);
+    CHECK(empty_luma_macroblock.blocks[5].token.total_coefficients == 0);
     const auto empty_luma_block = zkstego::decode_cavlc_luma_block({0x80}, 0, 0);
     CHECK(empty_luma_block.token.total_coefficients == 0);
     CHECK(empty_luma_block.tail.runs.empty());

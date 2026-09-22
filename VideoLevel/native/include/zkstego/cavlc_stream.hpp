@@ -119,6 +119,11 @@ struct CavlcDecodedLumaBlock {
     std::vector<std::int32_t> coefficients;
 };
 
+struct CavlcDecodedLumaMacroblock {
+    std::array<CavlcDecodedLumaBlock, 16> blocks;
+    std::size_t next_bit_offset{};
+};
+
 struct H264BaselineIMacroblockHeader {
     std::uint32_t mb_type{};
     std::uint32_t coded_block_pattern{};
@@ -176,6 +181,10 @@ CavlcDecodedLumaBlock decode_cavlc_luma_block(
     const std::vector<std::uint8_t>& rbsp,
     std::size_t start_bit,
     int n_c);
+CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
+    const std::vector<std::uint8_t>& rbsp,
+    std::size_t start_bit,
+    std::uint32_t coded_block_pattern_luma);
 std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
     const std::vector<std::int32_t>& decoded_non_trailing_levels,
     const std::vector<std::uint32_t>& runs);

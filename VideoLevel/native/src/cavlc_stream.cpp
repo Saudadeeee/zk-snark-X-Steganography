@@ -283,9 +283,9 @@ CavlcDecodedLevels decode_cavlc_non_trailing_levels(
             if (level_prefix < 14) {
                 level_code = level_prefix;
             } else if (level_prefix == 14) {
-                level_code = 14 + reader.read_bits(4);
+                level_code = 29 + reader.read_bits(4);
             } else {
-                level_code = 30;
+                level_code = 15;
                 if (level_prefix >= 16) {
                     level_code += (1U << (level_prefix - 3)) - 4096U;
                 }
@@ -534,6 +534,57 @@ CavlcDecodedLumaBlock decode_cavlc_luma_block(
     block.coefficients = reconstruct_cavlc_block(
         block.levels, block.tail.runs, kLumaBlockCoefficients);
     return block;
+}
+
+CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
+    const std::vector<std::uint8_t>& rbsp,
+    const std::size_t start_bit,
+    const std::uint32_t coded_block_pattern_luma) {
+    // residual_block_cavlc() traverses the four 8x8 luma groups in this
+    // order.  Within a group, the block indices follow the 4x4 raster grid.
+    constexpr std::array<std::array<std::size_t, 4>, 4> kCavlcLumaGroups{{
+        {{0, 1, 4, 5}},
+        {{2, 3, 6, 7}},
+        {{8, 9, 12, 13}},
+        {{10, 11, 14, 15}},
+    }};
+    if (coded_block_pattern_luma > 0x0fU) {
+        throw std::invalid_argument("luma coded block pattern must fit four bits");
+    }
+
+    CavlcDecodedLumaMacroblock macroblock;
+    std::array<std::uint32_t, 16> total_coefficients{};
+    auto bit_offset = start_bit;
+    for (std::size_t group_index = 0; group_index < kCavlcLumaGroups.size(); ++group_index) {
+        if ((coded_block_pattern_luma & (1U << group_index)) == 0U) continue;
+        for (const auto block_index : kCavlcLumaGroups[group_index]) {
+            const auto x = block_index % 4;
+            const auto y = block_index / 4;
+            const auto has_left = x != 0;
+            const auto has_top = y != 0;
+            const auto n_a = has_left ? total_coefficients[block_index - 1] : 0U;
+            const auto n_b = has_top ? total_coefficients[block_index - 4] : 0U;
+            const auto n_c = has_left && has_top ? static_cast<int>((n_a + n_b + 1U) / 2U)
+                           : has_left ? static_cast<int>(n_a)
+                           : has_top ? static_cast<int>(n_b)
+                                      : 0;
+            auto& block = macroblock.blocks[block_index];
+            try {
+                block = decode_cavlc_luma_block(rbsp, bit_offset, n_c);
+            } catch (const std::exception& error) {
+                throw std::invalid_argument(
+                    "CAVLC luma block " + std::to_string(block_index) +
+                    " (bit=" + std::to_string(bit_offset) +
+                    ", nA=" + std::to_string(n_a) +
+                    ", nB=" + std::to_string(n_b) +
+                    ", nC=" + std::to_string(n_c) + "): " + error.what());
+            }
+            total_coefficients[block_index] = block.token.total_coefficients;
+            bit_offset = block.tail.next_bit_offset;
+        }
+    }
+    macroblock.next_bit_offset = bit_offset;
+    return macroblock;
 }
 
 std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
