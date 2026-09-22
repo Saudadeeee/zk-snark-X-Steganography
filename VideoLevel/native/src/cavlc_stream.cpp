@@ -8,6 +8,7 @@ struct CoeffTokenCode {
     std::uint8_t trailing_ones;
 };
 constexpr std::array coeff_token_n4_7{
+    CoeffTokenCode{"1111", 0, 0},
     CoeffTokenCode{"001111", 1, 0},
     CoeffTokenCode{"1110", 1, 1},
     CoeffTokenCode{"001011", 2, 0},
@@ -380,13 +381,16 @@ CavlcDecodedLevels decode_cavlc_non_trailing_levels(
             }
             level_code += reader.read_bits(level_prefix - 3);
         }
+        // H.264 9.2.2 applies this adjustment to the first decoded level
+        // whenever there are fewer than three trailing ones.  Applying it to
+        // the opposite case changes suffix-length evolution and desynchronises
+        // following residual blocks.
+        if (index == 0 && token.trailing_ones < 3) {
+            level_code += 2U;
+        }
         const auto sign = level_code & 1U;
         std::uint32_t absolute = 0;
-        if (index == 0 && token.trailing_ones == 3) {
-            absolute = ((level_code - sign) >> 1U) + 2U;
-        } else {
-            absolute = (level_code - sign + 2U) >> 1U;
-        }
+        absolute = (level_code - sign + 2U) >> 1U;
         if (absolute > static_cast<std::uint32_t>(INT32_MAX)) {
             throw std::out_of_range("CAVLC level exceeds int32 range");
         }
