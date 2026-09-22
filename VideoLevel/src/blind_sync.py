@@ -17,10 +17,8 @@ import heapq
 import json
 from bisect import bisect_right
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Callable, Iterable, Iterator, Optional
 
-from .bitstream.bitstream_ops import BitstreamPatcher
 from .core.analysis_cache import (
     load_or_build_video_analysis,
 )
@@ -220,7 +218,6 @@ def iter_blind_sign_candidates_from_idr_analysis(
     *,
     min_coefficient_index: int = BLIND_MIN_SIGN_COEFFICIENT_INDEX,
     safety_filter: CAVLCSafetyFilter | None = None,
-    patcher_factory=BitstreamPatcher,
 ) -> Iterator[tuple[int, int, int]]:
     """Yield validated sign candidates one IDR analysis record at a time.
 
@@ -234,23 +231,31 @@ def iter_blind_sign_candidates_from_idr_analysis(
     active_filter = safety_filter or CAVLCSafetyFilter()
     for _idr_offset, coefficients, n_c_map, nal_length_map, frame_verified_data in analysis_records:
         # The production safety filter's fast sign scanner establishes only
-        # sign-offset membership.  Validate those sign positions with the
-        # exact patcher, rather than running the generic LSB scan over every
-        # coefficient that blind mode can never use.
+        # sign-offset membership.  Blind embedding additionally requires the
+        # patcher's bit-exact round-trip/retroactive-boundary validation; its
+        # generic validated path supplies that contract.  Keep the lighter
+        # sign-only seam for injected test or specialised filters.
         if isinstance(active_filter, CAVLCSafetyFilter):
-            raw_positions = active_filter.get_safe_sign_positions(
+            raw_positions = active_filter.get_safe_positions(
                 coefficients,
                 nC_map=n_c_map,
                 nal_length_map=nal_length_map,
                 frame_verified_data=frame_verified_data,
             )
-            yield from _validated_streaming_sign_candidates(
-                raw_positions,
-                idr_offset=_idr_offset,
-                frame_verified_data=frame_verified_data,
-                min_coefficient_index=min_coefficient_index,
-                patcher_factory=patcher_factory,
-            )
+            # Macroblock ids are global and never recur in a later IDR, so a
+            # cross-IDR cache cannot improve correctness. Releasing it here
+            # keeps the validated streaming path bounded by one IDR.
+            active_filter._lazy_patchability_cache.clear()
+            seen_blocks: set[tuple[int, int]] = set()
+            for candidate in raw_positions:
+                mb_idx, block_idx, coefficient_idx = (int(value) for value in candidate)
+                if coefficient_idx >= 0 or ~coefficient_idx < min_coefficient_index:
+                    continue
+                block_key = (mb_idx, block_idx)
+                if block_key in seen_blocks:
+                    continue
+                seen_blocks.add(block_key)
+                yield (mb_idx, block_idx, coefficient_idx)
             continue
 
         sign_positions = getattr(active_filter, "get_safe_sign_positions", None)
@@ -287,84 +292,6 @@ def iter_blind_sign_candidates_from_idr_analysis(
             frame_verified_data=frame_verified_data,
             required_bits=len(candidates),
         )
-
-
-def _validated_streaming_sign_candidates(
-    raw_positions: Iterable[tuple[int, int, int]],
-    *,
-    idr_offset: int,
-    frame_verified_data: dict,
-    min_coefficient_index: int,
-    patcher_factory,
-) -> Iterator[tuple[int, int, int]]:
-    """Admit only signs that the production patcher can actually flip.
-
-    One patcher invocation covers an IDR, so its own length, forward-decode,
-    and retroactive-boundary guards are the single source of truth.  Every
-    sign is flipped during preflight, which proves the non-current sign state
-    as well; a candidate that is already in the requested state needs no
-    mutation at embed time.
-    """
-    try:
-        global_offsets, global_blocks, rbsp_bytes = frame_verified_data[int(idr_offset)]
-    except (KeyError, TypeError, ValueError):
-        return
-
-    candidates: list[tuple[int, int, int]] = []
-    seen_blocks: set[tuple[int, int]] = set()
-    modifications: list[tuple[int, int, list[int]]] = []
-    for raw_position in raw_positions:
-        mb_idx, block_idx, coefficient_idx = (int(value) for value in raw_position)
-        if coefficient_idx >= 0 or ~coefficient_idx < min_coefficient_index:
-            continue
-        block_key = (mb_idx, block_idx)
-        if block_key in seen_blocks:
-            continue
-        values = global_blocks.get(block_key)
-        real_index = ~coefficient_idx
-        if values is None or real_index < 1 or real_index >= len(values) or values[real_index] == 0:
-            continue
-        seen_blocks.add(block_key)
-        candidate = (mb_idx, block_idx, coefficient_idx)
-        candidates.append(candidate)
-        flipped = list(values)
-        flipped[real_index] = -flipped[real_index]
-        modifications.append((mb_idx, block_idx, flipped))
-
-    if not modifications:
-        return
-    local_offsets = {
-        (int(mb) - int(idr_offset), int(block)): offsets
-        for (mb, block), offsets in global_offsets.items()
-    }
-    local_blocks = {
-        (int(mb) - int(idr_offset), int(block)): values
-        for (mb, block), values in global_blocks.items()
-    }
-    nal = SimpleNamespace(
-        rbsp_byte=rbsp_bytes,
-        forbidden_zero_bit=0,
-        nal_ref_idc=3,
-        nal_unit_type=5,
-        start_pos=0,
-        start_code_size=4,
-    )
-    patched = patcher_factory().patch_slice(
-        nal,
-        modifications,
-        sps=None,
-        pps=None,
-        global_mb_offset=int(idr_offset),
-        pre_computed_offsets=local_offsets,
-        pre_computed_blocks=local_blocks,
-    )
-    applied_blocks = {
-        (int(mb_idx), int(block_idx))
-        for mb_idx, block_idx in getattr(patched, "applied_block_keys", ())
-    }
-    for candidate in candidates:
-        if candidate[:2] in applied_blocks:
-            yield candidate
 
 
 def _metadata_from_analysis(

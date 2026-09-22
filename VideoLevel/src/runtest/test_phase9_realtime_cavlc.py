@@ -346,23 +346,15 @@ def t_streaming_blind_candidates_keep_one_sign_per_block():
 def t_streaming_blind_candidates_use_validated_filter_for_real_cavlc_filter():
     class SafetyFilter(CAVLCSafetyFilter):
         def get_safe_sign_positions(self, *_args, **_kwargs):
-            return [(5, 2, ~7), (5, 2, ~8), (6, 2, ~9)]
+            raise AssertionError("fast sign scan omits patchability validation")
 
         def get_safe_positions(self, *_args, **_kwargs):
-            raise AssertionError("generic LSB validation must not run for sign-only blind mode")
+            self._lazy_patchability_cache[(5, 2)] = (0, None, None)
+            return [(5, 2, ~7), (5, 2, ~8), (6, 2, 3)]
 
-    class Patcher:
-        def patch_slice(self, _nal, modifications, **_kwargs):
-            assert [(mb, blk) for mb, blk, _coefficients in modifications] == [(5, 2), (6, 2)]
-            return SimpleNamespace(applied_block_keys=[(6, 2)])
-
-    offsets = {(5, 2): {"start_bit": 0, "end_bit": 1, "bit_length": 1}, (6, 2): {"start_bit": 1, "end_bit": 2, "bit_length": 1}}
-    blocks = {(5, 2): [0] * 7 + [1] + [0] * 8, (6, 2): [0] * 9 + [1] + [0] * 6}
-    records = [(0, [], {}, {(5, 2): 1, (6, 2): 1}, {0: (offsets, blocks, b"\x00")})]
+    records = [(0, [], {}, {}, {})]
     safety_filter = SafetyFilter()
-    assert list(iter_blind_sign_candidates_from_idr_analysis(
-        records, safety_filter=safety_filter, patcher_factory=Patcher,
-    )) == [(6, 2, ~9)]
+    assert list(iter_blind_sign_candidates_from_idr_analysis(records, safety_filter=safety_filter)) == [(5, 2, ~7)]
     assert safety_filter._lazy_patchability_cache == {}
 
 
