@@ -177,10 +177,17 @@ CavlcResidualTail decode_cavlc_luma_residual_tail(
     const std::vector<std::uint8_t>& rbsp,
     std::size_t start_bit,
     std::uint32_t total_coefficients);
+CavlcResidualTail decode_cavlc_chroma_dc_residual_tail(
+    const std::vector<std::uint8_t>& rbsp,
+    std::size_t start_bit,
+    std::uint32_t total_coefficients);
 CavlcDecodedLumaBlock decode_cavlc_luma_block(
     const std::vector<std::uint8_t>& rbsp,
     std::size_t start_bit,
     int n_c);
+CavlcDecodedLumaBlock decode_cavlc_chroma_dc_block(
+    const std::vector<std::uint8_t>& rbsp,
+    std::size_t start_bit);
 CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
     const std::vector<std::uint8_t>& rbsp,
     std::size_t start_bit,
