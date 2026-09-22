@@ -1,6 +1,76 @@
 #include "zkstego/cavlc_stream.hpp"
 
 #include <array>
+
+struct CoeffTokenCode {
+    const char* bits;
+    std::uint8_t total_coefficients;
+    std::uint8_t trailing_ones;
+};
+constexpr std::array coeff_token_n4_7{
+    CoeffTokenCode{"001111", 1, 0},
+    CoeffTokenCode{"1110", 1, 1},
+    CoeffTokenCode{"001011", 2, 0},
+    CoeffTokenCode{"01111", 2, 1},
+    CoeffTokenCode{"1101", 2, 2},
+    CoeffTokenCode{"001000", 3, 0},
+    CoeffTokenCode{"01100", 3, 1},
+    CoeffTokenCode{"01110", 3, 2},
+    CoeffTokenCode{"1100", 3, 3},
+    CoeffTokenCode{"0001111", 4, 0},
+    CoeffTokenCode{"01010", 4, 1},
+    CoeffTokenCode{"01011", 4, 2},
+    CoeffTokenCode{"1011", 4, 3},
+    CoeffTokenCode{"0001011", 5, 0},
+    CoeffTokenCode{"01000", 5, 1},
+    CoeffTokenCode{"01001", 5, 2},
+    CoeffTokenCode{"1010", 5, 3},
+    CoeffTokenCode{"0001001", 6, 0},
+    CoeffTokenCode{"001110", 6, 1},
+    CoeffTokenCode{"001101", 6, 2},
+    CoeffTokenCode{"1001", 6, 3},
+    CoeffTokenCode{"0001000", 7, 0},
+    CoeffTokenCode{"001010", 7, 1},
+    CoeffTokenCode{"001001", 7, 2},
+    CoeffTokenCode{"1000", 7, 3},
+    CoeffTokenCode{"00001111", 8, 0},
+    CoeffTokenCode{"0001110", 8, 1},
+    CoeffTokenCode{"0001101", 8, 2},
+    CoeffTokenCode{"01101", 8, 3},
+    CoeffTokenCode{"00001011", 9, 0},
+    CoeffTokenCode{"00001110", 9, 1},
+    CoeffTokenCode{"0001010", 9, 2},
+    CoeffTokenCode{"001100", 9, 3},
+    CoeffTokenCode{"000001111", 10, 0},
+    CoeffTokenCode{"00001010", 10, 1},
+    CoeffTokenCode{"00001101", 10, 2},
+    CoeffTokenCode{"0001100", 10, 3},
+    CoeffTokenCode{"000001011", 11, 0},
+    CoeffTokenCode{"000001110", 11, 1},
+    CoeffTokenCode{"00001001", 11, 2},
+    CoeffTokenCode{"00001100", 11, 3},
+    CoeffTokenCode{"000001000", 12, 0},
+    CoeffTokenCode{"000001010", 12, 1},
+    CoeffTokenCode{"000001101", 12, 2},
+    CoeffTokenCode{"00001000", 12, 3},
+    CoeffTokenCode{"0000001101", 13, 0},
+    CoeffTokenCode{"000000111", 13, 1},
+    CoeffTokenCode{"000001001", 13, 2},
+    CoeffTokenCode{"000001100", 13, 3},
+    CoeffTokenCode{"0000001001", 14, 0},
+    CoeffTokenCode{"0000001100", 14, 1},
+    CoeffTokenCode{"0000001011", 14, 2},
+    CoeffTokenCode{"0000001010", 14, 3},
+    CoeffTokenCode{"0000000101", 15, 0},
+    CoeffTokenCode{"0000001000", 15, 1},
+    CoeffTokenCode{"0000000111", 15, 2},
+    CoeffTokenCode{"0000000110", 15, 3},
+    CoeffTokenCode{"0000000001", 16, 0},
+    CoeffTokenCode{"0000000100", 16, 1},
+    CoeffTokenCode{"0000000011", 16, 2},
+    CoeffTokenCode{"0000000010", 16, 3},
+};
+#include <array>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -20,12 +90,6 @@ std::size_t start_code_length_at(const std::vector<std::uint8_t>& bytes, std::si
     }
     return 0;
 }
-
-struct CoeffTokenCode {
-    const char* bits;
-    std::uint8_t total_coefficients;
-    std::uint8_t trailing_ones;
-};
 
 constexpr std::array coeff_token_n0_1{
     CoeffTokenCode{"1", 0, 0}, CoeffTokenCode{"000101", 1, 0}, CoeffTokenCode{"01", 1, 1},
@@ -228,8 +292,20 @@ CavlcCoeffToken parse_cavlc_coeff_token(
                 }
             }
         } else {
-            const auto& table = n_c <= 1 ? coeff_token_n0_1 : n_c <= 3 ? coeff_token_n2_3 : coeff_token_n4_5;
-            for (const auto& code : table) {
+            const CoeffTokenCode* table = nullptr;
+            std::size_t table_size = 0;
+            if (n_c <= 1) {
+                table = coeff_token_n0_1.data();
+                table_size = coeff_token_n0_1.size();
+            } else if (n_c <= 3) {
+                table = coeff_token_n2_3.data();
+                table_size = coeff_token_n2_3.size();
+            } else {
+                table = coeff_token_n4_7.data();
+                table_size = coeff_token_n4_7.size();
+            }
+            for (std::size_t table_index = 0; table_index < table_size; ++table_index) {
+                const auto& code = table[table_index];
                 const std::string_view candidate{code.bits};
                 if (candidate == bits) longest_match = &code;
                 if (candidate.size() > bits.size() && candidate.compare(0, bits.size(), bits) == 0) {

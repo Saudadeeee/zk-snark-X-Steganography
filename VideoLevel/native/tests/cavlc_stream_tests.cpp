@@ -218,7 +218,7 @@ int main() {
     CHECK(n4_token.trailing_ones == 1);
     CHECK(n4_token.sign_bit_offsets == std::vector<std::size_t>{4});
 
-    const auto n4_long_token = zkstego::parse_cavlc_coeff_token({0x40, 0x80}, 0, 4);
+    const auto n4_long_token = zkstego::parse_cavlc_coeff_token({0x00, 0x80}, 0, 4);
     CHECK(n4_long_token.total_coefficients == 16);
     CHECK(n4_long_token.trailing_ones == 3);
     CHECK(n4_long_token.level_bit_offset == 13);
