@@ -540,9 +540,16 @@ CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit,
     const std::uint32_t coded_block_pattern_luma) {
-    // residual_block_cavlc() traverses the four 8x8 luma groups in this
-    // order.  Within a group, the block indices follow the 4x4 raster grid.
+    // H.264 luma4x4BlkIdx is ordered by 8x8 group, not by 4x4 raster order.
+    // residual_block_cavlc() visits each group in index order.  The raster
+    // map below is used only for deriving the physical left/top neighbours.
     constexpr std::array<std::array<std::size_t, 4>, 4> kCavlcLumaGroups{{
+        {{0, 1, 2, 3}},
+        {{4, 5, 6, 7}},
+        {{8, 9, 10, 11}},
+        {{12, 13, 14, 15}},
+    }};
+    constexpr std::array<std::array<std::size_t, 4>, 4> kBlockIndexByRaster{{
         {{0, 1, 4, 5}},
         {{2, 3, 6, 7}},
         {{8, 9, 12, 13}},
@@ -558,12 +565,18 @@ CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
     for (std::size_t group_index = 0; group_index < kCavlcLumaGroups.size(); ++group_index) {
         if ((coded_block_pattern_luma & (1U << group_index)) == 0U) continue;
         for (const auto block_index : kCavlcLumaGroups[group_index]) {
-            const auto x = block_index % 4;
-            const auto y = block_index / 4;
+            std::size_t x = 0;
+            std::size_t y = 0;
+            for (; y < kBlockIndexByRaster.size(); ++y) {
+                for (x = 0; x < kBlockIndexByRaster[y].size(); ++x) {
+                    if (kBlockIndexByRaster[y][x] == block_index) break;
+                }
+                if (x != kBlockIndexByRaster[y].size()) break;
+            }
             const auto has_left = x != 0;
             const auto has_top = y != 0;
-            const auto n_a = has_left ? total_coefficients[block_index - 1] : 0U;
-            const auto n_b = has_top ? total_coefficients[block_index - 4] : 0U;
+            const auto n_a = has_left ? total_coefficients[kBlockIndexByRaster[y][x - 1]] : 0U;
+            const auto n_b = has_top ? total_coefficients[kBlockIndexByRaster[y - 1][x]] : 0U;
             const auto n_c = has_left && has_top ? static_cast<int>((n_a + n_b + 1U) / 2U)
                            : has_left ? static_cast<int>(n_a)
                            : has_top ? static_cast<int>(n_b)
