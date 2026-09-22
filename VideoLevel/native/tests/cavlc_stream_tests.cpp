@@ -162,6 +162,11 @@ int main() {
     CHECK((varied_runs_tail.runs == std::vector<std::uint32_t>{0, 3, 0, 1}));
     CHECK(varied_runs_tail.next_bit_offset == 9);
 
+    const auto real_tc9_tail = zkstego::decode_cavlc_luma_residual_tail({0x3b, 0xe8}, 0, 9);
+    CHECK(real_tc9_tail.total_zeros == 5);
+    CHECK((real_tc9_tail.runs == std::vector<std::uint32_t>{0, 2, 0, 1, 0, 2, 0, 0, 0}));
+    CHECK(real_tc9_tail.next_bit_offset == 15);
+
     struct TotalZerosCase {
         std::uint32_t total_coefficients;
         std::uint8_t encoded_byte;
@@ -213,12 +218,17 @@ int main() {
     CHECK(n4_token.trailing_ones == 1);
     CHECK(n4_token.sign_bit_offsets == std::vector<std::size_t>{4});
 
+    const auto n4_long_token = zkstego::parse_cavlc_coeff_token({0x40, 0x80}, 0, 4);
+    CHECK(n4_long_token.total_coefficients == 16);
+    CHECK(n4_long_token.trailing_ones == 3);
+    CHECK(n4_long_token.level_bit_offset == 13);
+
     const auto n6_token = zkstego::parse_cavlc_coeff_token({0xe8, 0x00}, 0, 6);
     CHECK(n6_token.total_coefficients == 1);
     CHECK(n6_token.trailing_ones == 1);
     CHECK(n6_token.sign_bit_offsets == std::vector<std::size_t>{4});
 
-    const auto n8_empty_token = zkstego::parse_cavlc_coeff_token({0x00}, 0, 8);
+    const auto n8_empty_token = zkstego::parse_cavlc_coeff_token({0x0c}, 0, 8);
     CHECK(n8_empty_token.total_coefficients == 0);
     CHECK(n8_empty_token.trailing_ones == 0);
     const auto n8_token = zkstego::parse_cavlc_coeff_token({0x14, 0x00}, 0, 8);

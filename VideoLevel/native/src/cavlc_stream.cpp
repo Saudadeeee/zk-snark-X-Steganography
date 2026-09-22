@@ -3,6 +3,7 @@
 #include <array>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 namespace zkstego {
@@ -196,8 +197,12 @@ CavlcCoeffToken parse_cavlc_coeff_token(
         // in the high four bits and TrailingOnes in the low two bits.
         const auto code = reader.read_bits(6);
         CavlcCoeffToken token;
-        token.total_coefficients = code >> 2U;
-        token.trailing_ones = code & 0x3U;
+        if (code == 3U) {
+            token.total_coefficients = 0;
+        } else {
+            token.total_coefficients = code >> 2U;
+            token.trailing_ones = code & 0x3U;
+        }
         if (token.trailing_ones > token.total_coefficients) {
             throw std::invalid_argument("invalid fixed-length CAVLC coeff_token");
         }
@@ -210,37 +215,41 @@ CavlcCoeffToken parse_cavlc_coeff_token(
     }
     std::string bits;
     bits.reserve(16);
+    const CoeffTokenCode* longest_match = nullptr;
     for (std::size_t length = 1; length <= 16; ++length) {
         bits.push_back(reader.read_bit() == 0 ? '0' : '1');
+        bool has_longer_prefix = false;
         if (n_c == -1) {
             for (const auto& code : coeff_token_chroma_dc) {
-                if (bits == code.bits) {
-                    CavlcCoeffToken token;
-                    token.total_coefficients = code.total_coefficients;
-                    token.trailing_ones = code.trailing_ones;
-                    for (std::size_t index = 0; index < token.trailing_ones; ++index) {
-                        token.sign_bit_offsets.push_back(reader.position() + index);
-                    }
-                    token.level_bit_offset = reader.position() + token.trailing_ones;
-                    return token;
+                const std::string_view candidate{code.bits};
+                if (candidate == bits) longest_match = &code;
+                if (candidate.size() > bits.size() && candidate.compare(0, bits.size(), bits) == 0) {
+                    has_longer_prefix = true;
                 }
             }
-            continue;
-        }
-        const auto& table = n_c <= 1 ? coeff_token_n0_1 : n_c <= 3 ? coeff_token_n2_3 : coeff_token_n4_5;
-        for (const auto& code : table) {
-            if (bits == code.bits) {
-                CavlcCoeffToken token;
-                token.total_coefficients = code.total_coefficients;
-                token.trailing_ones = code.trailing_ones;
-                token.sign_bit_offsets.reserve(token.trailing_ones);
-                for (std::size_t index = 0; index < token.trailing_ones; ++index) {
-                    token.sign_bit_offsets.push_back(reader.position() + index);
+        } else {
+            const auto& table = n_c <= 1 ? coeff_token_n0_1 : n_c <= 3 ? coeff_token_n2_3 : coeff_token_n4_5;
+            for (const auto& code : table) {
+                const std::string_view candidate{code.bits};
+                if (candidate == bits) longest_match = &code;
+                if (candidate.size() > bits.size() && candidate.compare(0, bits.size(), bits) == 0) {
+                    has_longer_prefix = true;
                 }
-                token.level_bit_offset = reader.position() + token.trailing_ones;
-                return token;
             }
         }
+        if (!has_longer_prefix) break;
+    }
+    if (longest_match != nullptr) {
+        CavlcCoeffToken token;
+        token.total_coefficients = longest_match->total_coefficients;
+        token.trailing_ones = longest_match->trailing_ones;
+        token.sign_bit_offsets.reserve(token.trailing_ones);
+        const auto token_end = start_bit + std::string_view(longest_match->bits).size();
+        for (std::size_t index = 0; index < token.trailing_ones; ++index) {
+            token.sign_bit_offsets.push_back(token_end + index);
+        }
+        token.level_bit_offset = token_end + token.trailing_ones;
+        return token;
     }
     throw std::invalid_argument("invalid CAVLC coeff_token for nC 0 or 1");
 }
@@ -429,10 +438,10 @@ CavlcResidualTail decode_cavlc_luma_residual_tail(
         VlcCode{"11", 0}, VlcCode{"10", 1}, VlcCode{"01", 2}, VlcCode{"001", 3}, VlcCode{"000", 4},
     };
     constexpr std::array run_before_zeros5_codes{
-        VlcCode{"11", 0}, VlcCode{"10", 1}, VlcCode{"01", 2}, VlcCode{"001", 3}, VlcCode{"0001", 4}, VlcCode{"0000", 5},
+        VlcCode{"11", 0}, VlcCode{"10", 1}, VlcCode{"011", 2}, VlcCode{"010", 3}, VlcCode{"001", 4}, VlcCode{"000", 5},
     };
     constexpr std::array run_before_zeros6_codes{
-        VlcCode{"11", 0}, VlcCode{"10", 1}, VlcCode{"01", 2}, VlcCode{"001", 3}, VlcCode{"0001", 4}, VlcCode{"00001", 5}, VlcCode{"00000", 6},
+        VlcCode{"11", 0}, VlcCode{"000", 1}, VlcCode{"001", 2}, VlcCode{"011", 3}, VlcCode{"010", 4}, VlcCode{"101", 5}, VlcCode{"100", 6},
     };
     constexpr std::array run_before_zeros7_plus_codes{
         VlcCode{"111", 0}, VlcCode{"110", 1}, VlcCode{"101", 2}, VlcCode{"100", 3}, VlcCode{"011", 4},
