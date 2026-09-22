@@ -106,7 +106,7 @@ int main() {
         {0x88, 0x84, 0x3f, 0xe0, 0xb8, 0x60, 0x1e, 0x5c,
          0x07, 0x29, 0x80, 0x00, 0x80, 0x8a, 0x64, 0x50},
         first_luma_token);
-    CHECK((first_luma_levels.values == std::vector<std::int32_t>{2, 2, -2, -24}));
+    CHECK((first_luma_levels.values == std::vector<std::int32_t>{3, 2, -2, -24}));
     CHECK(first_luma_levels.next_bit_offset == 109);
     const auto first_luma_tail = zkstego::decode_cavlc_tail_tc4(
         {0x88, 0x84, 0x3f, 0xe0, 0xb8, 0x60, 0x1e, 0x5c,
@@ -129,17 +129,17 @@ int main() {
         macroblock.residual_bit_offset,
         0);
     CHECK(first_luma_block.token.total_coefficients == 4);
-    CHECK((first_luma_block.levels.values == std::vector<std::int32_t>{2, 2, -2, -24}));
+    CHECK((first_luma_block.levels.values == std::vector<std::int32_t>{3, 2, -2, -24}));
     CHECK((first_luma_block.tail.runs == std::vector<std::uint32_t>{0, 3, 0, 0}));
     CHECK(first_luma_block.tail.next_bit_offset == 117);
     CHECK((first_luma_block.coefficients == std::vector<std::int32_t>{
-        -24, -2, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
+        -24, -2, 0, 0, 0, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
     zkstego::CavlcCoeffToken long_prefix_token;
     long_prefix_token.total_coefficients = 1;
     long_prefix_token.level_bit_offset = 0;
     const auto long_prefix_levels = zkstego::decode_cavlc_non_trailing_levels(
         {0x00, 0x02, 0x00}, long_prefix_token);
-    CHECK((long_prefix_levels.values == std::vector<std::int32_t>{8}));
+    CHECK((long_prefix_levels.values == std::vector<std::int32_t>{9}));
     CHECK(long_prefix_levels.next_bit_offset == 19);
 
     // H.264 9.2.2: the first non-trailing level receives the levelCode += 2
@@ -166,7 +166,7 @@ int main() {
     const auto first_luma_coefficients = zkstego::reconstruct_cavlc_tc4_no_trailing(
         first_luma_levels.values, first_luma_tail.runs);
     CHECK((first_luma_coefficients == std::vector<std::int32_t>{
-        -24, -2, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
+        -24, -2, 0, 0, 0, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
 
     const auto varied_runs_tail = zkstego::decode_cavlc_tail_tc4({0xd9, 0x80}, 0);
     CHECK(varied_runs_tail.total_zeros == 4);
@@ -228,6 +228,12 @@ int main() {
     CHECK(n4_token.total_coefficients == 1);
     CHECK(n4_token.trailing_ones == 1);
     CHECK(n4_token.sign_bit_offsets == std::vector<std::size_t>{4});
+
+    // Table 9-5(c), nC=4..7: 1111 is the valid empty-block token.
+    const auto n4_empty_token = zkstego::parse_cavlc_coeff_token({0xf0}, 0, 4);
+    CHECK(n4_empty_token.total_coefficients == 0);
+    CHECK(n4_empty_token.trailing_ones == 0);
+    CHECK(n4_empty_token.level_bit_offset == 4);
 
     const auto n4_long_token = zkstego::parse_cavlc_coeff_token({0x00, 0x80}, 0, 4);
     CHECK(n4_long_token.total_coefficients == 16);
