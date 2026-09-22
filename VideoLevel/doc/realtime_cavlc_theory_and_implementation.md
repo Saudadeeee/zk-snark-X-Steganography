@@ -132,6 +132,26 @@ candidate-selection memory, not a realtime claim: 5.008 slices/s is below a
 30 FPS camera target and the measurement excludes native patch/write, proof,
 and decoder validation.
 
+### Latest end to end negative result
+
+The Python path is not a usable embedding path yet. On the audit machine, a
+one-byte blind proof payload (1,072 bits) was scheduled and patched into
+`foreman_cif_q18_g1_300f.h264` (300 all-intra frames) in 280.579 seconds.
+The patcher reported all 1,072 positions applied and preserved the source
+byte length (3,551,610 bytes), but the resulting stream was not valid: FFmpeg
+reported H.264 macroblock/CAVLC errors when run with `-xerror`, and blind
+verification returned `valid: False` after 276.849 seconds (557.428 seconds
+total). A normal FFmpeg invocation can conceal these errors while returning
+zero; it is not an acceptable decoder acceptance test.
+
+`patch_selected_sign_positions_streaming` now validates its temporary output
+with `ffmpeg -v error -xerror` before atomically publishing it. A decoder
+error therefore aborts the operation and removes the temporary file. This is
+a fail-closed safety gate, not a repair for the current multi-block CAVLC
+patcher. Until native slice traversal and a bit-exact per-block rewrite are
+implemented and pass decoder plus blind-proof E2E tests, this repository must
+not claim realtime, edge-ready, or usable blind embedding.
+
 ## Blind extraction relationship
 
 Blind extraction and realtime use the same sign-invariant candidate policy.
