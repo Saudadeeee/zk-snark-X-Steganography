@@ -30,33 +30,42 @@ int main(int argc, char* argv[]) {
             return 2;
         }
         const auto units = zkstego::split_annex_b(annex_b);
+        std::size_t decoded_luma_macroblocks = 0;
         for (const auto& idr : idrs) {
-            if (!verbose && &idr != &idrs.front() && &idr != &idrs.back()) {
+            if (!verbose && !macroblock_mode && &idr != &idrs.front() && &idr != &idrs.back()) {
                 continue;
             }
-            std::cout << "nal=" << idr.nal_index
-                      << " first_mb=" << idr.slice_header.first_mb_in_slice
-                      << " slice_type=" << idr.slice_header.slice_type
-                      << " data_bit_offset=" << idr.slice_header.data_bit_offset
-                      << " cbp=" << idr.first_macroblock.coded_block_pattern
-                      << " residual_bit_offset=" << idr.first_macroblock.residual_bit_offset
-                      << " first_luma_tc=" << idr.first_luma_block.token.total_coefficients
-                      << " first_luma_end=" << idr.first_luma_block.tail.next_bit_offset
-                      << '\n';
             if (macroblock_mode) {
                 const auto macroblock = zkstego::decode_cavlc_luma_macroblock(
                     units.at(idr.nal_index).rbsp(),
                     idr.first_macroblock.residual_bit_offset,
                     idr.first_macroblock.coded_block_pattern & 0x0fU);
-                std::cout << "nal=" << idr.nal_index
-                          << " luma_macroblock_end=" << macroblock.next_bit_offset
-                          << " total_coefficients=";
-                for (std::size_t block_index = 0; block_index < macroblock.blocks.size(); ++block_index) {
-                    if (block_index != 0) std::cout << ',';
-                    std::cout << macroblock.blocks[block_index].token.total_coefficients;
+                ++decoded_luma_macroblocks;
+                if (&idr == &idrs.front() || &idr == &idrs.back()) {
+                    std::cout << "nal=" << idr.nal_index
+                              << " luma_macroblock_end=" << macroblock.next_bit_offset
+                              << " total_coefficients=";
+                    for (std::size_t block_index = 0; block_index < macroblock.blocks.size(); ++block_index) {
+                        if (block_index != 0) std::cout << ',';
+                        std::cout << macroblock.blocks[block_index].token.total_coefficients;
+                    }
+                    std::cout << '\n';
                 }
-                std::cout << '\n';
             }
+            if (!macroblock_mode || &idr == &idrs.front() || &idr == &idrs.back()) {
+                std::cout << "nal=" << idr.nal_index
+                          << " first_mb=" << idr.slice_header.first_mb_in_slice
+                          << " slice_type=" << idr.slice_header.slice_type
+                          << " data_bit_offset=" << idr.slice_header.data_bit_offset
+                          << " cbp=" << idr.first_macroblock.coded_block_pattern
+                          << " residual_bit_offset=" << idr.first_macroblock.residual_bit_offset
+                          << " first_luma_tc=" << idr.first_luma_block.token.total_coefficients
+                          << " first_luma_end=" << idr.first_luma_block.tail.next_bit_offset
+                          << '\n';
+            }
+        }
+        if (macroblock_mode) {
+            std::cout << "decoded_luma_macroblocks=" << decoded_luma_macroblocks << '\n';
         }
     } catch (const std::exception& error) {
         std::cerr << "native IDR inspection failed: " << error.what() << '\n';
