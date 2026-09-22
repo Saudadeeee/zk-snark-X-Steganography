@@ -696,6 +696,31 @@ CavlcDecodedLumaBlock decode_cavlc_chroma_dc_block(
     return block;
 }
 
+CavlcDecodedLumaBlock decode_cavlc_chroma_ac_block(
+    const std::vector<std::uint8_t>& rbsp,
+    const std::size_t start_bit,
+    const int n_c) {
+    if (n_c < 0) {
+        throw std::invalid_argument("chroma AC requires a non-negative nC context");
+    }
+    constexpr std::size_t kChromaAcCoefficients = 15;
+    CavlcDecodedLumaBlock block;
+    block.token = parse_cavlc_coeff_token(rbsp, start_bit, n_c);
+    block.levels = decode_cavlc_non_trailing_levels(rbsp, block.token);
+    if (block.token.total_coefficients == 0) {
+        block.tail.next_bit_offset = block.levels.next_bit_offset;
+    } else {
+        block.tail = decode_cavlc_luma_residual_tail(
+            rbsp, block.levels.next_bit_offset, block.token.total_coefficients);
+        if (block.tail.total_zeros > kChromaAcCoefficients - block.token.total_coefficients) {
+            throw std::invalid_argument("chroma AC total_zeros exceeds block bound");
+        }
+    }
+    block.coefficients = reconstruct_cavlc_block(
+        block.levels, block.tail.runs, kChromaAcCoefficients);
+    return block;
+}
+
 CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit,
