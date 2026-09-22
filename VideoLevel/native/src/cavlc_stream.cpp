@@ -186,11 +186,33 @@ CavlcCoeffToken parse_cavlc_coeff_token(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit,
     const int n_c) {
-    if (n_c < -2 || n_c > 7) {
+    if (n_c < -2) {
         throw std::invalid_argument("native coeff_token parser received an unsupported nC context");
     }
     RbspBitReader reader(rbsp);
     reader.skip_bits(start_bit);
+    if (n_c >= 8) {
+        // H.264 Table 9-5: a fixed six-bit coeff_token. Values 0/1 encode
+        // TC=1 with T1=0/1; value 3 is the special empty block; from TC=2
+        // onward the high bits encode TC-1 and the low two bits encode T1.
+        const auto code = reader.read_bits(6);
+        CavlcCoeffToken token;
+        if (code == 3) {
+            token.total_coefficients = 0;
+        } else {
+            token.total_coefficients = code / 4U + 1U;
+            token.trailing_ones = code % 4U;
+            if (token.trailing_ones > 3 || token.trailing_ones > token.total_coefficients) {
+                throw std::invalid_argument("invalid fixed-length CAVLC coeff_token");
+            }
+        }
+        token.sign_bit_offsets.reserve(token.trailing_ones);
+        for (std::size_t index = 0; index < token.trailing_ones; ++index) {
+            token.sign_bit_offsets.push_back(reader.position() + index);
+        }
+        token.level_bit_offset = reader.position() + token.trailing_ones;
+        return token;
+    }
     std::string bits;
     bits.reserve(16);
     for (std::size_t length = 1; length <= 16; ++length) {

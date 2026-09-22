@@ -205,6 +205,15 @@ int main() {
     CHECK(n6_token.trailing_ones == 1);
     CHECK(n6_token.sign_bit_offsets == std::vector<std::size_t>{4});
 
+    const auto n8_empty_token = zkstego::parse_cavlc_coeff_token({0x0c}, 0, 8);
+    CHECK(n8_empty_token.total_coefficients == 0);
+    CHECK(n8_empty_token.trailing_ones == 0);
+    const auto n8_token = zkstego::parse_cavlc_coeff_token({0x04, 0x00}, 0, 8);
+    CHECK(n8_token.total_coefficients == 1);
+    CHECK(n8_token.trailing_ones == 1);
+    CHECK(n8_token.sign_bit_offsets == std::vector<std::size_t>{6});
+    CHECK(n8_token.level_bit_offset == 7);
+
     const auto chroma_dc_token = zkstego::parse_cavlc_coeff_token({0x80}, 0, -1);
     CHECK(chroma_dc_token.total_coefficients == 1);
     CHECK(chroma_dc_token.trailing_ones == 1);
