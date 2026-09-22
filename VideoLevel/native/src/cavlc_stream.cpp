@@ -595,6 +595,66 @@ CavlcResidualTail decode_cavlc_luma_residual_tail(
     return tail;
 }
 
+CavlcResidualTail decode_cavlc_chroma_dc_residual_tail(
+    const std::vector<std::uint8_t>& rbsp,
+    const std::size_t start_bit,
+    const std::uint32_t total_coefficients) {
+    struct VlcCode { const char* bits; std::uint8_t value; };
+    constexpr std::array total_zeros_tc1{
+        VlcCode{"1", 0}, VlcCode{"01", 1}, VlcCode{"00", 2}, VlcCode{"000", 3},
+    };
+    constexpr std::array total_zeros_tc2{
+        VlcCode{"1", 0}, VlcCode{"01", 1}, VlcCode{"00", 2},
+    };
+    constexpr std::array total_zeros_tc3{
+        VlcCode{"1", 0}, VlcCode{"0", 1},
+    };
+    constexpr std::array run_before_zeros1{
+        VlcCode{"1", 0}, VlcCode{"0", 1},
+    };
+    constexpr std::array run_before_zeros2{
+        VlcCode{"1", 0}, VlcCode{"01", 1}, VlcCode{"00", 2},
+    };
+    constexpr std::array run_before_zeros3{
+        VlcCode{"11", 0}, VlcCode{"10", 1}, VlcCode{"01", 2}, VlcCode{"00", 3},
+    };
+    const auto decode = [](RbspBitReader& reader, const auto& table) -> std::uint32_t {
+        std::string bits;
+        for (std::size_t length = 1; length <= 3; ++length) {
+            bits.push_back(reader.read_bit() == 0 ? '0' : '1');
+            for (const auto& code : table) {
+                if (bits == code.bits) return code.value;
+            }
+        }
+        throw std::invalid_argument("invalid chroma DC CAVLC VLC");
+    };
+    if (total_coefficients == 0 || total_coefficients > 4) {
+        throw std::invalid_argument("chroma DC total_coefficients must be in [1, 4]");
+    }
+    RbspBitReader reader(rbsp);
+    reader.skip_bits(start_bit);
+    CavlcResidualTail tail;
+    if (total_coefficients == 1) tail.total_zeros = decode(reader, total_zeros_tc1);
+    if (total_coefficients == 2) tail.total_zeros = decode(reader, total_zeros_tc2);
+    if (total_coefficients == 3) tail.total_zeros = decode(reader, total_zeros_tc3);
+    if (tail.total_zeros > 4U - total_coefficients) {
+        throw std::invalid_argument("chroma DC total_zeros exceeds block bound");
+    }
+    auto zeros_left = tail.total_zeros;
+    for (std::uint32_t index = 1; index < total_coefficients; ++index) {
+        std::uint32_t run = 0;
+        if (zeros_left == 1) run = decode(reader, run_before_zeros1);
+        if (zeros_left == 2) run = decode(reader, run_before_zeros2);
+        if (zeros_left == 3) run = decode(reader, run_before_zeros3);
+        if (run > zeros_left) throw std::invalid_argument("chroma DC run exceeds remaining zeros");
+        tail.runs.push_back(run);
+        zeros_left -= run;
+    }
+    tail.runs.push_back(zeros_left);
+    tail.next_bit_offset = reader.position();
+    return tail;
+}
+
 CavlcResidualTail decode_cavlc_tail_tc4(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit) {
@@ -617,6 +677,22 @@ CavlcDecodedLumaBlock decode_cavlc_luma_block(
     }
     block.coefficients = reconstruct_cavlc_block(
         block.levels, block.tail.runs, kLumaBlockCoefficients);
+    return block;
+}
+
+CavlcDecodedLumaBlock decode_cavlc_chroma_dc_block(
+    const std::vector<std::uint8_t>& rbsp,
+    const std::size_t start_bit) {
+    CavlcDecodedLumaBlock block;
+    block.token = parse_cavlc_coeff_token(rbsp, start_bit, -1);
+    block.levels = decode_cavlc_non_trailing_levels(rbsp, block.token);
+    if (block.token.total_coefficients == 0) {
+        block.tail.next_bit_offset = block.levels.next_bit_offset;
+    } else {
+        block.tail = decode_cavlc_chroma_dc_residual_tail(
+            rbsp, block.levels.next_bit_offset, block.token.total_coefficients);
+    }
+    block.coefficients = reconstruct_cavlc_block(block.levels, block.tail.runs, 4);
     return block;
 }
 
