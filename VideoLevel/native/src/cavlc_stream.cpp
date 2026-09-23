@@ -72,6 +72,7 @@ constexpr std::array coeff_token_n4_7{
     CoeffTokenCode{"0000000010", 16, 3},
 };
 #include <array>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -231,8 +232,8 @@ H264BaselineIdrSliceHeader parse_baseline_idr_slice_header(
         static_cast<void>(reader.read_ue());
     }
     const auto slice_type_modulo = header.slice_type % 5;
-    if (slice_type_modulo != 2 && slice_type_modulo != 4) {
-        throw std::invalid_argument("native IDR parser currently supports I and SI slices only");
+    if (slice_type_modulo != 2) {
+        throw std::invalid_argument("native IDR parser requires I-slice macroblock syntax");
     }
     static_cast<void>(reader.read_bit());  // no_output_of_prior_pics_flag
     static_cast<void>(reader.read_bit());  // long_term_reference_flag
@@ -693,6 +694,28 @@ CavlcDecodedLumaBlock decode_cavlc_luma_block(
     return block;
 }
 
+CavlcDecodedLumaBlock decode_cavlc_luma_ac_block(
+    const std::vector<std::uint8_t>& rbsp,
+    const std::size_t start_bit,
+    const int n_c) {
+    if (n_c < 0) {
+        throw std::invalid_argument("luma AC requires a non-negative nC context");
+    }
+    constexpr std::size_t kLumaAcCoefficients = 15;
+    CavlcDecodedLumaBlock block;
+    block.token = parse_cavlc_coeff_token(rbsp, start_bit, n_c);
+    block.levels = decode_cavlc_non_trailing_levels(rbsp, block.token);
+    if (block.token.total_coefficients == 0) {
+        block.tail.next_bit_offset = block.levels.next_bit_offset;
+    } else {
+        block.tail = decode_cavlc_residual_tail(
+            rbsp, block.levels.next_bit_offset, block.token.total_coefficients, kLumaAcCoefficients);
+    }
+    block.coefficients = reconstruct_cavlc_block(
+        block.levels, block.tail.runs, kLumaAcCoefficients);
+    return block;
+}
+
 CavlcDecodedLumaBlock decode_cavlc_chroma_dc_block(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit) {
@@ -731,11 +754,14 @@ CavlcDecodedLumaBlock decode_cavlc_chroma_ac_block(
     return block;
 }
 
-CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
+namespace {
+
+CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock_impl(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit,
     const std::uint32_t coded_block_pattern_luma,
-    const CavlcLumaNeighbourCounts& neighbours) {
+    const CavlcLumaNeighbourCounts& neighbours,
+    const bool ac_only) {
     // H.264 luma4x4BlkIdx is ordered by 8x8 group, not by 4x4 raster order.
     // residual_block_cavlc() visits each group in index order.  The raster
     // map below is used only for deriving the physical left/top neighbours.
@@ -796,7 +822,8 @@ CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
                                       : 0;
             auto& block = macroblock.blocks[block_index];
             try {
-                block = decode_cavlc_luma_block(rbsp, bit_offset, n_c);
+                block = ac_only ? decode_cavlc_luma_ac_block(rbsp, bit_offset, n_c)
+                                : decode_cavlc_luma_block(rbsp, bit_offset, n_c);
             } catch (const std::exception& error) {
                 std::string decoded_summary;
                 for (std::size_t prior_index = 0; prior_index < macroblock.blocks.size(); ++prior_index) {
@@ -822,12 +849,32 @@ CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
     return macroblock;
 }
 
+}  // namespace
+
+CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
+    const std::vector<std::uint8_t>& rbsp,
+    const std::size_t start_bit,
+    const std::uint32_t coded_block_pattern_luma,
+    const CavlcLumaNeighbourCounts& neighbours) {
+    return decode_cavlc_luma_macroblock_impl(
+        rbsp, start_bit, coded_block_pattern_luma, neighbours, false);
+}
+
 CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit,
     const std::uint32_t coded_block_pattern_luma) {
     return decode_cavlc_luma_macroblock(
         rbsp, start_bit, coded_block_pattern_luma, CavlcLumaNeighbourCounts{});
+}
+
+CavlcDecodedLumaMacroblock decode_cavlc_luma_ac_macroblock(
+    const std::vector<std::uint8_t>& rbsp,
+    const std::size_t start_bit,
+    const std::uint32_t coded_block_pattern_luma,
+    const CavlcLumaNeighbourCounts& neighbours) {
+    return decode_cavlc_luma_macroblock_impl(
+        rbsp, start_bit, coded_block_pattern_luma, neighbours, true);
 }
 
 std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
@@ -893,6 +940,145 @@ H264BaselineIMacroblockHeader parse_baseline_i_macroblock_header(
     }
     header.residual_bit_offset = reader.position();
     return header;
+}
+
+CavlcDecodedIdrSlice decode_baseline_i_idr_slice(
+    const std::vector<std::uint8_t>& rbsp,
+    const H264BaselineSps& sps,
+    const H264BaselinePps& pps) {
+    // This is deliberately a narrow traversal contract. parse_baseline_* has
+    // already rejected CABAC, FMO, and field pictures; requiring one complete
+    // raster slice additionally makes the macroblock-neighbour state explicit
+    // and prevents silently applying it to arbitrary multi-slice streams.
+    const auto slice_header = parse_baseline_idr_slice_header(rbsp, sps, pps);
+    if (slice_header.first_mb_in_slice != 0U) {
+        throw std::invalid_argument("native I-slice traversal requires a slice starting at macroblock zero");
+    }
+    const auto width = static_cast<std::size_t>(sps.pic_width_in_mbs_minus1) + 1U;
+    const auto height = static_cast<std::size_t>(sps.pic_height_in_map_units_minus1) + 1U;
+    if (width == 0U || height == 0U || width > std::numeric_limits<std::size_t>::max() / height) {
+        throw std::invalid_argument("invalid native I-slice traversal dimensions");
+    }
+    const auto macroblock_count = width * height;
+    if (macroblock_count > rbsp.size() * 8U) {
+        throw std::invalid_argument("declared macroblock count exceeds available RBSP bits");
+    }
+
+    CavlcDecodedIdrSlice decoded;
+    decoded.sps = sps;
+    decoded.pps = pps;
+    decoded.header = slice_header;
+    decoded.macroblocks.reserve(macroblock_count);
+    auto bit_offset = slice_header.data_bit_offset;
+
+    constexpr std::array<std::size_t, 4> kLumaRightEdge{{5, 7, 13, 15}};
+    constexpr std::array<std::size_t, 4> kLumaBottomEdge{{10, 11, 14, 15}};
+    for (std::size_t address = 0; address < macroblock_count; ++address) {
+        CavlcDecodedIMacroblock macroblock;
+        macroblock.address = static_cast<std::uint32_t>(address);
+        try {
+            macroblock.header = parse_baseline_i_macroblock_header(rbsp, bit_offset);
+            const auto is_i16x16 = macroblock.header.mb_type >= 1U && macroblock.header.mb_type <= 24U;
+
+            CavlcLumaNeighbourCounts luma_neighbours;
+            const auto x = address % width;
+            const auto y = address / width;
+            luma_neighbours.left_available = x != 0U;
+            luma_neighbours.top_available = y != 0U;
+            if (luma_neighbours.left_available) {
+                const auto& left = decoded.macroblocks.at(address - 1U).luma.blocks;
+                for (std::size_t edge = 0; edge < kLumaRightEdge.size(); ++edge) {
+                    luma_neighbours.left[edge] = left[kLumaRightEdge[edge]].token.total_coefficients;
+                }
+            }
+            if (luma_neighbours.top_available) {
+                const auto& top = decoded.macroblocks.at(address - width).luma.blocks;
+                for (std::size_t edge = 0; edge < kLumaBottomEdge.size(); ++edge) {
+                    luma_neighbours.top[edge] = top[kLumaBottomEdge[edge]].token.total_coefficients;
+                }
+            }
+            if (is_i16x16) {
+                // FFmpeg's CAVLC decoder predicts I16x16 DC through the
+                // normal luma block-zero neighbourhood (LUMA_DC maps to
+                // index zero for pred_non_zero_count), rather than a
+                // separately persisted DC grid.
+                const auto left_dc = luma_neighbours.left[0];
+                const auto top_dc = luma_neighbours.top[0];
+                const auto dc_n_c = luma_neighbours.left_available && luma_neighbours.top_available
+                    ? static_cast<int>((left_dc + top_dc + 1U) / 2U)
+                    : luma_neighbours.left_available ? static_cast<int>(left_dc)
+                    : luma_neighbours.top_available ? static_cast<int>(top_dc)
+                    : 0;
+                macroblock.luma_dc = decode_cavlc_luma_block(
+                    rbsp, macroblock.header.residual_bit_offset, dc_n_c);
+                bit_offset = macroblock.luma_dc.tail.next_bit_offset;
+                if ((macroblock.header.coded_block_pattern & 0x0fU) != 0U) {
+                    macroblock.luma = decode_cavlc_luma_ac_macroblock(
+                        rbsp, bit_offset, macroblock.header.coded_block_pattern & 0x0fU, luma_neighbours);
+                    bit_offset = macroblock.luma.next_bit_offset;
+                } else {
+                    macroblock.luma.next_bit_offset = bit_offset;
+                }
+            } else {
+                macroblock.luma = decode_cavlc_luma_macroblock(
+                    rbsp, macroblock.header.residual_bit_offset,
+                    macroblock.header.coded_block_pattern & 0x0fU, luma_neighbours);
+                bit_offset = macroblock.luma.next_bit_offset;
+            }
+
+            const auto chroma_coded_block_pattern = (macroblock.header.coded_block_pattern >> 4U) & 0x03U;
+            if (chroma_coded_block_pattern >= 1U) {
+                macroblock.chroma_dc[0] = decode_cavlc_chroma_dc_block(rbsp, bit_offset);
+                bit_offset = macroblock.chroma_dc[0].tail.next_bit_offset;
+                macroblock.chroma_dc[1] = decode_cavlc_chroma_dc_block(rbsp, bit_offset);
+                bit_offset = macroblock.chroma_dc[1].tail.next_bit_offset;
+            }
+            if (chroma_coded_block_pattern >= 2U) {
+                for (std::size_t component = 0; component < 2; ++component) {
+                    for (std::size_t local = 0; local < 4; ++local) {
+                        const auto chroma_x = local % 2U;
+                        const auto chroma_y = local / 2U;
+                        const auto current = component * 4U + local;
+                        const auto has_left = chroma_x != 0U || luma_neighbours.left_available;
+                        const auto has_top = chroma_y != 0U || luma_neighbours.top_available;
+                        const auto n_a = chroma_x != 0U
+                            ? macroblock.chroma_ac[current - 1U].token.total_coefficients
+                            : (luma_neighbours.left_available
+                                ? decoded.macroblocks.at(address - 1U).chroma_ac[component * 4U + chroma_y * 2U + 1U].token.total_coefficients
+                                : 0U);
+                        const auto n_b = chroma_y != 0U
+                            ? macroblock.chroma_ac[current - 2U].token.total_coefficients
+                            : (luma_neighbours.top_available
+                                ? decoded.macroblocks.at(address - width).chroma_ac[component * 4U + 2U + chroma_x].token.total_coefficients
+                                : 0U);
+                        const auto n_c = has_left && has_top ? static_cast<int>((n_a + n_b + 1U) / 2U)
+                            : has_left ? static_cast<int>(n_a)
+                            : has_top ? static_cast<int>(n_b)
+                            : 0;
+                        macroblock.chroma_ac[current] = decode_cavlc_chroma_ac_block(rbsp, bit_offset, n_c);
+                        bit_offset = macroblock.chroma_ac[current].tail.next_bit_offset;
+                    }
+                }
+            }
+            macroblock.next_bit_offset = bit_offset;
+        } catch (const std::exception& error) {
+            throw std::invalid_argument(
+                "native I-slice traversal failed at macroblock " + std::to_string(address) +
+                " (bit=" + std::to_string(bit_offset) + "): " + error.what());
+        }
+        decoded.macroblocks.push_back(std::move(macroblock));
+    }
+
+    if (bit_offset >= rbsp.size() * 8U || ((rbsp[bit_offset / 8U] >> (7U - bit_offset % 8U)) & 1U) == 0U) {
+        throw std::invalid_argument("native I-slice traversal did not reach rbsp_stop_one_bit");
+    }
+    for (auto trailing = bit_offset + 1U; trailing < rbsp.size() * 8U; ++trailing) {
+        if (((rbsp[trailing / 8U] >> (7U - trailing % 8U)) & 1U) != 0U) {
+            throw std::invalid_argument("native I-slice traversal found non-zero rbsp trailing alignment bit");
+        }
+    }
+    decoded.rbsp_trailing_bit_offset = bit_offset;
+    return decoded;
 }
 
 std::vector<std::uint8_t> ebsp_to_rbsp(const std::vector<std::uint8_t>& ebsp) {
@@ -1007,6 +1193,46 @@ std::vector<H264BaselineIdrNalHeader> inspect_baseline_idr_headers(
         });
     }
     return inspected;
+}
+
+std::vector<CavlcDecodedIdrSlice> decode_baseline_i_idr_slices(
+    const std::vector<std::uint8_t>& annex_b) {
+    std::unordered_map<std::uint32_t, H264BaselineSps> sps_by_id;
+    std::unordered_map<std::uint32_t, H264BaselinePps> pps_by_id;
+    std::vector<CavlcDecodedIdrSlice> decoded_slices;
+    const auto units = split_annex_b(annex_b);
+    for (std::size_t nal_index = 0; nal_index < units.size(); ++nal_index) {
+        const auto& nal = units[nal_index];
+        const auto rbsp = nal.rbsp();
+        if (nal.nal_unit_type == 7U) {
+            const auto sps = parse_baseline_sps(rbsp);
+            sps_by_id.insert_or_assign(sps.sequence_parameter_set_id, sps);
+            continue;
+        }
+        if (nal.nal_unit_type == 8U) {
+            const auto pps = parse_baseline_pps(rbsp);
+            pps_by_id.insert_or_assign(pps.pic_parameter_set_id, pps);
+            continue;
+        }
+        if (!nal.is_idr()) continue;
+
+        RbspBitReader prefix_reader(rbsp);
+        static_cast<void>(prefix_reader.read_ue());  // first_mb_in_slice
+        static_cast<void>(prefix_reader.read_ue());  // slice_type
+        const auto pps_id = prefix_reader.read_ue();
+        const auto pps_it = pps_by_id.find(pps_id);
+        if (pps_it == pps_by_id.end()) {
+            throw std::invalid_argument("IDR references an unavailable PPS");
+        }
+        const auto sps_it = sps_by_id.find(pps_it->second.sequence_parameter_set_id);
+        if (sps_it == sps_by_id.end()) {
+            throw std::invalid_argument("PPS references an unavailable SPS");
+        }
+        auto decoded = decode_baseline_i_idr_slice(rbsp, sps_it->second, pps_it->second);
+        decoded.nal_index = nal_index;
+        decoded_slices.push_back(std::move(decoded));
+    }
+    return decoded_slices;
 }
 
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units) {

@@ -63,10 +63,10 @@ of the same component (Cb never borrows Cr counts, and neither uses a
 ChromaDC count). If both neighbouring macroblocks are available,
 `nC = (nA + nB + 1) >> 1`; otherwise `nC = nA + nB`, with an unavailable,
 skip, or uncoded neighbour contributing zero. This rule is a parsing invariant
-for native traversal, not an optional estimator. The current native diagnostic
-implements only the first-macroblock subset, where external neighbours are
-unavailable; full slice traversal must retain this state per component across
-macroblock boundaries.
+for native traversal, not an optional estimator. The native full-slice reader
+retains this state per component across macroblock boundaries for the locked
+progressive, one-slice camera profile; FMO, MBAFF, CABAC, and nonzero
+`first_mb_in_slice` are rejected rather than guessed.
 
 ## Realtime segment protocol
 
@@ -199,10 +199,26 @@ in the native Table 9-5(a) copy, not to a constant boundary-context rule.
 The corrected table is compared programmatically with FFmpeg's canonical
 Table 9-5 data and covered by per-row regression tests for `TotalCoeff=13..16`.
 
-The native path therefore remains limited to first-macroblock diagnostic
-traversal with luma, ChromaDC, and ChromaAC coverage. It does **not**
-establish complete slice traversal, bit-exact rewrite, blind extraction,
-decoder-valid output, or a realtime claim. Those remain release gates.
+### Full-slice traversal evidence
+
+The native reader now traverses the entire locked IDR slice, including mixed
+I4x4 and I16x16 macroblocks, I16x16 luma DC (16 coefficients), I16x16 luma
+AC (15 coefficients), 4:2:0 ChromaDC/ChromaAC, and raster neighbour state.
+The I16x16 DC context follows FFmpeg's `pred_non_zero_count` mapping through
+the normal luma block-zero neighbours; it is not a separate DC-grid context.
+At completion the reader requires a valid `rbsp_stop_one_bit` followed only
+by zero alignment bits.
+
+On `foreman_cif_q18_g1_300f.h264` (3,551,610 bytes, SHA-256
+`867CC0C68BBA4461E5699C1214236DF5CC75C658398C85F2E11BCCC11935DF57`), the
+Release CTest traversed all 300 IDR slices, each with 396 macroblocks:
+**118,800 macroblocks total**. It additionally asserts that I16x16,
+ChromaDC, and ChromaAC paths were encountered. The command
+`zkstego_idr_inspect ... --slice` independently reported the same counts and
+the source fixture passes `ffmpeg -v error -xerror`. This proves native reader
+coverage for that pinned fixture; it does **not** prove a generic H.264 reader
+and does not yet establish rewrite, blind extraction, decoder-valid stego
+output, or realtime operation. Those remain release gates.
 
 ### September 2026 diagnostic update
 
@@ -217,8 +233,8 @@ FFmpeg's CAVLC decoder calculates `nC` from its populated
 `non_zero_count_cache`; it does not substitute a fixed edge context. Native
 completion still requires macroblock-by-macroblock availability and cache
 state matching for luma and each chroma component before any CAVLC token may
-be rewritten. The current first-macroblock diagnostic remains fail-closed
-outside its explicitly tested scope.
+be rewritten. The full-slice reader now implements that cache for the locked
+one-slice profile and remains fail-closed outside it.
 
 The legacy Python public-API E2E test is also not an edge benchmark. Its
 Phase-5 full-file `embed`/`verify` execution accumulated approximately

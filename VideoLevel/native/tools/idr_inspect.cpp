@@ -13,11 +13,12 @@
 
 int main(int argc, char* argv[]) {
     if (argc < 2 || argc > 5) {
-        std::cerr << "usage: zkstego_idr_inspect <annex-b-h264> [--verbose|--macroblock] [--nal-index <index>]\n";
+        std::cerr << "usage: zkstego_idr_inspect <annex-b-h264> [--verbose|--macroblock|--slice] [--nal-index <index>]\n";
         return 2;
     }
     bool verbose = false;
     bool macroblock_mode = false;
+    bool slice_mode = false;
     std::optional<std::size_t> selected_nal_index;
     for (int argument_index = 2; argument_index < argc; ++argument_index) {
         const std::string argument{argv[argument_index]};
@@ -25,6 +26,8 @@ int main(int argc, char* argv[]) {
             verbose = true;
         } else if (argument == "--macroblock") {
             macroblock_mode = true;
+        } else if (argument == "--slice") {
+            slice_mode = true;
         } else if (argument == "--nal-index") {
             if (++argument_index >= argc) {
                 std::cerr << "--nal-index requires a non-negative NAL index\n";
@@ -62,6 +65,22 @@ int main(int argc, char* argv[]) {
     try {
         const auto idrs = zkstego::inspect_baseline_idr_headers(annex_b);
         std::cout << "idr_count=" << idrs.size() << '\n';
+        if (slice_mode) {
+            const auto slices = zkstego::decode_baseline_i_idr_slices(annex_b);
+            std::size_t decoded_macroblocks = 0;
+            for (const auto& slice : slices) {
+                if (selected_nal_index.has_value() && slice.nal_index != *selected_nal_index) continue;
+                decoded_macroblocks += slice.macroblocks.size();
+                std::cout << "nal=" << slice.nal_index
+                          << " macroblocks=" << slice.macroblocks.size()
+                          << " trailing_bit=" << slice.rbsp_trailing_bit_offset << '\n';
+            }
+            if (selected_nal_index.has_value() && decoded_macroblocks == 0U) {
+                throw std::invalid_argument("selected NAL is not an inspectable full I IDR slice");
+            }
+            std::cout << "decoded_i_macroblocks=" << decoded_macroblocks << '\n';
+            return 0;
+        }
         const auto units = zkstego::split_annex_b(annex_b);
         std::size_t decoded_first_luma_macroblocks = 0;
         for (const auto& idr : idrs) {

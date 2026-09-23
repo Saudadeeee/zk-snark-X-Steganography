@@ -2,7 +2,10 @@
 
 #include <array>
 #include <cstdint>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -100,6 +103,16 @@ int main() {
     CHECK(idr_header.idr_pic_id == 0);
     CHECK(idr_header.slice_qp_delta == -3);
     CHECK(idr_header.data_bit_offset == 24);
+
+    // The native macroblock traversal implements I syntax only. An SI slice
+    // must be rejected at the header boundary, never interpreted as I data.
+    bool si_slice_rejected = false;
+    try {
+        static_cast<void>(zkstego::parse_baseline_idr_slice_header({0x96, 0x10}, sps, pps));
+    } catch (const std::invalid_argument&) {
+        si_slice_rejected = true;
+    }
+    CHECK(si_slice_rejected);
 
     zkstego::H264BaselineSps poc_type_zero_sps;
     poc_type_zero_sps.frame_mbs_only_flag = true;
@@ -269,6 +282,38 @@ int main() {
         invalid_neighbour_rejected = true;
     }
     CHECK(invalid_neighbour_rejected);
+
+    // Acceptance regression for the locked camera profile: every IDR must
+    // traverse every macroblock and land precisely at rbsp_trailing_bits.
+    // This exercises mixed I4x4/I16x16 luma, CAVLC AC/DC, and 4:2:0 chroma
+    // neighbour contexts over the whole 300-frame fixture, not just a prefix.
+    const std::string fixture_path = std::string{ZKSTEGO_PROJECT_SOURCE_DIR} +
+        "/data/encoded/foreman_cif_q18_g1_300f.h264";
+    std::ifstream fixture(fixture_path, std::ios::binary);
+    CHECK(static_cast<bool>(fixture));
+    const std::vector<std::uint8_t> fixture_bytes{
+        std::istreambuf_iterator<char>(fixture), std::istreambuf_iterator<char>()};
+    CHECK(fixture_bytes.size() == 3551610);
+    const auto decoded_fixture = zkstego::decode_baseline_i_idr_slices(fixture_bytes);
+    CHECK(decoded_fixture.size() == 300);
+    std::size_t i16x16_macroblocks = 0;
+    std::size_t chroma_dc_macroblocks = 0;
+    std::size_t chroma_ac_macroblocks = 0;
+    for (const auto& slice : decoded_fixture) {
+        CHECK(slice.macroblocks.size() == 396);
+        CHECK(slice.rbsp_trailing_bit_offset > slice.header.data_bit_offset);
+        for (const auto& macroblock : slice.macroblocks) {
+            if (macroblock.header.mb_type >= 1U && macroblock.header.mb_type <= 24U) {
+                ++i16x16_macroblocks;
+            }
+            const auto chroma_coded_block_pattern = (macroblock.header.coded_block_pattern >> 4U) & 0x03U;
+            if (chroma_coded_block_pattern >= 1U) ++chroma_dc_macroblocks;
+            if (chroma_coded_block_pattern >= 2U) ++chroma_ac_macroblocks;
+        }
+    }
+    CHECK(i16x16_macroblocks > 0U);
+    CHECK(chroma_dc_macroblocks > 0U);
+    CHECK(chroma_ac_macroblocks > 0U);
     const auto empty_luma_block = zkstego::decode_cavlc_luma_block({0x80}, 0, 0);
     CHECK(empty_luma_block.token.total_coefficients == 0);
     CHECK(empty_luma_block.tail.runs.empty());

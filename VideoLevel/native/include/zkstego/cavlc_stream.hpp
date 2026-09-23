@@ -144,6 +144,27 @@ struct H264BaselineIMacroblockHeader {
     std::size_t residual_bit_offset{};
 };
 
+struct CavlcDecodedIMacroblock {
+    std::uint32_t address{};
+    H264BaselineIMacroblockHeader header;
+    // Parsed only for I16x16. Its nC context follows the normal luma
+    // block-zero neighbour mapping used by CAVLC decoders.
+    CavlcDecodedLumaBlock luma_dc;
+    CavlcDecodedLumaMacroblock luma;
+    std::array<CavlcDecodedLumaBlock, 2> chroma_dc;
+    std::array<CavlcDecodedLumaBlock, 8> chroma_ac;
+    std::size_t next_bit_offset{};
+};
+
+struct CavlcDecodedIdrSlice {
+    std::size_t nal_index{};
+    H264BaselineSps sps;
+    H264BaselinePps pps;
+    H264BaselineIdrSliceHeader header;
+    std::vector<CavlcDecodedIMacroblock> macroblocks;
+    std::size_t rbsp_trailing_bit_offset{};
+};
+
 struct H264BaselineIdrNalHeader {
     std::size_t nal_index{};
     H264BaselineIdrSliceHeader slice_header;
@@ -202,6 +223,10 @@ CavlcDecodedLumaBlock decode_cavlc_luma_block(
     const std::vector<std::uint8_t>& rbsp,
     std::size_t start_bit,
     int n_c);
+CavlcDecodedLumaBlock decode_cavlc_luma_ac_block(
+    const std::vector<std::uint8_t>& rbsp,
+    std::size_t start_bit,
+    int n_c);
 CavlcDecodedLumaBlock decode_cavlc_chroma_dc_block(
     const std::vector<std::uint8_t>& rbsp,
     std::size_t start_bit);
@@ -218,6 +243,17 @@ CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
     std::size_t start_bit,
     std::uint32_t coded_block_pattern_luma,
     const CavlcLumaNeighbourCounts& neighbours);
+CavlcDecodedLumaMacroblock decode_cavlc_luma_ac_macroblock(
+    const std::vector<std::uint8_t>& rbsp,
+    std::size_t start_bit,
+    std::uint32_t coded_block_pattern_luma,
+    const CavlcLumaNeighbourCounts& neighbours);
+CavlcDecodedIdrSlice decode_baseline_i_idr_slice(
+    const std::vector<std::uint8_t>& rbsp,
+    const H264BaselineSps& sps,
+    const H264BaselinePps& pps);
+std::vector<CavlcDecodedIdrSlice> decode_baseline_i_idr_slices(
+    const std::vector<std::uint8_t>& annex_b);
 std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
     const std::vector<std::int32_t>& decoded_non_trailing_levels,
     const std::vector<std::uint32_t>& runs);

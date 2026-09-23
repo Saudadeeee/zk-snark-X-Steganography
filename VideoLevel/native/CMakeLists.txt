@@ -10,6 +10,8 @@ target_include_directories(zkstego_cavlc_stream PUBLIC ${CMAKE_CURRENT_SOURCE_DI
 
 add_executable(zkstego_cavlc_stream_tests tests/cavlc_stream_tests.cpp)
 target_link_libraries(zkstego_cavlc_stream_tests PRIVATE zkstego_cavlc_stream)
+target_compile_definitions(zkstego_cavlc_stream_tests PRIVATE
+  ZKSTEGO_PROJECT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 add_executable(zkstego_idr_inspect tools/idr_inspect.cpp)
 target_link_libraries(zkstego_idr_inspect PRIVATE zkstego_cavlc_stream)
