@@ -309,10 +309,32 @@ submitted an HTTP embed job, downloaded a same-size H.264 result, passed
 `ffmpeg -v error -xerror`, extracted the exact test payload through HTTP with
 the correct key, and failed the wrong-key extraction job without exposing a
 payload artifact. This validates the HTTP/fixture integration only. There is
-still no camera capture/stream ingress, target-edge hardware measurement,
+still no live camera ingest/forwarding stream, target-edge hardware measurement,
 ZKP-specific payload generation/binding in this path, or full capacity,
 quality, p50/p95 and CPU/RAM benchmark evidence; therefore realtime and
 production acceptance remain unmet.
+
+### Physical webcam HTTP run (2026-09-24)
+
+The hardware-gated `src/runtest/test_native_camera_http.py` was run against an
+attached DirectShow UVC webcam. FFmpeg enumerated 352x288 as a
+supported mode at 30 FPS. A three-second capture encoded Baseline/CAVLC,
+all-intra, YUV420P; FFprobe counted 91 frames (38,534 H.264 bytes) and reported
+25/1 average frame rate. Measured on this host: capture command wall time
+4.779s; HTTP native embed job 0.275s; HTTP blind extract job 0.483s. The output retained the input byte length,
+passed strict FFmpeg (`-v error -xerror`, exit 0), recovered `cam-proof-v1`
+with the right key, and returned a failed extraction with the wrong key. The
+capture was held in a temporary directory and removed after the test.
+
+This is a successful physical-camera-to-HTTP fixture run, but it captures a
+short clip before submission; it is not a live ingest/forwarding stream and its
+job wall times omit the three-second capture/buffer interval. The observed
+25/1 FFprobe rate differs from the requested 30 FPS mode and should not be
+treated as measured realtime capture throughput. It does not
+establish sustained FPS, p50/p95 under load, CPU/RAM, edge-device performance,
+or actual ZKP generation/binding. The configured camera mode is 30 FPS while
+the separate locked fixture was 25 FPS; camera-encoder compatibility must
+remain scoped to the verified encoder options above.
 
 ### September 2026 diagnostic update
 

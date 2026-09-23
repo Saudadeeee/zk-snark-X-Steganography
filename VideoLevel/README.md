@@ -202,6 +202,12 @@ job id; `GET /api/v1/jobs/{job_id}` polls safe status; and an embed result is
 downloaded at `GET /api/v1/jobs/{job_id}/artifact`. All job routes require
 `Authorization: Bearer <token>`. OpenAPI is available locally at `/docs`.
 
+On Windows, the hardware-gated camera E2E can be reproduced by setting
+`ZK_STEGO_CAMERA_NAME` to a DirectShow webcam name and running
+`py -3.12 src/runtest/test_native_camera_http.py`. It captures into a temporary
+directory and deletes the capture after testing; the camera may show its active
+indicator during the run.
+
 For the native CAVLC data plane, build `zkstego_blind_bits` and start the
 separate native-backed app instead of treating the legacy Python service as
 the edge path:
