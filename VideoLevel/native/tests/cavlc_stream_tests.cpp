@@ -282,13 +282,16 @@ int main() {
     const auto n8_empty_token = zkstego::parse_cavlc_coeff_token({0x0c}, 0, 8);
     CHECK(n8_empty_token.total_coefficients == 0);
     CHECK(n8_empty_token.trailing_ones == 0);
+    const auto n8_one_token = zkstego::parse_cavlc_coeff_token({0x00}, 0, 8);
+    CHECK(n8_one_token.total_coefficients == 1);
+    CHECK(n8_one_token.trailing_ones == 0);
     const auto n8_token = zkstego::parse_cavlc_coeff_token({0x14, 0x00}, 0, 8);
-    CHECK(n8_token.total_coefficients == 1);
+    CHECK(n8_token.total_coefficients == 2);
     CHECK(n8_token.trailing_ones == 1);
     CHECK(n8_token.sign_bit_offsets == std::vector<std::size_t>{6});
     CHECK(n8_token.level_bit_offset == 7);
     const auto n8_tc14_token = zkstego::parse_cavlc_coeff_token({0xe0}, 0, 8);
-    CHECK(n8_tc14_token.total_coefficients == 14);
+    CHECK(n8_tc14_token.total_coefficients == 15);
     CHECK(n8_tc14_token.trailing_ones == 0);
     CHECK(n8_tc14_token.level_bit_offset == 6);
 
