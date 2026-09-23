@@ -206,6 +206,14 @@ int main() {
     CHECK(tc16_tail.runs == std::vector<std::uint32_t>(16, 0));
     CHECK(tc16_tail.next_bit_offset == 0);
 
+    // Chroma AC has maxNumCoeff=15.  Its TotalCoeff=15 case has no
+    // total_zeros syntax; consuming the luma TC=15 VLC here would shift the
+    // following residual block by one bit.
+    const auto chroma_ac_full_tail = zkstego::decode_cavlc_residual_tail({}, 0, 15, 15);
+    CHECK(chroma_ac_full_tail.total_zeros == 0);
+    CHECK(chroma_ac_full_tail.runs == std::vector<std::uint32_t>(15, 0));
+    CHECK(chroma_ac_full_tail.next_bit_offset == 0);
+
     const auto token = zkstego::parse_cavlc_coeff_token({0x41, 0x80}, 0, 0);
     CHECK(token.total_coefficients == 1);
     CHECK(token.trailing_ones == 1);

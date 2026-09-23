@@ -1,23 +1,55 @@
 #include "zkstego/cavlc_stream.hpp"
 
+#include <algorithm>
 #include <array>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 int main(int argc, char* argv[]) {
-    if (argc != 2 && argc != 3) {
-        std::cerr << "usage: zkstego_idr_inspect <annex-b-h264> [--verbose|--macroblock]\n";
+    if (argc < 2 || argc > 5) {
+        std::cerr << "usage: zkstego_idr_inspect <annex-b-h264> [--verbose|--macroblock] [--nal-index <index>]\n";
         return 2;
     }
-    const bool verbose = argc == 3 && std::string(argv[2]) == "--verbose";
-    const bool macroblock_mode = argc == 3 && std::string(argv[2]) == "--macroblock";
-    if (argc == 3 && !verbose && !macroblock_mode) {
-        std::cerr << "unknown option: " << argv[2] << '\n';
-        return 2;
+    bool verbose = false;
+    bool macroblock_mode = false;
+    std::optional<std::size_t> selected_nal_index;
+    for (int argument_index = 2; argument_index < argc; ++argument_index) {
+        const std::string argument{argv[argument_index]};
+        if (argument == "--verbose") {
+            verbose = true;
+        } else if (argument == "--macroblock") {
+            macroblock_mode = true;
+        } else if (argument == "--nal-index") {
+            if (++argument_index >= argc) {
+                std::cerr << "--nal-index requires a non-negative NAL index\n";
+                return 2;
+            }
+            try {
+                const auto index_text = std::string{argv[argument_index]};
+                if (index_text.empty() || index_text.front() == '-') {
+                    throw std::invalid_argument("negative index");
+                }
+                std::size_t consumed = 0;
+                const auto parsed = std::stoull(index_text, &consumed);
+                if (consumed != index_text.size()) throw std::invalid_argument("trailing text");
+                if (parsed > std::numeric_limits<std::size_t>::max()) {
+                    throw std::out_of_range("NAL index is out of range");
+                }
+                selected_nal_index = static_cast<std::size_t>(parsed);
+            } catch (const std::exception&) {
+                std::cerr << "--nal-index requires a non-negative NAL index\n";
+                return 2;
+            }
+        } else {
+            std::cerr << "unknown option: " << argument << '\n';
+            return 2;
+        }
     }
     const std::string input_path = argv[1];
     std::ifstream input(input_path, std::ios::binary);
@@ -33,6 +65,9 @@ int main(int argc, char* argv[]) {
         const auto units = zkstego::split_annex_b(annex_b);
         std::size_t decoded_first_luma_macroblocks = 0;
         for (const auto& idr : idrs) {
+            if (selected_nal_index.has_value() && idr.nal_index != *selected_nal_index) {
+                continue;
+            }
             if (!verbose && !macroblock_mode && &idr != &idrs.front() && &idr != &idrs.back()) {
                 continue;
             }
@@ -47,6 +82,10 @@ int main(int argc, char* argv[]) {
                     idr.first_macroblock.residual_bit_offset,
                     idr.first_macroblock.coded_block_pattern & 0x0fU);
                 auto residual_end = macroblock.next_bit_offset;
+                if (selected_nal_index.has_value()) {
+                    std::cout << "nal=" << idr.nal_index
+                              << " luma_macroblock_end=" << residual_end << '\n';
+                }
                 std::uint32_t cb_chroma_dc_tc = 0;
                 std::uint32_t cr_chroma_dc_tc = 0;
                 std::array<std::uint32_t, 8> chroma_ac_total_coefficients{};
@@ -59,6 +98,11 @@ int main(int argc, char* argv[]) {
                         cb_chroma_dc_tc = cb_chroma_dc.token.total_coefficients;
                         cr_chroma_dc_tc = cr_chroma_dc.token.total_coefficients;
                         residual_end = cr_chroma_dc.tail.next_bit_offset;
+                        if (selected_nal_index.has_value()) {
+                            std::cout << "nal=" << idr.nal_index
+                                      << " chroma_dc_tc=" << cb_chroma_dc_tc << ',' << cr_chroma_dc_tc
+                                      << " chroma_dc_end=" << residual_end << '\n';
+                        }
                     } catch (const std::exception& error) {
                         throw std::invalid_argument(
                             "chroma DC at bit " + std::to_string(residual_end) + ": " + error.what());
@@ -85,15 +129,36 @@ int main(int argc, char* argv[]) {
                                     if (prior != 0) prior_counts += ',';
                                     prior_counts += std::to_string(chroma_ac_total_coefficients[prior]);
                                 }
+                                const auto rbsp = units.at(idr.nal_index).rbsp();
+                                std::string next_bits;
+                                constexpr std::size_t kDiagnosticBits = 24;
+                                const auto available_bits = rbsp.size() * 8U - residual_end;
+                                const auto bit_count = std::min(kDiagnosticBits, available_bits);
+                                next_bits.reserve(bit_count);
+                                for (std::size_t bit_index = 0; bit_index < bit_count; ++bit_index) {
+                                    const auto absolute_bit = residual_end + bit_index;
+                                    const auto bit = static_cast<unsigned>(
+                                        (rbsp[absolute_bit / 8U] >> (7U - absolute_bit % 8U)) & 1U);
+                                    next_bits.push_back(bit == 0U ? '0' : '1');
+                                }
                                 throw std::invalid_argument(
                                     "chroma AC component " + std::to_string(component) +
                                     " block " + std::to_string(local_index) +
                                     " at bit " + std::to_string(residual_end) +
                                     " nC=" + std::to_string(n_c) +
-                                    " priorTC=" + prior_counts + ": " + error.what());
+                                    " priorTC=" + prior_counts +
+                                    " nextBits=" + next_bits + ": " + error.what());
                             }
                             chroma_ac_total_coefficients[component * 4 + local_index] = block.token.total_coefficients;
                             residual_end = block.tail.next_bit_offset;
+                            if (selected_nal_index.has_value()) {
+                                std::cout << "nal=" << idr.nal_index
+                                          << " chroma_ac_component=" << component
+                                          << " block=" << local_index
+                                          << " nC=" << n_c
+                                          << " tc=" << block.token.total_coefficients
+                                          << " end=" << residual_end << '\n';
+                            }
                         }
                     }
                 }
@@ -134,6 +199,9 @@ int main(int argc, char* argv[]) {
         }
         if (macroblock_mode) {
             std::cout << "decoded_first_luma_macroblocks=" << decoded_first_luma_macroblocks << '\n';
+        }
+        if (selected_nal_index.has_value() && decoded_first_luma_macroblocks == 0 && macroblock_mode) {
+            throw std::invalid_argument("selected NAL is not an inspectable IDR macroblock");
         }
     } catch (const std::exception& error) {
         std::cerr << "native IDR inspection failed: " << error.what() << '\n';

@@ -442,10 +442,14 @@ std::vector<std::int32_t> reconstruct_cavlc_block(
     return coefficients;
 }
 
-CavlcResidualTail decode_cavlc_luma_residual_tail(
+// The VLC tables below are shared by luma 4x4 and ChromaAC.  The latter has
+// maxNumCoeff=15 because its DC coefficient is carried separately, so the
+// presence rule for total_zeros must be parameterized.
+CavlcResidualTail decode_cavlc_residual_tail(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit,
-    const std::uint32_t total_coefficients) {
+    const std::uint32_t total_coefficients,
+    const std::size_t max_num_coefficients) {
     struct VlcCode { const char* bits; std::uint8_t value; };
     constexpr std::array total_zeros_tc1{
         VlcCode{"1", 0}, VlcCode{"011", 1}, VlcCode{"010", 2}, VlcCode{"0011", 3}, VlcCode{"0010", 4},
@@ -539,32 +543,34 @@ CavlcResidualTail decode_cavlc_luma_residual_tail(
         }
         throw std::invalid_argument("invalid CAVLC tail VLC");
     };
-    if (total_coefficients == 0 || total_coefficients > 16) {
-        throw std::invalid_argument("luma total_coefficients must be in [1, 16]");
+    if (max_num_coefficients == 0 || max_num_coefficients > 16 ||
+        total_coefficients == 0 || total_coefficients > max_num_coefficients) {
+        throw std::invalid_argument("CAVLC total_coefficients exceeds residual block bound");
     }
     RbspBitReader reader(rbsp);
     reader.skip_bits(start_bit);
     CavlcResidualTail tail;
-    switch (total_coefficients) {
-        case 1: tail.total_zeros = decode(reader, total_zeros_tc1); break;
-        case 2: tail.total_zeros = decode(reader, total_zeros_tc2); break;
-        case 3: tail.total_zeros = decode(reader, total_zeros_tc3); break;
-        case 4: tail.total_zeros = decode(reader, total_zeros_tc4); break;
-        case 5: tail.total_zeros = decode(reader, total_zeros_tc5); break;
-        case 6: tail.total_zeros = decode(reader, total_zeros_tc6); break;
-        case 7: tail.total_zeros = decode(reader, total_zeros_tc7); break;
-        case 8: tail.total_zeros = decode(reader, total_zeros_tc8); break;
-        case 9: tail.total_zeros = decode(reader, total_zeros_tc9); break;
-        case 10: tail.total_zeros = decode(reader, total_zeros_tc10); break;
-        case 11: tail.total_zeros = decode(reader, total_zeros_tc11); break;
-        case 12: tail.total_zeros = decode(reader, total_zeros_tc12); break;
-        case 13: tail.total_zeros = decode(reader, total_zeros_tc13); break;
-        case 14: tail.total_zeros = decode(reader, total_zeros_tc14); break;
-        case 15: tail.total_zeros = decode(reader, total_zeros_tc15); break;
-        case 16: break;
-        default: throw std::invalid_argument("unsupported luma total_coefficients");
+    if (total_coefficients < max_num_coefficients) {
+        switch (total_coefficients) {
+            case 1: tail.total_zeros = decode(reader, total_zeros_tc1); break;
+            case 2: tail.total_zeros = decode(reader, total_zeros_tc2); break;
+            case 3: tail.total_zeros = decode(reader, total_zeros_tc3); break;
+            case 4: tail.total_zeros = decode(reader, total_zeros_tc4); break;
+            case 5: tail.total_zeros = decode(reader, total_zeros_tc5); break;
+            case 6: tail.total_zeros = decode(reader, total_zeros_tc6); break;
+            case 7: tail.total_zeros = decode(reader, total_zeros_tc7); break;
+            case 8: tail.total_zeros = decode(reader, total_zeros_tc8); break;
+            case 9: tail.total_zeros = decode(reader, total_zeros_tc9); break;
+            case 10: tail.total_zeros = decode(reader, total_zeros_tc10); break;
+            case 11: tail.total_zeros = decode(reader, total_zeros_tc11); break;
+            case 12: tail.total_zeros = decode(reader, total_zeros_tc12); break;
+            case 13: tail.total_zeros = decode(reader, total_zeros_tc13); break;
+            case 14: tail.total_zeros = decode(reader, total_zeros_tc14); break;
+            case 15: tail.total_zeros = decode(reader, total_zeros_tc15); break;
+            default: throw std::invalid_argument("unsupported CAVLC total_coefficients");
+        }
     }
-    const auto max_total_zeros = 16U - total_coefficients;
+    const auto max_total_zeros = static_cast<std::uint32_t>(max_num_coefficients) - total_coefficients;
     if (tail.total_zeros > max_total_zeros) {
         throw std::invalid_argument("CAVLC total_zeros exceeds luma block bound");
     }
@@ -593,6 +599,13 @@ CavlcResidualTail decode_cavlc_luma_residual_tail(
     tail.runs.push_back(zeros_left);
     tail.next_bit_offset = reader.position();
     return tail;
+}
+
+CavlcResidualTail decode_cavlc_luma_residual_tail(
+    const std::vector<std::uint8_t>& rbsp,
+    const std::size_t start_bit,
+    const std::uint32_t total_coefficients) {
+    return decode_cavlc_residual_tail(rbsp, start_bit, total_coefficients, 16);
 }
 
 CavlcResidualTail decode_cavlc_chroma_dc_residual_tail(
@@ -710,11 +723,8 @@ CavlcDecodedLumaBlock decode_cavlc_chroma_ac_block(
     if (block.token.total_coefficients == 0) {
         block.tail.next_bit_offset = block.levels.next_bit_offset;
     } else {
-        block.tail = decode_cavlc_luma_residual_tail(
-            rbsp, block.levels.next_bit_offset, block.token.total_coefficients);
-        if (block.tail.total_zeros > kChromaAcCoefficients - block.token.total_coefficients) {
-            throw std::invalid_argument("chroma AC total_zeros exceeds block bound");
-        }
+        block.tail = decode_cavlc_residual_tail(
+            rbsp, block.levels.next_bit_offset, block.token.total_coefficients, kChromaAcCoefficients);
     }
     block.coefficients = reconstruct_cavlc_block(
         block.levels, block.tail.runs, kChromaAcCoefficients);

@@ -172,13 +172,20 @@ adjustment required by H.264 9.2.2 and the empty `nC=4..7` coeff-token
 can change subsequent suffix lengths, while a missing empty-block token
 desynchronizes the rest of a macroblock.
 
-`zkstego_idr_inspect --macroblock` now exercises this primitive against every
-IDR's first macroblock. On `foreman_cif_q18_g1_300f.h264`, it decoded all
-300/300 first luma macroblocks (each 16 luma 4x4 blocks) in 135.755 ms on the
-audit machine. This confirms the first-macroblock luma path for that fixture;
-it does **not** establish complete slice traversal, chroma residual support,
-bit-exact rewrite, blind extraction, decoder-valid output, or a realtime
-claim. Those remain release gates.
+`zkstego_idr_inspect --macroblock` exercises this primitive against every
+IDR's first macroblock. An earlier luma-only run on
+`foreman_cif_q18_g1_300f.h264` reached 300/300 first luma macroblocks in
+135.755 ms, but that is superseded by the current full-residual diagnostic:
+the run reaches NAL 123 and then rejects the first macroblock while parsing
+ChromaAC. The trace records a valid-looking `001011` token at bit 784 that is
+legal only for the `nC=2..3` table while the native neighbour state predicts
+`nC=0`. This is evidence of an unresolved preceding-block or neighbour-state
+desynchronization, not evidence that the 300-frame fixture is fully parsed.
+
+The native path therefore remains limited to a diagnostic luma traversal plus
+partial ChromaDC/ChromaAC coverage. It does **not** establish complete slice
+traversal, chroma residual support, bit-exact rewrite, blind extraction,
+decoder-valid output, or a realtime claim. Those remain release gates.
 
 ## Blind extraction relationship
 
