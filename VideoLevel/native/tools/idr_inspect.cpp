@@ -51,13 +51,18 @@ int main(int argc, char* argv[]) {
                 std::uint32_t cr_chroma_dc_tc = 0;
                 std::array<std::uint32_t, 8> chroma_ac_total_coefficients{};
                 if (((idr.first_macroblock.coded_block_pattern >> 4U) & 0x03U) >= 1U) {
-                    const auto cb_chroma_dc = zkstego::decode_cavlc_chroma_dc_block(
-                        units.at(idr.nal_index).rbsp(), residual_end);
-                    const auto cr_chroma_dc = zkstego::decode_cavlc_chroma_dc_block(
-                        units.at(idr.nal_index).rbsp(), cb_chroma_dc.tail.next_bit_offset);
-                    cb_chroma_dc_tc = cb_chroma_dc.token.total_coefficients;
-                    cr_chroma_dc_tc = cr_chroma_dc.token.total_coefficients;
-                    residual_end = cr_chroma_dc.tail.next_bit_offset;
+                    try {
+                        const auto cb_chroma_dc = zkstego::decode_cavlc_chroma_dc_block(
+                            units.at(idr.nal_index).rbsp(), residual_end);
+                        const auto cr_chroma_dc = zkstego::decode_cavlc_chroma_dc_block(
+                            units.at(idr.nal_index).rbsp(), cb_chroma_dc.tail.next_bit_offset);
+                        cb_chroma_dc_tc = cb_chroma_dc.token.total_coefficients;
+                        cr_chroma_dc_tc = cr_chroma_dc.token.total_coefficients;
+                        residual_end = cr_chroma_dc.tail.next_bit_offset;
+                    } catch (const std::exception& error) {
+                        throw std::invalid_argument(
+                            "chroma DC at bit " + std::to_string(residual_end) + ": " + error.what());
+                    }
                 }
                 if (((idr.first_macroblock.coded_block_pattern >> 4U) & 0x03U) >= 2U) {
                     for (std::size_t component = 0; component < 2; ++component) {
@@ -70,8 +75,23 @@ int main(int argc, char* argv[]) {
                                            : x != 0 ? static_cast<int>(n_a)
                                                     : y != 0 ? static_cast<int>(n_b)
                                                              : 0;
-                            const auto block = zkstego::decode_cavlc_chroma_ac_block(
-                                units.at(idr.nal_index).rbsp(), residual_end, n_c);
+                            zkstego::CavlcDecodedLumaBlock block;
+                            try {
+                                block = zkstego::decode_cavlc_chroma_ac_block(
+                                    units.at(idr.nal_index).rbsp(), residual_end, n_c);
+                            } catch (const std::exception& error) {
+                                std::string prior_counts;
+                                for (std::size_t prior = 0; prior < chroma_ac_total_coefficients.size(); ++prior) {
+                                    if (prior != 0) prior_counts += ',';
+                                    prior_counts += std::to_string(chroma_ac_total_coefficients[prior]);
+                                }
+                                throw std::invalid_argument(
+                                    "chroma AC component " + std::to_string(component) +
+                                    " block " + std::to_string(local_index) +
+                                    " at bit " + std::to_string(residual_end) +
+                                    " nC=" + std::to_string(n_c) +
+                                    " priorTC=" + prior_counts + ": " + error.what());
+                            }
                             chroma_ac_total_coefficients[component * 4 + local_index] = block.token.total_coefficients;
                             residual_end = block.tail.next_bit_offset;
                         }
