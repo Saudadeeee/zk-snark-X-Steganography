@@ -614,7 +614,7 @@ CavlcResidualTail decode_cavlc_chroma_dc_residual_tail(
     const std::uint32_t total_coefficients) {
     struct VlcCode { const char* bits; std::uint8_t value; };
     constexpr std::array total_zeros_tc1{
-        VlcCode{"1", 0}, VlcCode{"01", 1}, VlcCode{"00", 2}, VlcCode{"000", 3},
+        VlcCode{"1", 0}, VlcCode{"01", 1}, VlcCode{"001", 2}, VlcCode{"000", 3},
     };
     constexpr std::array total_zeros_tc2{
         VlcCode{"1", 0}, VlcCode{"01", 1}, VlcCode{"00", 2},

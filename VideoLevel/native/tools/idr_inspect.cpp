@@ -85,6 +85,13 @@ int main(int argc, char* argv[]) {
                 if (selected_nal_index.has_value()) {
                     std::cout << "nal=" << idr.nal_index
                               << " luma_macroblock_end=" << residual_end << '\n';
+                    for (std::size_t block_index = 0; block_index < macroblock.blocks.size(); ++block_index) {
+                        const auto& block = macroblock.blocks[block_index];
+                        std::cout << "nal=" << idr.nal_index
+                                  << " luma_block=" << block_index
+                                  << " tc=" << block.token.total_coefficients
+                                  << " end=" << block.tail.next_bit_offset << '\n';
+                    }
                 }
                 std::uint32_t cb_chroma_dc_tc = 0;
                 std::uint32_t cr_chroma_dc_tc = 0;

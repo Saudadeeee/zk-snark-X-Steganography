@@ -314,6 +314,21 @@ int main() {
     CHECK(chroma_dc_block.tail.runs == std::vector<std::uint32_t>{0});
     CHECK(chroma_dc_block.tail.next_bit_offset == 3);
     CHECK(chroma_dc_block.coefficients == std::vector<std::int32_t>({1, 0, 0, 0}));
+    // Table 9-8, ChromaDC TotalCoeff=1: total_zeros=2 is 001, not 00.
+    // Treating 00 as a complete code makes it a prefix of the 000 code and
+    // shifts every following residual block.
+    const auto chroma_dc_one_zero_tail = zkstego::decode_cavlc_chroma_dc_residual_tail({0x40}, 0, 1);
+    CHECK(chroma_dc_one_zero_tail.total_zeros == 1);
+    CHECK(chroma_dc_one_zero_tail.runs == std::vector<std::uint32_t>({1}));
+    CHECK(chroma_dc_one_zero_tail.next_bit_offset == 2);
+    const auto chroma_dc_two_zeros_tail = zkstego::decode_cavlc_chroma_dc_residual_tail({0x20}, 0, 1);
+    CHECK(chroma_dc_two_zeros_tail.total_zeros == 2);
+    CHECK(chroma_dc_two_zeros_tail.runs == std::vector<std::uint32_t>({2}));
+    CHECK(chroma_dc_two_zeros_tail.next_bit_offset == 3);
+    const auto chroma_dc_three_zeros_tail = zkstego::decode_cavlc_chroma_dc_residual_tail({0x00}, 0, 1);
+    CHECK(chroma_dc_three_zeros_tail.total_zeros == 3);
+    CHECK(chroma_dc_three_zeros_tail.runs == std::vector<std::uint32_t>({3}));
+    CHECK(chroma_dc_three_zeros_tail.next_bit_offset == 3);
     const auto chroma_ac_block = zkstego::decode_cavlc_chroma_ac_block({0x50}, 0, 0);
     CHECK(chroma_ac_block.token.total_coefficients == 1);
     CHECK(chroma_ac_block.levels.trailing_one_values == std::vector<std::int32_t>{1});
