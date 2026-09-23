@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <stdexcept>
 #include <string_view>
 #include <vector>
 
@@ -203,6 +204,71 @@ int main() {
     CHECK(empty_luma_macroblock.blocks[1].token.total_coefficients == 0);
     CHECK(empty_luma_macroblock.blocks[4].token.total_coefficients == 0);
     CHECK(empty_luma_macroblock.blocks[5].token.total_coefficients == 0);
+
+    // The first block of a non-left-edge macroblock must select its
+    // coeff_token table from persisted left-neighbour state.  nC=2 encodes
+    // an empty block as "11"; each following locally zero-context block is
+    // the nC=0/1 code "1", so the complete 16-block span is 17 bits.
+    zkstego::CavlcLumaNeighbourCounts luma_left_neighbour;
+    luma_left_neighbour.left_available = true;
+    luma_left_neighbour.left[0] = 2;
+    const auto contextual_empty_luma_macroblock = zkstego::decode_cavlc_luma_macroblock(
+        {0xff, 0xff, 0x80}, 0, 15, luma_left_neighbour);
+    CHECK(contextual_empty_luma_macroblock.next_bit_offset == 17);
+    CHECK(contextual_empty_luma_macroblock.blocks[0].token.total_coefficients == 0);
+    CHECK(contextual_empty_luma_macroblock.blocks[1].token.total_coefficients == 0);
+
+    // Top-edge state uses the same nC=2 token for block (0, 0).
+    zkstego::CavlcLumaNeighbourCounts luma_top_neighbour;
+    luma_top_neighbour.top_available = true;
+    luma_top_neighbour.top[0] = 2;
+    CHECK(zkstego::decode_cavlc_luma_macroblock(
+              {0xff, 0xff, 0x80}, 0, 15, luma_top_neighbour).next_bit_offset == 17);
+
+    // nC is ceil((nA + nB) / 2), including when both external neighbours
+    // are available.  1 and 2 must therefore choose the nC=2 table.
+    zkstego::CavlcLumaNeighbourCounts luma_both_neighbours;
+    luma_both_neighbours.left_available = true;
+    luma_both_neighbours.top_available = true;
+    luma_both_neighbours.left[0] = 1;
+    luma_both_neighbours.top[0] = 2;
+    CHECK(zkstego::decode_cavlc_luma_macroblock(
+              {0xff, 0xff, 0x80}, 0, 15, luma_both_neighbours).next_bit_offset == 17);
+
+    // State behind an unavailable edge is ignored.  This models the first
+    // macroblock of a locked raster slice without trusting stale buffers.
+    zkstego::CavlcLumaNeighbourCounts unavailable_neighbours;
+    unavailable_neighbours.left[0] = 16;
+    unavailable_neighbours.top[0] = 16;
+    CHECK(zkstego::decode_cavlc_luma_macroblock(
+              {0xff, 0xff}, 0, 15, unavailable_neighbours).next_bit_offset == 16);
+
+    // External context is addressed in physical 4x4 raster coordinates, not
+    // in CAVLC group order: block 4 is (2, 0), and block 8 is (0, 2).  Each
+    // needs a value of four because its other, in-MB neighbour is zero and
+    // nC is the rounded-up average.
+    zkstego::CavlcLumaNeighbourCounts indexed_top_neighbour;
+    indexed_top_neighbour.top_available = true;
+    indexed_top_neighbour.top[2] = 4;
+    CHECK(zkstego::decode_cavlc_luma_macroblock(
+              {0xf8}, 0, 2, indexed_top_neighbour).next_bit_offset == 5);
+    zkstego::CavlcLumaNeighbourCounts indexed_left_neighbour;
+    indexed_left_neighbour.left_available = true;
+    indexed_left_neighbour.left[2] = 4;
+    CHECK(zkstego::decode_cavlc_luma_macroblock(
+              {0xf8}, 0, 4, indexed_left_neighbour).next_bit_offset == 5);
+
+    zkstego::CavlcLumaNeighbourCounts invalid_left_neighbour;
+    invalid_left_neighbour.left_available = true;
+    invalid_left_neighbour.left[0] = 17;
+    bool invalid_neighbour_rejected = false;
+    try {
+        static_cast<void>(zkstego::decode_cavlc_luma_macroblock(
+            {0x80}, 0, 1, invalid_left_neighbour));
+    } catch (const std::invalid_argument&) {
+        invalid_neighbour_rejected = true;
+    }
+    CHECK(invalid_neighbour_rejected);
     const auto empty_luma_block = zkstego::decode_cavlc_luma_block({0x80}, 0, 0);
     CHECK(empty_luma_block.token.total_coefficients == 0);
     CHECK(empty_luma_block.tail.runs.empty());

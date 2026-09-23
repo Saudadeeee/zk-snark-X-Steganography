@@ -734,7 +734,8 @@ CavlcDecodedLumaBlock decode_cavlc_chroma_ac_block(
 CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit,
-    const std::uint32_t coded_block_pattern_luma) {
+    const std::uint32_t coded_block_pattern_luma,
+    const CavlcLumaNeighbourCounts& neighbours) {
     // H.264 luma4x4BlkIdx is ordered by 8x8 group, not by 4x4 raster order.
     // residual_block_cavlc() visits each group in index order.  The raster
     // map below is used only for deriving the physical left/top neighbours.
@@ -753,6 +754,21 @@ CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
     if (coded_block_pattern_luma > 0x0fU) {
         throw std::invalid_argument("luma coded block pattern must fit four bits");
     }
+    // A CAVLC TotalCoeff is bounded by the 16 coefficients in a luma 4x4
+    // block. Validate externally persisted state before it participates in
+    // the nC average: apart from rejecting corrupt traversal state, this also
+    // prevents overflow in nA + nB below.
+    const auto validate_neighbour_counts = [](const std::array<std::uint32_t, 4>& counts,
+                                               const char* direction) {
+        for (const auto count : counts) {
+            if (count > 16U) {
+                throw std::invalid_argument(
+                    std::string("luma ") + direction + " neighbour TotalCoeff exceeds 16");
+            }
+        }
+    };
+    if (neighbours.left_available) validate_neighbour_counts(neighbours.left, "left");
+    if (neighbours.top_available) validate_neighbour_counts(neighbours.top, "top");
 
     CavlcDecodedLumaMacroblock macroblock;
     std::array<std::uint32_t, 16> total_coefficients{};
@@ -768,10 +784,12 @@ CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
                 }
                 if (x != kBlockIndexByRaster[y].size()) break;
             }
-            const auto has_left = x != 0;
-            const auto has_top = y != 0;
-            const auto n_a = has_left ? total_coefficients[kBlockIndexByRaster[y][x - 1]] : 0U;
-            const auto n_b = has_top ? total_coefficients[kBlockIndexByRaster[y - 1][x]] : 0U;
+            const auto has_left = x != 0 || neighbours.left_available;
+            const auto has_top = y != 0 || neighbours.top_available;
+            const auto n_a = x != 0 ? total_coefficients[kBlockIndexByRaster[y][x - 1]]
+                                    : neighbours.left[y];
+            const auto n_b = y != 0 ? total_coefficients[kBlockIndexByRaster[y - 1][x]]
+                                    : neighbours.top[x];
             const auto n_c = has_left && has_top ? static_cast<int>((n_a + n_b + 1U) / 2U)
                            : has_left ? static_cast<int>(n_a)
                            : has_top ? static_cast<int>(n_b)
@@ -802,6 +820,14 @@ CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
     }
     macroblock.next_bit_offset = bit_offset;
     return macroblock;
+}
+
+CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
+    const std::vector<std::uint8_t>& rbsp,
+    const std::size_t start_bit,
+    const std::uint32_t coded_block_pattern_luma) {
+    return decode_cavlc_luma_macroblock(
+        rbsp, start_bit, coded_block_pattern_luma, CavlcLumaNeighbourCounts{});
 }
 
 std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(

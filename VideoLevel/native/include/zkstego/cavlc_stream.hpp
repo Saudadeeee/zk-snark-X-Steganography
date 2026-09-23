@@ -124,6 +124,18 @@ struct CavlcDecodedLumaMacroblock {
     std::size_t next_bit_offset{};
 };
 
+struct CavlcLumaNeighbourCounts {
+    // Valid only for the locked progressive, single-slice raster profile.
+    // Callers must derive availability from the slice, not merely from frame
+    // position; FMO and MBAFF are intentionally outside this primitive.
+    bool left_available{};
+    bool top_available{};
+    // TotalCoeff values at the left MB's x=3 edge and top MB's y=3 edge,
+    // indexed by luma 4x4 raster coordinate. Values must be in [0, 16].
+    std::array<std::uint32_t, 4> left{};
+    std::array<std::uint32_t, 4> top{};
+};
+
 struct H264BaselineIMacroblockHeader {
     std::uint32_t mb_type{};
     std::uint32_t coded_block_pattern{};
@@ -201,6 +213,11 @@ CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
     const std::vector<std::uint8_t>& rbsp,
     std::size_t start_bit,
     std::uint32_t coded_block_pattern_luma);
+CavlcDecodedLumaMacroblock decode_cavlc_luma_macroblock(
+    const std::vector<std::uint8_t>& rbsp,
+    std::size_t start_bit,
+    std::uint32_t coded_block_pattern_luma,
+    const CavlcLumaNeighbourCounts& neighbours);
 std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
     const std::vector<std::int32_t>& decoded_non_trailing_levels,
     const std::vector<std::uint32_t>& runs);
