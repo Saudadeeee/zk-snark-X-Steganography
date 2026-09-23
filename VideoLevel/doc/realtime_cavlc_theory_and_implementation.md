@@ -204,6 +204,28 @@ partial ChromaDC/ChromaAC coverage. It does **not** establish complete slice
 traversal, chroma residual support, bit-exact rewrite, blind extraction,
 decoder-valid output, or a realtime claim. Those remain release gates.
 
+### September 2026 diagnostic update
+
+The `nC=0` versus `nC=2..3` ChromaAC discrepancy must not be fixed by a
+constant frame-edge value. A controlled probe that seeded unavailable ChromaAC
+neighbours with `2` made Foreman NAL 123 parse, but then made NAL 3 reject a
+ChromaAC `total_zeros` value outside its 15-coefficient bound. The probe was
+discarded. This demonstrates that it was an accidental alignment, not an
+encoder-profile rule.
+
+FFmpeg's CAVLC decoder calculates `nC` from its populated
+`non_zero_count_cache`; it does not substitute a fixed edge context. Native
+completion therefore requires macroblock-by-macroblock availability and cache
+state matching for luma and each chroma component before any CAVLC token may
+be rewritten. The current first-macroblock diagnostic lacks that state and
+remains fail-closed.
+
+The legacy Python public-API E2E test is also not an edge benchmark. Its
+Phase-5 full-file `embed`/`verify` execution accumulated approximately
+3.33 GiB working set while processing the fixture, so it was stopped before
+host memory exhaustion. It uses sidecars and a batch parser; it cannot be
+used as evidence for the required sidecar-free native edge data plane.
+
 ## Blind extraction relationship
 
 Blind extraction and realtime use the same sign-invariant candidate policy.
