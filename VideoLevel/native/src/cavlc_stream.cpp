@@ -1620,6 +1620,226 @@ std::vector<std::uint8_t> extract_authenticated_cavlc_payload(
     return unpack_authenticated_cavlc_frame(full_frame, secret_key, maximum_payload_bytes);
 }
 
+namespace {
+
+void wipe_stream_secret(std::vector<std::uint8_t>& value) noexcept {
+    volatile auto* bytes = value.data();
+    for (std::size_t index = 0; index < value.size(); ++index) bytes[index] = 0U;
+}
+
+struct PreparedCavlcStreamSegment {
+    std::vector<std::uint8_t> analysis_input;
+    std::vector<AnnexBNalUnit> parameter_sets;
+    std::vector<CavlcSignCandidate> candidates;
+    std::size_t context_nal_count{};
+};
+
+PreparedCavlcStreamSegment prepare_cavlc_stream_segment(
+    const std::vector<std::uint8_t>& annex_b_segment,
+    const std::vector<AnnexBNalUnit>& previous_parameter_sets) {
+    const auto units = split_annex_b(annex_b_segment);
+    const auto idr_count = std::count_if(units.begin(), units.end(), [](const auto& unit) {
+        return unit.is_idr();
+    });
+    if (idr_count != 1U || std::any_of(units.begin(), units.end(), [](const auto& unit) {
+            return unit.nal_unit_type == 1U;
+        })) {
+        throw std::invalid_argument("stream segment must contain exactly one IDR picture and no P-slices");
+    }
+    auto parameter_sets = previous_parameter_sets;
+    bool saw_idr = false;
+    for (const auto& unit : units) {
+        if (unit.is_idr()) {
+            saw_idr = true;
+        } else if (unit.nal_unit_type == 7U || unit.nal_unit_type == 8U) {
+            if (saw_idr) throw std::invalid_argument("stream parameter sets must precede the IDR slice");
+            const auto existing = std::find_if(parameter_sets.begin(), parameter_sets.end(), [&](const auto& item) {
+                return item.nal_unit_type == unit.nal_unit_type;
+            });
+            if (existing == parameter_sets.end()) parameter_sets.push_back(unit);
+            else *existing = unit;
+        }
+    }
+    const auto has_parameter_set = [&](const std::uint8_t type) {
+        return std::any_of(parameter_sets.begin(), parameter_sets.end(), [&](const auto& item) {
+            return item.nal_unit_type == type;
+        });
+    };
+    if (!has_parameter_set(7U) || !has_parameter_set(8U)) {
+        throw std::invalid_argument("stream IDR requires SPS/PPS in-band or from prior stream segments");
+    }
+    auto analysis_units = parameter_sets;
+    analysis_units.insert(analysis_units.end(), units.begin(), units.end());
+    auto analysis_input = assemble_annex_b(analysis_units);
+    const auto slices = decode_baseline_i_idr_slices(analysis_input);
+    if (slices.size() != 1U) {
+        throw std::invalid_argument("stream segment must contain exactly one supported IDR slice");
+    }
+    auto candidates = collect_cavlc_trailing_one_sign_candidates(slices);
+    return {std::move(analysis_input), std::move(parameter_sets), std::move(candidates),
+            analysis_units.size() - units.size()};
+}
+
+std::vector<std::uint8_t> extract_keyed_bits_from_candidates(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    const std::vector<CavlcSignCandidate>& candidates,
+    const std::size_t payload_bit_count) {
+    const auto selected = select_keyed_cavlc_sign_candidates(candidates, secret_key, payload_bit_count);
+    const auto units = split_annex_b(annex_b);
+    std::vector<std::uint8_t> payload_bits;
+    payload_bits.reserve(selected.size());
+    for (const auto& candidate : selected) {
+        if (candidate.nal_index >= units.size()) {
+            throw std::invalid_argument("blind schedule candidate NAL is outside the segment");
+        }
+        const auto rbsp = units[candidate.nal_index].rbsp();
+        if (candidate.rbsp_bit_offset >= rbsp.size() * 8U) {
+            throw std::invalid_argument("blind schedule candidate bit is outside RBSP");
+        }
+        payload_bits.push_back(static_cast<std::uint8_t>(
+            (rbsp[candidate.rbsp_bit_offset / 8U] >>
+             (7U - candidate.rbsp_bit_offset % 8U)) & 1U));
+    }
+    return payload_bits;
+}
+
+std::vector<std::uint8_t> remove_stream_context_prefix(
+    const std::vector<std::uint8_t>& annex_b_with_context,
+    const std::size_t context_nal_count) {
+    auto units = split_annex_b(annex_b_with_context);
+    if (context_nal_count > units.size()) {
+        throw std::logic_error("stream parameter-set context exceeded patched segment");
+    }
+    units.erase(units.begin(), units.begin() + static_cast<std::ptrdiff_t>(context_nal_count));
+    return assemble_annex_b(units);
+}
+
+}  // namespace
+
+AuthenticatedCavlcStreamEncoder::AuthenticatedCavlcStreamEncoder(
+    std::vector<std::uint8_t> secret_key,
+    const std::vector<std::uint8_t>& payload,
+    const std::size_t maximum_bits_per_segment)
+    : secret_key_(std::move(secret_key)),
+      frame_bits_(bytes_to_msb_bits(pack_authenticated_cavlc_frame(payload, secret_key_))),
+      maximum_bits_per_segment_(maximum_bits_per_segment) {
+    if (maximum_bits_per_segment_ == 0U) {
+        throw std::invalid_argument("maximum stream bits per segment must be positive");
+    }
+}
+
+AuthenticatedCavlcStreamEncoder::~AuthenticatedCavlcStreamEncoder() noexcept {
+    wipe_stream_secret(secret_key_);
+    wipe_stream_secret(frame_bits_);
+}
+
+AuthenticatedCavlcStreamSegment AuthenticatedCavlcStreamEncoder::process_segment(
+    const std::vector<std::uint8_t>& annex_b_segment) {
+    if (complete()) return {annex_b_segment, 0U, 0U, true};
+    auto prepared = prepare_cavlc_stream_segment(annex_b_segment, parameter_sets_);
+    parameter_sets_ = std::move(prepared.parameter_sets);
+    const auto& candidates = prepared.candidates;
+    const auto segment_capacity = std::min(maximum_bits_per_segment_, candidates.size());
+    if (segment_capacity == 0U) return {annex_b_segment, 0U, 0U, false};
+
+    std::vector<std::uint8_t> segment_bits(segment_capacity, 0U);
+    const auto bits_embedded = std::min(segment_capacity, remaining_bits());
+    std::copy_n(frame_bits_.begin() + static_cast<std::ptrdiff_t>(next_bit_), bits_embedded,
+                segment_bits.begin());
+    const auto selected = select_keyed_cavlc_sign_candidates(candidates, secret_key_, segment_capacity);
+    auto units = split_annex_b(prepared.analysis_input);
+    std::vector<std::vector<FixedLengthBitPatch>> patches_by_nal(units.size());
+    for (std::size_t index = 0; index < selected.size(); ++index) {
+        patches_by_nal[selected[index].nal_index].push_back(
+            {selected[index].rbsp_bit_offset, {segment_bits[index]}});
+    }
+    std::vector<AnnexBRbspPatchPlan> plan;
+    for (std::size_t index = 0; index < patches_by_nal.size(); ++index) {
+        if (!patches_by_nal[index].empty()) plan.push_back({index, std::move(patches_by_nal[index])});
+    }
+    auto patched = patch_annex_b_rbsp_plan(prepared.analysis_input, plan);
+    auto output = remove_stream_context_prefix(patched, prepared.context_nal_count);
+    next_bit_ += bits_embedded;
+    return {std::move(output), segment_capacity, bits_embedded, complete()};
+}
+
+bool AuthenticatedCavlcStreamEncoder::complete() const noexcept {
+    return next_bit_ == frame_bits_.size();
+}
+
+std::size_t AuthenticatedCavlcStreamEncoder::remaining_bits() const noexcept {
+    return frame_bits_.size() - next_bit_;
+}
+
+AuthenticatedCavlcStreamDecoder::AuthenticatedCavlcStreamDecoder(
+    std::vector<std::uint8_t> secret_key,
+    const std::size_t maximum_payload_bytes,
+    const std::size_t maximum_bits_per_segment)
+    : secret_key_(std::move(secret_key)),
+      maximum_payload_bytes_(maximum_payload_bytes),
+      maximum_bits_per_segment_(maximum_bits_per_segment) {
+    if (secret_key_.size() != 32U) throw std::invalid_argument("native CAVLC key must be 32 bytes");
+    if (maximum_payload_bytes_ > std::numeric_limits<std::uint16_t>::max()) {
+        throw std::invalid_argument("authenticated payload maximum exceeds 65535 bytes");
+    }
+    if (maximum_bits_per_segment_ == 0U) {
+        throw std::invalid_argument("maximum stream bits per segment must be positive");
+    }
+}
+
+AuthenticatedCavlcStreamDecoder::~AuthenticatedCavlcStreamDecoder() noexcept {
+    wipe_stream_secret(secret_key_);
+    wipe_stream_secret(collected_bits_);
+    if (payload_.has_value()) wipe_stream_secret(*payload_);
+}
+
+void AuthenticatedCavlcStreamDecoder::consume_segment(
+    const std::vector<std::uint8_t>& annex_b_segment) {
+    if (complete()) return;
+    if (failed_) throw std::invalid_argument(failure_reason_);
+    try {
+        auto prepared = prepare_cavlc_stream_segment(annex_b_segment, parameter_sets_);
+        parameter_sets_ = std::move(prepared.parameter_sets);
+        const auto& candidates = prepared.candidates;
+        const auto segment_bit_count = std::min(maximum_bits_per_segment_, candidates.size());
+        if (segment_bit_count == 0U) return;
+        const auto segment_bits = extract_keyed_bits_from_candidates(
+            prepared.analysis_input, secret_key_, candidates, segment_bit_count);
+        for (const auto bit : segment_bits) {
+            if (expected_frame_bits_.has_value() && collected_bits_.size() >= *expected_frame_bits_) break;
+            collected_bits_.push_back(bit);
+            if (!expected_frame_bits_.has_value() && collected_bits_.size() == 24U) {
+                const auto header = msb_bits_to_bytes(collected_bits_);
+                if (header[0] != 1U) throw std::invalid_argument("authenticated CAVLC stream version is invalid");
+                const auto payload_size = (static_cast<std::size_t>(header[1]) << 8U) | header[2];
+                if (payload_size > maximum_payload_bytes_) {
+                    throw std::invalid_argument("authenticated CAVLC stream length exceeds configured maximum");
+                }
+                expected_frame_bits_ = (3U + payload_size + 16U) * 8U;
+            }
+            if (expected_frame_bits_.has_value() && collected_bits_.size() == *expected_frame_bits_) {
+                payload_ = unpack_authenticated_cavlc_frame(
+                    msb_bits_to_bytes(collected_bits_), secret_key_, maximum_payload_bytes_);
+                break;
+            }
+        }
+    } catch (const std::exception& error) {
+        failed_ = true;
+        failure_reason_ = error.what();
+        wipe_stream_secret(collected_bits_);
+        collected_bits_.clear();
+        expected_frame_bits_.reset();
+        parameter_sets_.clear();
+        throw;
+    }
+}
+
+const std::vector<std::uint8_t>& AuthenticatedCavlcStreamDecoder::authenticated_payload() const {
+    if (!payload_.has_value()) throw std::logic_error("authenticated CAVLC stream is incomplete");
+    return *payload_;
+}
+
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units) {
     std::size_t total_size = 0;
     for (const auto& unit : units) {

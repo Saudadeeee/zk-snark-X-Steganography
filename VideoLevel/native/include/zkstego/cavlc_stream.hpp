@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <array>
+#include <optional>
+#include <string>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -305,6 +307,63 @@ std::vector<std::uint8_t> extract_authenticated_cavlc_payload(
     const std::vector<std::uint8_t>& annex_b,
     const std::vector<std::uint8_t>& secret_key,
     std::size_t maximum_payload_bytes);
+
+struct AuthenticatedCavlcStreamSegment {
+    std::vector<std::uint8_t> output;
+    std::size_t candidate_capacity{};
+    std::size_t bits_embedded{};
+    bool session_complete{};
+};
+
+class AuthenticatedCavlcStreamEncoder {
+public:
+    AuthenticatedCavlcStreamEncoder(
+        std::vector<std::uint8_t> secret_key,
+        const std::vector<std::uint8_t>& payload,
+        std::size_t maximum_bits_per_segment);
+    AuthenticatedCavlcStreamEncoder(const AuthenticatedCavlcStreamEncoder&) = delete;
+    AuthenticatedCavlcStreamEncoder& operator=(const AuthenticatedCavlcStreamEncoder&) = delete;
+    ~AuthenticatedCavlcStreamEncoder() noexcept;
+    [[nodiscard]] AuthenticatedCavlcStreamSegment process_segment(
+        const std::vector<std::uint8_t>& annex_b_segment);
+    [[nodiscard]] bool complete() const noexcept;
+    [[nodiscard]] std::size_t remaining_bits() const noexcept;
+
+private:
+    std::vector<std::uint8_t> secret_key_;
+    std::vector<std::uint8_t> frame_bits_;
+    std::vector<AnnexBNalUnit> parameter_sets_;
+    std::size_t maximum_bits_per_segment_{};
+    std::size_t next_bit_{};
+};
+
+class AuthenticatedCavlcStreamDecoder {
+public:
+    AuthenticatedCavlcStreamDecoder(
+        std::vector<std::uint8_t> secret_key,
+        std::size_t maximum_payload_bytes,
+        std::size_t maximum_bits_per_segment);
+    AuthenticatedCavlcStreamDecoder(const AuthenticatedCavlcStreamDecoder&) = delete;
+    AuthenticatedCavlcStreamDecoder& operator=(const AuthenticatedCavlcStreamDecoder&) = delete;
+    ~AuthenticatedCavlcStreamDecoder() noexcept;
+    void consume_segment(const std::vector<std::uint8_t>& annex_b_segment);
+    [[nodiscard]] bool complete() const noexcept { return payload_.has_value(); }
+    [[nodiscard]] bool failed() const noexcept { return failed_; }
+    [[nodiscard]] std::size_t buffered_bit_count() const noexcept { return collected_bits_.size(); }
+    [[nodiscard]] const std::vector<std::uint8_t>& authenticated_payload() const;
+
+private:
+    std::vector<std::uint8_t> secret_key_;
+    std::vector<AnnexBNalUnit> parameter_sets_;
+    std::size_t maximum_payload_bytes_{};
+    std::size_t maximum_bits_per_segment_{};
+    std::vector<std::uint8_t> collected_bits_;
+    std::optional<std::size_t> expected_frame_bits_;
+    std::optional<std::vector<std::uint8_t>> payload_;
+    bool failed_{};
+    std::string failure_reason_;
+};
+
 std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
     const std::vector<std::int32_t>& decoded_non_trailing_levels,
     const std::vector<std::uint32_t>& runs);

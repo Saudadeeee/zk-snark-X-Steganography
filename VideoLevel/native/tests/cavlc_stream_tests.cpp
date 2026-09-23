@@ -478,6 +478,72 @@ int main() {
     CHECK(throws_invalid_argument([&] {
         static_cast<void>(zkstego::extract_authenticated_cavlc_payload(tampered_authenticated_stego, blind_key, 32));
     }));
+
+    // Realtime protocol contract: each IDR is selected independently, and a
+    // stateful blind decoder reconstructs the authenticated frame across IDRs.
+    const auto stream_fixture_units = zkstego::split_annex_b(fixture_bytes);
+    std::vector<zkstego::AnnexBNalUnit> current_parameter_sets;
+    std::vector<std::vector<std::uint8_t>> idr_segments;
+    bool first_idr_segment = true;
+    for (const auto& unit : stream_fixture_units) {
+        if (unit.nal_unit_type == 7U || unit.nal_unit_type == 8U) {
+            const auto existing = std::find_if(current_parameter_sets.begin(), current_parameter_sets.end(),
+                [&](const auto& parameter_set) { return parameter_set.nal_unit_type == unit.nal_unit_type; });
+            if (existing == current_parameter_sets.end()) current_parameter_sets.push_back(unit);
+            else *existing = unit;
+        } else if (unit.nal_unit_type == 5U) {
+            auto frame_units = first_idr_segment ? current_parameter_sets : std::vector<zkstego::AnnexBNalUnit>{};
+            frame_units.push_back(unit);
+            idr_segments.push_back(zkstego::assemble_annex_b(frame_units));
+            first_idr_segment = false;
+        }
+    }
+    CHECK(idr_segments.size() == 300U);
+    std::vector<std::uint8_t> stream_payload(257U);
+    for (std::size_t index = 0; index < stream_payload.size(); ++index) {
+        stream_payload[index] = static_cast<std::uint8_t>((index * 37U + 11U) & 0xffU);
+    }
+    zkstego::AuthenticatedCavlcStreamEncoder stream_encoder(blind_key, stream_payload, 64U);
+    zkstego::AuthenticatedCavlcStreamDecoder stream_decoder(blind_key, 512U, 64U);
+    zkstego::AuthenticatedCavlcStreamDecoder wrong_stream_decoder(wrong_key, 512U, 64U);
+    bool wrong_stream_rejected = false;
+    std::string wrong_stream_error;
+    std::size_t frames_to_complete = 0;
+    for (const auto& segment : idr_segments) {
+        const auto encoded_segment = stream_encoder.process_segment(segment);
+        CHECK(encoded_segment.output.size() == segment.size());
+        if (encoded_segment.session_complete && frames_to_complete == 0U) {
+            frames_to_complete = static_cast<std::size_t>(&segment - idr_segments.data()) + 1U;
+        }
+        stream_decoder.consume_segment(encoded_segment.output);
+        if (!wrong_stream_rejected) {
+            try {
+                wrong_stream_decoder.consume_segment(encoded_segment.output);
+            } catch (const std::invalid_argument& error) {
+                wrong_stream_rejected = true;
+                wrong_stream_error = error.what();
+            }
+        }
+    }
+    CHECK(stream_encoder.complete());
+    CHECK(stream_decoder.complete());
+    CHECK(stream_decoder.authenticated_payload() == stream_payload);
+    CHECK(wrong_stream_rejected);
+    CHECK(wrong_stream_error == "authenticated CAVLC stream version is invalid" ||
+        wrong_stream_error == "authenticated CAVLC stream length exceeds configured maximum" ||
+        wrong_stream_error == "authenticated CAVLC frame tag is invalid");
+    CHECK(wrong_stream_decoder.failed());
+    CHECK(wrong_stream_decoder.buffered_bit_count() == 0U);
+    try {
+        wrong_stream_decoder.consume_segment(idr_segments.back());
+        CHECK(false);
+    } catch (const std::invalid_argument& error) {
+        CHECK(wrong_stream_error == error.what());
+    }
+    CHECK(wrong_stream_decoder.buffered_bit_count() == 0U);
+    CHECK(frames_to_complete > 1U);
+    CHECK(frames_to_complete < 300U);
+
     const auto empty_luma_block = zkstego::decode_cavlc_luma_block({0x80}, 0, 0);
     CHECK(empty_luma_block.token.total_coefficients == 0);
     CHECK(empty_luma_block.tail.runs.empty());

@@ -106,13 +106,31 @@ budget.
 
 ## Native patcher contract
 
-The pending native implementation must expose this logical function:
+The native library now exposes stateful authenticated segment processing:
 
 ```text
-patch_idr_segment(annex_b_segment, proof_bytes, embedding_key) -> annex_b_segment
+AuthenticatedCavlcStreamEncoder.process_segment(one_idr_segment)
+  -> patched_segment, candidate_capacity, bits_embedded, session_complete
+AuthenticatedCavlcStreamDecoder.consume_segment(one_idr_segment)
+  -> blind extraction state; verify HMAC when the framed payload is complete
 ```
 
-It must:
+Each call scopes keyed candidate ranking to exactly one IDR segment, so it no
+longer needs future frames to choose positions. The authenticated frame's bits
+are carried forward across segments, bounded by a configured maximum number
+of bits per segment; the final segment is zero-padded to the same observable
+capacity rule. The decoder independently derives that capacity, reads the
+length-prefixed frame, and rejects an invalid key/tag. It accepts only one
+supported IDR slice per segment and no P-slice. This native stateful API has
+fixture unit coverage, but it is not yet connected to HTTP/WebSocket or live
+camera I/O. The decoder is terminal after any malformed segment, header, or
+tag; it wipes partial recovered bits and refuses later chunks. Segment order
+is significant: dropping/reordering encoded segments causes authentication
+failure. This protocol currently has no sequence number, nonce, or replay
+protection, so a stream-session wrapper must supply and authenticate freshness
+before it is suitable for evidence use.
+
+Remaining native/controller work includes:
 
 1. Parse SPS/PPS once per stream and parse each IDR slice incrementally.
 2. Decode enough CAVLC syntax to locate selected luma residual levels and
@@ -124,7 +142,8 @@ It must:
    units byte-for-byte.
 5. Return an unchanged segment when its validated capacity is insufficient;
    report that condition as a controlled drop/failure, never partial silent
-   embedding.
+   embedding. (Current behavior does this for a zero-candidate segment; the
+   session advances only by the number of bits actually carried.)
 6. Expose per-segment parse, patch, proof-wait and total-latency metrics.
 
 ## Performance plan
@@ -297,6 +316,11 @@ modified payload bit; an actual CLI E2E output also passes FFmpeg strict decode.
 This authenticates a byte payload, including a serialized proof if supplied;
 it does not itself generate or verify a ZKP, encrypt the payload, prevent frame
 replay, establish Python parity, or prove realtime/production readiness.
+The segmented native framing uses this same authenticated payload and inherits
+those limitations. A proof-to-video binding must include the intended video
+commitment/session identifier inside the payload and be verified by the actual
+ZKP verifier; neither the current native HTTP adapter nor the new segment
+codec performs that operation.
 
 ### Native HTTP adapter and current E2E evidence
 
