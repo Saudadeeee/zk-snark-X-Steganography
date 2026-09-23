@@ -51,6 +51,23 @@ The candidate must satisfy all of the following:
 Sign changes alter reconstructed pixels through the inverse transform while
 keeping payload inside compressed video content. They are not metadata.
 
+### ChromaAC context and bounds
+
+For 4:2:0 ChromaAC, the DC transform coefficient is coded separately and an
+AC block has `maxNumCoeff = 15`, not 16. Consequently `total_zeros` is absent
+when `TotalCoeff == 15`; consuming the luma `TotalCoeff == 15` VLC at that
+point corrupts the next block boundary.
+
+`nC` for a ChromaAC `coeff_token` is derived from neighbouring **AC** blocks
+of the same component (Cb never borrows Cr counts, and neither uses a
+ChromaDC count). If both neighbouring macroblocks are available,
+`nC = (nA + nB + 1) >> 1`; otherwise `nC = nA + nB`, with an unavailable,
+skip, or uncoded neighbour contributing zero. This rule is a parsing invariant
+for native traversal, not an optional estimator. The current native diagnostic
+implements only the first-macroblock subset, where external neighbours are
+unavailable; full slice traversal must retain this state per component across
+macroblock boundaries.
+
 ## Realtime segment protocol
 
 ```text
