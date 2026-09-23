@@ -294,6 +294,13 @@ std::vector<std::uint8_t> embed_authenticated_cavlc_payload(
     const std::vector<std::uint8_t>& annex_b,
     const std::vector<std::uint8_t>& secret_key,
     const std::vector<std::uint8_t>& payload);
+std::vector<std::uint8_t> pack_authenticated_cavlc_frame(
+    const std::vector<std::uint8_t>& payload,
+    const std::vector<std::uint8_t>& secret_key);
+std::vector<std::uint8_t> unpack_authenticated_cavlc_frame(
+    const std::vector<std::uint8_t>& frame,
+    const std::vector<std::uint8_t>& secret_key,
+    std::size_t maximum_payload_bytes);
 std::vector<std::uint8_t> extract_authenticated_cavlc_payload(
     const std::vector<std::uint8_t>& annex_b,
     const std::vector<std::uint8_t>& secret_key,

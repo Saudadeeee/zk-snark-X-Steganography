@@ -1539,10 +1539,9 @@ std::vector<std::uint8_t> extract_keyed_cavlc_sign_bits(
     return payload_bits;
 }
 
-std::vector<std::uint8_t> embed_authenticated_cavlc_payload(
-    const std::vector<std::uint8_t>& annex_b,
-    const std::vector<std::uint8_t>& secret_key,
-    const std::vector<std::uint8_t>& payload) {
+std::vector<std::uint8_t> pack_authenticated_cavlc_frame(
+    const std::vector<std::uint8_t>& payload,
+    const std::vector<std::uint8_t>& secret_key) {
     constexpr std::uint8_t frame_version = 1;
     constexpr std::size_t tag_bytes = 16;
     if (payload.size() > std::numeric_limits<std::uint16_t>::max()) {
@@ -1556,7 +1555,45 @@ std::vector<std::uint8_t> embed_authenticated_cavlc_payload(
     frame.insert(frame.end(), payload.begin(), payload.end());
     const auto tag = authenticated_frame_tag(secret_key, frame);
     frame.insert(frame.end(), tag.begin(), tag.begin() + static_cast<std::ptrdiff_t>(tag_bytes));
-    return embed_keyed_cavlc_sign_bits(annex_b, secret_key, bytes_to_msb_bits(frame));
+    return frame;
+}
+
+std::vector<std::uint8_t> unpack_authenticated_cavlc_frame(
+    const std::vector<std::uint8_t>& frame,
+    const std::vector<std::uint8_t>& secret_key,
+    const std::size_t maximum_payload_bytes) {
+    constexpr std::uint8_t frame_version = 1;
+    constexpr std::size_t header_bytes = 3;
+    constexpr std::size_t tag_bytes = 16;
+    if (maximum_payload_bytes > std::numeric_limits<std::uint16_t>::max()) {
+        throw std::invalid_argument("authenticated payload maximum exceeds 65535 bytes");
+    }
+    if (frame.size() < header_bytes + tag_bytes || frame[0] != frame_version) {
+        throw std::invalid_argument("authenticated CAVLC frame version is invalid");
+    }
+    const auto payload_size = (static_cast<std::size_t>(frame[1]) << 8U) | frame[2];
+    if (payload_size > maximum_payload_bytes || frame.size() != header_bytes + payload_size + tag_bytes) {
+        throw std::invalid_argument("authenticated CAVLC frame length is invalid");
+    }
+    const auto authenticated_size = header_bytes + payload_size;
+    std::vector<std::uint8_t> authenticated_data(
+        frame.begin(), frame.begin() + static_cast<std::ptrdiff_t>(authenticated_size));
+    const auto expected_tag = authenticated_frame_tag(secret_key, authenticated_data);
+    std::uint8_t difference = 0;
+    for (std::size_t index = 0; index < tag_bytes; ++index) {
+        difference |= static_cast<std::uint8_t>(expected_tag[index] ^ frame[authenticated_size + index]);
+    }
+    if (difference != 0U) throw std::invalid_argument("authenticated CAVLC frame tag is invalid");
+    return {frame.begin() + static_cast<std::ptrdiff_t>(header_bytes),
+            frame.begin() + static_cast<std::ptrdiff_t>(authenticated_size)};
+}
+
+std::vector<std::uint8_t> embed_authenticated_cavlc_payload(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    const std::vector<std::uint8_t>& payload) {
+    return embed_keyed_cavlc_sign_bits(
+        annex_b, secret_key, bytes_to_msb_bits(pack_authenticated_cavlc_frame(payload, secret_key)));
 }
 
 std::vector<std::uint8_t> extract_authenticated_cavlc_payload(
@@ -1580,17 +1617,7 @@ std::vector<std::uint8_t> extract_authenticated_cavlc_payload(
     }
     const auto full_frame = msb_bits_to_bytes(extract_keyed_cavlc_sign_bits(
         annex_b, secret_key, (header_bytes + payload_size + tag_bytes) * 8U));
-    const auto authenticated_size = header_bytes + payload_size;
-    std::vector<std::uint8_t> authenticated_data(
-        full_frame.begin(), full_frame.begin() + static_cast<std::ptrdiff_t>(authenticated_size));
-    const auto expected_tag = authenticated_frame_tag(secret_key, authenticated_data);
-    std::uint8_t difference = 0;
-    for (std::size_t index = 0; index < tag_bytes; ++index) {
-        difference |= static_cast<std::uint8_t>(expected_tag[index] ^ full_frame[authenticated_size + index]);
-    }
-    if (difference != 0U) throw std::invalid_argument("authenticated CAVLC frame tag is invalid");
-    return {full_frame.begin() + static_cast<std::ptrdiff_t>(header_bytes),
-            full_frame.begin() + static_cast<std::ptrdiff_t>(authenticated_size)};
+    return unpack_authenticated_cavlc_frame(full_frame, secret_key, maximum_payload_bytes);
 }
 
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units) {

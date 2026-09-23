@@ -103,6 +103,14 @@ int main() {
     CHECK(keyed_schedule[2].nal_index == 7 && keyed_schedule[2].block_index == 3);
     auto wrong_key = blind_key;
     std::fill(wrong_key.begin(), wrong_key.end(), 0x01U);
+    const std::vector<std::uint8_t> expected_authenticated_frame{
+        0x01, 0x00, 0x05, 0x70, 0x72, 0x6f, 0x6f, 0x66,
+        0xfe, 0x20, 0xde, 0xac, 0x39, 0x9e, 0x5f, 0x3a,
+        0x59, 0xf5, 0xba, 0xc9, 0xed, 0xa8, 0x51, 0x36,
+    };
+    CHECK(zkstego::pack_authenticated_cavlc_frame({0x70, 0x72, 0x6f, 0x6f, 0x66}, blind_key) == expected_authenticated_frame);
+    CHECK(zkstego::unpack_authenticated_cavlc_frame(expected_authenticated_frame, blind_key, 32) ==
+        std::vector<std::uint8_t>({0x70, 0x72, 0x6f, 0x6f, 0x66}));
     const auto wrong_key_schedule = zkstego::select_keyed_cavlc_sign_candidates(
         schedule_vector, wrong_key, 1);
     CHECK(wrong_key_schedule[0].nal_index == 7 && wrong_key_schedule[0].macroblock_address == 11);
