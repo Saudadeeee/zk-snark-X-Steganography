@@ -3,28 +3,36 @@
 import os
 import sys
 import tempfile
-import time
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from src.realtime_cavlc import CAVLCRealtimeBudget, RealtimeCAVLCScheduler
-from src.bitstream.cavlc import CAVLCDecoder, CAVLCEncoder, find_coeff_token_code, get_run_before_table
-from src.bitstream.bitstream_io import BitstreamReader, BitstreamWriter
-from src.bitstream.h264 import NALUnitType, iter_annex_b_nal_units
 from src.bitstream import bitstream_ops
+from src.bitstream.bitstream_io import BitstreamReader, BitstreamWriter
 from src.bitstream.bitstream_ops import BitstreamPatcher
-from src.core.stego import CAVLCSafetyFilter
+from src.bitstream.cavlc import (
+    CAVLCDecoder,
+    CAVLCEncoder,
+    find_coeff_token_code,
+    get_run_before_table,
+)
+from src.bitstream.h264 import NALUnitType, iter_annex_b_nal_units
+from src.blind_sync import (
+    iter_blind_sign_candidates_from_idr_analysis,
+    select_blind_candidates_bounded,
+    select_streaming_blind_positions,
+)
 from src.core.pipeline import (
+    extract_selected_sign_bits_streaming,
+    iter_idr_luma_analysis,
     iter_idr_slices,
     iter_idr_trace_results,
-    iter_idr_luma_analysis,
     patch_selected_sign_positions_streaming,
-    extract_selected_sign_bits_streaming,
 )
-from src.blind_sync import iter_blind_sign_candidates_from_idr_analysis, select_blind_candidates_bounded
-from src.blind_sync import select_streaming_blind_positions
+from src.core.stego import CAVLCSafetyFilter
+from src.realtime_cavlc import CAVLCRealtimeBudget, RealtimeCAVLCScheduler
 from src.runtest._helpers import run_test, section, summarise
 
 
@@ -36,6 +44,95 @@ def t_scheduler_keeps_only_fresh_segments_under_pressure():
     assert scheduler.dropped_segments == 1
     assert scheduler.process_next().output == b"current"
     assert scheduler.process_next().output == b"fresh"
+
+
+def t_scheduler_bounds_queue_by_bytes_and_rejects_oversized_segment():
+    scheduler = RealtimeCAVLCScheduler(
+        CAVLCRealtimeBudget(fps=30.0, max_queue_segments=4, max_queued_bytes=5, max_segment_bytes=4),
+        lambda _epoch: b"proof",
+        lambda segment, _proof: segment,
+    )
+    scheduler.submit(b"1234", epoch=1)
+    scheduler.submit(b"ab", epoch=1)
+    assert scheduler.dropped_segments == 1
+    assert scheduler.queued_bytes == 2
+    try:
+        scheduler.submit(b"12345", epoch=1)
+    except ValueError as exc:
+        assert "maximum" in str(exc)
+    else:
+        raise AssertionError("oversized segment must be rejected")
+    try:
+        scheduler.submit(bytearray(b"mut"), epoch=1)
+    except TypeError as exc:
+        assert "immutable bytes" in str(exc)
+    else:
+        raise AssertionError("mutable segment input must not bypass the byte bound")
+    assert scheduler.queued_bytes == 2
+    assert scheduler.process_next().output == b"ab"
+    assert scheduler.queued_bytes == 0
+
+
+def t_scheduler_rejects_epoch_regression():
+    scheduler = RealtimeCAVLCScheduler(CAVLCRealtimeBudget(), lambda _epoch: b"p", lambda data, _p: data)
+    scheduler.submit(b"new", epoch=3)
+    try:
+        scheduler.submit(b"old", epoch=2)
+    except ValueError as exc:
+        assert "monotonic" in str(exc)
+    else:
+        raise AssertionError("scheduler must reject an epoch regression")
+
+
+def t_realtime_budget_rejects_non_finite_values():
+    for kwargs in ({"fps": float("nan")}, {"fps": float("inf")}, {"max_p95_latency_s": float("nan")}):
+        try:
+            CAVLCRealtimeBudget(**kwargs)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"invalid realtime budget accepted: {kwargs}")
+
+
+def t_scheduler_reuses_one_proof_when_consumers_race():
+    calls = 0
+    calls_lock = threading.Lock()
+
+    def proof(_epoch):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        return b"proof"
+
+    scheduler = RealtimeCAVLCScheduler(CAVLCRealtimeBudget(), proof, lambda data, _proof: data)
+    scheduler.submit(b"one", epoch=4)
+    scheduler.submit(b"two", epoch=4)
+    results = []
+    workers = [threading.Thread(target=lambda: results.append(scheduler.process_next())) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=2)
+        assert not worker.is_alive()
+    assert calls == 1
+    assert len(results) == 2 and all(result is not None for result in results)
+    assert scheduler.queued_bytes == 0
+
+
+def t_scheduler_bounds_epoch_cache_and_latency_sample_history():
+    proof_calls = []
+    scheduler = RealtimeCAVLCScheduler(
+        CAVLCRealtimeBudget(max_cached_epochs=2, max_latency_samples=2),
+        lambda epoch: proof_calls.append(epoch) or b"proof",
+        lambda data, _proof: data,
+    )
+    for epoch in (1, 1, 2, 3, 3):
+        scheduler.submit(b"x", epoch=epoch)
+        assert scheduler.process_next() is not None
+    report = scheduler.report()
+    assert proof_calls == [1, 2, 3]
+    assert report.processed_segments == 5
+    assert len(scheduler._latencies) == 2
 
 
 def t_scheduler_reuses_one_proof_per_epoch_and_reports_budget():
@@ -448,6 +545,11 @@ def main():
     section("Phase 9 - Realtime CAVLC Controller")
     results = [
         run_test("scheduler_keeps_only_fresh_segments_under_pressure", t_scheduler_keeps_only_fresh_segments_under_pressure),
+        run_test("scheduler_bounds_queue_by_bytes_and_rejects_oversized_segment", t_scheduler_bounds_queue_by_bytes_and_rejects_oversized_segment),
+        run_test("scheduler_rejects_epoch_regression", t_scheduler_rejects_epoch_regression),
+        run_test("realtime_budget_rejects_non_finite_values", t_realtime_budget_rejects_non_finite_values),
+        run_test("scheduler_reuses_one_proof_when_consumers_race", t_scheduler_reuses_one_proof_when_consumers_race),
+        run_test("scheduler_bounds_epoch_cache_and_latency_sample_history", t_scheduler_bounds_epoch_cache_and_latency_sample_history),
         run_test("scheduler_reuses_one_proof_per_epoch_and_reports_budget", t_scheduler_reuses_one_proof_per_epoch_and_reports_budget),
         run_test("cavlc_run_before_tables_match_h264_reference_vlcs", t_cavlc_run_before_tables_match_h264_reference_vlcs),
         run_test("cavlc_level_coding_round_trips_both_trailing_one_branches", t_cavlc_level_coding_round_trips_both_trailing_one_branches),

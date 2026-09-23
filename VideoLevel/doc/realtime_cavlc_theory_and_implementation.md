@@ -87,6 +87,19 @@ camera encoder (Baseline, CAVLC, short all-intra GOP)
   latency.
 - A proof is generated once for an epoch and reused by its segments.
 
+The scheduler now enforces both segment-count and byte bounds (defaults: two
+queued segments, 16 MiB per segment, 32 MiB queued total), evicts oldest queued
+segments until a new segment fits, and rejects a single segment larger than
+the configured byte limit. Non-finite FPS/latency budgets are rejected. Proof
+cache and latency history are bounded (four epochs and 4,096 samples by
+default), and concurrent consumers serialize proof creation while queue
+submission remains independent of the proof callback. Epochs must be
+non-decreasing; this lets bounded LRU eviction remain safe for a forward-only
+stream and prevents an old epoch from silently regenerating its proof. These
+are controller unit-test guarantees only: this scheduler is not yet wired to
+the physical camera or native HTTP service, so they do not establish live
+streaming.
+
 The output is acceptable only when queue drops are zero and p95 CAVLC patch
 latency is at most the frame interval (`1 / FPS`) or an explicitly stricter
 budget.

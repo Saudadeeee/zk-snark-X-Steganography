@@ -7,10 +7,12 @@ not accepted as a real-time implementation.
 
 from __future__ import annotations
 
-from collections import deque
-from dataclasses import dataclass
+import math
+import threading
 import time
-from typing import Callable, Deque
+from collections import OrderedDict, deque
+from collections.abc import Callable
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -18,10 +20,31 @@ class CAVLCRealtimeBudget:
     fps: float = 30.0
     max_queue_segments: int = 2
     max_p95_latency_s: float | None = None
+    max_segment_bytes: int = 16 * 1024 * 1024
+    max_queued_bytes: int = 32 * 1024 * 1024
+    max_cached_epochs: int = 4
+    max_latency_samples: int = 4096
 
     def __post_init__(self) -> None:
-        if self.fps <= 0 or self.max_queue_segments < 1:
-            raise ValueError("fps and max_queue_segments must be positive")
+        if (
+            isinstance(self.fps, bool)
+            or not isinstance(self.fps, (int, float))
+            or not math.isfinite(self.fps)
+            or self.fps <= 0
+        ):
+            raise ValueError("fps must be finite and positive and max_queue_segments must be positive")
+        if type(self.max_queue_segments) is not int or self.max_queue_segments < 1:
+            raise ValueError("fps must be finite and positive and max_queue_segments must be positive")
+        if self.max_p95_latency_s is not None and (
+            isinstance(self.max_p95_latency_s, bool)
+            or not isinstance(self.max_p95_latency_s, (int, float))
+            or not math.isfinite(self.max_p95_latency_s)
+            or self.max_p95_latency_s <= 0
+        ):
+            raise ValueError("max_p95_latency_s must be finite and positive")
+        bounds = (self.max_segment_bytes, self.max_queued_bytes, self.max_cached_epochs, self.max_latency_samples)
+        if any(type(bound) is not int or bound < 1 for bound in bounds):
+            raise ValueError("realtime memory and sample bounds must be positive")
 
     @property
     def frame_interval_s(self) -> float:
@@ -67,41 +90,83 @@ class RealtimeCAVLCScheduler:
         self.budget = budget
         self._proof_for_epoch = proof_for_epoch
         self._patch_segment = patch_segment
-        self._queue: Deque[tuple[bytes, int]] = deque()
-        self._proof_cache: dict[int, bytes] = {}
-        self._latencies: list[float] = []
+        self._queue: deque[tuple[bytes, int]] = deque()
+        self._queued_bytes = 0
+        self._proof_cache: OrderedDict[int, bytes] = OrderedDict()
+        self._latencies: deque[float] = deque(maxlen=budget.max_latency_samples)
+        self._processed_segments = 0
         self.dropped_segments = 0
+        self._lock = threading.Lock()
+        self._proof_lock = threading.Lock()
+        self._last_submitted_epoch: int | None = None
+
+    @property
+    def queued_bytes(self) -> int:
+        with self._lock:
+            return self._queued_bytes
 
     def submit(self, segment: bytes, *, epoch: int) -> None:
+        if not isinstance(segment, bytes):
+            raise TypeError("CAVLC segment must be immutable bytes")
         if not segment:
             raise ValueError("CAVLC segment must not be empty")
-        if len(self._queue) >= self.budget.max_queue_segments:
-            self._queue.popleft()
-            self.dropped_segments += 1
-        self._queue.append((bytes(segment), int(epoch)))
+        if len(segment) > self.budget.max_segment_bytes or len(segment) > self.budget.max_queued_bytes:
+            raise ValueError("CAVLC segment exceeds configured maximum byte size")
+        if type(epoch) is not int or epoch < 0:
+            raise ValueError("CAVLC proof epoch must be a non-negative integer")
+        segment_bytes = bytes(segment)
+        if len(segment_bytes) > self.budget.max_segment_bytes or len(segment_bytes) > self.budget.max_queued_bytes:
+            raise ValueError("CAVLC segment exceeds configured maximum byte size")
+        with self._lock:
+            if self._last_submitted_epoch is not None and epoch < self._last_submitted_epoch:
+                raise ValueError("CAVLC proof epochs must be monotonic")
+            while self._queue and (
+                len(self._queue) >= self.budget.max_queue_segments
+                or self._queued_bytes + len(segment_bytes) > self.budget.max_queued_bytes
+            ):
+                dropped, _ = self._queue.popleft()
+                self._queued_bytes -= len(dropped)
+                self.dropped_segments += 1
+            self._queue.append((segment_bytes, epoch))
+            self._queued_bytes += len(segment_bytes)
+            self._last_submitted_epoch = epoch
 
     def process_next(self) -> CAVLCRealtimeResult | None:
-        if not self._queue:
-            return None
-        segment, epoch = self._queue.popleft()
-        proof = self._proof_cache.get(epoch)
-        if proof is None:
-            proof = bytes(self._proof_for_epoch(epoch))
-            if not proof:
-                raise ValueError("proof_for_epoch returned an empty proof")
-            self._proof_cache[epoch] = proof
+        with self._lock:
+            if not self._queue:
+                return None
+            segment, epoch = self._queue.popleft()
+            self._queued_bytes -= len(segment)
+        with self._proof_lock:
+            proof = self._proof_cache.get(epoch)
+            if proof is None:
+                proof = bytes(self._proof_for_epoch(epoch))
+                if not proof:
+                    raise ValueError("proof_for_epoch returned an empty proof")
+                self._proof_cache[epoch] = proof
+                self._proof_cache.move_to_end(epoch)
+                while len(self._proof_cache) > self.budget.max_cached_epochs:
+                    self._proof_cache.popitem(last=False)
+            else:
+                self._proof_cache.move_to_end(epoch)
         started = time.perf_counter()
         output = bytes(self._patch_segment(segment, proof))
         latency = time.perf_counter() - started
-        self._latencies.append(latency)
+        with self._lock:
+            self._latencies.append(latency)
+            self._processed_segments += 1
         return CAVLCRealtimeResult(epoch, len(segment), output, latency)
 
     def report(self) -> CAVLCRealtimeReport:
-        p95 = _p95(self._latencies)
+        with self._lock:
+            latencies = list(self._latencies)
+            processed_segments = self._processed_segments
+            dropped_segments = self.dropped_segments
+        p95 = _p95(latencies)
         return CAVLCRealtimeReport(
-            processed_segments=len(self._latencies),
-            dropped_segments=self.dropped_segments,
+            processed_segments=processed_segments,
+            dropped_segments=dropped_segments,
             p95_latency_s=p95,
             latency_limit_s=self.budget.latency_limit_s,
-            accepted=bool(self._latencies) and self.dropped_segments == 0 and p95 <= self.budget.latency_limit_s,
+            accepted=bool(latencies) and dropped_segments == 0 and p95 <= self.budget.latency_limit_s,
         )
