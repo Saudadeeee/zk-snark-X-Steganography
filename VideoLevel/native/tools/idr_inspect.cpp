@@ -37,11 +37,12 @@ int main(int argc, char* argv[]) {
                 continue;
             }
             if (macroblock_mode) {
-                if (idr.first_macroblock.mb_type != 0) {
-                    throw std::invalid_argument(
-                        "--macroblock currently supports I4x4 macroblocks only; encountered I16x16 syntax");
-                }
-                const auto macroblock = zkstego::decode_cavlc_luma_macroblock(
+                try {
+                    if (idr.first_macroblock.mb_type != 0) {
+                        throw std::invalid_argument(
+                            "--macroblock currently supports I4x4 macroblocks only; encountered I16x16 syntax");
+                    }
+                    const auto macroblock = zkstego::decode_cavlc_luma_macroblock(
                     units.at(idr.nal_index).rbsp(),
                     idr.first_macroblock.residual_bit_offset,
                     idr.first_macroblock.coded_block_pattern & 0x0fU);
@@ -76,8 +77,8 @@ int main(int argc, char* argv[]) {
                         }
                     }
                 }
-                ++decoded_first_luma_macroblocks;
-                if (&idr == &idrs.front() || &idr == &idrs.back()) {
+                    ++decoded_first_luma_macroblocks;
+                    if (&idr == &idrs.front() || &idr == &idrs.back()) {
                     std::cout << "nal=" << idr.nal_index
                               << " luma_macroblock_end=" << macroblock.next_bit_offset
                               << " total_coefficients=";
@@ -91,7 +92,12 @@ int main(int argc, char* argv[]) {
                         if (block_index != 0) std::cout << ',';
                         std::cout << chroma_ac_total_coefficients[block_index];
                     }
-                    std::cout << " residual_end=" << residual_end << '\n';
+                        std::cout << " residual_end=" << residual_end << '\n';
+                    }
+                } catch (const std::exception& error) {
+                    throw std::invalid_argument(
+                        "CAVLC first-macroblock inspection failed at NAL " + std::to_string(idr.nal_index) +
+                        ": " + error.what());
                 }
             }
             if (!macroblock_mode || &idr == &idrs.front() || &idr == &idrs.back()) {
