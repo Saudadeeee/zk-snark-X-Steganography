@@ -290,6 +290,14 @@ std::vector<std::uint8_t> extract_keyed_cavlc_sign_bits(
     const std::vector<std::uint8_t>& annex_b,
     const std::vector<std::uint8_t>& secret_key,
     std::size_t payload_bit_count);
+std::vector<std::uint8_t> embed_authenticated_cavlc_payload(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    const std::vector<std::uint8_t>& payload);
+std::vector<std::uint8_t> extract_authenticated_cavlc_payload(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    std::size_t maximum_payload_bytes);
 std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
     const std::vector<std::int32_t>& decoded_non_trailing_levels,
     const std::vector<std::uint32_t>& runs);

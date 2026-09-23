@@ -271,9 +271,19 @@ Annex-B/RBSP data. The regression uses the locked 300-frame fixture to embed
 and recover 32 raw bits with the correct key, and shows a different raw
 sequence with a fixed wrong key. These functions are not a message protocol:
 they carry neither a length nor an authentication tag, so a caller cannot infer
-wrong-key rejection from raw bits alone. Python parity, a length-bound
-authenticated frame, and wrong-key authentication rejection are all required
-before this is called blind extraction.
+wrong-key rejection from raw bits alone.
+
+The native authenticated frame is now `version=1 | u16be(payload_length) |
+payload | tag[16]`. Its tag is the first 16 bytes of HMAC-SHA-256 over the
+preceding frame bytes, using the distinct derived HMAC key composed of the
+literal ASCII bytes `blind-native-frame-v1`, one NUL byte, and `K`. The
+receiver obtains the fixed 3-byte header first, validates the configured length
+bound, then derives the longer schedule prefix and verifies the tag. Tests on
+the locked fixture recover a correct-key payload and reject a wrong key and a
+modified payload bit; an actual CLI E2E output also passes FFmpeg strict decode.
+This authenticates a byte payload, including a serialized proof if supplied;
+it does not itself generate or verify a ZKP, encrypt the payload, prevent frame
+replay, establish Python parity, or prove realtime/production readiness.
 
 ### September 2026 diagnostic update
 

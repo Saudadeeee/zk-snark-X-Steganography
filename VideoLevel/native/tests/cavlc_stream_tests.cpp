@@ -446,6 +446,30 @@ int main() {
     CHECK(throws_invalid_argument([&] {
         static_cast<void>(zkstego::extract_keyed_cavlc_sign_bits(fixture_bytes, blind_key, candidates.size() + 1U));
     }));
+    const std::vector<std::uint8_t> authenticated_payload{0x70, 0x72, 0x6f, 0x6f, 0x66};
+    const auto authenticated_stego = zkstego::embed_authenticated_cavlc_payload(
+        fixture_bytes, blind_key, authenticated_payload);
+    CHECK(zkstego::extract_authenticated_cavlc_payload(
+        authenticated_stego, blind_key, 32) == authenticated_payload);
+    CHECK(throws_invalid_argument([&] {
+        static_cast<void>(zkstego::extract_authenticated_cavlc_payload(authenticated_stego, wrong_key, 32));
+    }));
+    const auto authenticated_candidates = zkstego::select_keyed_cavlc_sign_candidates(
+        zkstego::collect_cavlc_trailing_one_sign_candidates(
+            zkstego::decode_baseline_i_idr_slices(authenticated_stego)),
+        blind_key, (3U + authenticated_payload.size() + 16U) * 8U);
+    const auto tamper_target = authenticated_candidates[24];
+    const auto tamper_rbsp = zkstego::split_annex_b(authenticated_stego)
+        .at(tamper_target.nal_index).rbsp();
+    const auto tamper_bit = static_cast<std::uint8_t>(
+        (tamper_rbsp[tamper_target.rbsp_bit_offset / 8U] >>
+         (7U - tamper_target.rbsp_bit_offset % 8U)) & 1U);
+    const auto tampered_authenticated_stego = zkstego::patch_annex_b_rbsp_plan(authenticated_stego, {
+        {tamper_target.nal_index, {{tamper_target.rbsp_bit_offset, {static_cast<std::uint8_t>(1U - tamper_bit)}}}},
+    });
+    CHECK(throws_invalid_argument([&] {
+        static_cast<void>(zkstego::extract_authenticated_cavlc_payload(tampered_authenticated_stego, blind_key, 32));
+    }));
     const auto empty_luma_block = zkstego::decode_cavlc_luma_block({0x80}, 0, 0);
     CHECK(empty_luma_block.token.total_coefficients == 0);
     CHECK(empty_luma_block.tail.runs.empty());

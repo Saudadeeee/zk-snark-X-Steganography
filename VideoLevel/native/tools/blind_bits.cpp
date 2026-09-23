@@ -95,6 +95,17 @@ std::string bits_to_hex(const std::vector<std::uint8_t>& bits) {
     return text;
 }
 
+std::string bytes_to_hex(const std::vector<std::uint8_t>& bytes) {
+    constexpr char hex[] = "0123456789abcdef";
+    std::string text;
+    text.reserve(bytes.size() * 2U);
+    for (const auto byte : bytes) {
+        text.push_back(hex[byte >> 4U]);
+        text.push_back(hex[byte & 0x0fU]);
+    }
+    return text;
+}
+
 std::vector<std::uint8_t> read_binary(const std::string& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input) throw std::invalid_argument("cannot open input video");
@@ -161,6 +172,8 @@ int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr << "usage: zkstego_blind_bits embed <input.h264> <protected-key-file> <payload-hex> <new-output.h264>\n"
                      "   or: zkstego_blind_bits extract <input.h264> <protected-key-file> <bit-count-multiple-of-8>\n"
+                     "   or: zkstego_blind_bits embed-auth <input.h264> <protected-key-file> <payload-hex> <new-output.h264>\n"
+                     "   or: zkstego_blind_bits extract-auth <input.h264> <protected-key-file> <maximum-payload-bytes>\n"
                      "key file: one 64-hex-character key line; restrict OS access to it.\n"
                      "warning: extraction prints unauthenticated raw bits; it does not reject wrong keys.\n";
         return 2;
@@ -176,6 +189,16 @@ int main(int argc, char* argv[]) {
             std::cout << "embedded_bits=" << payload.size() * 8U << " output_bytes=" << stego.size() << '\n';
             return 0;
         }
+        if (operation == "embed-auth" && argc == 6) {
+            const auto key = read_key_file(argv[3]);
+            const auto payload = decode_hex(argv[4]);
+            const auto stego = zkstego::embed_authenticated_cavlc_payload(
+                read_binary(argv[2]), key.value(), payload);
+            write_new_binary(argv[5], stego);
+            std::cout << "embedded_authenticated_payload_bytes=" << payload.size()
+                      << " output_bytes=" << stego.size() << '\n';
+            return 0;
+        }
         if (operation == "extract" && argc == 5) {
             const auto key = read_key_file(argv[3]);
             const auto count = parse_bit_count(argv[4]);
@@ -183,6 +206,13 @@ int main(int argc, char* argv[]) {
             std::cerr << "warning: printing unauthenticated raw bits; wrong keys are not rejected\n";
             std::cout << bits_to_hex(zkstego::extract_keyed_cavlc_sign_bits(
                 read_binary(argv[2]), key.value(), count)) << '\n';
+            return 0;
+        }
+        if (operation == "extract-auth" && argc == 5) {
+            const auto key = read_key_file(argv[3]);
+            const auto maximum_payload_bytes = parse_bit_count(argv[4]);
+            std::cout << bytes_to_hex(zkstego::extract_authenticated_cavlc_payload(
+                read_binary(argv[2]), key.value(), maximum_payload_bytes)) << '\n';
             return 0;
         }
         throw std::invalid_argument("invalid command arguments");

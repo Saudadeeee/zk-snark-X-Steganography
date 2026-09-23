@@ -1402,6 +1402,42 @@ std::array<std::uint8_t, 32> hmac_sha256(
 #endif
 }
 
+std::array<std::uint8_t, 32> authenticated_frame_tag(
+    const std::vector<std::uint8_t>& secret_key,
+    const std::vector<std::uint8_t>& frame_without_tag) {
+    if (secret_key.size() != 32U) throw std::invalid_argument("authenticated frame key must be exactly 32 bytes");
+    SensitiveBytes authentication_key(std::vector<std::uint8_t>{
+        'b','l','i','n','d','-','n','a','t','i','v','e','-','f','r','a','m','e','-','v','1',0});
+    authentication_key.value().insert(
+        authentication_key.value().end(), secret_key.begin(), secret_key.end());
+    return hmac_sha256(authentication_key.value(), std::string(
+        frame_without_tag.begin(), frame_without_tag.end()));
+}
+
+std::vector<std::uint8_t> bytes_to_msb_bits(const std::vector<std::uint8_t>& bytes) {
+    std::vector<std::uint8_t> bits;
+    bits.reserve(bytes.size() * 8U);
+    for (const auto byte : bytes) {
+        for (std::uint8_t shift = 8U; shift-- > 0U;) bits.push_back((byte >> shift) & 1U);
+    }
+    return bits;
+}
+
+std::vector<std::uint8_t> msb_bits_to_bytes(const std::vector<std::uint8_t>& bits) {
+    if (bits.size() % 8U != 0U) throw std::invalid_argument("authenticated frame bits must be byte-aligned");
+    std::vector<std::uint8_t> bytes;
+    bytes.reserve(bits.size() / 8U);
+    for (std::size_t index = 0; index < bits.size(); index += 8U) {
+        std::uint8_t byte = 0;
+        for (std::size_t offset = 0; offset < 8U; ++offset) {
+            if (bits[index + offset] > 1U) throw std::invalid_argument("authenticated frame bit is invalid");
+            byte = static_cast<std::uint8_t>((byte << 1U) | bits[index + offset]);
+        }
+        bytes.push_back(byte);
+    }
+    return bytes;
+}
+
 }  // namespace
 
 std::array<std::uint8_t, 32> score_keyed_cavlc_sign_candidate(
@@ -1501,6 +1537,60 @@ std::vector<std::uint8_t> extract_keyed_cavlc_sign_bits(
              (7U - candidate.rbsp_bit_offset % 8U)) & 1U));
     }
     return payload_bits;
+}
+
+std::vector<std::uint8_t> embed_authenticated_cavlc_payload(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    const std::vector<std::uint8_t>& payload) {
+    constexpr std::uint8_t frame_version = 1;
+    constexpr std::size_t tag_bytes = 16;
+    if (payload.size() > std::numeric_limits<std::uint16_t>::max()) {
+        throw std::invalid_argument("authenticated payload exceeds 65535 bytes");
+    }
+    std::vector<std::uint8_t> frame;
+    frame.reserve(3U + payload.size() + tag_bytes);
+    frame.push_back(frame_version);
+    frame.push_back(static_cast<std::uint8_t>(payload.size() >> 8U));
+    frame.push_back(static_cast<std::uint8_t>(payload.size()));
+    frame.insert(frame.end(), payload.begin(), payload.end());
+    const auto tag = authenticated_frame_tag(secret_key, frame);
+    frame.insert(frame.end(), tag.begin(), tag.begin() + static_cast<std::ptrdiff_t>(tag_bytes));
+    return embed_keyed_cavlc_sign_bits(annex_b, secret_key, bytes_to_msb_bits(frame));
+}
+
+std::vector<std::uint8_t> extract_authenticated_cavlc_payload(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    const std::size_t maximum_payload_bytes) {
+    constexpr std::uint8_t frame_version = 1;
+    constexpr std::size_t header_bytes = 3;
+    constexpr std::size_t tag_bytes = 16;
+    if (maximum_payload_bytes > std::numeric_limits<std::uint16_t>::max()) {
+        throw std::invalid_argument("authenticated payload maximum exceeds 65535 bytes");
+    }
+    const auto header = msb_bits_to_bytes(extract_keyed_cavlc_sign_bits(
+        annex_b, secret_key, header_bytes * 8U));
+    if (header.size() != header_bytes || header[0] != frame_version) {
+        throw std::invalid_argument("authenticated CAVLC frame version is invalid");
+    }
+    const auto payload_size = (static_cast<std::size_t>(header[1]) << 8U) | header[2];
+    if (payload_size > maximum_payload_bytes) {
+        throw std::invalid_argument("authenticated CAVLC frame length exceeds configured maximum");
+    }
+    const auto full_frame = msb_bits_to_bytes(extract_keyed_cavlc_sign_bits(
+        annex_b, secret_key, (header_bytes + payload_size + tag_bytes) * 8U));
+    const auto authenticated_size = header_bytes + payload_size;
+    std::vector<std::uint8_t> authenticated_data(
+        full_frame.begin(), full_frame.begin() + static_cast<std::ptrdiff_t>(authenticated_size));
+    const auto expected_tag = authenticated_frame_tag(secret_key, authenticated_data);
+    std::uint8_t difference = 0;
+    for (std::size_t index = 0; index < tag_bytes; ++index) {
+        difference |= static_cast<std::uint8_t>(expected_tag[index] ^ full_frame[authenticated_size + index]);
+    }
+    if (difference != 0U) throw std::invalid_argument("authenticated CAVLC frame tag is invalid");
+    return {full_frame.begin() + static_cast<std::ptrdiff_t>(header_bytes),
+            full_frame.begin() + static_cast<std::ptrdiff_t>(authenticated_size)};
 }
 
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units) {
