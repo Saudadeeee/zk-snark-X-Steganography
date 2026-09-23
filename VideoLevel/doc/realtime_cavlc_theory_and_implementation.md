@@ -241,6 +241,34 @@ This is real strict-decoder evidence for **one** native sign rewrite. It does
 not validate a keyed multi-bit schedule, payload framing, extraction, proof
 verification, stream operation, or realtime performance.
 
+### Canonical blind schedule (implementation gate)
+
+The next native channel must use this single schedule contract; an extractor
+derives it from the stego stream itself and never receives positions or a
+sidecar. A candidate is exactly one parsed trailing-one sign bit per residual
+block, with identity serialized as ASCII:
+
+```text
+<nal_index>:<macroblock_address>:<category>:<block_index>:<rbsp_bit_offset>
+```
+
+where `category` is `0=LumaDc`, `1=Luma4x4`, `2=ChromaDc`, or `3=ChromaAc`.
+For a 32-byte secret `K`, the ordering score is the 32-byte HMAC-SHA-256
+digest of that serialization under
+the literal ASCII bytes `blind-native-cavlc-v1`, followed by one NUL byte and `K`.
+Candidates are sorted lexicographically by
+`(score, serialized identity)`, and the first `required_bits` candidates carry
+payload bits in that order. The framing layer must authenticate and length-bind
+the payload before embedding, so a wrong key produces an authentication failure
+rather than a plausible message.
+
+The native selector now has fixed candidate serialization, HMAC-score and
+wrong-key order vectors. The `(score, identity)` tie fallback is deterministic;
+creating a real SHA-256 HMAC collision for a runtime vector is not a feasible
+test strategy. The schedule remains unimplemented end-to-end: Python parity,
+embed/extract with a correct key, authenticated framing, and wrong-key
+authentication rejection are all required before this is called blind extraction.
+
 ### September 2026 diagnostic update
 
 The `nC=0` versus `nC=2..3` ChromaAC discrepancy must not be fixed by a

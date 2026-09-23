@@ -7,6 +7,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(zkstego_cavlc_stream STATIC src/cavlc_stream.cpp)
 target_include_directories(zkstego_cavlc_stream PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+if(WIN32)
+  target_link_libraries(zkstego_cavlc_stream PRIVATE bcrypt)
+else()
+  find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+  target_link_libraries(zkstego_cavlc_stream PRIVATE OpenSSL::Crypto)
+endif()
 
 add_executable(zkstego_cavlc_stream_tests tests/cavlc_stream_tests.cpp)
 target_link_libraries(zkstego_cavlc_stream_tests PRIVATE zkstego_cavlc_stream)

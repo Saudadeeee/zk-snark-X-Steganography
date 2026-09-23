@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iterator>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -74,6 +75,65 @@ int main() {
 
     zkstego::RbspBitReader signed_minimum_reader({0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xff, 0xff});
     CHECK(signed_minimum_reader.read_se() == -2147483647);
+
+    // Cross-language schedule vector: these candidates and the 00..1f key
+    // are scored by Python's hmac.new(..., hashlib.sha256) under the exact
+    // canonical domain key. The expected order is fixed by those digests.
+    std::vector<std::uint8_t> blind_key(32);
+    std::iota(blind_key.begin(), blind_key.end(), static_cast<std::uint8_t>(0));
+    const std::vector<zkstego::CavlcSignCandidate> schedule_vector{
+        {7, 11, zkstego::CavlcResidualCategory::Luma4x4, 3, 91},
+        {3, 2, zkstego::CavlcResidualCategory::ChromaAc, 0, 12},
+        {7, 11, zkstego::CavlcResidualCategory::Luma4x4, 2, 90},
+    };
+    CHECK(zkstego::serialize_cavlc_sign_candidate(schedule_vector[0]) == "7:11:1:3:91");
+    CHECK(zkstego::serialize_cavlc_sign_candidate(schedule_vector[1]) == "3:2:3:0:12");
+    const auto expected_first_score = std::array<std::uint8_t, 32>{
+        0x87, 0x78, 0xf4, 0xc4, 0xc4, 0x55, 0xd7, 0x5b,
+        0x5f, 0x8f, 0x6e, 0x7a, 0xae, 0x77, 0x65, 0xb1,
+        0xf5, 0x86, 0x58, 0x5e, 0x4e, 0x82, 0x04, 0x7f,
+        0xb2, 0xc5, 0xeb, 0x9e, 0xce, 0xaf, 0x33, 0xf3,
+    };
+    CHECK(zkstego::score_keyed_cavlc_sign_candidate(schedule_vector[0], blind_key) == expected_first_score);
+    const auto keyed_schedule = zkstego::select_keyed_cavlc_sign_candidates(
+        schedule_vector, blind_key, schedule_vector.size());
+    CHECK(keyed_schedule[0].nal_index == 3 && keyed_schedule[0].macroblock_address == 2);
+    CHECK(keyed_schedule[0].category == zkstego::CavlcResidualCategory::ChromaAc);
+    CHECK(keyed_schedule[1].nal_index == 7 && keyed_schedule[1].block_index == 2);
+    CHECK(keyed_schedule[2].nal_index == 7 && keyed_schedule[2].block_index == 3);
+    auto wrong_key = blind_key;
+    std::fill(wrong_key.begin(), wrong_key.end(), 0x01U);
+    const auto wrong_key_schedule = zkstego::select_keyed_cavlc_sign_candidates(
+        schedule_vector, wrong_key, 1);
+    CHECK(wrong_key_schedule[0].nal_index == 7 && wrong_key_schedule[0].macroblock_address == 11);
+    CHECK(wrong_key_schedule[0].category == zkstego::CavlcResidualCategory::Luma4x4);
+    CHECK(wrong_key_schedule[0].block_index == 3 && wrong_key_schedule[0].rbsp_bit_offset == 91);
+    const auto throws_invalid_argument = [](const auto& operation) {
+        try { operation(); } catch (const std::invalid_argument&) { return true; }
+        return false;
+    };
+    CHECK(throws_invalid_argument([&] {
+        static_cast<void>(zkstego::score_keyed_cavlc_sign_candidate(schedule_vector[0], {0}));
+    }));
+    CHECK(throws_invalid_argument([&] {
+        static_cast<void>(zkstego::select_keyed_cavlc_sign_candidates(schedule_vector, blind_key, 4));
+    }));
+    auto duplicate_schedule = schedule_vector;
+    duplicate_schedule.push_back(schedule_vector[0]);
+    CHECK(throws_invalid_argument([&] {
+        static_cast<void>(zkstego::select_keyed_cavlc_sign_candidates(duplicate_schedule, blind_key, 1));
+    }));
+    auto aliased_schedule = schedule_vector;
+    aliased_schedule[1].nal_index = schedule_vector[0].nal_index;
+    aliased_schedule[1].rbsp_bit_offset = schedule_vector[0].rbsp_bit_offset;
+    CHECK(throws_invalid_argument([&] {
+        static_cast<void>(zkstego::select_keyed_cavlc_sign_candidates(aliased_schedule, blind_key, 1));
+    }));
+    auto malformed_candidate = schedule_vector[0];
+    malformed_candidate.category = static_cast<zkstego::CavlcResidualCategory>(9);
+    CHECK(throws_invalid_argument([&] {
+        static_cast<void>(zkstego::score_keyed_cavlc_sign_candidate(malformed_candidate, blind_key));
+    }));
 
     const auto sps = zkstego::parse_baseline_sps({
         0x42, 0xc0, 0x0d, 0xdc, 0x16, 0x09, 0x6f, 0xfc,

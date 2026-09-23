@@ -274,6 +274,14 @@ std::vector<CavlcDecodedIdrSlice> decode_baseline_i_idr_slices(
     const std::vector<std::uint8_t>& annex_b);
 std::vector<CavlcSignCandidate> collect_cavlc_trailing_one_sign_candidates(
     const std::vector<CavlcDecodedIdrSlice>& slices);
+std::string serialize_cavlc_sign_candidate(const CavlcSignCandidate& candidate);
+std::array<std::uint8_t, 32> score_keyed_cavlc_sign_candidate(
+    const CavlcSignCandidate& candidate,
+    const std::vector<std::uint8_t>& secret_key);
+std::vector<CavlcSignCandidate> select_keyed_cavlc_sign_candidates(
+    const std::vector<CavlcSignCandidate>& candidates,
+    const std::vector<std::uint8_t>& secret_key,
+    std::size_t required_bits);
 std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
     const std::vector<std::int32_t>& decoded_non_trailing_levels,
     const std::vector<std::uint32_t>& runs);

@@ -72,11 +72,28 @@ constexpr std::array coeff_token_n4_7{
     CoeffTokenCode{"0000000010", 16, 3},
 };
 #include <array>
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <bcrypt.h>
+#else
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
+#endif
 
 namespace zkstego {
 
@@ -1270,6 +1287,166 @@ std::vector<CavlcSignCandidate> collect_cavlc_trailing_one_sign_candidates(
         }
     }
     return candidates;
+}
+
+std::string serialize_cavlc_sign_candidate(const CavlcSignCandidate& candidate) {
+    return std::to_string(candidate.nal_index) + ":" +
+        std::to_string(candidate.macroblock_address) + ":" +
+        std::to_string(static_cast<std::uint8_t>(candidate.category)) + ":" +
+        std::to_string(candidate.block_index) + ":" +
+        std::to_string(candidate.rbsp_bit_offset);
+}
+
+namespace {
+
+class SensitiveBytes {
+public:
+    explicit SensitiveBytes(std::vector<std::uint8_t> value) : value_(std::move(value)) {}
+    SensitiveBytes(const SensitiveBytes&) = delete;
+    SensitiveBytes& operator=(const SensitiveBytes&) = delete;
+    ~SensitiveBytes() noexcept {
+        if (value_.empty()) return;
+#ifdef _WIN32
+        SecureZeroMemory(value_.data(), value_.size());
+#else
+        OPENSSL_cleanse(value_.data(), value_.size());
+#endif
+    }
+    const std::vector<std::uint8_t>& value() const noexcept { return value_; }
+    std::vector<std::uint8_t>& value() noexcept { return value_; }
+
+private:
+    std::vector<std::uint8_t> value_;
+};
+
+#ifdef _WIN32
+class CngAlgorithmHandle {
+public:
+    CngAlgorithmHandle() = default;
+    CngAlgorithmHandle(const CngAlgorithmHandle&) = delete;
+    CngAlgorithmHandle& operator=(const CngAlgorithmHandle&) = delete;
+    CngAlgorithmHandle(CngAlgorithmHandle&&) = delete;
+    CngAlgorithmHandle& operator=(CngAlgorithmHandle&&) = delete;
+    ~CngAlgorithmHandle() noexcept {
+        if (value != nullptr) static_cast<void>(BCryptCloseAlgorithmProvider(value, 0));
+    }
+    BCRYPT_ALG_HANDLE value{};
+};
+
+class CngHashHandle {
+public:
+    CngHashHandle() = default;
+    CngHashHandle(const CngHashHandle&) = delete;
+    CngHashHandle& operator=(const CngHashHandle&) = delete;
+    CngHashHandle(CngHashHandle&&) = delete;
+    CngHashHandle& operator=(CngHashHandle&&) = delete;
+    ~CngHashHandle() noexcept {
+        if (value != nullptr) static_cast<void>(BCryptDestroyHash(value));
+    }
+    BCRYPT_HASH_HANDLE value{};
+};
+#endif
+
+void validate_blind_schedule_candidate(const CavlcSignCandidate& candidate) {
+    const auto category = static_cast<std::uint8_t>(candidate.category);
+    const auto valid_block = (category == 0U && candidate.block_index == 0U) ||
+        (category == 1U && candidate.block_index < 16U) ||
+        (category == 2U && candidate.block_index < 2U) ||
+        (category == 3U && candidate.block_index < 8U);
+    if (!valid_block) throw std::invalid_argument("blind schedule candidate category or block index is invalid");
+}
+
+std::array<std::uint8_t, 32> hmac_sha256(
+    const std::vector<std::uint8_t>& key, const std::string& message) {
+    std::array<std::uint8_t, 32> digest{};
+#ifdef _WIN32
+    // CNG retains pbHashObject until BCryptDestroyHash. Declare this buffer
+    // before the handle so reverse destruction releases the handle first.
+    SensitiveBytes object{std::vector<std::uint8_t>{}};
+    CngAlgorithmHandle algorithm;
+    CngHashHandle hash;
+    if (BCryptOpenAlgorithmProvider(&algorithm.value, BCRYPT_SHA256_ALGORITHM, nullptr,
+                                    BCRYPT_ALG_HANDLE_HMAC_FLAG) < 0) {
+        throw std::runtime_error("cannot initialize Windows CNG HMAC-SHA-256");
+    }
+    DWORD object_size = 0;
+    DWORD result_size = 0;
+    const auto object_status = BCryptGetProperty(
+        algorithm.value, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PUCHAR>(&object_size),
+        sizeof(object_size), &result_size, 0);
+    if (object_status < 0 || result_size != sizeof(object_size)) {
+        throw std::runtime_error("cannot query Windows CNG HMAC object length");
+    }
+    object.value().resize(object_size);
+    const auto hash_status = BCryptCreateHash(
+        algorithm.value, &hash.value, object.value().data(), static_cast<ULONG>(object.value().size()),
+        const_cast<PUCHAR>(key.data()), static_cast<ULONG>(key.size()), 0);
+    if (hash_status < 0) {
+        throw std::runtime_error("cannot create Windows CNG HMAC");
+    }
+    const auto data_status = BCryptHashData(
+        hash.value, reinterpret_cast<PUCHAR>(const_cast<char*>(message.data())),
+        static_cast<ULONG>(message.size()), 0);
+    const auto finish_status = data_status < 0 ? data_status : BCryptFinishHash(
+        hash.value, digest.data(), static_cast<ULONG>(digest.size()), 0);
+    if (finish_status < 0) throw std::runtime_error("Windows CNG HMAC-SHA-256 failed");
+    return digest;
+#else
+    unsigned int digest_size = 0;
+    if (HMAC(EVP_sha256(), key.data(), static_cast<int>(key.size()),
+             reinterpret_cast<const unsigned char*>(message.data()), message.size(),
+             digest.data(), &digest_size) == nullptr || digest_size != digest.size()) {
+        throw std::runtime_error("OpenSSL HMAC-SHA-256 failed");
+    }
+    return digest;
+#endif
+}
+
+}  // namespace
+
+std::array<std::uint8_t, 32> score_keyed_cavlc_sign_candidate(
+    const CavlcSignCandidate& candidate,
+    const std::vector<std::uint8_t>& secret_key) {
+    if (secret_key.size() != 32U) throw std::invalid_argument("blind schedule key must be exactly 32 bytes");
+    validate_blind_schedule_candidate(candidate);
+    SensitiveBytes ordering_key(std::vector<std::uint8_t>{
+        'b','l','i','n','d','-','n','a','t','i','v','e','-','c','a','v','l','c','-','v','1',0});
+    ordering_key.value().insert(
+        ordering_key.value().end(), secret_key.begin(), secret_key.end());
+    return hmac_sha256(ordering_key.value(), serialize_cavlc_sign_candidate(candidate));
+}
+
+std::vector<CavlcSignCandidate> select_keyed_cavlc_sign_candidates(
+    const std::vector<CavlcSignCandidate>& candidates,
+    const std::vector<std::uint8_t>& secret_key,
+    const std::size_t required_bits) {
+    if (secret_key.size() != 32U) throw std::invalid_argument("blind schedule key must be exactly 32 bytes");
+    if (required_bits > candidates.size()) throw std::invalid_argument("blind schedule capacity is insufficient");
+    struct ScoredCandidate { std::array<std::uint8_t, 32> score; std::string identity; CavlcSignCandidate candidate; };
+    std::vector<ScoredCandidate> scored;
+    scored.reserve(candidates.size());
+    std::unordered_set<std::string> identities;
+    std::unordered_set<std::string> physical_targets;
+    for (const auto& candidate : candidates) {
+        validate_blind_schedule_candidate(candidate);
+        auto identity = serialize_cavlc_sign_candidate(candidate);
+        if (!identities.insert(identity).second) {
+            throw std::invalid_argument("blind schedule candidate identity is duplicated");
+        }
+        const auto physical_target = std::to_string(candidate.nal_index) + ":" +
+            std::to_string(candidate.rbsp_bit_offset);
+        if (!physical_targets.insert(physical_target).second) {
+            throw std::invalid_argument("blind schedule candidate patch target is duplicated");
+        }
+        scored.push_back({score_keyed_cavlc_sign_candidate(candidate, secret_key), std::move(identity), candidate});
+    }
+    std::sort(scored.begin(), scored.end(), [](const auto& left, const auto& right) {
+        return left.score != right.score ? left.score < right.score : left.identity < right.identity;
+    });
+    std::vector<CavlcSignCandidate> selected;
+    selected.reserve(required_bits);
+    for (std::size_t index = 0; index < required_bits; ++index) selected.push_back(scored[index].candidate);
+    return selected;
 }
 
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units) {
