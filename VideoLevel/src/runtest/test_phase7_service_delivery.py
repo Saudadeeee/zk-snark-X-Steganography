@@ -1,6 +1,8 @@
 """Contract tests for the authenticated HTTP service and expiring signing keys."""
 
+import asyncio
 import base64
+import json
 import os
 import sys
 import tempfile
@@ -15,8 +17,12 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 
-from src.api.app import ApiSettings, create_app
-from src.key_policy import KeyCertificate, issue_key_certificate, verify_manifest_with_certificate
+from src.api.app import ApiSettings, RequestBodyGuard, create_app
+from src.key_policy import (
+    KeyCertificate,
+    issue_key_certificate,
+    verify_manifest_with_certificate,
+)
 from src.manifest import StegoManifest
 from src.runtest._helpers import run_test, section, summarise
 
@@ -211,6 +217,118 @@ def t_failed_upload_removes_orphan_job_and_releases_capacity():
             assert accepted.status_code == 202, accepted.text
 
 
+def t_http_body_guard_rejects_oversized_multipart_before_job_admission():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        app = create_app(
+            ApiSettings(api_token="test-token", work_dir=Path(temp_dir), max_upload_bytes=512 * 1024),
+        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/jobs/embed",
+                headers={"Authorization": "Bearer test-token"},
+                data={
+                    "message_b64": base64.b64encode(b"x").decode("ascii"),
+                    "secret_key_b64": base64.b64encode(b"k" * 32).decode("ascii"),
+                },
+                files={"video": ("oversized.h264", b"x" * 1_600_000, "video/h264")},
+            )
+            assert response.status_code == 413, response.text
+            assert list((Path(temp_dir) / "jobs").glob("*.json")) == []
+
+
+def t_http_body_guard_times_out_slow_request_body():
+    async def exercise():
+        emitted = []
+        pending = asyncio.Event()
+
+        async def inner(scope, receive, send):
+            await receive()
+
+        async def receive():
+            await pending.wait()
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            emitted.append(message)
+
+        guard = RequestBodyGuard(
+            inner,
+            maximum_bytes={"/api/v1/jobs/extract": 1024},
+            timeout_seconds=0.02,
+        )
+        await guard(
+            {"type": "http", "method": "POST", "path": "/api/v1/jobs/extract", "headers": []},
+            receive,
+            send,
+        )
+        return emitted
+
+    emitted = asyncio.run(exercise())
+    assert emitted[0]["status"] == 408
+
+
+def t_restart_recovery_fails_stale_job_and_removes_uploaded_media():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        app = create_app(ApiSettings(api_token="test-token", work_dir=Path(temp_dir)))
+        with TestClient(app):
+            record = app.state.store.create("extract")
+            job_dir = Path(temp_dir) / "files" / record["job_id"]
+            job_dir.mkdir(parents=True)
+            (job_dir / "stego.h264").write_bytes(b"uploaded video")
+            (job_dir / "payload.bin").write_bytes(b"partial plaintext")
+            app.state.store.update(record["job_id"], status="running")
+
+            app.state.recover_interrupted_jobs()
+            recovered = app.state.store.get(record["job_id"])
+            assert recovered["status"] == "failed", recovered
+            assert recovered["error"] == "job interrupted by service restart"
+            assert list(job_dir.iterdir()) == []
+
+            no_media_record = app.state.store.create("embed")
+            app.state.store.update(no_media_record["job_id"], status="queued")
+            assert not (Path(temp_dir) / "files" / no_media_record["job_id"]).exists()
+            app.state.recover_interrupted_jobs()
+            recovered_without_media = app.state.store.get(no_media_record["job_id"])
+            assert recovered_without_media["status"] == "failed", recovered_without_media
+
+            sentinel = Path(temp_dir) / "cover.h264"
+            sentinel.write_bytes(b"outside job directory")
+            malformed_id = Path(temp_dir) / "jobs" / "...json"
+            malformed_id.write_text(
+                json.dumps({"job_id": "..", "operation": "embed", "status": "running"}),
+                encoding="utf-8",
+            )
+
+            malformed_operation = app.state.store.create("embed")
+            malformed_dir = Path(temp_dir) / "files" / malformed_operation["job_id"]
+            malformed_dir.mkdir(parents=True)
+            keep_file = malformed_dir / "cover.h264"
+            keep_file.write_bytes(b"do not touch invalid operation")
+            app.state.store.update(
+                malformed_operation["job_id"], operation={"invalid": True}, status="running",
+            )
+            app.state.recover_interrupted_jobs()
+            assert sentinel.read_bytes() == b"outside job directory"
+            assert keep_file.read_bytes() == b"do not touch invalid operation"
+
+
+def t_api_work_dir_rejects_a_second_live_instance():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        settings = ApiSettings(api_token="test-token", work_dir=Path(temp_dir))
+        first_app = create_app(settings)
+        second_app = create_app(settings)
+        with TestClient(first_app) as first_client:
+            assert first_client.get("/health").status_code == 200
+            try:
+                with TestClient(second_app):
+                    raise AssertionError("second API instance unexpectedly acquired the work-dir lease")
+            except RuntimeError as exc:
+                assert "another API process" in str(exc)
+
+        with TestClient(second_app) as second_client:
+            assert second_client.get("/health").status_code == 200
+
+
 def t_expiring_certificate_rejects_key_after_deadline():
     issuer = Ed25519PrivateKey.generate()
     signer = Ed25519PrivateKey.generate()
@@ -259,6 +377,10 @@ def main():
         run_test("verify_job_uses_strict_cover_and_returns_no_message", t_verify_job_uses_strict_cover_and_returns_no_message),
         run_test("http_job_queue_is_bounded_and_rejects_overload", t_http_job_queue_is_bounded_and_rejects_overload),
         run_test("failed_upload_removes_orphan_job_and_releases_capacity", t_failed_upload_removes_orphan_job_and_releases_capacity),
+        run_test("http_body_guard_rejects_oversized_multipart_before_job_admission", t_http_body_guard_rejects_oversized_multipart_before_job_admission),
+        run_test("http_body_guard_times_out_slow_request_body", t_http_body_guard_times_out_slow_request_body),
+        run_test("restart_recovery_fails_stale_job_and_removes_uploaded_media", t_restart_recovery_fails_stale_job_and_removes_uploaded_media),
+        run_test("api_work_dir_rejects_a_second_live_instance", t_api_work_dir_rejects_a_second_live_instance),
         run_test("expiring_certificate_rejects_key_after_deadline", t_expiring_certificate_rejects_key_after_deadline),
         run_test("certificate_serialization_is_canonical_and_tamper_evident", t_certificate_serialization_is_canonical_and_tamper_evident),
     ]

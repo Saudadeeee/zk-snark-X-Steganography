@@ -285,6 +285,35 @@ This authenticates a byte payload, including a serialized proof if supplied;
 it does not itself generate or verify a ZKP, encrypt the payload, prevent frame
 replay, establish Python parity, or prove realtime/production readiness.
 
+### Native HTTP adapter and current E2E evidence
+
+`src/api/native_handlers.py:create_native_app` connects the bounded FastAPI job
+service to `zkstego_blind_bits`. The embed job uses native authenticated CAVLC
+sign rewriting; the extract job is blind and downloads the recovered bytes as
+an authorized, one-time artifact. Source uploads are removed after processing;
+generated artifacts are consumed on download and expired by a ten-minute
+default TTL sweeper. Aggregate multipart body size and total body-read duration
+are bounded before a job slot is reserved. An OS-backed exclusive lease rejects
+a second API process on the same work directory; startup recovery fails persisted
+queued/running jobs and removes their uploaded/partial files. The key is provided to the child through
+stdin, never as an argument or a temporary key file. Embedding sends the
+payload hex through the same pipe as a second line using
+`embed-auth-stdin`, so payload bytes do not appear in the process command line.
+The native app disables the legacy Python proof-verification endpoint rather
+than silently mixing data planes: HMAC authentication of bytes is not ZKP
+verification.
+
+On 2026-09-24, `python src/runtest/test_native_http_channel.py` passed against
+the committed 300-frame Foreman fixture and the locally built native CLI. It
+submitted an HTTP embed job, downloaded a same-size H.264 result, passed
+`ffmpeg -v error -xerror`, extracted the exact test payload through HTTP with
+the correct key, and failed the wrong-key extraction job without exposing a
+payload artifact. This validates the HTTP/fixture integration only. There is
+still no camera capture/stream ingress, target-edge hardware measurement,
+ZKP-specific payload generation/binding in this path, or full capacity,
+quality, p50/p95 and CPU/RAM benchmark evidence; therefore realtime and
+production acceptance remain unmet.
+
 ### September 2026 diagnostic update
 
 The `nC=0` versus `nC=2..3` ChromaAC discrepancy must not be fixed by a

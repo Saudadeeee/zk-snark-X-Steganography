@@ -202,6 +202,33 @@ job id; `GET /api/v1/jobs/{job_id}` polls safe status; and an embed result is
 downloaded at `GET /api/v1/jobs/{job_id}/artifact`. All job routes require
 `Authorization: Bearer <token>`. OpenAPI is available locally at `/docs`.
 
+For the native CAVLC data plane, build `zkstego_blind_bits` and start the
+separate native-backed app instead of treating the legacy Python service as
+the edge path:
+
+```powershell
+cmake --build native/build --config Release --target zkstego_blind_bits
+$env:ZK_STEGO_API_TOKEN = "replace-with-a-long-random-token"
+$env:ZK_STEGO_NATIVE_CLI = (Resolve-Path native/build/Release/zkstego_blind_bits.exe).Path
+py -3.12 -m uvicorn src.api.native_handlers:create_native_app --factory --host 127.0.0.1 --port 8080
+```
+
+This app exposes native authenticated `POST /api/v1/jobs/embed` and blind
+`POST /api/v1/jobs/extract`; both use the bounded worker/queue and authorized
+artifact endpoint. Artifacts are one-time downloads and expire after ten
+minutes by default; uploaded source videos are removed after job processing.
+Use one Uvicorn worker for this prototype: its bounded queue is process-local.
+An OS-backed exclusive lease prevents another service process from sharing the
+same work directory.
+On restart it marks persisted queued/running jobs failed and removes their
+uploaded source and partial output files.
+The API also rejects multipart bodies above its aggregate limit and applies a
+120-second request-body deadline. The 32-byte key is sent to the child process through stdin,
+not argv or a temporary key file. `/api/v1/jobs/verify` deliberately returns
+501 here: native payload HMAC validation is not a substitute for ZKP proof
+verification. This is a real fixture-tested HTTP path, not yet a camera ingest
+stream or a claim of realtime edge performance.
+
 ### Expiring manifest keys
 
 `src.key_policy` issues issuer-signed Ed25519 certificates for manifest public

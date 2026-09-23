@@ -8,6 +8,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -33,9 +34,24 @@ private:
     std::array<char, 67> value_{};
 };
 
+class SensitivePayloadText {
+public:
+    SensitivePayloadText() = default;
+    SensitivePayloadText(const SensitivePayloadText&) = delete;
+    SensitivePayloadText& operator=(const SensitivePayloadText&) = delete;
+    ~SensitivePayloadText() noexcept { secure_wipe(value_.data(), value_.size()); }
+    char* data() noexcept { return value_.data(); }
+    const char* data() const noexcept { return value_.data(); }
+    std::size_t size() const noexcept { return value_.size(); }
+
+private:
+    // 8192 hex chars, optional CRLF, and NUL.
+    std::array<char, 8195> value_{};
+};
+
 class SensitiveBytes {
 public:
-    SensitiveBytes() : value_(32U) {}
+    explicit SensitiveBytes(const std::size_t capacity = 32U) : value_(capacity) {}
     SensitiveBytes(const SensitiveBytes&) = delete;
     SensitiveBytes& operator=(const SensitiveBytes&) = delete;
     SensitiveBytes(SensitiveBytes&& other) noexcept
@@ -71,12 +87,11 @@ std::uint8_t hex_nibble(const char value) {
     throw std::invalid_argument("hex input contains a non-hex character");
 }
 
-std::vector<std::uint8_t> decode_hex(const std::string& text) {
+SensitiveBytes decode_hex(const std::string_view text) {
     if (text.size() % 2U != 0U) throw std::invalid_argument("hex input must have an even number of characters");
-    std::vector<std::uint8_t> bytes;
-    bytes.reserve(text.size() / 2U);
+    SensitiveBytes bytes(text.size() / 2U);
     for (std::size_t index = 0; index < text.size(); index += 2U) {
-        bytes.push_back(static_cast<std::uint8_t>((hex_nibble(text[index]) << 4U) | hex_nibble(text[index + 1U])));
+        bytes.append(static_cast<std::uint8_t>((hex_nibble(text[index]) << 4U) | hex_nibble(text[index + 1U])));
     }
     return bytes;
 }
@@ -122,22 +137,27 @@ std::vector<std::uint8_t> read_binary(const std::string& path) {
 }
 
 SensitiveBytes read_key_file(const std::string& path) {
-    std::ifstream input(path);
-    if (!input) throw std::invalid_argument("cannot open protected key file");
+    std::ifstream key_file;
+    std::istream* input = &std::cin;
+    if (path != "-") {
+        key_file.open(path);
+        if (!key_file) throw std::invalid_argument("cannot open protected key file");
+        input = &key_file;
+    }
     SensitiveKeyText text;
-    input.getline(text.data(), static_cast<std::streamsize>(text.size()));
-    if (input.fail() && !input.eof()) {
+    input->getline(text.data(), static_cast<std::streamsize>(text.size()));
+    if (input->fail() && !input->eof()) {
         throw std::invalid_argument("key file must contain exactly one 64-character key line");
     }
     std::size_t text_size = std::char_traits<char>::length(text.data());
     if (text_size > 0U && text[text_size - 1U] == '\r') --text_size;
     char trailing{};
-    while (input.get(trailing)) {
+    while (input->get(trailing)) {
         if (trailing != ' ' && trailing != '\t' && trailing != '\r' && trailing != '\n') {
-            throw std::invalid_argument("key file must contain exactly one hex key line");
+            throw std::invalid_argument("key source must contain exactly one hex key line");
         }
     }
-    if (input.bad()) throw std::invalid_argument("failed while reading protected key file");
+    if (input->bad()) throw std::invalid_argument("failed while reading protected key source");
     if (text_size != 64U) throw std::invalid_argument("key file must contain exactly 64 hex characters");
     SensitiveBytes key;
     for (std::size_t index = 0; index < text_size; index += 2U) {
@@ -146,6 +166,37 @@ SensitiveBytes read_key_file(const std::string& path) {
     }
     if (key.size() != 32U) throw std::invalid_argument("key file must decode to exactly 32 bytes");
     return key;
+}
+
+SensitiveBytes read_key_stdin_line() {
+    SensitiveKeyText text;
+    std::cin.getline(text.data(), static_cast<std::streamsize>(text.size()));
+    if (std::cin.fail() && !std::cin.eof()) {
+        throw std::invalid_argument("stdin key must be exactly one 64-character hex line");
+    }
+    std::size_t text_size = std::char_traits<char>::length(text.data());
+    if (text_size > 0U && text[text_size - 1U] == '\r') --text_size;
+    if (text_size != 64U) throw std::invalid_argument("stdin key must contain exactly 64 hex characters");
+    SensitiveBytes key;
+    for (std::size_t index = 0; index < text_size; index += 2U) {
+        key.append(static_cast<std::uint8_t>(
+            (hex_nibble(text[index]) << 4U) | hex_nibble(text[index + 1U])));
+    }
+    return key;
+}
+
+SensitiveBytes read_hex_payload_stdin_line() {
+    SensitivePayloadText text;
+    std::cin.getline(text.data(), static_cast<std::streamsize>(text.size()));
+    if ((std::cin.fail() && !std::cin.eof()) || std::cin.bad()) {
+        throw std::invalid_argument("stdin payload must be a non-empty hex line of at most 4096 bytes");
+    }
+    auto text_size = std::char_traits<char>::length(text.data());
+    if (text_size > 0U && text.data()[text_size - 1U] == '\r') --text_size;
+    if (text_size == 0U || text_size > 8192U) {
+        throw std::invalid_argument("stdin payload must be a non-empty hex line of at most 4096 bytes");
+    }
+    return decode_hex(std::string_view(text.data(), text_size));
 }
 
 void write_new_binary(const std::string& path, const std::vector<std::uint8_t>& bytes) {
@@ -182,8 +233,11 @@ int main(int argc, char* argv[]) {
         std::cerr << "usage: zkstego_blind_bits embed <input.h264> <protected-key-file> <payload-hex> <new-output.h264>\n"
                      "   or: zkstego_blind_bits extract <input.h264> <protected-key-file> <bit-count-multiple-of-8>\n"
                      "   or: zkstego_blind_bits embed-auth <input.h264> <protected-key-file> <payload-hex> <new-output.h264>\n"
+                     "   or: zkstego_blind_bits embed-auth-stdin <input.h264> <new-output.h264>\n"
                      "   or: zkstego_blind_bits extract-auth <input.h264> <protected-key-file> <maximum-payload-bytes>\n"
-                     "key file: one 64-hex-character key line; restrict OS access to it.\n"
+                     "key source: one 64-hex-character key line; use '-' to read it from stdin.\n"
+                     "embed-auth-stdin reads the key line followed by one payload-hex line from stdin.\n"
+                     "key files must have restricted OS access.\n"
                      "warning: extraction prints unauthenticated raw bits; it does not reject wrong keys.\n";
         return 2;
     }
@@ -193,7 +247,7 @@ int main(int argc, char* argv[]) {
             const auto key = read_key_file(argv[3]);
             const auto payload = decode_hex(argv[4]);
             const auto stego = zkstego::embed_keyed_cavlc_sign_bits(
-                read_binary(argv[2]), key.value(), bytes_to_bits(payload));
+                read_binary(argv[2]), key.value(), bytes_to_bits(payload.value()));
             write_new_binary(argv[5], stego);
             std::cout << "embedded_bits=" << payload.size() * 8U << " output_bytes=" << stego.size() << '\n';
             return 0;
@@ -202,8 +256,18 @@ int main(int argc, char* argv[]) {
             const auto key = read_key_file(argv[3]);
             const auto payload = decode_hex(argv[4]);
             const auto stego = zkstego::embed_authenticated_cavlc_payload(
-                read_binary(argv[2]), key.value(), payload);
+                read_binary(argv[2]), key.value(), payload.value());
             write_new_binary(argv[5], stego);
+            std::cout << "embedded_authenticated_payload_bytes=" << payload.size()
+                      << " output_bytes=" << stego.size() << '\n';
+            return 0;
+        }
+        if (operation == "embed-auth-stdin" && argc == 4) {
+            auto key = read_key_stdin_line();
+            auto payload = read_hex_payload_stdin_line();
+            const auto stego = zkstego::embed_authenticated_cavlc_payload(
+                read_binary(argv[2]), key.value(), payload.value());
+            write_new_binary(argv[3], stego);
             std::cout << "embedded_authenticated_payload_bytes=" << payload.size()
                       << " output_bytes=" << stego.size() << '\n';
             return 0;
