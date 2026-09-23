@@ -10,7 +10,8 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from src.realtime_cavlc import CAVLCRealtimeBudget, RealtimeCAVLCScheduler
-from src.bitstream.cavlc import get_run_before_table
+from src.bitstream.cavlc import CAVLCDecoder, CAVLCEncoder, find_coeff_token_code, get_run_before_table
+from src.bitstream.bitstream_io import BitstreamReader, BitstreamWriter
 from src.bitstream.h264 import NALUnitType, iter_annex_b_nal_units
 from src.bitstream import bitstream_ops
 from src.bitstream.bitstream_ops import BitstreamPatcher
@@ -65,6 +66,39 @@ def t_cavlc_run_before_tables_match_h264_reference_vlcs():
         "11": 0, "000": 1, "001": 2, "011": 3, "010": 4, "101": 5, "100": 6,
     }
     assert get_run_before_table(7)["00000000001"] == 14
+
+
+def t_cavlc_level_coding_round_trips_both_trailing_one_branches():
+    """The first non-trailing level must round-trip for both H.264 branches."""
+    for n_c, coeffs in (
+        (0, [2, 0, 1] + [0] * 13),
+        (0, [-2, 0, 1] + [0] * 13),
+        (0, [4, 1, 1, 1] + [0] * 12),
+        (0, [-4, 1, 1, 1] + [0] * 12),
+        (8, [2, 0, 1] + [0] * 13),
+        (8, [4, 1, 1, 1] + [0] * 12),
+        (8, [0] * 16),
+        (0, [2] * 11 + [0] * 5),
+        (0, [2] * 8 + [1, 1, 1] + [0] * 5),
+    ):
+        writer = BitstreamWriter()
+        CAVLCEncoder(writer).encode_block_cavlc(coeffs, nC=n_c)
+        decoded = CAVLCDecoder(BitstreamReader(writer.get_bytes())).decode_block_cavlc(nC=n_c)
+        assert decoded.levels == coeffs
+
+
+def t_cavlc_flc_table_9_5e_literals_and_invalid_tokens_are_fail_closed():
+    assert find_coeff_token_code(0, 0, nC=8) == "000011"
+    assert find_coeff_token_code(1, 0, nC=8) == "000000"
+    assert find_coeff_token_code(1, 1, nC=8) == "000001"
+    assert find_coeff_token_code(16, 0, nC=8) == "111100"
+    assert find_coeff_token_code(16, 3, nC=8) == "111111"
+    try:
+        CAVLCDecoder(BitstreamReader(bytes([0b00001000])))._decode_coeff_token(nC=8)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("invalid FLC6 coeff_token must not decode as an empty block")
 
 
 def t_patcher_keeps_decoded_trailing_one_count_on_standard_round_trip():
@@ -416,6 +450,8 @@ def main():
         run_test("scheduler_keeps_only_fresh_segments_under_pressure", t_scheduler_keeps_only_fresh_segments_under_pressure),
         run_test("scheduler_reuses_one_proof_per_epoch_and_reports_budget", t_scheduler_reuses_one_proof_per_epoch_and_reports_budget),
         run_test("cavlc_run_before_tables_match_h264_reference_vlcs", t_cavlc_run_before_tables_match_h264_reference_vlcs),
+        run_test("cavlc_level_coding_round_trips_both_trailing_one_branches", t_cavlc_level_coding_round_trips_both_trailing_one_branches),
+        run_test("cavlc_flc_table_9_5e_literals_and_invalid_tokens_are_fail_closed", t_cavlc_flc_table_9_5e_literals_and_invalid_tokens_are_fail_closed),
         run_test("patcher_keeps_decoded_trailing_one_count_on_standard_round_trip", t_patcher_keeps_decoded_trailing_one_count_on_standard_round_trip),
         run_test("streaming_sign_patcher_writes_only_verified_idr_patch", t_streaming_sign_patcher_writes_only_verified_idr_patch),
         run_test("streaming_sign_extractor_preserves_requested_schedule_order", t_streaming_sign_extractor_preserves_requested_schedule_order),

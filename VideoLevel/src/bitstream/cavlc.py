@@ -864,7 +864,9 @@ def find_coeff_token_code(total_coeffs: int, trailing_ones: int, nC: int) -> str
     # Handle TC=0 (all zeros) - use coeff0_token table from x264
     if total_coeffs == 0 and trailing_ones == 0:
         # x264_coeff0_token[6] from tables.c line 1798
-        if nC < 2:
+        if nC >= 8:
+            return "000011"  # Table 9-5(e), codeNum 3
+        elif nC < 2:
             return '1'        # nC=0,1
         elif nC < 4:
             return '11'       # nC=2,3
@@ -881,8 +883,9 @@ def find_coeff_token_code(total_coeffs: int, trailing_ones: int, nC: int) -> str
             return '1'
     
     if nC >= 8:
-        # Use FLC: 6 bits total, bits[5:4]=T1 (upper 2), bits[3:0]=TC (lower 4)
-        code = (trailing_ones << 4) | (total_coeffs & 0xF)
+        # Table 9-5(e): TC=0 is the reserved code 3.  For TC=1..16,
+        # codeNum = 4 * (TC - 1) + T1.
+        code = 3 if total_coeffs == 0 else ((total_coeffs - 1) << 2) | trailing_ones
         return f"{code:06b}"
     
     reverse_table = build_reverse_coeff_token_table(nC)
@@ -1063,17 +1066,21 @@ class CAVLCDecoder:
 
         if table == 'FLC6':
             # nC >= 8: use fixed-length code (6 bits)
-            # H.264 spec Table 9-5(e): 6-bit FLC where:
-            #   bits[5:2] (upper 4 bits) = TotalCoeff (0-15)
-            #   bits[1:0] (lower 2 bits) = TrailingOnes (0-3)
-            # code = (TotalCoeff << 2) | TrailingOnes
+            # H.264 Table 9-5(e): code 3 represents TC=0/T1=0;
+            # otherwise TC=(codeNum >> 2)+1 and T1=codeNum & 3.
             try:
                 code = self.reader.read_bits(6)
-                total_coeffs = code >> 2            # Upper 4 bits = TC
-                trailing_ones = code & 0x3          # Lower 2 bits = T1
-                return (total_coeffs, min(trailing_ones, 3))
-            except Exception:
-                # Bitstream error - return zero coefficients
+                if code == 3:
+                    return (0, 0)
+                total_coeffs = (code >> 2) + 1
+                trailing_ones = code & 0x3
+                if trailing_ones > total_coeffs:
+                    raise ValueError("Invalid FLC6 coeff_token")
+                return (total_coeffs, trailing_ones)
+            except EOFError:
+                # A truncated stream cannot contain a complete FLC token.
+                # Preserve the historical end-of-input recovery only here;
+                # malformed six-bit codes must remain visible to callers.
                 return (0, 0)
 
         elif table:
@@ -1186,22 +1193,16 @@ class CAVLCDecoder:
                         levelCode += (1 << (level_prefix - 3)) - 4096
                     levelCode += self.reader.read_bits(level_prefix - 3)
             
-            # Convert levelCode to actual level value
-            # H.264 Section 9.2.2.1:
-            # - Normal: levelCode = 2*abs_level - 2 + sign_bit
-            # - After 3 T1s: levelCode = 2*abs_level + sign_bit (bias +3 correction)
+            # H.264 9.2.2 applies levelCode += 2 to the first decoded
+            # non-trailing level whenever TrailingOnes is less than three.
+            # Applying it to the opposite case desynchronizes suffix-length
+            # evolution and every following residual block.
+            if i == 0 and trailing_ones < 3:
+                levelCode += 2
+
+            # Convert levelCode to actual level value.
             sign_bit = levelCode & 1  # LSB is sign (0=positive, 1=negative)
-            
-            if i == 0 and trailing_ones == 3:
-                # First level after 3 T1s: special decoding
-                # levelCode = 2*(abs_level - 2) + sign_bit
-                # Solve: abs_level = (levelCode - sign_bit)/2 + 2
-                abs_level = (levelCode - sign_bit) >> 1
-                abs_level += 2
-            else:
-                # levelCode = 2*abs_level - 2 + sign_bit
-                # abs_level = (levelCode - sign_bit + 2) / 2
-                abs_level = (levelCode - sign_bit + 2) >> 1
+            abs_level = (levelCode - sign_bit + 2) >> 1
 
             
             # Apply sign (1 = negative, 0 = positive)
@@ -1601,31 +1602,22 @@ class CAVLCEncoder:
         # Initialize suffix length per H.264 Section 9.2.2.1 EXACTLY
         # CRITICAL: Must match H.264 spec precisely for round-trip encoding!
         #
-        # H.264 spec initialization:
-        # if( TotalCoeff( coeff_token ) > 10 )
-        #     suffixLength = 1
-        # else
-        #     suffixLength = 0
-        # if( TotalCoeff( coeff_token ) > 3 && TrailingOnes( coeff_token ) == 3 )
-        #     suffixLength++
+        # H.264 9.2.2.1: suffixLength starts at one only when the
+        # block is dense and it has fewer than three trailing ones.
         
         # Use total_coeffs_for_suffix (not total_coeffs) to preserve bit length
         # when re-encoding modified blocks with override_total_coeffs
-        if analysis.total_coeffs_for_suffix > 10:
+        if analysis.total_coeffs_for_suffix > 10 and analysis.trailing_ones < 3:
             suffixLength = 1
         else:
             suffixLength = 0
-        
-        # Special case: if total_coeffs > 3 and all 3 trailing ones present
-        if analysis.total_coeffs_for_suffix > 3 and analysis.trailing_ones == 3:
-            suffixLength += 1
         
         for i, level in enumerate(levels_to_encode):
             abs_level = abs(level)
             sign = 1 if level < 0 else 0
             
             # Calculate levelCode WITH sign embedded (H.264 Section 9.2.2.1 Table 9-6)
-            if i == 0 and analysis.trailing_ones == 3:
+            if i == 0 and analysis.trailing_ones < 3:
                 levelCode = (abs_level - 2) * 2 + sign
             else:
                 levelCode = (abs_level - 1) * 2 + sign
