@@ -22,6 +22,9 @@ target_compile_definitions(zkstego_cavlc_stream_tests PRIVATE
 add_executable(zkstego_idr_inspect tools/idr_inspect.cpp)
 target_link_libraries(zkstego_idr_inspect PRIVATE zkstego_cavlc_stream)
 
+add_executable(zkstego_blind_bits tools/blind_bits.cpp)
+target_link_libraries(zkstego_blind_bits PRIVATE zkstego_cavlc_stream)
+
 include(CTest)
 if(BUILD_TESTING)
   add_test(NAME zkstego_cavlc_stream_tests COMMAND zkstego_cavlc_stream_tests)

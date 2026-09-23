@@ -422,12 +422,29 @@ int main() {
     };
     const auto blind_stego_fixture = zkstego::embed_keyed_cavlc_sign_bits(
         fixture_bytes, blind_key, blind_payload_bits);
+    const auto blind_stego_candidates = zkstego::collect_cavlc_trailing_one_sign_candidates(
+        zkstego::decode_baseline_i_idr_slices(blind_stego_fixture));
+    CHECK(blind_stego_candidates.size() == candidates.size());
+    for (std::size_t index = 0; index < candidates.size(); ++index) {
+        CHECK(zkstego::serialize_cavlc_sign_candidate(blind_stego_candidates[index]) ==
+            zkstego::serialize_cavlc_sign_candidate(candidates[index]));
+    }
     CHECK(zkstego::extract_keyed_cavlc_sign_bits(
         blind_stego_fixture, blind_key, blind_payload_bits.size()) == blind_payload_bits);
     CHECK(zkstego::extract_keyed_cavlc_sign_bits(
         blind_stego_fixture, wrong_key, blind_payload_bits.size()) != blind_payload_bits);
     CHECK(throws_invalid_argument([&] {
         static_cast<void>(zkstego::embed_keyed_cavlc_sign_bits(fixture_bytes, blind_key, {2}));
+    }));
+    CHECK(zkstego::embed_keyed_cavlc_sign_bits(fixture_bytes, blind_key, {}) == fixture_bytes);
+    CHECK(throws_invalid_argument([&] {
+        static_cast<void>(zkstego::embed_keyed_cavlc_sign_bits(fixture_bytes, {0}, blind_payload_bits));
+    }));
+    CHECK(throws_invalid_argument([&] {
+        static_cast<void>(zkstego::extract_keyed_cavlc_sign_bits(fixture_bytes, {0}, 1));
+    }));
+    CHECK(throws_invalid_argument([&] {
+        static_cast<void>(zkstego::extract_keyed_cavlc_sign_bits(fixture_bytes, blind_key, candidates.size() + 1U));
     }));
     const auto empty_luma_block = zkstego::decode_cavlc_luma_block({0x80}, 0, 0);
     CHECK(empty_luma_block.token.total_coefficients == 0);
