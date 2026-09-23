@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -12,14 +13,15 @@
 #include <vector>
 
 int main(int argc, char* argv[]) {
-    if (argc < 2 || argc > 5) {
-        std::cerr << "usage: zkstego_idr_inspect <annex-b-h264> [--verbose|--macroblock|--slice] [--nal-index <index>]\n";
+    if (argc < 2 || argc > 6) {
+        std::cerr << "usage: zkstego_idr_inspect <annex-b-h264> [--verbose|--macroblock|--slice] [--nal-index <index>] [--flip-first-sign <new-output>]\n";
         return 2;
     }
     bool verbose = false;
     bool macroblock_mode = false;
     bool slice_mode = false;
     std::optional<std::size_t> selected_nal_index;
+    std::optional<std::string> flip_first_sign_output;
     for (int argument_index = 2; argument_index < argc; ++argument_index) {
         const std::string argument{argv[argument_index]};
         if (argument == "--verbose") {
@@ -28,6 +30,16 @@ int main(int argc, char* argv[]) {
             macroblock_mode = true;
         } else if (argument == "--slice") {
             slice_mode = true;
+        } else if (argument == "--flip-first-sign") {
+            if (++argument_index >= argc) {
+                std::cerr << "--flip-first-sign requires a new output path\n";
+                return 2;
+            }
+            flip_first_sign_output = argv[argument_index];
+            if (flip_first_sign_output->empty()) {
+                std::cerr << "--flip-first-sign output must be a new path\n";
+                return 2;
+            }
         } else if (argument == "--nal-index") {
             if (++argument_index >= argc) {
                 std::cerr << "--nal-index requires a non-negative NAL index\n";
@@ -54,6 +66,10 @@ int main(int argc, char* argv[]) {
             return 2;
         }
     }
+    if (flip_first_sign_output.has_value() && selected_nal_index.has_value()) {
+        std::cerr << "--flip-first-sign cannot be combined with --nal-index\n";
+        return 2;
+    }
     const std::string input_path = argv[1];
     std::ifstream input(input_path, std::ios::binary);
     if (!input) {
@@ -63,6 +79,42 @@ int main(int argc, char* argv[]) {
     const std::vector<std::uint8_t> annex_b{
         std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
     try {
+        if (flip_first_sign_output.has_value()) {
+            const auto slices = zkstego::decode_baseline_i_idr_slices(annex_b);
+            const auto candidates = zkstego::collect_cavlc_trailing_one_sign_candidates(slices);
+            if (candidates.empty()) throw std::invalid_argument("input has no trailing-one sign candidates");
+            const auto& candidate = candidates.front();
+            const auto units = zkstego::split_annex_b(annex_b);
+            const auto rbsp = units.at(candidate.nal_index).rbsp();
+            const auto original_bit = static_cast<std::uint8_t>(
+                (rbsp[candidate.rbsp_bit_offset / 8U] >> (7U - candidate.rbsp_bit_offset % 8U)) & 1U);
+            const auto patched = zkstego::patch_annex_b_rbsp_plan(annex_b, {
+                {candidate.nal_index, {{candidate.rbsp_bit_offset, {static_cast<std::uint8_t>(1U - original_bit)}}}},
+            });
+            // "x" requests exclusive creation, closing the existence/open
+            // race and refusing an output path that appeared after CLI parse.
+            std::FILE* output = nullptr;
+#ifdef _MSC_VER
+            if (fopen_s(&output, flip_first_sign_output->c_str(), "wbx") != 0 || output == nullptr) {
+                throw std::invalid_argument("cannot exclusively create requested output path");
+            }
+#else
+            output = std::fopen(flip_first_sign_output->c_str(), "wbx");
+            if (output == nullptr) {
+                throw std::invalid_argument("cannot exclusively create requested output path");
+            }
+#endif
+            const auto bytes_written = std::fwrite(patched.data(), 1U, patched.size(), output);
+            const auto close_status = std::fclose(output);
+            if (bytes_written != patched.size() || close_status != 0) {
+                throw std::invalid_argument("failed while writing patched output");
+            }
+            std::cout << "patched_nal=" << candidate.nal_index
+                      << " macroblock=" << candidate.macroblock_address
+                      << " rbsp_bit=" << candidate.rbsp_bit_offset
+                      << " output_bytes=" << patched.size() << '\n';
+            return 0;
+        }
         const auto idrs = zkstego::inspect_baseline_idr_headers(annex_b);
         std::cout << "idr_count=" << idrs.size() << '\n';
         if (slice_mode) {

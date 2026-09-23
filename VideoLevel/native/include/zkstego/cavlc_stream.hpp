@@ -165,6 +165,24 @@ struct CavlcDecodedIdrSlice {
     std::size_t rbsp_trailing_bit_offset{};
 };
 
+enum class CavlcResidualCategory : std::uint8_t {
+    LumaDc,
+    Luma4x4,
+    ChromaDc,
+    ChromaAc,
+};
+
+// A trailing-one sign bit is a bit-exact, length-invariant CAVLC candidate:
+// flipping it changes only coefficient sign, never coeff_token or residual
+// block length. One candidate is emitted per residual block.
+struct CavlcSignCandidate {
+    std::size_t nal_index{};
+    std::uint32_t macroblock_address{};
+    CavlcResidualCategory category{};
+    std::uint8_t block_index{};
+    std::size_t rbsp_bit_offset{};
+};
+
 struct H264BaselineIdrNalHeader {
     std::size_t nal_index{};
     H264BaselineIdrSliceHeader slice_header;
@@ -254,6 +272,8 @@ CavlcDecodedIdrSlice decode_baseline_i_idr_slice(
     const H264BaselinePps& pps);
 std::vector<CavlcDecodedIdrSlice> decode_baseline_i_idr_slices(
     const std::vector<std::uint8_t>& annex_b);
+std::vector<CavlcSignCandidate> collect_cavlc_trailing_one_sign_candidates(
+    const std::vector<CavlcDecodedIdrSlice>& slices);
 std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
     const std::vector<std::int32_t>& decoded_non_trailing_levels,
     const std::vector<std::uint32_t>& runs);

@@ -1,5 +1,6 @@
 #include "zkstego/cavlc_stream.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <fstream>
@@ -314,6 +315,47 @@ int main() {
     CHECK(i16x16_macroblocks > 0U);
     CHECK(chroma_dc_macroblocks > 0U);
     CHECK(chroma_ac_macroblocks > 0U);
+
+    // A trailing-one sign edit must preserve the blind candidate map because
+    // it cannot change CAVLC codeword length or the number of trailing ones.
+    const auto candidates = zkstego::collect_cavlc_trailing_one_sign_candidates(decoded_fixture);
+    CHECK(!candidates.empty());
+    const auto selected_candidate = candidates.front();
+    const auto fixture_units = zkstego::split_annex_b(fixture_bytes);
+    const auto selected_rbsp = fixture_units.at(selected_candidate.nal_index).rbsp();
+    const auto selected_original_bit = static_cast<std::uint8_t>(
+        (selected_rbsp[selected_candidate.rbsp_bit_offset / 8U] >>
+         (7U - selected_candidate.rbsp_bit_offset % 8U)) & 1U);
+    const auto patched_fixture = zkstego::patch_annex_b_rbsp_plan(fixture_bytes, {
+        {selected_candidate.nal_index, {{selected_candidate.rbsp_bit_offset, {static_cast<std::uint8_t>(1U - selected_original_bit)}}}},
+    });
+    const auto patched_rbsp = zkstego::split_annex_b(patched_fixture)
+        .at(selected_candidate.nal_index).rbsp();
+    const auto selected_patched_bit = static_cast<std::uint8_t>(
+        (patched_rbsp[selected_candidate.rbsp_bit_offset / 8U] >>
+         (7U - selected_candidate.rbsp_bit_offset % 8U)) & 1U);
+    CHECK(selected_patched_bit == 1U - selected_original_bit);
+    const auto reparsed_candidates = zkstego::collect_cavlc_trailing_one_sign_candidates(
+        zkstego::decode_baseline_i_idr_slices(patched_fixture));
+    const auto matching_candidate = std::find_if(
+        reparsed_candidates.begin(), reparsed_candidates.end(), [&](const auto& candidate) {
+            return candidate.nal_index == selected_candidate.nal_index &&
+                candidate.macroblock_address == selected_candidate.macroblock_address &&
+                candidate.category == selected_candidate.category &&
+                candidate.block_index == selected_candidate.block_index &&
+                candidate.rbsp_bit_offset == selected_candidate.rbsp_bit_offset;
+        });
+    CHECK(matching_candidate != reparsed_candidates.end());
+    CHECK(reparsed_candidates.size() == candidates.size());
+    for (std::size_t index = 0; index < candidates.size(); ++index) {
+        const auto& before = candidates[index];
+        const auto& after = reparsed_candidates[index];
+        CHECK(before.nal_index == after.nal_index);
+        CHECK(before.macroblock_address == after.macroblock_address);
+        CHECK(before.category == after.category);
+        CHECK(before.block_index == after.block_index);
+        CHECK(before.rbsp_bit_offset == after.rbsp_bit_offset);
+    }
     const auto empty_luma_block = zkstego::decode_cavlc_luma_block({0x80}, 0, 0);
     CHECK(empty_luma_block.token.total_coefficients == 0);
     CHECK(empty_luma_block.tail.runs.empty());

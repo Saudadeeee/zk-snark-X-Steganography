@@ -1235,6 +1235,43 @@ std::vector<CavlcDecodedIdrSlice> decode_baseline_i_idr_slices(
     return decoded_slices;
 }
 
+std::vector<CavlcSignCandidate> collect_cavlc_trailing_one_sign_candidates(
+    const std::vector<CavlcDecodedIdrSlice>& slices) {
+    std::vector<CavlcSignCandidate> candidates;
+    for (const auto& slice : slices) {
+        for (const auto& macroblock : slice.macroblocks) {
+            const auto append = [&](const CavlcDecodedLumaBlock& block,
+                                    const CavlcResidualCategory category,
+                                    const std::uint8_t block_index) {
+                if (block.token.sign_bit_offsets.empty()) return;
+                candidates.push_back(CavlcSignCandidate{
+                    slice.nal_index,
+                    macroblock.address,
+                    category,
+                    block_index,
+                    block.token.sign_bit_offsets.front(),
+                });
+            };
+            if (macroblock.header.mb_type >= 1U && macroblock.header.mb_type <= 24U) {
+                append(macroblock.luma_dc, CavlcResidualCategory::LumaDc, 0U);
+            }
+            for (std::size_t block_index = 0; block_index < macroblock.luma.blocks.size(); ++block_index) {
+                append(macroblock.luma.blocks[block_index], CavlcResidualCategory::Luma4x4,
+                       static_cast<std::uint8_t>(block_index));
+            }
+            for (std::size_t component = 0; component < macroblock.chroma_dc.size(); ++component) {
+                append(macroblock.chroma_dc[component], CavlcResidualCategory::ChromaDc,
+                       static_cast<std::uint8_t>(component));
+            }
+            for (std::size_t block_index = 0; block_index < macroblock.chroma_ac.size(); ++block_index) {
+                append(macroblock.chroma_ac[block_index], CavlcResidualCategory::ChromaAc,
+                       static_cast<std::uint8_t>(block_index));
+            }
+        }
+    }
+    return candidates;
+}
+
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units) {
     std::size_t total_size = 0;
     for (const auto& unit : units) {

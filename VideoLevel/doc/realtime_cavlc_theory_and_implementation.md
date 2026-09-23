@@ -220,6 +220,27 @@ coverage for that pinned fixture; it does **not** prove a generic H.264 reader
 and does not yet establish rewrite, blind extraction, decoder-valid stego
 output, or realtime operation. Those remain release gates.
 
+### Length-invariant sign rewrite evidence
+
+For each residual block with one or more trailing ones, native traversal emits
+only the first trailing-one sign flag as its candidate. That bit follows the
+`coeff_token`, so changing it cannot alter `TotalCoeff`, `TrailingOnes`, level
+coding, run coding, or the RBSP bit length. Candidate identity is the tuple
+`(NAL index, macroblock address, residual category, block index, RBSP bit
+offset)`, deliberately using RBSP rather than EBSP offsets because regenerated
+emulation-prevention bytes may move EBSP positions.
+
+The native regression flips one such candidate, verifies the output bit and
+the complete ordered candidate map after a full reparse, and CTest passes.
+Independently, `zkstego_idr_inspect --flip-first-sign <new-file>` flipped NAL
+3 / macroblock 0 / RBSP bit 91 in the pinned fixture; its temporary output had
+3,551,610 bytes and SHA-256
+`E1415CCC2CCA3DC13B7D71225401E8C9FEEEFF1BC493A119FE406EA5E138A7F0`.
+`ffmpeg -v error -xerror -i <new-file> -f null -` returned successfully.
+This is real strict-decoder evidence for **one** native sign rewrite. It does
+not validate a keyed multi-bit schedule, payload framing, extraction, proof
+verification, stream operation, or realtime performance.
+
 ### September 2026 diagnostic update
 
 The `nC=0` versus `nC=2..3` ChromaAC discrepancy must not be fixed by a
