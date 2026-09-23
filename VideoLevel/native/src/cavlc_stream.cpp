@@ -265,7 +265,7 @@ CavlcCoeffToken parse_cavlc_coeff_token(
         if (code == 3U) {
             token.total_coefficients = 0;
         } else {
-            token.total_coefficients = code >> 2U;
+            token.total_coefficients = (code >> 2U) + 1U;
             token.trailing_ones = code & 0x3U;
         }
         if (token.trailing_ones > token.total_coefficients) {
