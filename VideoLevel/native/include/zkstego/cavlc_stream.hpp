@@ -282,6 +282,14 @@ std::vector<CavlcSignCandidate> select_keyed_cavlc_sign_candidates(
     const std::vector<CavlcSignCandidate>& candidates,
     const std::vector<std::uint8_t>& secret_key,
     std::size_t required_bits);
+std::vector<std::uint8_t> embed_keyed_cavlc_sign_bits(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    const std::vector<std::uint8_t>& payload_bits);
+std::vector<std::uint8_t> extract_keyed_cavlc_sign_bits(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    std::size_t payload_bit_count);
 std::vector<std::int32_t> reconstruct_cavlc_tc4_no_trailing(
     const std::vector<std::int32_t>& decoded_non_trailing_levels,
     const std::vector<std::uint32_t>& runs);

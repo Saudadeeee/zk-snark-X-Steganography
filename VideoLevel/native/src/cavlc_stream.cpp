@@ -1449,6 +1449,60 @@ std::vector<CavlcSignCandidate> select_keyed_cavlc_sign_candidates(
     return selected;
 }
 
+std::vector<std::uint8_t> embed_keyed_cavlc_sign_bits(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    const std::vector<std::uint8_t>& payload_bits) {
+    for (const auto bit : payload_bits) {
+        if (bit > 1U) throw std::invalid_argument("CAVLC payload bits must be zero or one");
+    }
+    const auto candidates = collect_cavlc_trailing_one_sign_candidates(
+        decode_baseline_i_idr_slices(annex_b));
+    const auto selected = select_keyed_cavlc_sign_candidates(
+        candidates, secret_key, payload_bits.size());
+    const auto units = split_annex_b(annex_b);
+    std::vector<std::vector<FixedLengthBitPatch>> patches_by_nal(units.size());
+    for (std::size_t index = 0; index < selected.size(); ++index) {
+        const auto& candidate = selected[index];
+        patches_by_nal[candidate.nal_index].push_back(
+            {candidate.rbsp_bit_offset, {payload_bits[index]}});
+    }
+    std::vector<AnnexBRbspPatchPlan> plan;
+    plan.reserve(units.size());
+    for (std::size_t nal_index = 0; nal_index < patches_by_nal.size(); ++nal_index) {
+        if (!patches_by_nal[nal_index].empty()) {
+            plan.push_back({nal_index, std::move(patches_by_nal[nal_index])});
+        }
+    }
+    return patch_annex_b_rbsp_plan(annex_b, plan);
+}
+
+std::vector<std::uint8_t> extract_keyed_cavlc_sign_bits(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    const std::size_t payload_bit_count) {
+    const auto candidates = collect_cavlc_trailing_one_sign_candidates(
+        decode_baseline_i_idr_slices(annex_b));
+    const auto selected = select_keyed_cavlc_sign_candidates(
+        candidates, secret_key, payload_bit_count);
+    const auto units = split_annex_b(annex_b);
+    std::vector<std::uint8_t> payload_bits;
+    payload_bits.reserve(selected.size());
+    for (const auto& candidate : selected) {
+        if (candidate.nal_index >= units.size()) {
+            throw std::invalid_argument("blind schedule candidate NAL is outside the segment");
+        }
+        const auto rbsp = units[candidate.nal_index].rbsp();
+        if (candidate.rbsp_bit_offset >= rbsp.size() * 8U) {
+            throw std::invalid_argument("blind schedule candidate bit is outside RBSP");
+        }
+        payload_bits.push_back(static_cast<std::uint8_t>(
+            (rbsp[candidate.rbsp_bit_offset / 8U] >>
+             (7U - candidate.rbsp_bit_offset % 8U)) & 1U));
+    }
+    return payload_bits;
+}
+
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units) {
     std::size_t total_size = 0;
     for (const auto& unit : units) {

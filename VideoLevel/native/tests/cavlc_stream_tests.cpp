@@ -416,6 +416,19 @@ int main() {
         CHECK(before.block_index == after.block_index);
         CHECK(before.rbsp_bit_offset == after.rbsp_bit_offset);
     }
+    const std::vector<std::uint8_t> blind_payload_bits{
+        1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0,
+        0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1,
+    };
+    const auto blind_stego_fixture = zkstego::embed_keyed_cavlc_sign_bits(
+        fixture_bytes, blind_key, blind_payload_bits);
+    CHECK(zkstego::extract_keyed_cavlc_sign_bits(
+        blind_stego_fixture, blind_key, blind_payload_bits.size()) == blind_payload_bits);
+    CHECK(zkstego::extract_keyed_cavlc_sign_bits(
+        blind_stego_fixture, wrong_key, blind_payload_bits.size()) != blind_payload_bits);
+    CHECK(throws_invalid_argument([&] {
+        static_cast<void>(zkstego::embed_keyed_cavlc_sign_bits(fixture_bytes, blind_key, {2}));
+    }));
     const auto empty_luma_block = zkstego::decode_cavlc_luma_block({0x80}, 0, 0);
     CHECK(empty_luma_block.token.total_coefficients == 0);
     CHECK(empty_luma_block.tail.runs.empty());

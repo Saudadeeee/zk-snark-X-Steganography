@@ -265,9 +265,15 @@ rather than a plausible message.
 The native selector now has fixed candidate serialization, HMAC-score and
 wrong-key order vectors. The `(score, identity)` tie fallback is deterministic;
 creating a real SHA-256 HMAC collision for a runtime vector is not a feasible
-test strategy. The schedule remains unimplemented end-to-end: Python parity,
-embed/extract with a correct key, authenticated framing, and wrong-key
-authentication rejection are all required before this is called blind extraction.
+test strategy. `embed_keyed_cavlc_sign_bits` and
+`extract_keyed_cavlc_sign_bits` now apply this schedule directly to native
+Annex-B/RBSP data. The regression uses the locked 300-frame fixture to embed
+and recover 32 raw bits with the correct key, and shows a different raw
+sequence with a fixed wrong key. These functions are not a message protocol:
+they carry neither a length nor an authentication tag, so a caller cannot infer
+wrong-key rejection from raw bits alone. Python parity, a length-bound
+authenticated frame, and wrong-key authentication rejection are all required
+before this is called blind extraction.
 
 ### September 2026 diagnostic update
 
