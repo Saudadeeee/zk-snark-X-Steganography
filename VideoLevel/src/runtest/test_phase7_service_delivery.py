@@ -4,6 +4,7 @@ import base64
 import os
 import sys
 import tempfile
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -129,6 +130,87 @@ def t_verify_job_uses_strict_cover_and_returns_no_message():
             assert "private" not in repr(body)
 
 
+def t_http_job_queue_is_bounded_and_rejects_overload():
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_embed(**kwargs):
+        started.set()
+        assert release.wait(timeout=5)
+        Path(kwargs["output_path"]).write_bytes(b"stego")
+        return {"valid": True, "bits_embedded": 8, "capacity_bits": 8}
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        app = create_app(
+            ApiSettings(api_token="test-token", work_dir=Path(temp_dir), max_workers=1, max_queued_jobs=1),
+            embed_handler=slow_embed,
+        )
+        with TestClient(app) as client:
+            request = {
+                "headers": {"Authorization": "Bearer test-token"},
+                "data": {
+                    "message_b64": base64.b64encode(b"x").decode("ascii"),
+                    "secret_key_b64": base64.b64encode(b"k" * 32).decode("ascii"),
+                },
+                "files": {"video": ("cover.h264", b"\x00\x00\x00\x01cover", "video/h264")},
+            }
+            first = client.post("/api/v1/jobs/embed", **request)
+            assert first.status_code == 202, first.text
+            assert started.wait(timeout=2)
+
+            second = client.post("/api/v1/jobs/embed", **request)
+            assert second.status_code == 202, second.text
+            third = client.post("/api/v1/jobs/embed", **request)
+            assert third.status_code == 503, third.text
+            assert third.json()["detail"] == "job capacity reached; retry later"
+            assert len(list((Path(temp_dir) / "jobs").glob("*.json"))) == 2
+            release.set()
+
+            accepted_ids = (first.json()["job_id"], second.json()["job_id"])
+            for job_id in accepted_ids:
+                for _ in range(100):
+                    body = client.get(f"/api/v1/jobs/{job_id}", headers=request["headers"]).json()
+                    if body["status"] in {"succeeded", "failed"}:
+                        break
+                    time.sleep(0.01)
+                assert body["status"] == "succeeded", body
+
+            recovered = client.post("/api/v1/jobs/embed", **request)
+            assert recovered.status_code == 202, recovered.text
+            recovered_id = recovered.json()["job_id"]
+            for _ in range(100):
+                body = client.get(f"/api/v1/jobs/{recovered_id}", headers=request["headers"]).json()
+                if body["status"] in {"succeeded", "failed"}:
+                    break
+                time.sleep(0.01)
+            assert body["status"] == "succeeded", body
+
+
+def t_failed_upload_removes_orphan_job_and_releases_capacity():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        app = create_app(
+            ApiSettings(api_token="test-token", work_dir=Path(temp_dir), max_upload_bytes=1, max_queued_jobs=0),
+            embed_handler=lambda **kwargs: {"valid": True, "bits_embedded": 8, "capacity_bits": 8},
+        )
+        with TestClient(app) as client:
+            request = {
+                "headers": {"Authorization": "Bearer test-token"},
+                "data": {
+                    "message_b64": base64.b64encode(b"x").decode("ascii"),
+                    "secret_key_b64": base64.b64encode(b"k" * 32).decode("ascii"),
+                },
+                "files": {"video": ("cover.h264", b"too-large", "video/h264")},
+            }
+            failed = client.post("/api/v1/jobs/embed", **request)
+            assert failed.status_code == 413, failed.text
+            assert list((Path(temp_dir) / "jobs").glob("*.json")) == []
+            assert list((Path(temp_dir) / "files").iterdir()) == []
+
+            request["files"] = {"video": ("cover.h264", b"x", "video/h264")}
+            accepted = client.post("/api/v1/jobs/embed", **request)
+            assert accepted.status_code == 202, accepted.text
+
+
 def t_expiring_certificate_rejects_key_after_deadline():
     issuer = Ed25519PrivateKey.generate()
     signer = Ed25519PrivateKey.generate()
@@ -175,6 +257,8 @@ def main():
         run_test("health_is_public_but_jobs_require_bearer_token", t_health_is_public_but_jobs_require_bearer_token),
         run_test("embed_job_returns_only_safe_public_status", t_embed_job_returns_only_safe_public_status),
         run_test("verify_job_uses_strict_cover_and_returns_no_message", t_verify_job_uses_strict_cover_and_returns_no_message),
+        run_test("http_job_queue_is_bounded_and_rejects_overload", t_http_job_queue_is_bounded_and_rejects_overload),
+        run_test("failed_upload_removes_orphan_job_and_releases_capacity", t_failed_upload_removes_orphan_job_and_releases_capacity),
         run_test("expiring_certificate_rejects_key_after_deadline", t_expiring_certificate_rejects_key_after_deadline),
         run_test("certificate_serialization_is_canonical_and_tamper_evident", t_certificate_serialization_is_canonical_and_tamper_evident),
     ]

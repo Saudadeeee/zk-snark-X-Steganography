@@ -31,6 +31,7 @@ class ApiSettings:
     circuits_dir: Path = Path("circuits")
     max_upload_bytes: int = 100 * 1024 * 1024
     max_workers: int = 1
+    max_queued_jobs: int = 2
 
     @classmethod
     def from_environment(cls) -> "ApiSettings":
@@ -80,6 +81,11 @@ class JobStore:
             record = self._records[job_id]
             record.update(changes, updated_at=_now())
             self._persist(record)
+
+    def discard(self, job_id: str) -> None:
+        with self._lock:
+            self._records.pop(job_id, None)
+            (self.directory / f"{job_id}.json").unlink(missing_ok=True)
 
     def _persist(self, record: dict[str, Any]) -> None:
         destination = self.directory / f"{record['job_id']}.json"
@@ -150,9 +156,12 @@ def create_app(
     verify_handler: Callable[..., Any] = verify,
 ) -> FastAPI:
     settings = settings or ApiSettings.from_environment()
+    if settings.max_workers < 1 or settings.max_queued_jobs < 0:
+        raise ValueError("max_workers must be positive and max_queued_jobs must be non-negative")
     app = FastAPI(title="ZK-Stego Video API", version="1.0.0", docs_url="/docs", redoc_url=None)
     store = JobStore(settings.work_dir / "jobs")
     executor = ThreadPoolExecutor(max_workers=settings.max_workers, thread_name_prefix="zk-stego")
+    capacity = threading.BoundedSemaphore(settings.max_workers + settings.max_queued_jobs)
     app.state.settings, app.state.store, app.state.executor = settings, store, executor
 
     def require_token(authorization: str | None = Header(default=None)) -> None:
@@ -160,15 +169,37 @@ def create_app(
         if not authorization or not secrets.compare_digest(authorization, expected):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bearer token required")
 
+    def reserve_capacity() -> None:
+        if not capacity.acquire(blocking=False):
+            raise HTTPException(status_code=503, detail="job capacity reached; retry later", headers={"Retry-After": "1"})
+
     def submit(job_id: str, operation: str, handler: Callable[[], dict[str, Any]]) -> None:
         def run() -> None:
-            store.update(job_id, status="running")
             try:
-                result = handler()
-                store.update(job_id, status="succeeded", result=result)
-            except Exception as exc:  # Do not expose paths, secrets, or internal tracebacks.
-                store.update(job_id, status="failed", error=f"{operation} failed: {type(exc).__name__}")
-        executor.submit(run)
+                store.update(job_id, status="running")
+                try:
+                    result = handler()
+                    store.update(job_id, status="succeeded", result=result)
+                except Exception as exc:  # Do not expose paths, secrets, or internal tracebacks.
+                    store.update(job_id, status="failed", error=f"{operation} failed: {type(exc).__name__}")
+            finally:
+                capacity.release()
+        try:
+            executor.submit(run)
+        except Exception:
+            try:
+                store.update(job_id, status="failed", error=f"{operation} could not be scheduled")
+            finally:
+                capacity.release()
+            raise
+
+    def abandon_upload(job_id: str, job_dir: Path, created: bool) -> None:
+        if created:
+            for path in job_dir.iterdir():
+                if path.is_file():
+                    path.unlink(missing_ok=True)
+            job_dir.rmdir()
+        store.discard(job_id)
 
     @app.on_event("shutdown")
     def shutdown() -> None:
@@ -188,11 +219,22 @@ def create_app(
     ) -> dict[str, str]:
         message, secret_key = _decode_message(message_b64), _decode_key(secret_key_b64, "secret_key_b64")
         chaos_key = _decode_key(chaos_key_b64, "chaos_key_b64") if chaos_key_b64 else None
-        record = store.create("embed")
-        job_dir = settings.work_dir / "files" / record["job_id"]
-        job_dir.mkdir(parents=True, exist_ok=False)
-        input_path, output_path = job_dir / "cover.h264", job_dir / "stego.h264"
-        await _save_upload(video, input_path, settings.max_upload_bytes)
+        reserve_capacity()
+        job_dir_created = False
+        try:
+            record = store.create("embed")
+            job_dir = settings.work_dir / "files" / record["job_id"]
+            job_dir.mkdir(parents=True, exist_ok=False)
+            job_dir_created = True
+            input_path, output_path = job_dir / "cover.h264", job_dir / "stego.h264"
+            await _save_upload(video, input_path, settings.max_upload_bytes)
+        except BaseException:
+            try:
+                if "record" in locals():
+                    abandon_upload(record["job_id"], job_dir, job_dir_created)
+            finally:
+                capacity.release()
+            raise
 
         def perform() -> dict[str, Any]:
             result = embed_handler(
@@ -215,12 +257,23 @@ def create_app(
     ) -> dict[str, str]:
         secret_key = _decode_key(secret_key_b64, "secret_key_b64")
         chaos_key = _decode_key(chaos_key_b64, "chaos_key_b64") if chaos_key_b64 else None
-        record = store.create("verify")
-        job_dir = settings.work_dir / "files" / record["job_id"]
-        job_dir.mkdir(parents=True, exist_ok=False)
-        stego_path, original_path = job_dir / "stego.h264", job_dir / "original.h264"
-        await _save_upload(stego_video, stego_path, settings.max_upload_bytes)
-        await _save_upload(original_video, original_path, settings.max_upload_bytes)
+        reserve_capacity()
+        job_dir_created = False
+        try:
+            record = store.create("verify")
+            job_dir = settings.work_dir / "files" / record["job_id"]
+            job_dir.mkdir(parents=True, exist_ok=False)
+            job_dir_created = True
+            stego_path, original_path = job_dir / "stego.h264", job_dir / "original.h264"
+            await _save_upload(stego_video, stego_path, settings.max_upload_bytes)
+            await _save_upload(original_video, original_path, settings.max_upload_bytes)
+        except BaseException:
+            try:
+                if "record" in locals():
+                    abandon_upload(record["job_id"], job_dir, job_dir_created)
+            finally:
+                capacity.release()
+            raise
 
         def perform() -> dict[str, Any]:
             result = verify_handler(
