@@ -35,24 +35,33 @@ private:
 
 class SensitiveBytes {
 public:
-    SensitiveBytes() { value_.reserve(32U); }
+    SensitiveBytes() : value_(32U) {}
     SensitiveBytes(const SensitiveBytes&) = delete;
     SensitiveBytes& operator=(const SensitiveBytes&) = delete;
-    SensitiveBytes(SensitiveBytes&& other) noexcept : value_(std::move(other.value_)) {}
+    SensitiveBytes(SensitiveBytes&& other) noexcept
+        : value_(std::move(other.value_)), written_(other.written_) {
+        other.written_ = 0;
+    }
     SensitiveBytes& operator=(SensitiveBytes&& other) noexcept {
         if (this != &other) {
             secure_wipe(value_.data(), value_.size());
             value_ = std::move(other.value_);
+            written_ = other.written_;
+            other.written_ = 0;
         }
         return *this;
     }
-    ~SensitiveBytes() noexcept { secure_wipe(value_.data(), value_.capacity()); }
-    void append(const std::uint8_t byte) { value_.push_back(byte); }
-    std::size_t size() const noexcept { return value_.size(); }
+    ~SensitiveBytes() noexcept { secure_wipe(value_.data(), value_.size()); }
+    void append(const std::uint8_t byte) {
+        if (written_ == value_.size()) throw std::invalid_argument("protected key is too long");
+        value_[written_++] = byte;
+    }
+    std::size_t size() const noexcept { return written_; }
     const std::vector<std::uint8_t>& value() const noexcept { return value_; }
 
 private:
     std::vector<std::uint8_t> value_;
+    std::size_t written_{};
 };
 
 std::uint8_t hex_nibble(const char value) {
