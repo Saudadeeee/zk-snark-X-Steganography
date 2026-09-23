@@ -94,7 +94,7 @@ std::size_t start_code_length_at(const std::vector<std::uint8_t>& bytes, std::si
 
 constexpr std::array coeff_token_n0_1{
     CoeffTokenCode{"1", 0, 0}, CoeffTokenCode{"000101", 1, 0}, CoeffTokenCode{"01", 1, 1},
-    CoeffTokenCode{"00000111", 2, 0}, CoeffTokenCode{"000100", 2, 1}, CoeffTokenCode{"0011", 2, 2},
+    CoeffTokenCode{"00000111", 2, 0}, CoeffTokenCode{"000100", 2, 1}, CoeffTokenCode{"001", 2, 2},
     CoeffTokenCode{"000000111", 3, 0}, CoeffTokenCode{"00000110", 3, 1}, CoeffTokenCode{"0000101", 3, 2}, CoeffTokenCode{"00011", 3, 3},
     CoeffTokenCode{"0000000111", 4, 0}, CoeffTokenCode{"000000110", 4, 1}, CoeffTokenCode{"00000101", 4, 2}, CoeffTokenCode{"000011", 4, 3},
     CoeffTokenCode{"00000000111", 5, 0}, CoeffTokenCode{"0000000110", 5, 1}, CoeffTokenCode{"000000101", 5, 2}, CoeffTokenCode{"0000100", 5, 3},
@@ -105,10 +105,10 @@ constexpr std::array coeff_token_n0_1{
     CoeffTokenCode{"00000000001011", 10, 0}, CoeffTokenCode{"00000000001010", 10, 1}, CoeffTokenCode{"00000000001101", 10, 2}, CoeffTokenCode{"0000000001100", 10, 3},
     CoeffTokenCode{"000000000001111", 11, 0}, CoeffTokenCode{"000000000001110", 11, 1}, CoeffTokenCode{"00000000001001", 11, 2}, CoeffTokenCode{"00000000001100", 11, 3},
     CoeffTokenCode{"000000000001011", 12, 0}, CoeffTokenCode{"000000000001010", 12, 1}, CoeffTokenCode{"000000000001101", 12, 2}, CoeffTokenCode{"00000000001000", 12, 3},
-    CoeffTokenCode{"0000000000000111", 13, 0}, CoeffTokenCode{"0000000000001010", 13, 1}, CoeffTokenCode{"000000000001001", 13, 2}, CoeffTokenCode{"000000000001100", 13, 3},
-    CoeffTokenCode{"0000000000000100", 14, 0}, CoeffTokenCode{"0000000000000110", 14, 1}, CoeffTokenCode{"0000000000000101", 14, 2}, CoeffTokenCode{"000000000001000", 14, 3},
-    CoeffTokenCode{"0000000000001111", 15, 0}, CoeffTokenCode{"0000000000001110", 15, 1}, CoeffTokenCode{"0000000000001101", 15, 2}, CoeffTokenCode{"0000000000001100", 15, 3},
-    CoeffTokenCode{"0000000000001011", 16, 0}, CoeffTokenCode{"0000000000001001", 16, 1}, CoeffTokenCode{"0000000000000011", 16, 2}, CoeffTokenCode{"0000000000001000", 16, 3},
+    CoeffTokenCode{"0000000000001111", 13, 0}, CoeffTokenCode{"000000000000001", 13, 1}, CoeffTokenCode{"000000000001001", 13, 2}, CoeffTokenCode{"000000000001100", 13, 3},
+    CoeffTokenCode{"0000000000001011", 14, 0}, CoeffTokenCode{"0000000000001110", 14, 1}, CoeffTokenCode{"0000000000001101", 14, 2}, CoeffTokenCode{"000000000001000", 14, 3},
+    CoeffTokenCode{"0000000000000111", 15, 0}, CoeffTokenCode{"0000000000001010", 15, 1}, CoeffTokenCode{"0000000000001001", 15, 2}, CoeffTokenCode{"0000000000001100", 15, 3},
+    CoeffTokenCode{"0000000000000100", 16, 0}, CoeffTokenCode{"0000000000000110", 16, 1}, CoeffTokenCode{"0000000000000101", 16, 2}, CoeffTokenCode{"0000000000001000", 16, 3},
 };
 
 constexpr std::array coeff_token_n2_3{

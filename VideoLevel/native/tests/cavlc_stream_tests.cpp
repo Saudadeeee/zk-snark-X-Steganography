@@ -1,5 +1,6 @@
 #include "zkstego/cavlc_stream.hpp"
 
+#include <array>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -14,6 +15,49 @@ int main() {
     CHECK(reader.read_bit() == 0);
     CHECK(reader.read_ue() == 2);  // remaining bits: 0110 -> ue(v)=2
     CHECK(reader.remaining_bits() == 1);
+
+    // FFmpeg's canonical Table 9-5(a) mappings for nC=0/1. These
+    // regression cases cover the formerly malformed TC=2 and high-TC rows.
+    const auto n0_tc2_t2 = zkstego::parse_cavlc_coeff_token({0x20, 0x00, 0x00}, 0, 0);
+    CHECK(n0_tc2_t2.total_coefficients == 2);
+    CHECK(n0_tc2_t2.trailing_ones == 2);
+    CHECK(n0_tc2_t2.level_bit_offset == 5);
+    const auto n0_tc13_t0 = zkstego::parse_cavlc_coeff_token({0x00, 0x0f, 0x00}, 0, 0);
+    CHECK(n0_tc13_t0.total_coefficients == 13);
+    CHECK(n0_tc13_t0.trailing_ones == 0);
+    CHECK(n0_tc13_t0.level_bit_offset == 16);
+    const auto bits_to_bytes = [](const std::string_view bits) {
+        std::vector<std::uint8_t> bytes;
+        std::uint8_t value = 0;
+        std::size_t count = 0;
+        for (const char bit : bits) {
+            value = static_cast<std::uint8_t>((value << 1U) | (bit == '1' ? 1U : 0U));
+            if (++count == 8U) {
+                bytes.push_back(value);
+                value = 0;
+                count = 0;
+            }
+        }
+        if (count != 0U) bytes.push_back(static_cast<std::uint8_t>(value << (8U - count)));
+        return bytes;
+    };
+    struct CoeffTokenCase { std::string_view bits; std::uint32_t total_coefficients; std::uint32_t trailing_ones; };
+    constexpr std::array canonical_high_n0_1_tokens{
+        CoeffTokenCase{"0000000000001111", 13, 0}, CoeffTokenCase{"000000000000001", 13, 1},
+        CoeffTokenCase{"000000000001001", 13, 2}, CoeffTokenCase{"000000000001100", 13, 3},
+        CoeffTokenCase{"0000000000001011", 14, 0}, CoeffTokenCase{"0000000000001110", 14, 1},
+        CoeffTokenCase{"0000000000001101", 14, 2}, CoeffTokenCase{"000000000001000", 14, 3},
+        CoeffTokenCase{"0000000000000111", 15, 0}, CoeffTokenCase{"0000000000001010", 15, 1},
+        CoeffTokenCase{"0000000000001001", 15, 2}, CoeffTokenCase{"0000000000001100", 15, 3},
+        CoeffTokenCase{"0000000000000100", 16, 0}, CoeffTokenCase{"0000000000000110", 16, 1},
+        CoeffTokenCase{"0000000000000101", 16, 2}, CoeffTokenCase{"0000000000001000", 16, 3},
+    };
+    for (const auto& test_case : canonical_high_n0_1_tokens) {
+        const auto token = zkstego::parse_cavlc_coeff_token(bits_to_bytes(test_case.bits), 0, 0);
+        CHECK(token.total_coefficients == test_case.total_coefficients);
+        CHECK(token.trailing_ones == test_case.trailing_ones);
+        CHECK(token.level_bit_offset == test_case.bits.size() + test_case.trailing_ones);
+    }
 
     zkstego::RbspBitReader skipping_reader({0b10100110});
     skipping_reader.skip_bits(5);
@@ -247,15 +291,6 @@ int main() {
     // Representative entries from every TotalCoeff row of H.264 Table 9-5(c)
     // (nC=4..7).  The table is variable length, so a six-bit-only decoder is
     // not sufficient here.
-    const auto bits_to_bytes = [](std::string_view bits) {
-        std::vector<std::uint8_t> bytes((bits.size() + 7U) / 8U);
-        for (std::size_t bit_index = 0; bit_index < bits.size(); ++bit_index) {
-            if (bits[bit_index] == '1') {
-                bytes[bit_index / 8U] |= static_cast<std::uint8_t>(1U << (7U - bit_index % 8U));
-            }
-        }
-        return bytes;
-    };
     struct N4TokenCase {
         std::string_view bits;
         std::uint32_t total_coefficients;

@@ -192,16 +192,16 @@ desynchronizes the rest of a macroblock.
 `zkstego_idr_inspect --macroblock` exercises this primitive against every
 IDR's first macroblock. An earlier luma-only run on
 `foreman_cif_q18_g1_300f.h264` reached 300/300 first luma macroblocks in
-135.755 ms, but that is superseded by the current full-residual diagnostic:
-the run reaches NAL 123 and then rejects the first macroblock while parsing
-ChromaAC. The trace records a valid-looking `001011` token at bit 784 that is
-legal only for the `nC=2..3` table while the native neighbour state predicts
-`nC=0`. This is evidence of an unresolved preceding-block or neighbour-state
-desynchronization, not evidence that the 300-frame fixture is fully parsed.
+135.755 ms. The current full-residual diagnostic reaches 300/300 first
+macroblocks, including ChromaDC and all eight ChromaAC blocks. The prior NAL
+123 ChromaAC failure was traced to 12 incorrect `nC=0..1` `coeff_token` rows
+in the native Table 9-5(a) copy, not to a constant boundary-context rule.
+The corrected table is compared programmatically with FFmpeg's canonical
+Table 9-5 data and covered by per-row regression tests for `TotalCoeff=13..16`.
 
-The native path therefore remains limited to a diagnostic luma traversal plus
-partial ChromaDC/ChromaAC coverage. It does **not** establish complete slice
-traversal, chroma residual support, bit-exact rewrite, blind extraction,
+The native path therefore remains limited to first-macroblock diagnostic
+traversal with luma, ChromaDC, and ChromaAC coverage. It does **not**
+establish complete slice traversal, bit-exact rewrite, blind extraction,
 decoder-valid output, or a realtime claim. Those remain release gates.
 
 ### September 2026 diagnostic update
@@ -210,15 +210,15 @@ The `nC=0` versus `nC=2..3` ChromaAC discrepancy must not be fixed by a
 constant frame-edge value. A controlled probe that seeded unavailable ChromaAC
 neighbours with `2` made Foreman NAL 123 parse, but then made NAL 3 reject a
 ChromaAC `total_zeros` value outside its 15-coefficient bound. The probe was
-discarded. This demonstrates that it was an accidental alignment, not an
-encoder-profile rule.
+discarded. Comparing native rows against FFmpeg instead found the malformed
+Table 9-5(a) entries and corrected the actual source of the desynchronization.
 
 FFmpeg's CAVLC decoder calculates `nC` from its populated
 `non_zero_count_cache`; it does not substitute a fixed edge context. Native
-completion therefore requires macroblock-by-macroblock availability and cache
+completion still requires macroblock-by-macroblock availability and cache
 state matching for luma and each chroma component before any CAVLC token may
-be rewritten. The current first-macroblock diagnostic lacks that state and
-remains fail-closed.
+be rewritten. The current first-macroblock diagnostic remains fail-closed
+outside its explicitly tested scope.
 
 The legacy Python public-API E2E test is also not an edge benchmark. Its
 Phase-5 full-file `embed`/`verify` execution accumulated approximately
