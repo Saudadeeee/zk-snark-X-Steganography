@@ -14,11 +14,10 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from src.runtest._helpers import section, run_test, summarise, SKIP, get_circuits_dir
+from src.manifest import MANIFEST_VERSION, StegoManifest
+from src.runtest._helpers import SKIP, get_circuits_dir, run_test, section, summarise
 from src.verifier import verify
 from src.verifier_blind import verify_near_blind
-from src.manifest import MANIFEST_VERSION, StegoManifest
-
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 RESULTS_DIR = ROOT / "benchmark" / "results"
@@ -45,7 +44,7 @@ def _sec1_artifact_verified(stego: Path) -> bool:
         return False
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return False
     return meta.get("verify_valid") is True and meta.get("verify_message_match") is True
 
