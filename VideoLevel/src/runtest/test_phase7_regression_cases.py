@@ -2,9 +2,9 @@
 test_phase7_regression_cases.py - Regression fixtures for known weak cases.
 
 Focuses on:
-  1. verified all-intra operating-point verification
+  1. verified legacy Groth16 all-intra operating-point verification
   2. near-threshold quality guard retention
-  3. sidecar-assisted near-blind verification on an existing SEC1 artifact
+  3. rejection of an unauthenticated legacy manifest by the current near-blind verifier
 """
 
 import json
@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from src.runtest._helpers import section, run_test, summarise, SKIP, get_circuits_dir
 from src.verifier import verify
+from src.verifier_blind import verify_near_blind
 from src.manifest import MANIFEST_VERSION, StegoManifest
 
 
@@ -28,6 +29,10 @@ CIRCUITS_DIR = get_circuits_dir()
 SECRET_KEY = bytes(range(32))
 CHAOS_KEY = b"sec1_benchmark_chaos_v1"
 REAL_PROOF_MESSAGE = b"ZK-bench-v1.0!"
+LEGACY_STEGO = OUTPUT_DIR / "sec1_stego_deadline_q22_g1_600f.h264"
+LEGACY_ORIGINAL = ENCODED_DIR / "deadline_cif_q22_g1_600f.h264"
+LEGACY_POSITIONS = Path(f"{LEGACY_STEGO}.positions.json")
+LEGACY_MANIFEST = Path(f"{LEGACY_STEGO}.manifest.json")
 
 
 def _load_positions(path: Path) -> list[tuple[int, int, int]]:
@@ -46,9 +51,9 @@ def _sec1_artifact_verified(stego: Path) -> bool:
 
 
 def t_verified_all_intra_operating_point():
-    stego = OUTPUT_DIR / "sec1_stego_akiyo_q22_g1.h264"
-    original = ENCODED_DIR / "akiyo_cif_q22_g1.h264"
-    pos_path = OUTPUT_DIR / "sec1_stego_akiyo_q22_g1.h264.positions.json"
+    stego = LEGACY_STEGO
+    original = LEGACY_ORIGINAL
+    pos_path = LEGACY_POSITIONS
     if not stego.exists() or not original.exists() or not pos_path.exists():
         SKIP("verified_all_intra_operating_point", "required SEC1 artifact missing")
         return
@@ -64,6 +69,7 @@ def t_verified_all_intra_operating_point():
         secret_key=SECRET_KEY,
         message_length=len(REAL_PROOF_MESSAGE),
         chaos_key=CHAOS_KEY,
+        proof_backend="groth16",
         precomputed_positions=positions,
         precomputed_payload_bits=len(positions),
         use_analysis_cache=True,
@@ -93,9 +99,9 @@ def t_near_threshold_quality_guard_retention():
 
 
 def t_legacy_near_blind_artifacts_are_not_trusted():
-    stego = OUTPUT_DIR / "sec1_stego_akiyo_q22_g1.h264"
-    manifest = OUTPUT_DIR / "sec1_stego_akiyo_q22_g1.h264.manifest.json"
-    pos_path = OUTPUT_DIR / "sec1_stego_akiyo_q22_g1.h264.positions.json"
+    stego = LEGACY_STEGO
+    manifest = LEGACY_MANIFEST
+    pos_path = LEGACY_POSITIONS
     if not stego.exists() or not manifest.exists() or not pos_path.exists():
         SKIP("legacy_near_blind_artifacts_are_not_trusted", "required SEC1 sidecar artifact missing")
         return
@@ -106,6 +112,21 @@ def t_legacy_near_blind_artifacts_are_not_trusted():
     assert artifact_manifest.version != MANIFEST_VERSION, (
         "legacy benchmark sidecar unexpectedly claims the authenticated manifest schema"
     )
+    try:
+        verify_near_blind(
+            stego_video_path=str(stego),
+            circuits_dir=str(CIRCUITS_DIR),
+            secret_key=SECRET_KEY,
+            message_length=len(REAL_PROOF_MESSAGE),
+            manifest_public_key=bytes(32),
+            chaos_key=CHAOS_KEY,
+        )
+    except RuntimeError as error:
+        assert "Manifest signature verification failed" in str(error), (
+            f"legacy artifact rejected for an unexpected reason: {error}"
+        )
+    else:
+        raise AssertionError("near-blind verifier accepted an unauthenticated legacy manifest")
 
 
 def main():
