@@ -27,6 +27,7 @@ PHASES = [
     ("Phase 5", "Extract + Verify",    "test_phase5_extract_verify.py"),
     ("Phase 6", "Near-blind + Manifest", "test_phase6_near_blind_manifest.py"),
     ("Phase 7", "Regression Cases", "test_phase7_regression_cases.py"),
+    ("Phase 12", "Lattice capacity gate", "test_phase12_lattice_capacity_gate.py"),
 ]
 
 SEP  = '-' * 58

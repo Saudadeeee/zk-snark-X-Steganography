@@ -27,6 +27,7 @@ from src.runtest._helpers import (
 )
 
 from src.embedder import embed
+from src.lattice_pq import LatticeSigner
 from src.exceptions import InsufficientCapacityError
 from src.manifest import (
     EmbeddingMetadata,
@@ -50,6 +51,7 @@ CIRCUITS_DIR = get_circuits_dir()
 SECRET_KEY = LOCKED_SECRET_KEY
 SIGNING_PRIVATE_KEY = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
 SIGNING_PUBLIC_KEY = SIGNING_PRIVATE_KEY.public_key()
+LATTICE_PUBLIC_KEY, LATTICE_PRIVATE_KEY = LatticeSigner.generate_keypair()
 TEST_MSG = LOCKED_MESSAGE
 VIDEO_CANDIDATES = [
     get_video("deadline_cif_q22_g1.h264"),
@@ -115,7 +117,7 @@ def t_manifest_hmac_roundtrip():
     assert not manifest.verify_signature(Ed25519PrivateKey.generate().public_key()), "wrong public key must fail"
 
     manifest.payload.message_length = 5
-    assert not manifest.verify_signature(SIGNING_KEY), "manifest tampering must invalidate the signature"
+    assert not manifest.verify_signature(SIGNING_PUBLIC_KEY), "manifest tampering must invalidate the signature"
 
 
 def t_near_blind_verify_pipeline():
@@ -133,6 +135,7 @@ def t_near_blind_verify_pipeline():
                 output_path=out,
                 circuits_dir=CIRCUITS_DIR,
                 secret_key=SECRET_KEY,
+                lattice_private_key=LATTICE_PRIVATE_KEY,
                 chaos_key=LOCKED_CHAOS_KEY,
                 precomputed_positions=candidate_pool or None,
                 trust_precomputed_positions=False,
@@ -157,10 +160,7 @@ def t_near_blind_verify_pipeline():
             message_length=len(TEST_MSG),
             chaos_key=LOCKED_CHAOS_KEY,
             use_analysis_cache=True,
-            manifest_public_key=SIGNING_PUBLIC_KEY.public_bytes(
-                encoding=serialization.Encoding.Raw,
-                format=serialization.PublicFormat.Raw,
-            ),
+            manifest_public_key=LATTICE_PUBLIC_KEY,
         )
         assert result.valid, "near-blind verification should succeed on a fresh embed"
         assert result.message == TEST_MSG, f"unexpected extracted message: {result.message!r}"
