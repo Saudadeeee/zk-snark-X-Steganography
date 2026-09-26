@@ -103,7 +103,9 @@ def t_cli_writes_report_for_a_valid_measured_partition():
         assert result == 0
         assert report["raw_safe_carrier_bits"] == 10
         assert report["quality_validated"] is False
-        assert json.loads(stdout.getvalue())["asset"] == str(video.resolve())
+        emitted = json.loads(stdout.getvalue())
+        assert emitted["asset"] == "clip.h264"
+        assert emitted["proof_artifact"] == "proof.bin"
 
 
 def main_test():
