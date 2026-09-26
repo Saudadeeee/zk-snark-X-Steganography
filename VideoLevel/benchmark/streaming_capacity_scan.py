@@ -68,6 +68,28 @@ def validate_segment_partition(
     return total_frames
 
 
+def next_patchability_target(
+    required_bits: int,
+    confirmed_bits: int,
+    raw_capacity_bits: int,
+    remaining_segments: int,
+) -> int:
+    """Allocate a fair target for this chunk without exceeding its raw candidates."""
+    for name, value, minimum in (
+        ("required_bits", required_bits, 0),
+        ("confirmed_bits", confirmed_bits, 0),
+        ("raw_capacity_bits", raw_capacity_bits, 0),
+        ("remaining_segments", remaining_segments, 0),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            raise ValueError(f"{name} must be an integer >= {minimum}")
+    remaining = max(0, required_bits - confirmed_bits)
+    if remaining == 0 or remaining_segments == 0:
+        return 0
+    fair_share = (remaining + remaining_segments - 1) // remaining_segments
+    return min(raw_capacity_bits, fair_share)
+
+
 def summarize_raw_capacity(
     *,
     asset: str,
@@ -77,6 +99,7 @@ def summarize_raw_capacity(
     raw_safe_bits_by_segment: Sequence[int],
     proof_bytes: int,
     framing_bytes: int = 16,
+    patchable_safe_bits_by_segment: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     """Create an explicitly non-acceptance raw-capacity report."""
     validate_segment_partition(frame_count, frames_per_segment, segment_frame_counts)
@@ -91,7 +114,7 @@ def summarize_raw_capacity(
         capacity_bits=raw_capacity,
         framing_bytes=framing_bytes,
     )
-    return {
+    report = {
         "measurement": "raw_safe_cavlc_candidates_only",
         "asset": Path(asset).name,
         "frame_count": frame_count,
@@ -103,11 +126,55 @@ def summarize_raw_capacity(
         "proof_bytes": proof_bytes,
         "framing_bytes": framing_bytes,
         "raw_capacity_assessment": assessment.to_dict(),
-        "patchability_validated": False,
         "quality_validated": False,
         "blind_extraction_validated": False,
         "raw_fit_is_sufficient_for_embedding": False,
     }
+    if patchable_safe_bits_by_segment is None:
+        report.update(
+            {
+                "patchability_validated": False,
+                "patchability_result": "not_measured",
+                "patchability_confirmed_bits": 0,
+                "patchability_confirmed_bits_by_segment": None,
+                "insufficient_patchable_candidates_proven": False,
+            }
+        )
+        return report
+
+    if len(patchable_safe_bits_by_segment) != len(raw_safe_bits_by_segment):
+        raise ValueError("patchability results must match the segment count")
+    for index, capacity in enumerate(patchable_safe_bits_by_segment):
+        if (
+            isinstance(capacity, bool)
+            or not isinstance(capacity, int)
+            or capacity < 0
+            or capacity > raw_safe_bits_by_segment[index]
+        ):
+            raise ValueError(f"patchable bit count for segment {index} is invalid")
+
+    patchable_total = sum(patchable_safe_bits_by_segment)
+    patchability_assessment = assess_capacity(
+        proof_bytes=proof_bytes,
+        capacity_bits=patchable_total,
+        framing_bytes=framing_bytes,
+    )
+    report.update(
+        {
+            "patchability_policy": "BitstreamPatcher block validation; max one carrier per block",
+            "patchability_confirmed_bits_by_segment": list(patchable_safe_bits_by_segment),
+            "patchability_confirmed_bits": patchable_total,
+            "patchability_capacity_assessment": patchability_assessment.to_dict(),
+            "patchability_validated": patchability_assessment.fits,
+            "patchability_result": (
+                "proof_payload_positions_confirmed"
+                if patchability_assessment.fits
+                else "inconclusive_candidate_shortfall"
+            ),
+            "insufficient_patchable_candidates_proven": False,
+        }
+    )
+    return report
 
 
 def _run(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
@@ -162,20 +229,44 @@ def _scan_segments(
     *,
     ffmpeg: str = "ffmpeg",
     ffprobe: str = "ffprobe",
-) -> tuple[list[int], list[int]]:
+    patchability_required_bits: int | None = None,
+) -> tuple[list[int], list[int], list[int] | None]:
     """Segment at requested IDRs and analyze one chunk at a time."""
     video_path = Path(video_path).resolve(strict=True)
     cuts = frame_cut_points(total_frames, frames_per_segment)
 
     os.environ["BENCHMARK_DISABLE_ANALYSIS_CACHE"] = "1"
     from benchmark._common import load_or_build_benchmark_analysis
+    if patchability_required_bits is not None:
+        if (
+            isinstance(patchability_required_bits, bool)
+            or not isinstance(patchability_required_bits, int)
+            or patchability_required_bits < 0
+        ):
+            raise ValueError("patchability_required_bits must be a non-negative integer")
+        from src.embedder import _prune_patchable_positions
+    else:
+        _prune_patchable_positions = None
 
     if not cuts:
         analysis = load_or_build_benchmark_analysis(video_path, force=True)
         raw_bits = len(analysis[-1])
+        patchable_bits = None
+        if patchability_required_bits is not None:
+            target = next_patchability_target(
+                patchability_required_bits, 0, raw_bits, 1
+            )
+            selected = (
+                _prune_patchable_positions(
+                    analysis[-1], analysis[1], required_bits=target
+                )
+                if target
+                else []
+            )
+            patchable_bits = [len(selected)]
         del analysis
         gc.collect()
-        return [total_frames], [raw_bits]
+        return [total_frames], [raw_bits], patchable_bits
 
     with tempfile.TemporaryDirectory(prefix="zkstego-capacity-") as temp_dir:
         pattern = str(Path(temp_dir) / "segment_%05d.h264")
@@ -210,12 +301,34 @@ def _scan_segments(
         validate_segment_partition(total_frames, frames_per_segment, frame_counts)
 
         raw_bits: list[int] = []
-        for segment in segments:
+        patchable_bits = [] if patchability_required_bits is not None else None
+        confirmed_patchable_bits = 0
+        for index, segment in enumerate(segments):
             analysis = load_or_build_benchmark_analysis(segment, force=True)
-            raw_bits.append(len(analysis[-1]))
+            raw_capacity = len(analysis[-1])
+            raw_bits.append(raw_capacity)
+            if patchable_bits is not None and _prune_patchable_positions is not None:
+                target = next_patchability_target(
+                    patchability_required_bits,
+                    confirmed_patchable_bits,
+                    raw_capacity,
+                    len(segments) - index,
+                )
+                selected = (
+                    _prune_patchable_positions(
+                        analysis[-1],
+                        analysis[1],
+                        required_bits=target,
+                        max_modifications_per_block=1,
+                    )
+                    if target
+                    else []
+                )
+                patchable_bits.append(len(selected))
+                confirmed_patchable_bits += len(selected)
             del analysis
             gc.collect()
-        return frame_counts, raw_bits
+        return frame_counts, raw_bits, patchable_bits
 
 
 def scan_video(
@@ -226,6 +339,7 @@ def scan_video(
     framing_bytes: int = 16,
     ffmpeg: str = "ffmpeg",
     ffprobe: str = "ffprobe",
+    validate_patchability: bool = False,
 ) -> dict[str, Any]:
     """Measure raw candidates for a real Annex-B H.264 video and proof file."""
     video_path = video_path.resolve(strict=True)
@@ -233,14 +347,17 @@ def scan_video(
     _positive_integer("frames_per_segment", frames_per_segment)
     if isinstance(framing_bytes, bool) or not isinstance(framing_bytes, int) or framing_bytes < 0:
         raise ValueError("framing_bytes must be a non-negative integer")
+    proof_bytes = proof_path.stat().st_size
+    required_bits = (proof_bytes + framing_bytes) * 8
     started = time.perf_counter()
     frame_count = _probe_frame_count(video_path, ffprobe)
-    segment_counts, raw_bits = _scan_segments(
+    segment_counts, raw_bits, patchable_bits = _scan_segments(
         video_path,
         frames_per_segment,
         frame_count,
         ffmpeg=ffmpeg,
         ffprobe=ffprobe,
+        patchability_required_bits=required_bits if validate_patchability else None,
     )
     report = summarize_raw_capacity(
         asset=str(video_path),
@@ -248,8 +365,9 @@ def scan_video(
         frames_per_segment=frames_per_segment,
         segment_frame_counts=segment_counts,
         raw_safe_bits_by_segment=raw_bits,
-        proof_bytes=proof_path.stat().st_size,
+        proof_bytes=proof_bytes,
         framing_bytes=framing_bytes,
+        patchable_safe_bits_by_segment=patchable_bits,
     )
     report.update(
         {
@@ -258,6 +376,7 @@ def scan_video(
             "proof_artifact": proof_path.name,
             "proof_sha256": _sha256_file(proof_path),
             "ffmpeg_version": _ffmpeg_version(ffmpeg),
+            "patchability_requested": validate_patchability,
             "elapsed_sec": round(time.perf_counter() - started, 3),
         }
     )
@@ -277,6 +396,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--framing-bytes", type=int, default=16)
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--ffprobe", default="ffprobe")
+    parser.add_argument(
+        "--validate-patchability",
+        action="store_true",
+        help="expensive targeted BitstreamPatcher validation for proof plus framing bits",
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
 
@@ -288,6 +412,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             framing_bytes=args.framing_bytes,
             ffmpeg=args.ffmpeg,
             ffprobe=args.ffprobe,
+            validate_patchability=args.validate_patchability,
         )
         encoded = json.dumps(report, sort_keys=True, indent=2)
         if args.output is not None:
