@@ -105,6 +105,33 @@ def build_blind_stable_candidates(
     return positions
 
 
+def _metadata_from_analysis(
+    coefficients: list[tuple[int, int, list[int]]],
+    frame_verified_data: dict,
+    nal_length_map: dict,
+    safe_positions: list[tuple[int, int, int]],
+) -> tuple[BlindPublicMetadata, list[tuple[int, int, int]]]:
+    """Build blind synchronization metadata from an existing video analysis."""
+    stable_candidates = build_blind_stable_candidates(coefficients, nal_length_map)
+    serialized = [[int(mb), int(blk), int(cidx)] for mb, blk, cidx in stable_candidates]
+    candidate_fingerprint = hashlib.sha256(
+        json.dumps(serialized, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    ).hexdigest()
+    metadata = BlindPublicMetadata(
+        version="blind-sync-v1",
+        codec="h264",
+        profile="baseline-cavlc",
+        idr_count=len(frame_verified_data),
+        raw_safe_bits=len(safe_positions),
+        patchable_block_count=sum(
+            1 for bit_len in nal_length_map.values() if bit_len is not None and bit_len > 0
+        ),
+        stable_candidate_count=len(stable_candidates),
+        candidate_fingerprint=candidate_fingerprint,
+    )
+    return metadata, stable_candidates
+
+
 def extract_public_metadata(
     video_path: str,
     *,
@@ -129,26 +156,12 @@ def extract_public_metadata(
         cache_dir=analysis_cache_dir,
     )
 
-    stable_candidates = build_blind_stable_candidates(coefficients, nal_length_map)
-    serialized = [
-        [int(mb), int(blk), int(cidx)]
-        for mb, blk, cidx in stable_candidates
-    ]
-    candidate_fingerprint = hashlib.sha256(
-        json.dumps(serialized, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-    ).hexdigest()
-
-    metadata = BlindPublicMetadata(
-        version="blind-sync-v1",
-        codec="h264",
-        profile="baseline-cavlc",
-        idr_count=len(frame_verified_data),
-        raw_safe_bits=len(safe_positions),
-        patchable_block_count=sum(1 for bit_len in nal_length_map.values() if bit_len is not None and bit_len > 0),
-        stable_candidate_count=len(stable_candidates),
-        candidate_fingerprint=candidate_fingerprint,
+    return _metadata_from_analysis(
+        coefficients,
+        frame_verified_data,
+        nal_length_map,
+        safe_positions,
     )
-    return metadata, stable_candidates
 
 
 def derive_seed_base(metadata: BlindPublicMetadata) -> bytes:
@@ -252,10 +265,10 @@ def derive_blind_positions_chaos_dedup(
     blind-stable single-candidate prototype.
     """
     (
-        _coefficients,
+        coefficients,
         frame_verified_data,
         _nC_map,
-        _nal_length_map,
+        nal_length_map,
         _t1_override_map,
         safe_positions,
     ) = load_or_build_video_analysis(
@@ -264,11 +277,11 @@ def derive_blind_positions_chaos_dedup(
         force_refresh=force_analysis_refresh,
         cache_dir=analysis_cache_dir,
     )
-    metadata, _stable_candidates = extract_public_metadata(
-        video_path,
-        use_analysis_cache=use_analysis_cache,
-        force_analysis_refresh=force_analysis_refresh,
-        analysis_cache_dir=analysis_cache_dir,
+    metadata, _stable_candidates = _metadata_from_analysis(
+        coefficients,
+        frame_verified_data,
+        nal_length_map,
+        safe_positions,
     )
     seed_base = derive_seed_base(metadata)
     ordering_secret = derive_ordering_key(sync_key, seed_base) if metadata_bound else bytes(sync_key)
@@ -300,10 +313,10 @@ def derive_blind_positions_operating_like(
       5. take the required prefix
     """
     (
-        _coefficients,
-        _frame_verified_data,
+        coefficients,
+        frame_verified_data,
         _nC_map,
-        _nal_length_map,
+        nal_length_map,
         _t1_override_map,
         safe_positions,
     ) = load_or_build_video_analysis(
@@ -312,11 +325,11 @@ def derive_blind_positions_operating_like(
         force_refresh=force_analysis_refresh,
         cache_dir=analysis_cache_dir,
     )
-    metadata, _stable_candidates = extract_public_metadata(
-        video_path,
-        use_analysis_cache=use_analysis_cache,
-        force_analysis_refresh=force_analysis_refresh,
-        analysis_cache_dir=analysis_cache_dir,
+    metadata, _stable_candidates = _metadata_from_analysis(
+        coefficients,
+        frame_verified_data,
+        nal_length_map,
+        safe_positions,
     )
     seed_base = derive_seed_base(metadata)
     ordering_secret = derive_ordering_key(sync_key, seed_base) if metadata_bound else bytes(sync_key)
@@ -349,10 +362,10 @@ def derive_blind_positions_operating_signbit_like(
       dedup per block -> per-IDR cap
     """
     (
-        _coefficients,
-        _frame_verified_data,
+        coefficients,
+        frame_verified_data,
         _nC_map,
-        _nal_length_map,
+        nal_length_map,
         _t1_override_map,
         safe_positions,
     ) = load_or_build_video_analysis(
@@ -361,11 +374,11 @@ def derive_blind_positions_operating_signbit_like(
         force_refresh=force_analysis_refresh,
         cache_dir=analysis_cache_dir,
     )
-    metadata, _stable_candidates = extract_public_metadata(
-        video_path,
-        use_analysis_cache=use_analysis_cache,
-        force_analysis_refresh=force_analysis_refresh,
-        analysis_cache_dir=analysis_cache_dir,
+    metadata, _stable_candidates = _metadata_from_analysis(
+        coefficients,
+        frame_verified_data,
+        nal_length_map,
+        safe_positions,
     )
     seed_base = derive_seed_base(metadata)
     ordering_secret = derive_ordering_key(sync_key, seed_base) if metadata_bound else bytes(sync_key)
@@ -400,10 +413,10 @@ def derive_blind_positions_operating_contract(
     Generic operating-contract-derived blind position generator.
     """
     (
-        _coefficients,
-        _frame_verified_data,
+        coefficients,
+        frame_verified_data,
         _nC_map,
-        _nal_length_map,
+        nal_length_map,
         _t1_override_map,
         safe_positions,
     ) = load_or_build_video_analysis(
@@ -412,11 +425,11 @@ def derive_blind_positions_operating_contract(
         force_refresh=force_analysis_refresh,
         cache_dir=analysis_cache_dir,
     )
-    metadata, _stable_candidates = extract_public_metadata(
-        video_path,
-        use_analysis_cache=use_analysis_cache,
-        force_analysis_refresh=force_analysis_refresh,
-        analysis_cache_dir=analysis_cache_dir,
+    metadata, _stable_candidates = _metadata_from_analysis(
+        coefficients,
+        frame_verified_data,
+        nal_length_map,
+        safe_positions,
     )
     seed_base = derive_seed_base(metadata)
     ordering_secret = derive_ordering_key(sync_key, seed_base) if contract.metadata_bound else bytes(sync_key)
