@@ -92,6 +92,12 @@ def t_lazer_preflight_reports_a_missing_docker_daemon() -> None:
     run.assert_called_once()
 
 
+def t_lazer_backend_checks_are_in_the_full_test_runner() -> None:
+    from src.runtest.run_all import PHASES
+
+    assert any(filename == "test_lazer_backend.py" for _, _, filename in PHASES)
+
+
 def main() -> None:
     section("LaZer Linux backend")
     results = [
@@ -100,6 +106,7 @@ def main() -> None:
         run_test("lazer_lock_is_pinned_and_declares_the_general_relation_demo", t_lazer_lock_is_pinned_and_declares_the_general_relation_demo),
         run_test("lazer_runner_refuses_an_unsupported_container_host_before_execution", t_lazer_runner_refuses_an_unsupported_container_host_before_execution),
         run_test("lazer_preflight_reports_a_missing_docker_daemon", t_lazer_preflight_reports_a_missing_docker_daemon),
+        run_test("lazer_backend_checks_are_in_the_full_test_runner", t_lazer_backend_checks_are_in_the_full_test_runner),
     ]
     raise SystemExit(summarise(results, "LaZer Linux backend"))
 
