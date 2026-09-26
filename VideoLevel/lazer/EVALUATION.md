@@ -15,6 +15,21 @@ CPU. It reported Linux/x86-64 and `aes`, but did **not** report `avx512f`.
 Consequently no LaZer image was built or run here. This is expected: a Docker
 container cannot add an AVX-512 instruction set that the host does not expose.
 
+## Current-machine recheck (2026-09-27)
+
+The preflight was rerun after checking the local Docker CLI and engine. The CLI
+is installed, but `docker info` cannot connect to the Docker Desktop Linux
+engine. The updated `python -m src.lazer_backend` result is:
+
+```json
+{"blockers":["docker_daemon_unavailable"],"cpu_flags":[],"docker_available":false,"machine":"","ready":false,"system_name":""}
+```
+
+Because the engine is unavailable, this run did not inspect container-visible
+CPU flags. In particular, it does not confirm or supersede the earlier
+AVX-512F result; restore the engine and rerun the preflight before attempting
+any LaZer build or proof execution.
+
 ## What is integrated
 
 - Immutable upstream pin: `10eafeca4cd53ff4fc54193dce904dbd0026fefd`.
