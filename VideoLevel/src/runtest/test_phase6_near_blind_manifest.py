@@ -2,7 +2,7 @@
 test_phase6_near_blind_manifest.py - Phase 6: Near-blind verification and manifest integrity.
 
 Tests:
-  1. manifest_hmac_roundtrip      - sign/verify works and tamper is detected
+  1. manifest_signature_roundtrip - sign/verify works and tamper is detected
   2. near_blind_verify_pipeline   - embed with sidecars and verify without original video
 """
 
@@ -103,7 +103,7 @@ def _validated_pool_for_video(video: str) -> list[tuple[int, int, int]]:
     return load_sec1_positions(contract.sequence_name, validated_pool=True)
 
 
-def t_manifest_hmac_roundtrip():
+def t_manifest_signature_roundtrip():
     manifest = StegoManifest(
         payload=PayloadMetadata(message_length=4, bits_embedded=32, bits_required=32),
         embedding=EmbeddingMetadata(strategy="t1_sign_flip", positions_count=32),
@@ -178,7 +178,7 @@ def t_near_blind_verify_pipeline():
 def main():
     section("Phase 6 - Near-blind Verification & Manifest Integrity")
     results = [
-        run_test("manifest_hmac_roundtrip", t_manifest_hmac_roundtrip),
+        run_test("manifest_signature_roundtrip", t_manifest_signature_roundtrip),
         run_test("near_blind_verify_pipeline", t_near_blind_verify_pipeline),
     ]
     sys.exit(summarise(results, "Phase 6"))

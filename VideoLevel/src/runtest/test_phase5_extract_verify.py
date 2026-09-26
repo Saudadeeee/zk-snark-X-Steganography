@@ -1,9 +1,9 @@
 """
-test_phase5_extract_verify.py - Phase 5: Public API round-trip and proof verification.
+test_phase5_extract_verify.py - Phase 5: Public API round-trip and receipt verification.
 
 Tests:
   1. embed_api_sidecars_exist          - embed() produces a coherent stego artifact set
-  2. zk_full_pipeline                  - real Groth16 proof path through embed()/verify()
+  2. lattice_attestation_pipeline      - ML-DSA receipt path through embed()/verify()
 """
 
 import os
@@ -151,10 +151,10 @@ def t_embed_api_sidecars_exist():
         _cleanup_output(out)
 
 
-def t_zk_full_pipeline():
+def t_lattice_attestation_pipeline():
     video = _first_embeddable_video(TEST_MSG)
     if video is None:
-        SKIP("zk_full_pipeline", "no benchmark asset available")
+        SKIP("lattice_attestation_pipeline", "no benchmark asset available")
         return
 
     out = get_output("test_p5_zk_api.h264")
@@ -173,7 +173,7 @@ def t_zk_full_pipeline():
                 use_analysis_cache=True,
             )
         except InsufficientCapacityError:
-            SKIP("zk_full_pipeline", "selected assets lack enough patchable capacity")
+            SKIP("lattice_attestation_pipeline", "selected assets lack enough patchable capacity")
             return
 
         verify_result = verify(
@@ -187,17 +187,17 @@ def t_zk_full_pipeline():
             precomputed_payload_bits=result.bits_embedded,
             use_analysis_cache=True,
         )
-        assert verify_result.valid, "full public API proof pipeline should verify"
+        assert verify_result.valid, "full public API lattice-attestation pipeline should verify"
         assert verify_result.message == TEST_MSG, f"unexpected extracted message: {verify_result.message!r}"
     finally:
         _cleanup_output(out)
 
 
 def main():
-    section("Phase 5 - Public API Round-trip & ZK Proof Verification")
+    section("Phase 5 - Public API Round-trip & Lattice Attestation Verification")
     results = [
         run_test("embed_api_sidecars_exist", t_embed_api_sidecars_exist),
-        run_test("zk_full_pipeline", t_zk_full_pipeline),
+        run_test("lattice_attestation_pipeline", t_lattice_attestation_pipeline),
     ]
     sys.exit(summarise(results, "Phase 5"))
 

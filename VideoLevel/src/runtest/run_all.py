@@ -24,7 +24,7 @@ PHASES = [
     ("Phase 2", "H264 Parser",         "test_phase2_h264_parser.py"),
     ("Phase 3", "Safety + Embed",      "test_phase3_safety_embed.py"),
     ("Phase 4", "Reconstruct",         "test_phase4_reconstruct.py"),
-    ("Phase 5", "Extract + Verify",    "test_phase5_extract_verify.py"),
+    ("Phase 5", "Lattice receipt",    "test_phase5_extract_verify.py"),
     ("Phase 6", "Near-blind + Manifest", "test_phase6_near_blind_manifest.py"),
     ("Phase 7", "Regression Cases", "test_phase7_regression_cases.py"),
     ("Phase 12", "Lattice capacity gate", "test_phase12_lattice_capacity_gate.py"),
