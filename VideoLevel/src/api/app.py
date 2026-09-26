@@ -344,6 +344,7 @@ def create_app(
     artifact_cleanup_thread: threading.Thread | None = None
     artifact_lock = threading.Lock()
     app.state.settings, app.state.store, app.state.executor = settings, store, executor
+    app.state.capacity = capacity
     app.state.work_dir_lease = work_dir_lease
 
     def require_token(authorization: str | None = Header(default=None)) -> None:

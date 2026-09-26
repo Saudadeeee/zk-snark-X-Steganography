@@ -1,0 +1,131 @@
+# Fill this file only with measurements from the actual deployment target.
+# Keep status: pending until every required field and target acceptance gate
+# has evidence. Never put API tokens, video keys, signing keys, or credentials here.
+schema_version: 1
+status: pending
+measured_at_utc: null
+evidence_artifact: null
+
+target:
+  vendor: null
+  board_model: null
+  board_revision: null
+  soc_model: null
+  architecture: null
+  operating_system: null
+  kernel: null
+  cpu_model: null
+  cpu_cores: null
+  ram_bytes: null
+  thermal_policy: null
+
+toolchain:
+  source_revision: null
+  compiler: null
+  compiler_version: null
+  cmake_version: null
+  openssl_version: null
+  ffmpeg_version: null
+  ffmpeg_decoder_build: null
+  native_cli_sha256: null
+
+capture:
+  camera_model: null
+  interface: null
+  sensor_mode: null
+  camera_input_buffer_bytes: null
+  encoder_model: null
+  hardware_h264_encoder: null
+  output_transport: annex_b_h264
+  profile: baseline
+  entropy_coding: CAVLC
+  pixel_format: yuv420p
+  resolution: 352x288
+  requested_fps: 30
+  qp: 22
+  gop: 1
+  fps_mode: passthrough
+  x264_params: keyint=1:min-keyint=1:scenecut=0:repeat-headers=1
+  syntax_compatibility_evidence: null
+
+native_pipeline:
+  binary_path: null
+  max_bits_per_idr: 64
+  uses_sei: false
+  uses_container_metadata: false
+  uses_pixel_domain_fallback: false
+  unsupported_syntax_policy: reject
+  strict_ffmpeg_command: "ffmpeg -v error -xerror -i <stego.h264> -f null -"
+
+service:
+  listen_address: null
+  tls_termination: null # Required deployment URL/certificate reference; no secret material.
+  uvicorn_workers: 1
+  max_workers: 1
+  max_queued_jobs: 2
+  max_upload_bytes: 104857600
+  websocket_max_message_bytes: 1048576
+  websocket_max_queue_messages: 1
+  websocket_max_chunks: 100000
+  stream_timeout_seconds: 3600
+  native_stdin_high_water_bytes: 65536
+  native_stdin_max_allowed_buffer_bytes: null # high-water mark plus one observed input chunk
+  native_stdout_chunk_bytes: 65536
+  benchmark_camera_pipe_read_chunk_bytes: null
+
+key_policy:
+  key_custody: null
+  expiry_enforcement: null # trusted time, online service, HSM/TEE, or explicitly offline policy.
+  revocation_test_evidence: null
+
+acceptance:
+  fixture_ctest: pending
+  fixture_blind_extract_correct_key: pending
+  fixture_wrong_key_rejected: pending
+  camera_stream_groth16_verified: pending
+  camera_stream_wrong_key_rejected: pending
+  strict_ffmpeg_decode_exit: null
+  decoded_frame_count: null
+  dropped_chunks: null
+  capacity_bits: null
+  yuv420_psnr_full_video_db: null
+  yuv420_psnr_min_modified_frame_db: null
+  luma_ssim_mean: null
+  luma_ssim_min: null
+  active_stream_fps: null
+  sensor_to_output_latency_p50_ms: null
+  sensor_to_output_latency_p95_ms: null
+  camera_pipe_to_client_nal_latency_measurement: null
+  camera_pipe_to_client_nal_latency_p50_ms: null
+  camera_pipe_to_client_nal_latency_p95_ms: null
+  camera_pipe_to_client_nal_count: null
+  camera_read_to_send_start_p95_ms: null
+  send_start_to_client_receive_p95_ms: null
+  input_nal_completion_interarrival_p95_ms: null
+  output_nal_completion_interarrival_p95_ms: null
+  native_stdin_write_drain_p95_ms: null
+  native_stdout_read_wait_p95_ms: null
+  native_stdout_to_websocket_send_p95_ms: null
+  native_patch_latency_p50_ms: null
+  native_patch_latency_p95_ms: null
+  process_tree_peak_rss_bytes: null
+  process_tree_cpu_seconds: null
+  thermal_soak_duration_seconds: null
+  thermal_throttle_observed: null
+
+acceptance_budgets:
+  # Must match the requested 30-FPS capture mode using source-preserving counts.
+  minimum_active_stream_fps: 30
+  maximum_sensor_to_output_latency_p95_ms: null
+  maximum_process_tree_peak_rss_bytes: null
+  maximum_dropped_chunks: 0
+  minimum_yuv420_psnr_full_video_db: null
+  minimum_luma_ssim_mean: null
+  minimum_thermal_soak_duration_seconds: 60
+
+notes:
+  - "Null/pending means unmeasured; do not infer success from host results."
+  - "Arrival FPS is not sensor-to-output latency; measure both on the target."
+  - "The host TestClient NAL-completion metric excludes sensor exposure and real TCP/TLS."
+  - "The current Groth16 circuit proves a message/key relation, not video or camera origin."
+  - "The locked encoder contract is a compatibility test point, not proof every camera supports it."

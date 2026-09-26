@@ -2,28 +2,35 @@
 
 ## Purpose and current status
 
-This document defines the only acceptable realtime path for this repository:
-patch H.264 Baseline CAVLC residual coefficients inside independently decodable
-IDR segments. Payload bytes must not be carried by SEI, NAL headers, container
-metadata, or a spatial-pixel fallback.
+This document specifies the constrained native data plane: change selected
+trailing-one signs in H.264 Baseline/CAVLC residual syntax inside Annex-B IDR
+segments. Payload bytes must not be carried by SEI, NAL headers, container
+metadata, or a spatial-pixel fallback. Unsupported syntax is rejected; this
+is not a generic H.264 editor.
 
-The repository currently has a tested realtime control plane in
-`src/realtime_cavlc.py`. It bounds queue latency, reuses one proof per epoch,
-and reports an acceptance result. The current Python CAVLC parser and
-reconstructor remain batch implementations. Therefore the controller is not
-evidence that pixel content has already been patched at camera-frame rate.
+Current functional implementation and evidence:
 
-The first native data-plane layer is implemented in `native/`: Annex-B NAL
-splitting and lossless reassembly, EBSP to RBSP conversion, RBSP
-emulation-prevention insertion, and bounds-checked fixed-length patch plans
-across multiple NAL RBSPs in one segment transform. It is tested with CTest,
-including preservation of unmodified NALs during a patched-IDR segment round
-trip. It also decodes the luma `total_zeros`/`run_before` residual tail for
-every CAVLC `TotalCoeff` value from 1 through 16; the test suite exercises all
-table columns and one tail from a real IDR RBSP. It is intentionally limited to
-a patch plan and isolated residual primitives: native slice traversal,
-candidate selection, full block re-encoding, and camera-segment E2E validation
-remain required before deployment.
+- `native/` traverses the locked single-slice progressive 4:2:0 I/IDR profile,
+  selects keyed sign positions, rewrites RBSP/EBSP without changing sign-field
+  bit lengths, and supports blind authenticated extraction.
+- Fixture E2E has passed on Windows and Linux x86-64: correct-key recovery,
+  wrong-key rejection, and strict `ffmpeg -v error -xerror` decode. The Linux
+  CTest and fixture result are recorded below.
+- `src/api/native_handlers.py` exposes bounded HTTP jobs and an authenticated
+  WebSocket stream that forwards camera bytes incrementally to the native CLI.
+  Physical-camera run 19 is a 60-second development-host soak: it strictly
+  decoded 1,801 frames, verified the recovered Groth16 proof, and rejected a
+  wrong key. Runs 18 and 19 include camera, toolchain, host, and native-binary
+  identity metadata.
+- `src/realtime_cavlc.py` remains a separately tested scheduling controller;
+  it is not the scheduler used by the camera WebSocket path.
+
+These results establish functional fixture and development-host camera paths,
+not edge readiness. The measured camera is USB UVC without an H.264 hardware
+output; FFmpeg software-encodes its YUYV/MJPEG capture to the pinned Baseline,
+CAVLC, all-intra profile. No target-edge camera/SoC throughput or sustained
+thermal benchmark has been recorded. See the acceptance table and measured
+limits below; do not extrapolate the host numbers to an edge deployment.
 
 ## CAVLC embedding theory
 
@@ -122,13 +129,66 @@ of bits per segment; the final segment is zero-padded to the same observable
 capacity rule. The decoder independently derives that capacity, reads the
 length-prefixed frame, and rejects an invalid key/tag. It accepts only one
 supported IDR slice per segment and no P-slice. This native stateful API has
-fixture unit coverage, but it is not yet connected to HTTP/WebSocket or live
-camera I/O. The decoder is terminal after any malformed segment, header, or
+fixture unit coverage and is now reached by the native HTTP job adapter through
+the `embed-stream-auth-stdin` / `extract-stream-auth` CLI operations. The file-job
+adapter still accepts a completed `.h264` upload; live ingest is available
+separately through the WebSocket relay described below.
+`ZK_STEGO_MAX_BITS_PER_IDR` configures the shared encoder and
+blind decoder cap (default 64, must be positive). The CLI walks Annex-B NALs,
+updates its SPS/PPS context, and processes each supported IDR slice independently;
+non-IDR NALs are passed through unchanged. This currently requires one supported
+IDR slice NAL per processed segment; the wrapper does not group type-5 slices by
+picture or validate multi-slice picture semantics. Therefore deployment is still
+scoped to the locked single-slice Baseline/CAVLC encoder configuration; other
+camera syntax is not yet established as supported.
+The decoder is terminal after any malformed segment, header, or
 tag; it wipes partial recovered bits and refuses later chunks. Segment order
 is significant: dropping/reordering encoded segments causes authentication
 failure. This protocol currently has no sequence number, nonce, or replay
 protection, so a stream-session wrapper must supply and authenticate freshness
 before it is suitable for evidence use.
+
+Live embed metrics report both `bits_embedded` and
+`candidate_capacity_bits`. The former is the exact authenticated native frame
+size in bits (version + 16-bit payload length + payload + 16-byte HMAC tag);
+the latter is the sum of candidate capacity from each payload-bearing IDR
+segment processed through completion, after the configured per-IDR cap. It is
+not a maximum capacity for the entire camera mode or a theoretical bound.
+Comparing these fields prevents proof-byte length from being mistaken for the
+actual CAVLC transport cost. Camera run records produced by the recorder require
+capacity to be at least the embedded frame size.
+
+The benchmark separately runs `measure-live-capacity-stdin <max-bits-per-IDR>`
+over the entire captured source stream. This incremental native scan reports
+all IDR segments, all keyed-schedule-eligible trailing-one signs, and the
+sum of `min(configured per-IDR cap, eligible signs)` over the whole stream.
+That whole-stream bound must not be confused with capacity consumed before one
+particular payload finishes embedding; its scan time is reported separately
+and is not part of the live-ingest FPS or latency figures.
+
+The native stream response also reports `idr_service_p50_ms` and
+`idr_service_p95_ms` over completed IDR NALs, including passthrough IDRs after
+the payload completes. Timing begins once `AnnexBNalStreamReader` has returned
+a complete NAL and ends after native stdout write/flush; it excludes waiting
+for incoming bytes and downstream WebSocket send. `segment_process_p50_ms` /
+`segment_process_p95_ms` remain a separate measurement over payload-bearing
+IDRs only. If those modified segments are under five percent of a clip, the
+all-IDR p95 is expected to describe mostly passthrough service time; use the
+patched-segment metric to see the heavier embedding tail. Both are host-local
+service times, not sensor-to-client end-to-end latency.
+
+The native CLI additionally exposes `embed-live-auth-stdin` and
+`extract-live-auth-stdin`. They consume a bounded text control preamble (key,
+and for embedding the payload), then treat the remaining stdin bytes as raw
+Annex-B and forward embedded video to stdout NAL-by-NAL. The reader handles
+start codes split across reads, caps one NAL at 16 MiB, and writes/flushes each
+NAL so a pipe's finite OS buffer supplies backpressure. It necessarily waits
+for the following start code to know a NAL is complete. If the input ends
+before the payload frame fits, embedding exits unsuccessfully; consumers must
+treat nonzero exit or stream closure before completion as failure. This CLI
+primitive is not itself an HTTP relay; the authenticated WebSocket adapter
+described below connects it to a duplex channel. The API job handler still
+uses completed uploads.
 
 Remaining native/controller work includes:
 
@@ -166,9 +226,12 @@ Run the scheduler contract test with:
 py -3.12 src/runtest/test_phase9_realtime_cavlc.py
 ```
 
-The native patcher must add an E2E camera fixture and replace this controller
-only acceptance with measured CAVLC segment results before realtime can be
-claimed.
+Phase 9 remains a scheduler contract test, not a performance acceptance test.
+The native implementation now has a cross-platform fixture E2E and a physical
+camera-to-WebSocket E2E on the development host (see the results below). Those
+runs establish functional behavior and host measurements only; every metric in
+the table still needs to be collected on the intended edge target before a
+realtime/edge claim can be made.
 
 ### Current measured boundary
 
@@ -196,10 +259,23 @@ zero; it is not an acceptable decoder acceptance test.
 `patch_selected_sign_positions_streaming` now validates its temporary output
 with `ffmpeg -v error -xerror` before atomically publishing it. A decoder
 error therefore aborts the operation and removes the temporary file. This is
-a fail-closed safety gate, not a repair for the current multi-block CAVLC
-patcher. Until native slice traversal and a bit-exact per-block rewrite are
-implemented and pass decoder plus blind-proof E2E tests, this repository must
-not claim realtime, edge-ready, or usable blind embedding.
+a fail-closed safety gate, not a repair for the legacy Python multi-block CAVLC
+patcher. That result does not describe the native C++ path below. Native
+functional E2E evidence is recorded separately and still does not establish
+camera or edge performance.
+
+### Native Linux fixture E2E (2026-09-24)
+
+On Ubuntu 24.04 x86-64 (GCC 13.3, OpenSSL 3.0.13, FFmpeg 6.1.1), the current
+native C++ core built successfully and CTest passed 1/1 in 44.30 s. The native
+CLI embedded the 16-byte `native-linux-e2e` payload into
+`foreman_cif_q18_g1_300f.h264` (300 all-intra frames), producing a 3,551,610-byte
+stream. Blind extraction recovered the exact payload with the correct key;
+strict `ffmpeg -v error -xerror` decode passed and the wrong key was rejected.
+This closes the Linux functional fixture gap, not the edge-device acceptance
+gate: no Linux camera, ARM target, or target-edge performance measurement was
+part of this run. The full Groth16 proof-bearing physical camera E2E remains a
+separate development-host result.
 
 ### Native header traversal baseline
 
@@ -248,9 +324,9 @@ Release CTest traversed all 300 IDR slices, each with 396 macroblocks:
 ChromaDC, and ChromaAC paths were encountered. The command
 `zkstego_idr_inspect ... --slice` independently reported the same counts and
 the source fixture passes `ffmpeg -v error -xerror`. This proves native reader
-coverage for that pinned fixture; it does **not** prove a generic H.264 reader
-and does not yet establish rewrite, blind extraction, decoder-valid stego
-output, or realtime operation. Those remain release gates.
+coverage for that pinned fixture; it does **not** prove a generic H.264 reader.
+Rewrite, blind extraction, and decoder-valid output have separate fixture E2E
+evidence below; target-edge realtime operation remains a release gate.
 
 ### Length-invariant sign rewrite evidence
 
@@ -269,9 +345,10 @@ Independently, `zkstego_idr_inspect --flip-first-sign <new-file>` flipped NAL
 3,551,610 bytes and SHA-256
 `E1415CCC2CCA3DC13B7D71225401E8C9FEEEFF1BC493A119FE406EA5E138A7F0`.
 `ffmpeg -v error -xerror -i <new-file> -f null -` returned successfully.
-This is real strict-decoder evidence for **one** native sign rewrite. It does
-not validate a keyed multi-bit schedule, payload framing, extraction, proof
-verification, stream operation, or realtime performance.
+This historical test is strict-decoder evidence for **one** native sign rewrite
+only. The keyed multi-bit authenticated frame, extraction, and stream path have
+separate E2E evidence below. This single-bit test itself does not establish
+target-edge realtime performance.
 
 ### Canonical blind schedule (implementation gate)
 
@@ -317,10 +394,40 @@ This authenticates a byte payload, including a serialized proof if supplied;
 it does not itself generate or verify a ZKP, encrypt the payload, prevent frame
 replay, establish Python parity, or prove realtime/production readiness.
 The segmented native framing uses this same authenticated payload and inherits
-those limitations. A proof-to-video binding must include the intended video
-commitment/session identifier inside the payload and be verified by the actual
-ZKP verifier; neither the current native HTTP adapter nor the new segment
-codec performs that operation.
+those limitations. The current `payload_verify.circom` relation is exactly:
+
+```text
+h = SHA-256(message)
+c = SHA-256(h || secret_key)
+public signals = (h[256 bits], c[256 bits], message_length)
+private witness = secret_key[256 bits]
+```
+
+`src/zk_proof.py` recomputes these public signals from the recovered message
+and the supplied key before calling `snarkjs verify`. Consequently the camera
+E2E proves that the recovered message and supplied key satisfy this circuit.
+The Phase 1 real-proof test also changes only public `message_length` and
+confirms verification rejects that proof under the altered signal. This does
+not prove the source of the key, and it does not bind the proof to the
+carrier video's bytes, decoded frames, camera identity, capture time, or a
+session. A deployment verifier must obtain the expected public commitment from
+a trusted policy/issuer if it needs to distinguish an authorized key from a
+self-selected key. A proof-to-video claim would additionally need a canonical
+video/session commitment included in the circuit's public statement and
+recomputed by the verifier. The current circuit, native HMAC frame, and HTTP
+adapter do not implement that extension. Do not describe this as video
+attestation or camera-origin proof.
+
+The proof cost matters to that design choice: physical-camera run 24 measured
+Groth16 proof generation at 4,016.427 ms, explicitly outside capture. That is
+about 120 times a 33.3 ms frame interval at the requested 30 FPS, so these
+measurements do not support per-frame proof generation on the tested host,
+much less on an edge device. Binding one proof to a completed stream would
+instead require a canonical carrier commitment invariant under the selected
+CAVLC sign edits, recomputation by the blind verifier, and post-capture or
+two-pass proof construction; none is implemented or benchmarked here.
+`benchmark/results/realtime_camera_runs_20260924.json` records the measured
+proof time and its off-capture-path status.
 
 ### Native HTTP adapter and current E2E evidence
 
@@ -335,20 +442,41 @@ a second API process on the same work directory; startup recovery fails persiste
 queued/running jobs and removes their uploaded/partial files. The key is provided to the child through
 stdin, never as an argument or a temporary key file. Embedding sends the
 payload hex through the same pipe as a second line using
-`embed-auth-stdin`, so payload bytes do not appear in the process command line.
+`embed-stream-auth-stdin`; the job adapter selects IDR-local candidate schedules
+with `ZK_STEGO_MAX_BITS_PER_IDR`, so payload bytes do not appear in the process
+command line. The file-job CLI path still reads each completed upload into
+memory; only the WebSocket path below uses the incremental NAL reader. Neither
+path has yet established target-edge frame latency.
 The native app disables the legacy Python proof-verification endpoint rather
 than silently mixing data planes: HMAC authentication of bytes is not ZKP
 verification.
 
-On 2026-09-24, `python src/runtest/test_native_http_channel.py` passed against
-the committed 300-frame Foreman fixture and the locally built native CLI. It
+On 2026-09-24, `uv run --with-requirements requirements.txt --with httpx python
+src/runtest/test_native_http_channel.py` passed against the committed 300-frame
+Foreman fixture and the locally built native CLI after wiring the handler to
+the stateful IDR-session CLI. It
 submitted an HTTP embed job, downloaded a same-size H.264 result, passed
 `ffmpeg -v error -xerror`, extracted the exact test payload through HTTP with
 the correct key, and failed the wrong-key extraction job without exposing a
-payload artifact. This validates the HTTP/fixture integration only. There is
-still no live camera ingest/forwarding stream, target-edge hardware measurement,
-ZKP-specific payload generation/binding in this path, or full capacity,
-quality, p50/p95 and CPU/RAM benchmark evidence; therefore realtime and
+payload artifact. The same test command now also runs the native stdin/stdout
+pipe round trip, validates wrong-key rejection and strict FFmpeg decode, and the
+native CTest covers 3-byte/4-byte split markers and NAL-size rejection. The
+stdin/stdout test uses a buffered fixture, not a live camera source. There is
+now an authenticated WebSocket channel at `/api/v1/stream` that relays raw
+Annex-B chunks through that native pipe. It shares the API worker/queue
+semaphore, limits each binary message to 1 MiB, total input to the configured
+upload cap, chunk count to 100,000, and session duration to one hour by default.
+Clients send an initial JSON operation (`embed` or `extract`), raw Annex-B
+binary messages, then `{"type":"end"}`. Embed sends `complete` only after
+successful child exit; extract returns a payload only after native HMAC
+verification. Clients must treat premature disconnect or `error` as failure.
+The key/payload cross this authenticated connection, so deployment requires
+TLS. A real loopback Uvicorn/WebSocket TCP fixture E2E and physical
+camera-through-WebSocket proof E2Es now pass; run 19 measures capacity, quality,
+p50/p95, CPU/RAM, strict decode, and zero drops on the development host. These
+host measurements do not verify edge performance. The Groth16 proof is for the
+message/key public-signal relation and is verified after extraction; it is not
+a proof that the payload commits to the camera video. Target-edge realtime and
 production acceptance remain unmet.
 
 ### Physical webcam HTTP run (2026-09-24)
@@ -373,6 +501,384 @@ or actual ZKP generation/binding. The configured camera mode is 30 FPS while
 the separate locked fixture was 25 FPS; camera-encoder compatibility must
 remain scoped to the verified encoder options above.
 
+### Direct camera -> WebSocket -> native stream E2E (2026-09-24)
+
+The hardware-gated `src/runtest/test_native_camera_http.py` path fed a
+DirectShow UVC camera's FFmpeg Baseline/CAVLC output directly from a live pipe
+into `/api/v1/stream`, with no video file upload. It asserted that output bytes
+arrived before the camera pipe reached EOF, then ran strict FFmpeg decode and
+blind extraction over the same WebSocket channel. The initial HMAC-only
+baseline produced
+151 source and 151 stego frames at 352x288, 62,432 bytes on each side; FFprobe
+reported `avg_frame_rate=25/1`, and strict decode exited 0. Correct-key extraction
+matched `live-camera-proof`; wrong-key extraction returned
+`payload_not_authenticated`. Three independent five-second camera runs each
+produced 151 source/stego frames and passed strict decode. Startup until first
+pipe bytes ranged 1.526–1.671 s; active pipe arrival rate was 29.692–29.881
+frames/s, while launch-to-EOF throughput including startup was 22.396–22.910
+frames/s. First native output arrived 1.418–2.081 ms after the first input
+chunk. Native C++ measured p50 2.187–2.494 ms and p95 2.438–3.046 ms for only
+7–9 IDR segments modified before payload completion. Comparing decoded source
+and stego YUV420 frames gave full-video PSNR 60.5273–63.6297 dB, minimum
+modified-frame PSNR 44.9360–46.2062 dB, mean luma SSIM 0.99998967–0.99999200,
+and 142–144 identical frames per run. Native-child peak RSS was
+5,484,544–5,505,024 bytes; recorded CPU time was 0.015625–0.046875 s across
+approximately 6.7 s per process. This excludes API and FFmpeg camera-encoder
+resources, and process wall time includes waiting for camera startup/input.
+Per-run raw measurements are in
+[`realtime_camera_runs_20260924.json`](../benchmark/results/realtime_camera_runs_20260924.json).
+
+To collect reproducible hardware measurements, set `ZK_STEGO_CAMERA_NAME` to
+the DirectShow camera name and run
+`uv run --with-requirements requirements.txt python -m benchmark.realtime_camera_recorder --duration 60`.
+The runner executes the physical-camera E2E and atomically appends structured
+metrics only after all checks succeed. It preserves prior records; `--results`
+can choose another artifact. The JSON includes camera startup and arrival-rate
+timing, strict decoder status, proof and negative-check results, decoded
+quality, native/process-tree resource samples, and stream backpressure counters.
+Each new record additionally captures the exact pinned libx264 Baseline/CAVLC
+camera-encode parameters, camera device name, host OS/architecture/CPU/RAM,
+Python and FFmpeg versions, and native CLI path plus SHA-256 digest. Older runs
+are preserved as-is rather than retroactively assigning unobserved metadata.
+This is host-specific evidence, not a performance claim for a separate edge
+target.
+
+The same E2E was then repeated three times with a real Groth16 payload instead
+of the earlier short application-bytes-only baseline. Each message was packed
+with its 129-byte compressed proof, embedded in the camera stream, blind
+extracted, decompressed, and verified using public signals recomputed from the
+recovered message and key. All three proofs verified; wrong-key extraction was
+rejected and strict FFmpeg decode passed. Prove time was 4.344–9.426 s before
+camera capture; verify-after-extraction was 2.217–2.268 s. Those costs are not
+on the measured capture path, so the test does not demonstrate live proof
+generation or verification at camera frame rate. Proof-bearing runs modified
+39–47 IDR segments; their full-video PSNR was 56.8673–59.2692 dB, minimum
+modified-frame PSNR 44.0153–46.0138 dB, and mean luma SSIM 0.99995448–0.99996143.
+An additional negative E2E check confirmed the recovered Groth16 proof fails
+verification when either the public key-derived commitment or recovered
+message is changed; these checks are independent of the outer HMAC rejection.
+
+A 60-second proof-bearing camera soak then delivered 1,801 source and 1,801
+stego frames (773,750 bytes each) with no frame-count loss; the active arrival
+rate was 29.976 frames/s. The first output arrived 2.068 ms after the first
+pipe chunk. Native patch p50/p95 across 34 payload-bearing IDRs was
+2.190/2.756 ms. Strict decode, correct-key extraction, Groth16 verification,
+wrong-key rejection and changed-message rejection all passed. Decoded quality
+was 67.2664 dB full-video PSNR, 41.7642 dB minimum modified-frame PSNR and
+0.99999655 mean luma SSIM. Native child peak RSS was 5,537,792 bytes and CPU
+time 0.234375 s over a 61.845 s process lifetime; this still excludes API and
+camera-encoder resource use. The exact run is `run: 8` in the JSON artifact.
+
+A repeat 60-second run with process-tree sampling recorded 1,801 input/output
+frames, 29.986 frames/s active arrival, native patch p95 2.597 ms (73 patched
+IDRs), and the same strict decode/proof/negative-check passes. Full-video PSNR
+was 70.3741 dB, minimum modified-frame PSNR 43.6291 dB and mean luma SSIM
+0.99999318. The capture process tree (TestClient API process, native CLI and
+FFmpeg encoder) peaked at 138,465,280 bytes RSS and accumulated 11.4375 CPU
+seconds during 61.863 s. The Groth16 prover and after-capture verifier were
+outside this sampler. The exact data is `run: 9` in the artifact.
+
+A further 60-second proof-bearing run through the recorder captured and emitted
+1,801 frames with no loss at 29.987 frames/s active pipe arrival. Backpressure
+counters recorded 916 input chunks, 916 awaited native-stdin drains, zero
+dropped chunks and zero observed native-stdin user-space buffer bytes; input
+chunks were at most 4,118 bytes. Strict decode and correct-key, wrong-key,
+changed-message and Groth16 verification gates all passed. Native patch p95 was
+2.7003 ms across 46 payload-bearing IDRs; decoded full-video PSNR was 67.8012
+dB, minimum modified-frame PSNR 44.8819 dB and mean luma SSIM 0.99999649. The
+capture process tree peaked at 139,341,824 bytes RSS with 10.765625 CPU seconds
+over 61.860 s; native-child RSS was 5,935,104 bytes. The exact data is `run: 12`
+and was appended automatically only after the E2E gates passed.
+
+After adding explicit CAVLC capacity counters, another five-second proof-bearing
+camera run passed the same strict-decode, correct/wrong-key, changed-message and
+Groth16 checks. It emitted all 151 camera frames at 29.780 frames/s active pipe
+arrival. The 150-byte packed message+proof became a 169-byte authenticated frame
+(1,352 embedded bits including the native protocol header and HMAC); 22
+payload-bearing IDRs reported 1,408 aggregate candidate-capacity bits under the
+64-bit/IDR cap. This is the capacity consumed through completion, not the
+camera mode's maximum capacity. Full-video YUV420 PSNR was 62.484 dB, minimum
+modified-frame PSNR 50.3395 dB and mean luma SSIM 0.99994645. Strict FFmpeg
+decode exited 0; native segment p50/p95 was 6.8882/9.0552 ms over those 22 IDRs.
+Native child peak RSS/CPU was 5,722,112 bytes/0.171875 s; sampled API+FFmpeg+
+native process-tree peak RSS/CPU was 142,209,024 bytes/1.75 s over 6.854 s.
+Groth16 proving (4.249 s) occurred before capture and verification (2.215 s)
+after extraction, so neither is included in camera-rate processing. The exact
+record is `run: 13` in the camera JSON artifact.
+
+A 60-second repeat with the new capacity counters emitted 1,801 of 1,801
+frames at 29.987 frames/s active arrival, with no dropped chunks and strict
+FFmpeg decode exit 0. Correct-key blind extraction recovered the packed
+message/proof, Groth16 verification passed, and wrong-key/changed-message checks
+failed as intended. The authenticated frame consumed 1,352 bits from 1,408
+aggregate candidate-capacity bits across 22 payload-bearing IDRs. Segment
+p50/p95 was 6.9222/7.9279 ms. Decoded full-video YUV420 PSNR was 73.6628 dB,
+minimum modified-frame PSNR 50.1418 dB and mean luma SSIM 0.99999402. Native
+child peak RSS/CPU was 5,611,520 bytes/0.359375 s; process-tree peak RSS/CPU
+was 146,481,152 bytes/13.109375 s over 61.847 s. Proof generation (4.252 s)
+and post-extraction verification (2.267 s) were outside camera processing.
+The exact recorder output is `run: 14`. It extends the host soak evidence but
+does not establish performance on an independent edge device or multi-hour
+stability.
+
+Run 15 used the same 60-second camera profile and added the full-stream capacity
+scan. It passed strict decode, frame-count, blind extraction, proof verification,
+and all negative-key/message checks; all 1,801 frames arrived at 29.976
+frames/s, with zero dropped chunks. The complete source had 1,801 supported IDR
+segments and 825,136 raw eligible sign positions. With the configured 64-bit
+per-IDR cap, whole-clip capacity was 115,264 authenticated-frame bits (14,408
+bytes, or up to 14,389 payload bytes after the 19-byte native frame overhead).
+The live proof frame used 1,352 bits; its 22 payload-bearing IDRs had 1,408
+aggregate candidate-capacity bits. Whole-stream analysis took 10.784 s after
+capture and is not a live-path cost. Full-video PSNR/mean luma SSIM were
+70.7795 dB/0.99999241 (minimum modified-frame PSNR 47.5042 dB); native patch
+p50/p95 was 7.2609/8.8021 ms. Native child peak RSS/CPU was
+5,623,808 bytes/0.34375 s; the sampled capture process tree was
+146,358,272 bytes/14.0625 s over 61.869 s. Groth16 proving (4.289 s) and
+verification (2.214 s) were outside capture. The result is `run: 15` in the
+camera JSON artifact. This remains host evidence at 352x288, not validation on
+an independent edge target or proof of multi-hour stability.
+
+Run 16 added per-IDR service timing for the same 60-second camera mode. It
+again captured/emitted 1,801/1,801 frames at 29.972 frames/s active arrival,
+with zero dropped chunks, strict decode, proof verification, and correct-key /
+wrong-key / changed-message checks passing. Whole-stream capacity remained
+115,264 bits over 1,801 IDRs; 885,366 raw sign candidates were eligible, and
+the post-capture scan took 11.048 s. The all-IDR service samples covered all
+1,801 NALs: p50/p95 was 0.0179/0.0298 ms. Only 22 IDRs (1.22% of the clip)
+carried payload, so their separate patch-process p50/p95 was 7.5343/8.2745 ms;
+the lower all-IDR p95 is not a substitute for that tail figure. Decoded quality
+was 70.4466 dB full-video PSNR, 48.5958 dB minimum modified-frame PSNR and
+0.99999296 mean luma SSIM. Native child peak RSS/CPU was 5,681,152 bytes /
+0.328125 s, while the capture process tree was 147,927,040 bytes / 12.171875 s
+over 61.867 s. Proof generation (4.209 s) and verification (2.223 s) were
+outside capture. These service metrics exclude input wait and network send;
+this is still a development-host result, not an independent edge measurement.
+The recorded run is `run: 16`.
+
+Physical-camera run 21 adds an arrival-to-arrival NAL metric to the 60-second
+host proof E2E. The harness timestamps each camera FFmpeg stdout read in 1 KiB
+chunks and each corresponding WebSocket TestClient output chunk, then pairs
+NAL completions by Annex-B order and verifies NAL types/counts agree. For 5,404
+NALs, `ffmpeg_stdout_nal_completion_to_websocket_client_nal_completion` p50/p95
+was 2.2267/125.257 ms. The high p95 tail is a measured concern, not a claim of
+uniform few-millisecond latency. Because the receiver is Starlette's in-process
+TestClient, the metric excludes TCP/TLS transport and sensor-exposure delay; it
+must not be called camera sensor-to-output latency. Run 21 otherwise passed
+strict decode, frame accounting (1,801/1,801 at 29.977 active FPS), zero-drop
+flow checks, and proof/key gates. The artifact is
+`benchmark/results/realtime_camera_runs_20260924.json`.
+
+Physical-camera run 2 in
+`benchmark/results/realtime_camera_tcp_decomposed_20260924.json` repeats the
+60-second E2E through Uvicorn and a real loopback TCP WebSocket. It passed all
+capture, bounded-flow, strict-decode, blind extraction, proof and negative-key
+gates with 1,801/1,801 frames at 29.979 active FPS and zero dropped chunks.
+Across 5,404 NALs, end-to-end host loopback TCP p50/p95 was
+1.2775/128.5626 ms. Client camera-read-to-send-return p95 was 0.2847 ms; client
+send-return-to-output-receive p95 was 128.4907 ms. Server native stdin
+write+drain p95 was 0.0321 ms and native stdout-to-WebSocket-send p95 was
+0.2052 ms. Payload-bearing native patch p95 was 12.4047 ms. This localizes
+the measured tail after the synchronous client's send returns and before that
+client receives output, outside the measured server send/drain intervals; it
+does not distinguish OS/TCP delivery scheduling from client receiver
+scheduling. It is not LAN/TLS or sensor-exposure-to-output latency. The
+in-process TestClient run 21 and chunk-size experiment remain historical,
+separately labeled measurements rather than TCP data.
+
+The async loopback harness then measured NAL timing distributions and server
+stdout-read wait on real camera captures. Reducing DirectShow `rtbufsize` from
+64 MiB to 1 MiB / 256 KiB yielded TCP NAL p95 127.5855 / 127.4311 ms; the
+256 KiB run retained 1,801 frames with zero drops and all strict-decode/proof
+gates passing. Its input/output NAL interarrival p95 was 125.7893 / 126.1756 ms,
+server native stdout-read wait p95 was 145.1017 ms, and server stdout-to-send
+p95 was 0.1992 ms. The 64 MiB observation had input/output interarrival p95
+126.1165 / 126.707 ms and end-to-end p95 128.0479 ms. Because each was a
+different camera scene, the sub-millisecond end-to-end difference is not a
+causal result. The input/output cadence similarity and long native-output
+read wait are consistent with bursty DirectShow/FFmpeg input being a major
+contributor, but do not prove it without sensor timestamps or repeated,
+controlled capture. The harness now caps this input queue at 256 KiB to limit
+potential backlog; verify this does not drop frames on each target camera.
+
+Run 22 extends that 256 KiB configuration to a 300-second physical-camera
+soak. It captured/emitted 8,999/8,999 frames at 29.997 active FPS (29.869 FPS
+including startup), with no dropped chunks; strict FFmpeg decode, correct-key
+blind extraction, Groth16 proof verification, and wrong-key/changed-message
+rejection all passed. Over 26,998 NALs, loopback-TCP latency p50/p95 was
+1.299/127.9583 ms; input/output NAL interarrival p95 was 126.2041/126.8606 ms.
+Native stdout-read-wait p95 was 145.5923 ms, while stdout-to-WebSocket-send
+and stdin-write/drain p95 were 0.197/0.0337 ms. Payload-bearing patch p50/p95
+was 8.5508/9.5462 ms over 22 IDRs, and all-IDR service p95 was 0.0384 ms.
+Decoded quality measured 79.8169 dB full-video YUV420 PSNR, 48.5743 dB minimum
+modified-frame PSNR, and 0.99999771 mean luma SSIM. Whole-stream candidate
+capacity was 575,936 bits across 8,999 IDRs; its 54.902-second scan ran after
+capture. The capture-stage process tree measured 259,338,240-byte peak RSS and
+60.922 CPU seconds over 309.022 seconds; native-child peak RSS/CPU was
+5,283,840 bytes/1.094 seconds. These resource figures exclude post-capture
+analysis and proof generation/verification. The long soak confirms host
+continuity but does not resolve the ~128 ms latency tail: camera timestamps are
+absent, and loopback TCP is not sensor-to-output or target-edge measurement.
+All raw per-run fields, identity data, and binary hash are in run 22 of
+`benchmark/results/realtime_camera_runs_20260924.json`. Its reported frame
+rate is default-sync raw-H.264 output cadence, not verified camera sensor FPS.
+
+However, a separate capture-only diagnostic on 2026-09-24 makes the camera FPS
+claim conditional. DirectShow raw YUYV422 passthrough produced 450 complete
+frames in 60 seconds (7.5 FPS; completion interarrival p50/p95
+128.3263/156.99 ms); MJPEG passthrough independently produced 450 frames
+(129.989/155.3098 ms). A 20-second initial libx264 test emitted 150 frames in
+each mode because it targeted FFmpeg's null muxer; it did not exercise raw-H.264
+output duplication. The raw-H.264 comparison in the correction below revises
+the interpretation of the requested 352x288@30 mode, which the current session
+did not deliver at 30 source frames each second. This
+conflicts with the earlier full E2E run counts, which had no reliable source
+PTS and were taken in a separate session. Therefore the earlier ~30 FPS
+arrival-rate measurements prove the output counts of those runs only, not a
+guaranteed 30-FPS camera acquisition capability. Inspect/lock exposure and
+driver mode, and pair source-frame counts/timestamps with encoded NALs before
+using those figures for acceptance. Exact commands and outputs are recorded in
+`benchmark/results/realtime_camera_capture_rate_diagnostic_20260924.json`.
+This diagnostic suggests the present ~128–157 ms frame/NAL tail can originate
+at capture under current conditions; it does not prove sensor-exposure latency.
+The diagnostic host is an ASUS TUF Gaming F15 FX507ZM running Windows 11 Pro
+build 26100. Its built-in UVC camera (`USB\VID_13D3&PID_56A2&MI_00`) uses
+Microsoft's `USB Video Device` driver, version 10.0.26100.9444, INF
+`usbvideo.inf`. A read-only `IAMCameraControl::GetRange/Get` query reports
+auto exposure enabled at −6 log2 seconds (1/64 s), with a manual range of −8
+to 0 (1/256 s to 1 s); no `Set` call was made. The reported value is shorter
+than 1/30 s, so simple long-exposure throttling is not established as the cause
+of the low rate. This property is not a sensor timestamp or a measurement of
+actual integration time; driver delivery/pacing and other device timing remain
+to be isolated. The recorded hardware identity and query are included in the
+diagnostic JSON so camera rate results are not generalized across UVC devices.
+
+### Camera frame-rate accounting correction
+
+The raw-H.264 muxer comparison later established that default output
+synchronization can create synthetic frames: on a 20-second test it emitted
+600 encoded frames from 150 camera frames and logged 450 duplicates. With
+`-fps_mode passthrough`, the same mode emitted 150 and logged no duplication.
+The corrected full camera WebSocket/native E2E is run 24 in
+`benchmark/results/realtime_camera_runs_20260924.json`: 450/450 frames, 7.608
+active FPS, zero dropped chunks, strict FFmpeg decode and all proof/key checks
+passing. Its loopback latency p50/p95 was 1.9672/147.3311 ms; native payload
+patch p50/p95 was 7.3922/9.8505 ms. This measured host camera did not satisfy
+30-FPS acquisition. All earlier ~30-FPS E2E frame counts used default raw-H.264
+synchronization and are output-frame counts, not evidence of sensor acquisition
+rate; historical JSON remains unchanged, while the harness and new records now
+explicitly require passthrough. The capture-only raw YUYV/MJPEG diagnostics and
+raw-H.264 command evidence are in
+`benchmark/results/realtime_camera_capture_rate_diagnostic_20260924.json`.
+
+After this harness change, the quick suite passed 75/75 and the full Python
+suite passed **95/95**. Phase 11's 22/22 now includes a command-level assertion
+for `fps_mode=passthrough` and a recorder rejection test for any other mode;
+Phase 12 loopback fixture E2E passed 5/5. The real-camera run 24 above is the
+hardware E2E evidence for the corrected frame-counting behavior.
+
+An isolated 16 KiB camera-pipe-read experiment is stored separately in
+`benchmark/results/realtime_camera_chunk16k_experiment_20260924.json` (run 1).
+It passed the same 60-second camera, strict-decode, blind extraction, Groth16,
+wrong-key, changed-message, quality, and bounded-flow gates: 1,801/1,801
+frames, 30.002 active FPS, zero dropped chunks, and NAL pipe-to-TestClient
+p50/p95 2.2803/77.1584 ms. Compared with run 21's 1 KiB chunks and
+2.2267/125.257 ms, p95 is lower in this observation, but changing live scene
+content and non-paired runs prevent attributing the difference to chunk size.
+Native payload-bearing patch p50/p95 was 71.2413/75.0032 ms in this scene,
+showing content complexity also affects patch timing. This remains a TestClient
+measurement, not real TCP/TLS camera latency, and the high tail is unresolved.
+
+Run 17 is a five-second repeat recorded after the full Phase 4/5/6/7/8/9
+suite passed. It emitted 151/151 frames at 29.789 frames/s active arrival,
+with zero dropped chunks; strict FFmpeg decode, blind extraction, proof
+verification, and wrong-key/changed-message rejection passed. Full-video PSNR
+was 59.7052 dB, minimum modified-frame PSNR 47.7635 dB, and mean luma SSIM
+0.99988542. The native payload-bearing patch p50/p95 was 8.7398/9.557 ms over
+22 IDRs; all-IDR service p50/p95 was 0.0211/8.9457 ms over 151 IDRs. Native
+peak RSS was 6,471,680 bytes, while the sampled API+FFmpeg+native process tree
+peaked at 141,099,008 bytes. The proof was generated before capture and
+verified after extraction; this short repeat supplements, but does not replace,
+the 60-second soak in run 16. The exact data is `run: 17` in the camera JSON.
+
+Run 19 is the latest metadata-complete 60-second physical-camera soak. It
+captured and forwarded **1,801/1,801 frames** at 29.979 FPS active pipe arrival
+(29.409 FPS including 1.164 s camera startup), with zero dropped input chunks.
+First output followed the first input chunk by 2.033 ms; this is not
+sensor-exposure latency. Strict FFmpeg decode passed; correct-key extraction
+matched and verified the 129-byte Groth16 proof, while wrong-key extraction and
+wrong-key/changed-message proof checks rejected. Whole-stream candidate
+capacity was 115,264 bits across 1,801 IDRs; 1,400,881 raw sign candidates were
+eligible. The frame carried 1,352 authenticated bits using 1,408 candidate
+positions across 22 patched IDRs. Payload-bearing patch-process p50/p95 was
+9.0378/10.7122 ms; all-IDR service p50/p95 was 0.017/0.0362 ms. Decoded
+YUV420 full-video PSNR was 72.7252 dB, minimum modified-frame PSNR 50.385 dB,
+mean luma SSIM 0.99998796, and minimum luma SSIM 0.99821548. Native-child
+peak RSS/CPU was 5,152,768 bytes/0.453125 s; sampled camera/API/FFmpeg/native
+process-tree peak RSS/CPU was 141,774,848 bytes/11.328125 s. The post-capture
+capacity scan took 13.648 s; proof generation (4.049 s) was before capture and
+verification (2.126 s) after extraction. FFprobe reported no timestamped frames
+for this raw Annex-B stream, so FPS above is wall-clock arrival rate, not a
+PTS-derived rate. Full measurements and host/tool/binary metadata are in
+`run: 19` of `realtime_camera_runs_20260924.json`. This is a host result, not an
+independent edge-device measurement.
+
+Run 20 repeats the 60-second proof-bearing camera path after switching the
+client E2E to the public `ZKSnarkBridge.verify_proof_for_payload` API. It
+captured/emitted **1,801/1,801 frames** at 29.974 FPS active arrival (29.328 FPS
+including 1.325 s camera startup), with zero dropped chunks; strict FFmpeg
+decode and correct-key extraction passed, and wrong-key extraction plus
+wrong-key/changed-message Groth16 checks rejected. The 129-byte proof verified.
+Full-stream capacity was 115,264 bits over 1,801 IDRs from 1,167,124 raw sign
+candidates; 1,352 authenticated bits used 1,408 positions across 22 patched
+IDRs. Payload-bearing patch p50/p95 was 8.9923/9.7913 ms; all-IDR service
+p50/p95 was 0.0173/0.0366 ms. Decoded YUV420 PSNR was 72.7712 dB overall and
+49.2416 dB minimum on a modified frame; luma SSIM mean/min was
+0.99998695/0.99806717. Native-child peak RSS/CPU was 5,140,480 bytes/0.4375 s;
+the sampled process tree peaked at 141,402,112 bytes and 11.46875 CPU seconds.
+Proof generation (4.036 s) was before capture and verification (2.088 s) after
+extraction; the capacity scan took 12.451 s after capture. As in run 19,
+FFprobe had no timestamps for the raw Annex-B input, so FPS is wall-clock pipe
+arrival, not PTS-derived FPS or sensor-to-output latency. Run 20 is still a
+development-host result, not an edge-device benchmark.
+
+The tested UVC device was re-enumerated with FFmpeg DirectShow
+`-list_options true`: it exposes MJPEG and YUYV422 modes (including
+352x288@30), but no H.264 mode. Therefore the camera E2E's locked
+Baseline/CAVLC bitstream is produced by host `libx264` from the camera's
+MJPEG/raw capture; it does not validate a camera's built-in H.264 encoder or
+an edge-board hardware encoder. An edge deployment using this camera would
+need to run and benchmark the pinned Baseline/CAVLC encoder on the target, or
+use a different camera/encoder that exposes a verified compatible H.264
+stream.
+
+The existing circuit proves knowledge of the key for a public hash of the
+message. It does not prove that the message describes, hashes, or originated
+from the camera frames. The native HMAC frame authenticates extracted payload
+bytes to the key, but does not authenticate every video bit or camera origin.
+Thus this is real proof-carrying payload embedding and recovery, not a
+zero-knowledge attestation of the video content or capture device.
+
+These are development-host runs (multiple 5-second diagnostics and proof runs,
+plus 60-second proof-bearing soaks), not a long-duration target-edge benchmark.
+The historical pre-passthrough arrival rate is not source-camera FPS,
+per-frame latency, or proof of production-sustained 30-FPS processing; the
+corrected frame-accounting result below shows why. FFprobe on the raw Annex-B
+stream reports 25/1 average rate, nominal rate near
+60, no container duration, and zero timestamped frames. DirectShow advertises
+352x288 at 30 FPS for this camera, and historical default-sync H.264 pipe
+arrival was 29.692–29.987 encoded frames/s; later raw-H.264 comparison showed
+that this path can include duplicated frames. These historical rates are not
+sensor-acquisition FPS. FFprobe rates are not wall-clock observations because
+the elementary stream carries no PTS. First-output timing starts from an FFmpeg
+pipe chunk (which may contain multiple frames), not sensor exposure. Native
+p50/p95 covers only payload-bearing patched segments, not every
+pass-through frame or camera-to-output latency. Target-edge performance and
+multi-minute/hour stability remain unmeasured; the 60-second process-tree CPU
+and RSS figures include this test-host/API/FFmpeg/native stack but exclude
+proof generation/verification and should not be projected to edge hardware;
+realtime/production acceptance remains unmet.
+
 ### September 2026 diagnostic update
 
 The `nC=0` versus `nC=2..3` ChromaAC discrepancy must not be fixed by a
@@ -389,11 +895,13 @@ state matching for luma and each chroma component before any CAVLC token may
 be rewritten. The full-slice reader now implements that cache for the locked
 one-slice profile and remains fail-closed outside it.
 
-The legacy Python public-API E2E test is also not an edge benchmark. Its
-Phase-5 full-file `embed`/`verify` execution accumulated approximately
-3.33 GiB working set while processing the fixture, so it was stopped before
-host memory exhaustion. It uses sidecars and a batch parser; it cannot be
-used as evidence for the required sidecar-free native edge data plane.
+The legacy Python public-API E2E test is also not an edge benchmark. It uses
+sidecars and a full-file batch parser, so it cannot be used as evidence for the
+required sidecar-free native edge data plane. On 2026-09-24 the complete Phase-5
+`embed`/`verify` test finished successfully (2/2 Phase-5 cases); sampled Windows
+working set for the full-suite test process reached approximately 2.7 GB during
+that phase. This supersedes the earlier diagnostic note that described stopping
+the same test before completion due to memory use.
 
 ## Blind extraction relationship
 

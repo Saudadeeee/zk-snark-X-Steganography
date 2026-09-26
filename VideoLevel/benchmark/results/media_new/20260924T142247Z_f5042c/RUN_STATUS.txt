@@ -1,0 +1,7 @@
+INCOMPLETE / superseded benchmark attempt. Do not use for aggregate reports.
+
+This initial full-duration media matrix was stopped intentionally after the
+native 1280x960 capacity scan exceeded 11 minutes for one case. It contains
+partial intermediate H.264/log/CSV files only and has no video_pipeline_new.json
+summary. The completed, bounded 30-frame matrix is in the later run directory
+that contains video_pipeline_new.json.

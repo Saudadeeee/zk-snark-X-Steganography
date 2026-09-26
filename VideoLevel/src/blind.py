@@ -27,7 +27,7 @@ from .core.pipeline import (
 from .bitstream.bitstream_ops import BitstreamReconstructor
 from .embedder import EmbedResult, embed
 from .verifier import VerifyResult
-from .zk_proof import ZKSnarkBridge, blob_bit_length, pack, unpack
+from .zk_proof import ZKSnarkBridge, pack, unpack
 
 
 PROOF_BYTES = 129

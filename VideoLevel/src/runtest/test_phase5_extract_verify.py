@@ -27,7 +27,6 @@ from src.embedder import embed
 from src.exceptions import InsufficientCapacityError
 from src.verifier import verify
 from benchmark._common import (
-    load_sec1_positions,
     measure_patchable_usable_bits,
 )
 from benchmark.locked_operating_contract import (
@@ -41,19 +40,27 @@ SECRET_KEY = LOCKED_SECRET_KEY
 TEST_MSG = LOCKED_MESSAGE
 CIRCUITS_DIR = get_circuits_dir()
 
-# Prefer larger all-intra assets first because patchable capacity is the real constraint.
+# Prefer a smaller benchmark cover before falling back to large raw assets; the
+# current public-API path must recompute and validate positions against the
+# current parser/reconstructor rather than trusting stale benchmark sidecars.
 VIDEO_CANDIDATES = [
-    get_video("deadline_cif_q22_g1.h264"),
-    get_video("coastguard_cif_q22_g1_1000f.h264"),
-    get_video("coastguard_cif_q22_g1.h264"),
+    get_video("deadline_cif_q22_g1_600f.h264"),
     get_video("foreman_cif_q22_g1.h264"),
+    get_video("coastguard_cif_q22_g1.h264"),
+    get_video("coastguard_cif_q22_g1_1000f.h264"),
+    get_video("deadline_cif_q22_g1.h264"),
 ]
 SCAN_JSON = Path(__file__).resolve().parent.parent.parent / "benchmark" / "results" / "patchable_capacity_scan.json"
 
 
 def _first_embeddable_video(message: bytes) -> str | None:
     required_bits = (4 + len(message) + 129) * 8
-    contract = load_best_locked_operating_contract(required_bits=required_bits)
+    contract = load_best_locked_operating_contract(
+        required_bits=required_bits,
+        preferred_sequences=["deadline_q22_g1_600f", "akiyo_q22_g1", "coastguard_q22_g1",
+                             "deadline_q22_g1", "coastguard_q22_g1_1000f",
+                             "coastguard_q22_g1_3000f", "foreman_q22_g1"],
+    )
     if contract is not None:
         return contract.video_path
     if SCAN_JSON.exists():
@@ -92,16 +99,6 @@ def _first_embeddable_video(message: bytes) -> str | None:
     return best_video
 
 
-def _validated_pool_for_video(video: str) -> list[tuple[int, int, int]]:
-    required_bits = (4 + len(TEST_MSG) + 129) * 8
-    contract = load_best_locked_operating_contract(required_bits=required_bits)
-    if contract is None:
-        return []
-    if os.path.abspath(contract.video_path) != os.path.abspath(video):
-        return []
-    return load_sec1_positions(contract.sequence_name, validated_pool=True)
-
-
 def _cleanup_output(base_path: str) -> None:
     for path in (
         base_path,
@@ -125,7 +122,6 @@ def t_embed_api_sidecars_exist():
 
     out = get_output("test_p5_api_small.h264")
     try:
-        candidate_pool = _validated_pool_for_video(video)
         try:
             result = embed(
                 video_path=video,
@@ -133,13 +129,13 @@ def t_embed_api_sidecars_exist():
                 output_path=out,
                 circuits_dir=CIRCUITS_DIR,
                 secret_key=SECRET_KEY,
-                precomputed_positions=candidate_pool or None,
-                trust_precomputed_positions=False,
                 use_analysis_cache=True,
             )
-        except InsufficientCapacityError:
-            SKIP("embed_api_sidecars_exist", "selected assets lack enough patchable capacity")
-            return
+        except InsufficientCapacityError as exc:
+            raise AssertionError(
+                "public API could not embed the test payload: "
+                f"{exc}; context={getattr(exc, 'context', {})}"
+            ) from exc
 
         assert os.path.exists(out), "stego output file should exist"
         assert os.path.exists(f"{out}.positions.json"), "positions sidecar should exist"
@@ -163,7 +159,6 @@ def t_zk_full_pipeline():
 
     out = get_output("test_p5_zk_api.h264")
     try:
-        candidate_pool = _validated_pool_for_video(video)
         try:
             result = embed(
                 video_path=video,
@@ -171,13 +166,13 @@ def t_zk_full_pipeline():
                 output_path=out,
                 circuits_dir=CIRCUITS_DIR,
                 secret_key=SECRET_KEY,
-                precomputed_positions=candidate_pool or None,
-                trust_precomputed_positions=False,
                 use_analysis_cache=True,
             )
-        except InsufficientCapacityError:
-            SKIP("zk_full_pipeline", "selected assets lack enough patchable capacity")
-            return
+        except InsufficientCapacityError as exc:
+            raise AssertionError(
+                "public API could not embed the test payload: "
+                f"{exc}; context={getattr(exc, 'context', {})}"
+            ) from exc
 
         verify_result = verify(
             stego_video_path=out,

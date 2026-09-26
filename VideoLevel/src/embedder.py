@@ -325,8 +325,8 @@ def embed(
         safe_positions,
     ) = _resolve_video_analysis(
         video_path,
-        use_cache=use_analysis_cache,
-        force_refresh=force_analysis_refresh,
+        use_analysis_cache=use_analysis_cache,
+        force_analysis_refresh=force_analysis_refresh,
         analysis_cache_dir=analysis_cache_dir,
         precomputed_analysis=precomputed_analysis,
     )

@@ -1,0 +1,170 @@
+{
+  "diagnostic": "camera capture backend and mode comparison",
+  "measured_at": "2026-09-24",
+  "device": "USB2.0 HD UVC WebCam",
+  "host": {
+    "operating_system": "Windows 11 Pro",
+    "camera_hardware_id": "USB\\VID_13D3&PID_56A2&MI_00",
+    "ffmpeg_version": "8.0.1-essentials_build-www.gyan.dev",
+    "opencv_version": "4.12.0"
+  },
+  "method": {
+    "directshow_requested_duration_seconds": 10,
+    "camera_modes_were_requested_per_session_only": true,
+    "persistent_camera_controls_were_not_changed": true,
+    "frame_rate_basis": "counted emitted/returned frames divided by wall elapsed time",
+    "dropped_frame_counter_available": false,
+    "strict_h264_decode_tested": false,
+    "native_stego_or_http_pipeline_tested": false,
+    "directshow_command_template": "ffmpeg -hide_banner -loglevel info -f dshow -rtbufsize <8M-or-16M> -video_size <resolution> -framerate 30 -vcodec mjpeg -i \"video=USB2.0 HD UVC WebCam\" -t 10 -an -fps_mode passthrough -c:v copy -f null -",
+    "opencv_capture_method": "Open cv2.VideoCapture(0, cv2.CAP_MSMF), count successful read() results against time.perf_counter() for each stated duration, then release. For the 352x288 soak only, request FRAME_WIDTH=352 and FRAME_HEIGHT=288 for that capture session."
+  },
+  "directshow_ffmpeg_passthrough": [
+    {
+      "resolution": "320x240",
+      "dshow_rtbufsize": "8M",
+      "requested_duration_seconds": 10,
+      "codec": "MJPEG",
+      "requested_fps": 30,
+      "emitted_frames": 75,
+      "wall_elapsed_seconds": 10.15,
+      "wall_frame_rate_fps": 7.3892,
+      "ffmpeg_reported_media_duration_seconds": 10.04
+    },
+    {
+      "resolution": "640x480",
+      "dshow_rtbufsize": "8M",
+      "requested_duration_seconds": 10,
+      "codec": "MJPEG",
+      "requested_fps": 30,
+      "emitted_frames": 75,
+      "wall_elapsed_seconds": 10.15,
+      "wall_frame_rate_fps": 7.3892,
+      "ffmpeg_reported_media_duration_seconds": 10.04
+    },
+    {
+      "resolution": "1280x720",
+      "dshow_rtbufsize": "16M",
+      "requested_duration_seconds": 10,
+      "codec": "MJPEG",
+      "requested_fps": 30,
+      "emitted_frames": 75,
+      "wall_elapsed_seconds": 10.14,
+      "wall_frame_rate_fps": 7.3964,
+      "ffmpeg_reported_media_duration_seconds": 10.04
+    }
+  ],
+  "opencv_media_foundation_capture_only": [
+    {
+      "requested_resolution": "device default",
+      "reported_resolution": "640x480",
+      "reported_fps": 30.0,
+      "duration_seconds": 10.048,
+      "returned_frames": 286,
+      "wall_frame_rate_fps": 28.4634
+    },
+    {
+      "requested_resolution": "device default",
+      "reported_resolution": "640x480",
+      "reported_fps": 30.0,
+      "duration_seconds": 60.101,
+      "returned_frames": 1654,
+      "wall_frame_rate_fps": 27.5203
+    },
+    {
+      "requested_resolution": "352x288",
+      "resolution_request_accepted": true,
+      "reported_resolution": "352x288",
+      "reported_fps": 30.0,
+      "duration_seconds": 60.102,
+      "returned_frames": 1657,
+      "wall_frame_rate_fps": 27.5698
+    },
+    {
+      "requested_resolution": "352x288",
+      "reported_resolution": "352x288",
+      "reported_fps": 30.0,
+      "requested_mjpg_fourcc_accepted": false,
+      "requested_one_frame_buffer_accepted": false,
+      "duration_seconds": 10.051,
+      "returned_frames": 286,
+      "wall_frame_rate_fps": 28.4549
+    }
+  ],
+  "opencv_media_foundation_timing_followup": {
+    "frame_return_timestamps_are_host_perf_counter": true,
+    "opencv_pos_msec_interpretation_independently_validated": false,
+    "ten_second_probe": {
+      "resolution": "352x288",
+      "elapsed_seconds": 10.044,
+      "returned_frames": 286,
+      "wall_frame_rate_fps": 28.4737,
+      "read_completion_interarrival_p50_ms": 2.368,
+      "read_completion_interarrival_p95_ms": 136.991,
+      "positive_opencv_pos_msec_samples": 286,
+      "unchanged_pos_msec_pairs": 0,
+      "regressing_pos_msec_pairs": 0,
+      "positive_pos_msec_delta_p50_ms": 33.333,
+      "positive_pos_msec_delta_p95_ms": 33.333
+    },
+    "sixty_second_probe": {
+      "resolution": "352x288",
+      "elapsed_seconds": 60.103,
+      "returned_frames": 1657,
+      "wall_frame_rate_fps": 27.5695,
+      "read_completion_interarrival_p50_ms": 2.526,
+      "read_completion_interarrival_p95_ms": 137.901,
+      "read_completion_interarrival_max_ms": 162.305,
+      "intervals_over_33_333ms": 447,
+      "intervals_over_50ms": 447
+    },
+    "interpretation": "The OpenCV read() completion times were bursty even though returned CAP_PROP_POS_MSEC values advanced by 33.333 ms in the 10-second probe. The property is not independently validated as sensor time, and the discrepancy does not identify whether buffering, delivery scheduling, or sample timestamp semantics cause the gap. It is evidence that average FPS alone hides high capture API delivery jitter, not sensor-to-output latency."
+  },
+  "opencv_active_window_followup": {
+    "resolution": "352x288",
+    "reported_fps": 30.0,
+    "returned_frames": 1663,
+    "capture_loop_seconds": 60.109,
+    "startup_to_first_frame_seconds": 0.435,
+    "first_frame_to_loop_end_active_seconds": 59.674,
+    "last_frame_before_loop_end_ms": 0.004,
+    "active_frame_rate_fps": 27.868,
+    "read_completion_interarrival_p50_ms": 2.336,
+    "read_completion_interarrival_p95_ms": 138.782,
+    "read_completion_interarrival_max_ms": 174.415,
+    "active_duration_basis": "wall-clock loop end minus wall-clock first successful frame; capture loop exceeded its deadline while read() returned the last frame",
+    "strict_h264_decode_tested": false,
+    "native_stego_or_http_pipeline_tested": false
+  },
+  "opencv_msmf_grab_only_probe": {
+    "resolution": "352x288",
+    "reported_fps": 30.0,
+    "operation": "CAPTURE.grab() only; no retrieve() or image conversion",
+    "duration_seconds": 30.057,
+    "successful_grabs": 887,
+    "wall_frame_rate_fps": 29.5102,
+    "return_interarrival_p50_ms": 0.351,
+    "return_interarrival_p95_ms": 141.574,
+    "return_interarrival_max_ms": 160.464,
+    "strict_h264_decode_tested": false,
+    "native_stego_or_http_pipeline_tested": false
+  },
+  "opencv_msmf_grab_only_60s_followup": {
+    "resolution": "352x288",
+    "operation": "CAPTURE.grab() only; no retrieve() or image conversion",
+    "reported_fps": 30.0,
+    "successful_grabs": 1786,
+    "capture_loop_seconds": 60.1,
+    "startup_to_first_grab_seconds": 0.432,
+    "first_grab_to_loop_end_active_seconds": 59.668,
+    "active_grabs_per_second": 29.9327,
+    "first_to_last_grab_rate_fps": 29.9159,
+    "return_interarrival_p50_ms": 0.361,
+    "return_interarrival_p95_ms": 141.377,
+    "return_interarrival_max_ms": 172.196,
+    "intervals_over_50ms": 447,
+    "strict_h264_decode_tested": false,
+    "native_stego_or_http_pipeline_tested": false
+  },
+  "conclusion": "DirectShow/FFmpeg mode changes from 320x240 to 1280x720 did not change its approximately 7.4 FPS wall rate. OpenCV Media Foundation capture is substantially faster, but the latest 352x288 pixel-read first-frame-to-loop-end measurement is 27.868 active FPS with 138.782 ms read-completion p95, below the 30 FPS gate and with bursty delivery. A 60-second grab-only measurement reached 29.9327 grabs per active second, still below 30 FPS and with 141.377 ms p95; it does not retrieve image pixels or test encoding/stego. These sequential host diagnostics do not establish camera sensor timing, zero drops, strict H.264 validity, HTTP latency, or edge-device acceptance."
+}

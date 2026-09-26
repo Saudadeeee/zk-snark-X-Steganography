@@ -1162,6 +1162,103 @@ std::vector<AnnexBNalUnit> split_annex_b(const std::vector<std::uint8_t>& annex_
     return units;
 }
 
+AnnexBNalStreamReader::AnnexBNalStreamReader(
+    std::istream& input,
+    const std::size_t maximum_nal_bytes)
+    : input_(input), maximum_nal_bytes_(maximum_nal_bytes) {
+    if (maximum_nal_bytes_ < 5U) {
+        throw std::invalid_argument("maximum Annex-B NAL size must be at least five bytes");
+    }
+    if (maximum_nal_bytes_ > std::numeric_limits<std::size_t>::max() - 65536U) {
+        throw std::invalid_argument("maximum Annex-B NAL size is out of range");
+    }
+    buffer_.reserve(std::min<std::size_t>(maximum_nal_bytes_, 1024U * 1024U));
+}
+
+void AnnexBNalStreamReader::read_more() {
+    if (eof_) return;
+    auto* source = input_.rdbuf();
+    if (source == nullptr) throw std::invalid_argument("Annex-B input stream is unavailable");
+    constexpr std::size_t chunk_size = 64U * 1024U;
+    std::array<char, chunk_size> chunk{};
+    const auto available = source->in_avail();
+    if (available > 0) {
+        const auto requested = std::min<std::streamsize>(available, static_cast<std::streamsize>(chunk.size()));
+        const auto received = source->sgetn(chunk.data(), requested);
+        if (received <= 0) throw std::invalid_argument("failed while reading Annex-B input stream");
+        buffer_.insert(buffer_.end(), chunk.begin(), chunk.begin() + received);
+        return;
+    }
+    const auto next = source->sbumpc();
+    if (std::char_traits<char>::eq_int_type(next, std::char_traits<char>::eof())) {
+        eof_ = true;
+        return;
+    }
+    buffer_.push_back(static_cast<std::uint8_t>(std::char_traits<char>::to_char_type(next)));
+}
+
+bool AnnexBNalStreamReader::read_next(std::vector<std::uint8_t>& nal_bytes) {
+    nal_bytes.clear();
+    const auto marker_at = [](const std::vector<std::uint8_t>& bytes, const std::size_t offset) {
+        if (offset + 4U <= bytes.size() && bytes[offset] == 0U && bytes[offset + 1U] == 0U &&
+            bytes[offset + 2U] == 0U && bytes[offset + 3U] == 1U) return std::size_t{4U};
+        if (offset + 3U <= bytes.size() && bytes[offset] == 0U && bytes[offset + 1U] == 0U &&
+            bytes[offset + 2U] == 1U) return std::size_t{3U};
+        return std::size_t{0U};
+    };
+
+    while (true) {
+        if (!started_) {
+            std::size_t start = 0U;
+            while (start < buffer_.size() && marker_at(buffer_, start) == 0U) ++start;
+            if (start < buffer_.size()) {
+                if (std::any_of(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(start),
+                        [](const std::uint8_t byte) { return byte != 0U; })) {
+                    throw std::invalid_argument("nonzero bytes precede the first Annex-B start code");
+                }
+                if (start > 0U) buffer_.erase(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(start));
+                started_ = true;
+            } else {
+                if (eof_) {
+                    if (buffer_.empty()) return false;
+                    throw std::invalid_argument("Annex-B input ended before a start code");
+                }
+                if (buffer_.size() > 3U) {
+                    const auto discard_end = buffer_.end() - 3;
+                    if (std::any_of(buffer_.begin(), discard_end,
+                            [](const std::uint8_t byte) { return byte != 0U; })) {
+                        throw std::invalid_argument("nonzero bytes precede the first Annex-B start code");
+                    }
+                    buffer_.erase(buffer_.begin(), discard_end);
+                }
+                read_more();
+                continue;
+            }
+        }
+
+        const auto first_marker_size = marker_at(buffer_, 0U);
+        if (first_marker_size == 0U) throw std::invalid_argument("Annex-B start code was corrupted");
+        for (std::size_t offset = first_marker_size; offset < buffer_.size(); ++offset) {
+            if (marker_at(buffer_, offset) == 0U) continue;
+            if (offset > maximum_nal_bytes_) throw std::invalid_argument("Annex-B NAL exceeds configured size limit");
+            nal_bytes.assign(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(offset));
+            buffer_.erase(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(offset));
+            return true;
+        }
+        if (eof_) {
+            if (buffer_.size() > maximum_nal_bytes_) throw std::invalid_argument("Annex-B NAL exceeds configured size limit");
+            if (buffer_.empty()) return false;
+            nal_bytes.swap(buffer_);
+            started_ = false;
+            return true;
+        }
+        if (buffer_.size() > maximum_nal_bytes_ + 3U) {
+            throw std::invalid_argument("Annex-B NAL exceeds configured size limit");
+        }
+        read_more();
+    }
+}
+
 std::vector<H264BaselineIdrNalHeader> inspect_baseline_idr_headers(
     const std::vector<std::uint8_t>& annex_b) {
     std::unordered_map<std::uint32_t, H264BaselineSps> sps_by_id;

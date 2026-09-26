@@ -234,6 +234,17 @@ class ZKSnarkBridge:
         logger.info("[ZK] Verifying Groth16 proof...")
         return self._snarkjs_verify(proof_dict, public_dict)
 
+    def verify_proof_for_payload(
+        self, proof_dict: dict, payload_bytes: bytes, secret_key: bytes,
+    ) -> bool:
+        """Verify a proof against the public signals derived from payload and key."""
+        if not isinstance(payload_bytes, bytes) or not payload_bytes:
+            raise ValueError("payload_bytes must be non-empty bytes")
+        if not isinstance(secret_key, bytes) or len(secret_key) != 32:
+            raise ValueError("secret_key must be exactly 32 bytes")
+        public_signals = self._build_public_signals(payload_bytes, secret_key)
+        return self.verify(proof_dict, public_signals)
+
     def proof_to_bytes(self, proof_dict: dict) -> bytes:
         """Serialize proof dict → 129-byte compressed form."""
         return proof_to_bytes(proof_dict)

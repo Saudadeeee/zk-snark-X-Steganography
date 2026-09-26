@@ -1,44 +1,33 @@
-# Delivery benchmark protocol
+# Current delivery benchmark index
 
-This protocol reports the full delivery surface without mixing measured facts
-with estimates. The benchmark data already committed in `results/` is the
-quality, security, proof and timing baseline; `resource_benchmark.py` records
-whole-process resource use for the same reproducible section set.
+This file points to the current measured suite. Legacy `SEC1`–`SEC7` JSON
+datasets from the earlier proof-bearing pipeline were removed; their Python
+drivers remain as historical source and do not define current baseline numbers.
+Some historical PNG charts remain because this environment blocked their
+deletion. They are not current results; the old SEC5 charts in particular
+include simulated/non-equivalent comparisons.
 
-## Metrics and evidence
+## Current artifacts
 
-| Dimension | Metric | Source / command |
+| Scope | Human-readable report | Machine-readable evidence |
 |---|---|---|
-| Stego quality | full-video PSNR, minimum modified-frame PSNR, average SSIM, decoded proof/message match | `SEC1`, `sec1_quality_data.json` |
-| Capacity | raw, patchable, validated and operating bits (kept separate) | `SEC2`, `sec2_capacity_data.json` |
-| Detectability | chi-square, SPA and RS at the locked operating point | `SEC4`, `sec4_security_data.json` |
-| ZKP | real Groth16 proof size and prove/verify latency | `SEC5`, `sec5_zkp_data.json` |
-| Latency | one-time preprocessing, operational stages and end-to-end time | `SEC6`, `sec6_performance_data.json` |
-| Resources | wall-clock, aggregate process-tree CPU seconds and peak RSS | `resource_benchmark.py` |
+| Performance and full-duration H.264 conversion | `results/performance_new.pdf` | `results/conversion_manifest_new.json`, `results/media_new/<run-id>/video_pipeline_new.json` |
+| Per-frame visual quality | `results/video_quality_new.pdf` | `results/media_new/<run-id>/quality_per_frame_new.csv` |
+| Cryptographic primitive comparison | `results/security_new.pdf` | `results/security_new.json` |
+| Groth16 / PLONK proof comparison | `results/zkp_new.pdf` | `results/zkp_new.json` |
 
-Run from the repository root after installing `requirements.lock` and the
-documented Node/circom/ffmpeg toolchain:
+Use the commands and methodology in `NEW_BENCHMARKS.md` to regenerate the
+current `_new` suite. The media embed/extract matrix is a 30-frame sample per
+clip/resolution; only the source-to-H.264 conversion is full-duration. Upscaled
+cases are derived from CIF clips, not native high-resolution footage.
 
-```powershell
-py -3.12 -m benchmark.resource_benchmark --sections 1 2 3 4 5 6 --timeout 180
-```
+## Interpretation limits
 
-For a faster smoke benchmark (not publication evidence):
-
-```powershell
-py -3.12 -m benchmark.resource_benchmark --sections 1 2 3 4 5 6 --timeout 180 --fast
-```
-
-The command writes the machine-specific resource result to the ignored
-`benchmark/results/resource_benchmark.json`; retain that file with the source
-commit, input-video hashes and tool versions when comparing machines. A zero
-exit code from the underlying safe runner means each requested section passed
-its schema and artifact validation.
-
-## Current checked baseline
-
-The checked `akiyo_q22_g1` artifacts record 53.01 dB full-video PSNR, 40.30 dB
-minimum modified-frame PSNR, 0.999686 average SSIM, a verified 1232-bit
-payload, 147-byte Groth16 proof-bearing payload, 1556.58 ms prove time, 8.5 ms
-standalone verify time, and 85.03 s end-to-end SEC6 time. These are not claims
-about another input video, host, codec configuration or load condition.
+- Native CAVLC frame authentication uses a 16-byte truncation of HMAC-SHA-256.
+  The Python HMAC comparison measures the full 32-byte primitive as a reference,
+  not the native frame-tag timing or wire overhead.
+- The ZKP benchmark proves the existing payload commitment statement, not camera
+  origin or the entire video stream. Only Groth16 and PLONK have actual results.
+- The old SEC5 artifact included simulated comparison values, and the old SEC6
+  timing artifact came from a cache hit with zero-valued stages. Neither should
+  be quoted as a current measurement.

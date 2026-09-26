@@ -10,7 +10,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional
 
 # Current manifest schema version
 MANIFEST_VERSION = "1.0.0"

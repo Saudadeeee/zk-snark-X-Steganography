@@ -7,12 +7,12 @@ Usage:
 Exit code: 0 if all phases pass, 1 if any phase fails, 2 if any phase is incomplete.
 """
 
+import argparse
 import io
 import os
 import re
 import subprocess
 import sys
-import argparse
 
 # ── Locate project root and test files ───────────────────────────────── #
 
@@ -27,7 +27,12 @@ PHASES = [
     ("Phase 7", "HTTP + Key Expiry",   "test_phase7_service_delivery.py"),
     ("Phase 8", "Blind Extraction",    "test_phase8_blind_extraction.py"),
     ("Phase 9", "Realtime CAVLC",      "test_phase9_realtime_cavlc.py"),
+    ("Phase 10", "Native CLI Fixture E2E", "test_native_cli_fixture.py"),
+    ("Phase 11", "Benchmark Reproducibility", "test_phase11_benchmark_reproducibility.py"),
+    ("Phase 12", "Native HTTP/Stream E2E", "test_native_http_channel.py"),
 ]
+
+QUICK_PHASE_LABELS = {"Phase 1", "Phase 6", "Phase 7", "Phase 9", "Phase 11", "Phase 12"}
 
 SEP  = '-' * 58
 SEP2 = '=' * 58
@@ -51,6 +56,7 @@ def run_phase(label: str, description: str, filename: str):
         text=True,
         encoding='utf-8',
         errors='replace',
+        check=False,
     )
     stdout = result.stdout
     stderr = result.stderr
@@ -67,12 +73,24 @@ def run_phase(label: str, description: str, filename: str):
     return passed, failed, skipped, result.returncode
 
 
-def _status_from_exit_code(code: int) -> str:
-    if code == 0:
-        return 'OK'
-    if code == 2:
+def status_for_phase_result(passed: int, failed: int, skipped: int, exit_code: int) -> str:
+    """Reject failed or empty test output even if a phase exits with code zero."""
+    if failed > 0 or exit_code not in {0, 2}:
+        return 'FAIL'
+    if exit_code == 2 or skipped > 0:
         return 'INCOMPLETE'
-    return 'FAIL'
+    if passed <= 0:
+        return 'FAIL'
+    return 'OK'
+
+
+def exit_code_for_phase_statuses(statuses: list[str]) -> int:
+    """Return nonzero unless every selected phase completed successfully."""
+    if not statuses or any(status not in {'OK', 'INCOMPLETE'} for status in statuses):
+        return 1
+    if any(status == 'INCOMPLETE' for status in statuses):
+        return 2
+    return 0
 
 
 # ── Main ─────────────────────────────────────────────────────────────── #
@@ -97,7 +115,7 @@ def main():
     print("  ZK-SNARK Video Steganography — Full Test Suite")
     print(SEP2)
 
-    selected_phases = (PHASES[0], PHASES[-4], PHASES[-3], PHASES[-1]) if args.quick else PHASES
+    selected_phases = [phase for phase in PHASES if phase[0] in QUICK_PHASE_LABELS] if args.quick else PHASES
     summary = []
     for label, desc, filename in selected_phases:
         print(f"\n>>> Running {label} — {desc}")
@@ -105,7 +123,7 @@ def main():
         passed, failed, skipped, code = run_phase(label, desc, filename)
         print(SEP)
         total_run = passed + failed + skipped
-        status    = _status_from_exit_code(code)
+        status    = status_for_phase_result(passed, failed, skipped, code)
         summary.append((label, desc, passed, failed, skipped, status))
         print(
             f"  {label} result: {passed}/{total_run} passed, "
@@ -150,11 +168,7 @@ def main():
         print("  [FAIL] One or more phases failed — see output above.")
 
     print(SEP2)
-    if total_f:
-        sys.exit(1)
-    if any_incomplete:
-        sys.exit(2)
-    sys.exit(0)
+    sys.exit(exit_code_for_phase_statuses([status for _, _, _, _, _, status in summary]))
 
 
 if __name__ == '__main__':

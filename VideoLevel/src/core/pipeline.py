@@ -21,7 +21,6 @@ from ..bitstream.h264          import H264BitstreamParser, TraceableCAVLCParser,
 from ..bitstream.bitstream_ops import BitstreamReconstructor, BitstreamPatcher, BitArray
 from ..bitstream.bitstream_io  import BitstreamReader
 from ..bitstream.cavlc         import CAVLCDecoder
-from .stego                    import sort_blocks_interleaved, _CIF_MB_COUNT
 
 
 def validate_h264_decode(video_path: Path) -> None:

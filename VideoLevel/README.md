@@ -2,17 +2,43 @@
 
 Hide a Groth16 zero-knowledge proof inside H.264 baseline video by modifying CAVLC coefficients in IDR frames.
 
-**Status:** Research prototype with a frozen benchmark-grade core: locked operating-point embedding plus sidecar-assisted near-blind verification
+**Status:** Research prototype. The current native C++ path embeds a proof-bearing
+message inside an H.264 Baseline/CAVLC residual-sign channel and supports blind
+key-based extraction without SEI or a sidecar. The supported encoder/profile is
+constrained; this is not generic H.264 support.
+
 **Validated Runtime:** `py -3.12`
-**Tests:** committed phase tests cover proof, reconstruction, extraction/verification,
-and security hardening. Video-dependent phases require the documented local assets.
-**Benchmark Sections:** SEC1-SEC10 (Quality, Capacity, Methods, Security, Performance, Tradeoff, Real-time, Motion/GOP, Statistical, Audit)
+
+**Verification:** On 2026-09-24, the full Python phase suite passed 108/108 and
+the native fixture, strict FFmpeg decode, blind extraction, and HTTP/WebSocket
+tests passed on development hosts. This is functional evidence, not edge
+acceptance.
+
+**Realtime status:** Not accepted. The corrected physical-camera H.264 E2E run
+measured 7.608 source FPS against the 30-FPS gate. A separate OpenCV Media
+Foundation capture-only probe measured 27.868 active FPS with 138.782 ms
+read-completion p95 and did not exercise the native stego/HTTP pipeline. No
+edge target has been selected or benchmarked.
+
+**Proof boundary:** Groth16 verifies the recovered message/key relation; it does
+not prove video integrity, camera origin, or that the proof is bound to a video
+commitment.
+
+**Benchmark status:** the legacy SEC1-SEC10 scripts are historical drivers; use the measured `_new` reports and their stated sample limits for the current native CAVLC/HMAC path.
 
 ---
 
 ## Overview
 
-The system embeds a message-authentication proof into H.264 bitstreams without leaving the compressed-domain workflow. It:
+The current native edge prototype packs the message and compressed Groth16
+proof into the payload frame authenticated by the native HMAC channel, then
+embeds that frame by changing selected CAVLC residual coefficient signs. The
+blind extractor uses the key to recover the frame. Its E2E tests verify the
+proof after extraction; native HMAC validation alone is not ZKP verification.
+
+The following legacy public-API workflow additionally describes its optional
+chaos transforms and sidecar analysis; do not treat those options as part of
+the native camera/HTTP path:
 
 1. Generates a Groth16 proof for the payload.
 2. Packs `[4B message_length][message][129B compressed proof]`.
@@ -24,14 +50,13 @@ The system embeds a message-authentication proof into H.264 bitstreams without l
 6. Reconstructs a valid H.264 bitstream.
 7. Extracts and verifies the proof from the stego video.
 
-### New Features (IEEE-ready)
+### Legacy research and analysis features (not part of edge acceptance)
 
 - **Versioned Manifest Schema** (v1.0.0): Structured sidecar files with signing hooks
 - **Near-Blind Verification**: Reduced cover dependency via sidecar-driven extraction
 - **Statistical Benchmarking**: Multi-run error bars for IEEE TIP/TIFS validity (3+ runs)
 - **Audit Logging**: SEC1 quality guard tracking with reason logs
 - **Modern Detectors**: WS and SPAM steganalysis features
-- **Optimized Extraction**: Parallel IDR parsing with vectorization
 - **GOP Sweep Analysis**: Quality/capacity tradeoff across GOP=1,4,8,16
 
 ### Payload format
@@ -63,82 +88,24 @@ Private input:
 
 ## Current Benchmark Snapshot
 
-Current paper-grade artifacts were refreshed on `2026-06-08` for the locked
-`akiyo_q22_g1` operating point and validated with:
+The current `_new` suite is documented in [`benchmark/NEW_BENCHMARKS.md`](benchmark/NEW_BENCHMARKS.md). It ran on 2026-09-24 against all nine `data/raw/*.y4m` clips:
 
-```bash
-py -3.12 src/runtest/run_all.py
-py -3.12 -m benchmark.safe_benchmark_runner --sections 1 2 3 4 5 6
-```
+- 9/9 full-duration native-resolution H.264 conversions succeeded; frame counts and source cadence are recorded in `benchmark/results/conversion_manifest_new.json`.
+- 27/27 media pipeline samples passed (9 clips × 3 resolutions; first 30 frames per case). Full per-frame Y-PSNR and SSIM are in the run CSV; this is not a full-duration embed benchmark.
+- Security comparisons execute real library primitives. The native proposal is HMAC-SHA-256 truncated to a 16-byte per-frame tag; the Python HMAC row is a full 32-byte primitive reference, not the native tag's exact timing.
+- Groth16 and PLONK proof measurements are actual runs on the same circuit statement. PLONK setup/proving resource costs are substantial; unimplemented proof systems are not assigned estimated timings.
 
-### SEC1: Quality At The Locked 1232-bit Operating Point
+Start with `benchmark/results/performance_new.pdf`, `video_quality_new.pdf`,
+`security_new.pdf`, and `zkp_new.pdf`. Machine-readable evidence is in the
+adjacent `_new.json` files and `benchmark/results/media_new/<run-id>/`.
 
-| Sequence | Full-video PSNR | Min Modified-Frame PSNR | Avg SSIM | Embedded bits | Verify |
-|---|---:|---:|---:|---:|---:|
-| Akiyo QP22 G1 | 53.01 dB | 40.30 dB | 0.9997 | 1232/1232 | true |
-
-The current frozen paper-grade baseline is a single verified operating
-contract, not a claim that every listed asset has the same fully verified
-contract.
-
-### SEC2: Capacity
-
-SEC2 uses layered capacity accounting from the live `akiyo_q22_g1` artifact:
-
-| Term | Bits |
-|---|---:|
-| `raw_safe_bits` | 413415 |
-| `patchable_usable_bits` | 2000 |
-| `validated_pool_bits` | 1449 |
-| `operating_bits` | 1232 |
-| `zk_blob_bits` | 1232 |
-
-PSNR sweep at the locked operating point:
-
-| Fraction | Bits | PSNR |
-|---:|---:|---:|
-| 25% | 304 | 56.99 dB |
-| 50% | 616 | 54.89 dB |
-| 75% | 920 | 53.58 dB |
-| 100% | 1232 | 52.31 dB |
-
-Do not collapse raw, patchable, validated, operating, and applied capacity into
-one headline number.
-
-### SEC4: Steganalysis
-
-Current committed SEC4 artifact (`benchmark/results/sec4_security_data.json`) records:
-- chi-square p-value at operating point: `0.9622`
-- SPA at operating point: `0.03762`
-- RS delta: `0.0` (inapplicable to H.264 CAVLC)
-
-### SEC5: ZKP Overhead
-
-Current committed SEC5 artifact (`benchmark/results/sec5_zkp_data.json`) records:
-- **Groth16 packed proof-bearing payload**: `147 B`
-- **Groth16 prove time**: `1556.58 ms`
-- **Groth16 verify time**: `8.5 ms`
-- Alternative systems remain much larger or slower in the committed comparison artifact
-
-### SEC6: Performance
-
-Current committed SEC6 artifact (`benchmark/results/sec6_performance_data.json`) records for `akiyo_q22_g1`:
-- **Pre-processing** (one-time, cacheable): `59.0s`
-- **Operational cost** (public embed + verify path): `26.1s`
-- **Total end-to-end time**: `85.0s`
-- **Standalone ZK prove line item**: `0.0s` because proof generation is included inside the combined public embed stage
-- **ZK verify time**: `3.83s`
-
-### SEC10: GOP Sweep
-
-| GOP Size | Min Frame PSNR | Effective Capacity | Cascade Score |
-|---|---:|---:|---:|
-| 1 (all-intra) | 40.67 dB | 286k bits | 0.0 |
-| 4 | 38.2 dB | 201k bits | 0.15 |
-| 8 | 35.6 dB | 144k bits | 0.30 |
-| 16 | 32.1 dB | 97k bits | 0.55 |
-
----
+Old SEC1–SEC7 JSON datasets, stale run metadata, and the pixel-domain edge
+diagnostic have been removed because they belonged to an earlier pipeline;
+legacy source scripts remain for reference. Some old PNG charts remain in
+`benchmark/results/` because the environment blocked deletion of binary files.
+Treat all `sec1_*.png`–`sec7_*.png` files there as historical only; in
+particular SEC5 charts include non-comparable/simulated values and must not be
+quoted as measurements.
 
 ## Project Structure
 
@@ -168,7 +135,6 @@ VideoLevel/
 |   |-- bitstream/                H.264 / CAVLC parsing and patching
 |   |-- core/
 |   |   |-- pipeline.py           IDR extraction
-|   |   |-- pipeline_optimized.py Parallel/vec optimization
 |   |   |-- stego.py              Safety filter + embed logic
 |   |   |-- chaos.py              Arnold Cat + Logistic Map
 |   |   `-- analysis_cache.py     Video analysis caching
@@ -208,6 +174,36 @@ On Windows, the hardware-gated camera E2E can be reproduced by setting
 directory and deletes the capture after testing; the camera may show its active
 indicator during the run.
 
+### Build and test the native core on Linux
+
+The non-Windows CMake path uses OpenSSL Crypto for authenticated frames. The
+native library, CLI tools, and CTest suite were verified on Ubuntu 24.04
+x86-64 with GCC 13.3 and OpenSSL 3.0.13:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential cmake libssl-dev ffmpeg
+cmake -S native -B native/edge-build -DCMAKE_BUILD_TYPE=Release
+cmake --build native/edge-build -j2
+ctest --test-dir native/edge-build --output-on-failure
+python3 -u src/runtest/test_native_cli_fixture.py
+```
+
+This proves the Linux/OpenSSL build and native fixture tests on x86-64 only;
+it is not an ARM build or an edge-device performance result. Confirm the
+target OS, architecture, OpenSSL version, camera interface, and encoder profile
+before treating this as a deployment recipe. The final fixture E2E checks the
+authenticated payload CLI, strict FFmpeg decode, and correct/wrong keys; the
+real Groth16 proof is covered by the physical-camera recorder path on the
+development host, not by this small Linux fixture check.
+
+On 2026-09-24 the Linux C++ core also passed CTest (1/1, 44.30 s) in an Ubuntu
+24.04 x86-64 container (GCC 13.3, OpenSSL 3.0.13, FFmpeg 6.1.1). The Linux-built
+CLI embedded a 16-byte payload into the 300-frame fixture; strict FFmpeg decode,
+blind extraction with exact payload match, and wrong-key rejection all passed.
+The output was 3,551,610 bytes. This is functional Linux x86-64 evidence, not a
+camera, ARM, or edge-performance measurement.
+
 For the native CAVLC data plane, build `zkstego_blind_bits` and start the
 separate native-backed app instead of treating the legacy Python service as
 the edge path:
@@ -216,7 +212,7 @@ the edge path:
 cmake --build native/build --config Release --target zkstego_blind_bits
 $env:ZK_STEGO_API_TOKEN = "replace-with-a-long-random-token"
 $env:ZK_STEGO_NATIVE_CLI = (Resolve-Path native/build/Release/zkstego_blind_bits.exe).Path
-py -3.12 -m uvicorn src.api.native_handlers:create_native_app --factory --host 127.0.0.1 --port 8080
+py -3.12 -m uvicorn src.api.native_handlers:create_native_app --factory --host 127.0.0.1 --port 8080 --workers 1 --ws websockets --ws-max-size 1048576 --ws-max-queue 1
 ```
 
 This app exposes native authenticated `POST /api/v1/jobs/embed` and blind
@@ -228,12 +224,103 @@ An OS-backed exclusive lease prevents another service process from sharing the
 same work directory.
 On restart it marks persisted queued/running jobs failed and removes their
 uploaded source and partial output files.
-The API also rejects multipart bodies above its aggregate limit and applies a
+The pinned `websockets` package provides Uvicorn's production WebSocket
+protocol backend. The command caps incoming WebSocket messages at 1 MiB and
+the server-side receive queue at one message; the application also processes
+one chunk at a time and awaits native-stdin drain before reading another.
+The native stdin transport uses a 64 KiB high-water mark, and output forwarding
+reads at most 64 KiB before awaiting the WebSocket send. The API also rejects
+multipart bodies above its aggregate limit and applies a
 120-second request-body deadline. The 32-byte key is sent to the child process through stdin,
 not argv or a temporary key file. `/api/v1/jobs/verify` deliberately returns
 501 here: native payload HMAC validation is not a substitute for ZKP proof
-verification. This is a real fixture-tested HTTP path, not yet a camera ingest
-stream or a claim of realtime edge performance.
+verification. A real DirectShow camera ingest path is exercised separately by
+the hardware-gated E2E below; a passing host run is not a claim of performance
+on an independent edge target.
+
+To run the physical-camera proof E2E and append measurements to the latest
+`benchmark/results/realtime_camera_runs_*.json` artifact, set
+`ZK_STEGO_CAMERA_NAME` to an FFmpeg DirectShow device name and run:
+
+```powershell
+$env:ZK_STEGO_CAMERA_NAME = "USB2.0 HD UVC WebCam"
+uv run --with-requirements requirements.txt python -m benchmark.realtime_camera_recorder --duration 60
+```
+
+The recorder appends only after strict decode, frame-count, proof, key-rejection,
+and stream-completion gates all pass. It rejects incomplete quality or latency
+records, missing CPU/RAM or bounded-flow measurements, inconsistent sample
+counts, FPS that disagrees with decoded frames/active duration, absent input or
+output byte counts, and NaN/infinite numeric values; Phase 11 exercises these
+fail-closed cases. New run records also include the native
+CAVLC candidate capacity accumulated over payload-bearing IDR segments and the
+exact authenticated-frame bits embedded (payload plus protocol framing/tag);
+these are distinct from the Groth16 proof size alone. Use `--results <path>` to
+select another JSON artifact. The default duration is five seconds; the
+supported range is 1–300 seconds.
+Each newly appended record also stores the physical camera name, the DirectShow
+input-buffer bound, the pinned libx264 Baseline/CAVLC capture settings,
+including `-fps_mode passthrough` so FFmpeg cannot synthesize duplicate frames,
+host OS/CPU/RAM and Python version,
+FFmpeg version/path, and the native executable's SHA-256. Existing historical
+records are intentionally left unchanged and do not gain fabricated metadata.
+Native metrics report p50/p95 for payload-bearing patch operations and,
+separately, IDR service time for all IDRs (including pass-through frames).
+Service timing starts after a complete NAL is read and ends after native output
+write/flush; it excludes waiting for input bytes and downstream WebSocket send.
+The hardware-gated camera E2E runs Uvicorn and a WebSocket client over loopback
+TCP. It pairs Annex-B NAL completions by type/order, records 16 KiB maximum
+camera pipe reads, client send-return and receive timestamps, and bounded
+server-side stdin-drain / stdout-to-WebSocket-send percentiles. Its
+`ffmpeg_stdout_nal_completion_to_websocket_loopback_tcp_nal_completion` number
+is host loopback TCP latency—not sensor-exposure-to-display or LAN/TLS latency.
+Older run 21 and the isolated 16 KiB experiment used the in-process TestClient
+and are labeled separately; see the theory document for decomposed TCP evidence.
+After capture, the recorder also scans the full source stream and records raw
+candidate signs, the configured-cap whole-stream capacity, and scan duration;
+this offline analysis is reported separately from ingest FPS and latency.
+
+#### Carrying and verifying a Groth16 proof through the native channel
+
+The native channel carries authenticated bytes; it does not generate or verify
+Groth16 proofs. The client packages the proof with the message before starting
+the camera stream, then verifies it after blind extraction. The existing proof
+format is `[4-byte big-endian message length][message][129-byte Groth16 proof]`:
+
+```python
+import base64
+from src.zk_proof import ZKSnarkBridge, pack, proof_to_bytes, unpack
+
+message = b"camera event"
+secret_key = load_key_from_secure_storage()  # application-specific secure provisioning
+if len(secret_key) != 32:
+    raise ValueError("secret key must be exactly 32 bytes")
+if len(message) + 4 + 129 > 4096:
+    raise ValueError("proof-bearing payload exceeds the native stream limit")
+
+bridge = ZKSnarkBridge("circuits")
+proof, _ = bridge.generate_proof_for_payload(message, secret_key)  # before capture
+payload = pack(message, proof_to_bytes(proof))
+# Send base64(payload) as message_b64 in the authenticated /api/v1/stream embed
+# start control; stream raw camera Annex-B chunks, then send {"type": "end"}.
+
+# After extract returns payload_b64:
+payload_b64 = receive_payload_b64_from_websocket()  # application WebSocket receive loop
+decoded_payload = base64.b64decode(payload_b64, validate=True)
+recovered_message, proof_bytes = unpack(decoded_payload)
+recovered_proof = bridge.bytes_to_proof(proof_bytes)
+if not bridge.verify_proof_for_payload(recovered_proof, recovered_message, secret_key):
+    raise ValueError("Groth16 proof verification failed")
+```
+
+The 4+129-byte framing leaves at most 3,963 message bytes under the native
+4,096-byte stream payload bound. Proof generation is intentionally outside the
+camera ingest path; verification occurs after extraction. Wrong-key rejection
+at the native transport is HMAC authentication, while the final call above is
+the separate Groth16 check. `/api/v1/jobs/verify` remains disabled in the native
+service; this client-side sequence is the verified proof path. The circuit
+proves the documented message/key relation only, not camera origin or a binding
+to the encoded video; see the theory document before making provenance claims.
 
 ### Expiring manifest keys
 
@@ -256,6 +343,12 @@ the checked benchmark evidence.
 
 The CAVLC-only realtime design, native patcher contract, theory and acceptance
 metrics are documented in [doc/realtime_cavlc_theory_and_implementation.md](doc/realtime_cavlc_theory_and_implementation.md).
+The evidence audit and remaining edge acceptance gates are tracked in
+[doc/completion_plan.md](doc/completion_plan.md).
+Before an edge run, copy and fill
+[doc/edge_deployment_manifest.template.yaml](doc/edge_deployment_manifest.template.yaml)
+with the actual board/toolchain/camera identity and measured acceptance data;
+pending/null fields mean the system is not yet qualified for that target.
 The tested scheduler is run with `py -3.12 src/runtest/test_phase9_realtime_cavlc.py`.
 
 ### Requirements
@@ -401,13 +494,22 @@ result = verify_near_blind(
   - not part of the frozen benchmark-grade core path
   - should be treated as future work in the current paper
 
+These verifier modes describe the legacy Python operating-point API. The
+native authenticated CAVLC CLI has a separate blind extractor; see the native
+fixture and physical-camera E2E instructions above.
+
 ### Run tests
+
+The quick suite includes Phase 11 benchmark reproducibility checks (hardware/tool
+identity, append-only persistence, and fail-closed metric validation) and Phase
+12's real loopback Uvicorn/WebSocket E2E (not only FastAPI's in-process client).
 
 ```bash
 py -3.12 src/runtest/run_all.py --quick
 py -3.12 src/runtest/test_phase4_reconstruct.py
 py -3.12 src/runtest/test_phase5_extract_verify.py
 py -3.12 src/runtest/test_phase6_security_hardening.py
+py -3.12 src/runtest/test_native_http_channel.py
 py -3.12 src/runtest/test_future_trust_architecture.py  # experimental interfaces
 py -3.12 src/runtest/run_all.py
 ```
@@ -499,26 +601,25 @@ py -3.12 benchmark/sec10_gop_sweep.py --sequences foreman_q22_g1
 ## Known Limits
 
 - **Optimal Operating Mode:** GOP=1 / all-intra. GOP>1 support exists but degrades due to intra-prediction cascade.
-- **Cold-start Cost:** IDR extraction dominates (~1500s per video). Cacheable after first run.
-- **Capacity Reporting:** raw safe-position counts are not the same as final patchable or quality-validated operating capacity.
-- **Locked Operating-Point Mode:** the strongest end-to-end path currently reuses pre-validated operating positions for selected benchmark assets.
-- **Broad Public API Mode:** generic embedding without locked operating positions still under-fills on representative assets and should not be used for headline claims.
-- **Blind-Core Branch:** candidate synchronization and proxy research exists, but blind extraction is not yet a usable system feature and should be treated as future work.
+- **Legacy Python batch path:** cold-start IDR analysis can dominate (about 1,500 s/video in an older offline benchmark); do not apply that figure to the native streaming CLI.
+- **Legacy offline capacity reporting:** raw safe-position counts are not the same as final patchable or quality-validated operating capacity. Native stream records report their own keyed candidate capacity and embedded bits.
+- **Python locked operating-point mode:** the older benchmark-grade public API reuses pre-validated operating positions for selected assets; this is separate from native blind CAVLC extraction.
+- **Broad Python public API mode:** generic embedding without locked operating positions can under-fill representative assets and should not be used for headline claims; this limitation does not describe the native CLI E2E.
+- **Blind-Core research branch:** the experimental Python proxy/analysis branch is not the released data path. Blind extraction is implemented separately in the native authenticated CAVLC CLI and covered by fixture plus camera E2E; neither result establishes generic-profile support or edge readiness.
 - **High QP Limits:** QP=32 assets have limited capacity under 40 dB guard.
 - **Parser Resync Warnings:** Some streams emit warnings but still decode correctly.
 
 ---
 
-## Paper-Ready Outputs
+## Benchmark Readiness
 
-For IEEE TIP/TIFS submission:
-
-1. **Quality** (SEC1): locked `akiyo_q22_g1` contract embeds `1232/1232` bits with `53.01 dB` full-video PSNR and `40.30 dB` minimum modified-frame PSNR
-2. **Security** (SEC4): chi-square p-value `0.9622`, SPA `0.03762`, RS `0.0` at operating point
-3. **ZKP Overhead** (SEC5): current committed artifact reports 147 B packed Groth16 payload, 1556.58 ms prove, 8.5 ms verify
-4. **Performance** (SEC6): current committed artifact reports 59.0s pre-processing, 26.1s operational, 85.0s total on `akiyo_q22_g1`
-5. **Statistical** (statistical_benchmark.py): 3+ runs with mean/std
-6. **Audit** (sec1_audit.py): Quality guard reason logs
+The `_new` reports are current host measurements, not yet publication-grade or
+proof of real-time operation. The media matrix covers the first 30 frames of
+each clip/resolution; 13/27 cases fall below the historical 40 dB minimum
+modified-frame PSNR floor (worst 32.76 dB). Only Groth16 and PLONK have actual ZKP results; older
+SEC5 charts contained non-comparable or simulated values and have been removed.
+Use [benchmark/NEW_BENCHMARKS.md](benchmark/NEW_BENCHMARKS.md) for scope and
+regeneration commands.
 
 ---
 

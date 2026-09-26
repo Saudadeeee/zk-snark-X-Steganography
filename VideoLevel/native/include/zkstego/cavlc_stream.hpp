@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <array>
+#include <istream>
 #include <optional>
 #include <string>
 #include <stdexcept>
@@ -374,6 +375,24 @@ std::vector<H264BaselineIdrNalHeader> inspect_baseline_idr_headers(
     const std::vector<std::uint8_t>& annex_b);
 std::vector<AnnexBNalUnit> split_annex_b(const std::vector<std::uint8_t>& annex_b);
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units);
+
+// Incremental Annex-B reader. It retains at most one NAL plus one input chunk,
+// recognizes start codes crossing read boundaries, and fails closed on a NAL
+// larger than the configured bound. Returned bytes include the start code.
+class AnnexBNalStreamReader {
+public:
+    explicit AnnexBNalStreamReader(std::istream& input, std::size_t maximum_nal_bytes = 16U * 1024U * 1024U);
+    [[nodiscard]] bool read_next(std::vector<std::uint8_t>& nal_bytes);
+
+private:
+    std::istream& input_;
+    std::size_t maximum_nal_bytes_{};
+    std::vector<std::uint8_t> buffer_;
+    bool started_{};
+    bool eof_{};
+
+    void read_more();
+};
 std::vector<std::uint8_t> apply_fixed_length_patches(
     const std::vector<std::uint8_t>& source,
     const std::vector<FixedLengthBitPatch>& patches);

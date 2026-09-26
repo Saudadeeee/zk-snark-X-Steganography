@@ -6,6 +6,7 @@ import tempfile
 import threading
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -32,6 +33,8 @@ from src.core.pipeline import (
     patch_selected_sign_positions_streaming,
 )
 from src.core.stego import CAVLCSafetyFilter
+from src.embedder import embed
+from src.exceptions import InsufficientCapacityError
 from src.realtime_cavlc import CAVLCRealtimeBudget, RealtimeCAVLCScheduler
 from src.runtest._helpers import run_test, section, summarise
 
@@ -541,6 +544,45 @@ def t_streaming_blind_positions_use_a_stable_key_domain():
     assert selected == expected
 
 
+def t_embed_forwards_analysis_cache_options_to_resolver():
+    analysis = ([], {}, {}, {}, {}, [])
+
+    class ProofBridge:
+        def generate_proof_for_payload(self, _message, _key):
+            return {}, {}
+
+        def proof_to_bytes(self, _proof):
+            return bytes(129)
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        video = root / "cover.h264"
+        video.write_bytes(b"test")
+        circuits = root / "circuits"
+        circuits.mkdir()
+        for cache_enabled in (False, True):
+            with (
+                patch("src.embedder.analyze_stream_profile", return_value=SimpleNamespace(
+                    is_all_intra=True, inferred_gop_class="all_intra",
+                )),
+                patch("src.embedder._get_bridge", return_value=ProofBridge()),
+                patch("src.embedder.load_or_build_video_analysis", return_value=analysis) as loader,
+            ):
+                try:
+                    embed(
+                        video_path=str(video), message=b"x", output_path=str(root / "stego.h264"),
+                        circuits_dir=str(circuits), secret_key=bytes(32), precomputed_positions=[],
+                        use_analysis_cache=cache_enabled,
+                    )
+                except InsufficientCapacityError:
+                    pass
+                else:
+                    raise AssertionError("empty test analysis must fail closed for payload capacity")
+                loader.assert_called_once_with(
+                    str(video), use_cache=cache_enabled, force_refresh=False, cache_dir=None,
+                )
+
+
 def main():
     section("Phase 9 - Realtime CAVLC Controller")
     results = [
@@ -551,6 +593,7 @@ def main():
         run_test("scheduler_reuses_one_proof_when_consumers_race", t_scheduler_reuses_one_proof_when_consumers_race),
         run_test("scheduler_bounds_epoch_cache_and_latency_sample_history", t_scheduler_bounds_epoch_cache_and_latency_sample_history),
         run_test("scheduler_reuses_one_proof_per_epoch_and_reports_budget", t_scheduler_reuses_one_proof_per_epoch_and_reports_budget),
+        run_test("embed_forwards_analysis_cache_options_to_resolver", t_embed_forwards_analysis_cache_options_to_resolver),
         run_test("cavlc_run_before_tables_match_h264_reference_vlcs", t_cavlc_run_before_tables_match_h264_reference_vlcs),
         run_test("cavlc_level_coding_round_trips_both_trailing_one_branches", t_cavlc_level_coding_round_trips_both_trailing_one_branches),
         run_test("cavlc_flc_table_9_5e_literals_and_invalid_tokens_are_fail_closed", t_cavlc_flc_table_9_5e_literals_and_invalid_tokens_are_fail_closed),

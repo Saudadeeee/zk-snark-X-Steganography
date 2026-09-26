@@ -1,0 +1,470 @@
+% Biên dịch từ thư mục gốc:
+% xelatex -interaction=nonstopmode -halt-on-error -output-directory=doc doc/bao_cao_khoa_hoc_he_thong_zkstego_vi.tex
+% xelatex -interaction=nonstopmode -halt-on-error -output-directory=doc doc/bao_cao_khoa_hoc_he_thong_zkstego_vi.tex
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=22mm,headheight=16pt]{geometry}
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\setmonofont{Consolas}
+\usepackage{graphicx,booktabs,tabularx,array}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor,tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,calc}
+\usepackage{hyperref,caption,float,listings,enumitem,fancyhdr}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!55!black,
+  pdftitle={Hệ thống nhúng payload ZK vào H.264/CAVLC},
+  pdfauthor={Báo cáo kỹ thuật dựa trên mã nguồn và kết quả benchmark của dự án}}
+\setlength{\parskip}{0.42em}
+\setlength{\parindent}{1em}
+\setlist{nosep,leftmargin=2em}
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{ZK-Stego: H.264/CAVLC}
+\rhead{Tài liệu kỹ thuật}
+\cfoot{\thepage}
+\renewcommand{\arraystretch}{1.14}
+\captionsetup{font=small,labelfont=bf}
+\lstset{basicstyle=\ttfamily\footnotesize,breaklines=true,frame=single,columns=fullflexible,
+  showstringspaces=false,keywordstyle=\color{blue!55!black},commentstyle=\color{gray!70!black}}
+
+\title{\textbf{Hệ thống nhúng payload mang bằng chứng ZK vào video H.264/CAVLC}}
+\author{Tài liệu kỹ thuật dựa trên mã nguồn và artifact benchmark của dự án}
+\date{25 tháng 9 năm 2026}
+
+\begin{document}
+\maketitle
+
+\section{Kiến trúc hệ thống}
+Hệ thống có ba phần chạy ở các thời điểm khác nhau: ứng dụng tạo proof cho một message; pipeline video chọn và sửa các bit dấu của coefficient CAVLC; phía nhận khôi phục message/proof rồi verifier kiểm tra proof bằng public signals và verification key. Camera không tạo proof cho từng frame: proof được tạo trước, còn video là kênh mang payload.
+
+\begin{figure}[H]\centering
+\resizebox{\textwidth}{!}{\begin{tikzpicture}[
+  node distance=7mm and 8mm,
+  box/.style={draw,rounded corners,align=center,minimum height=12mm,text width=34mm,fill=blue!5},
+  app/.style={box,fill=green!7}, arr/.style={-{Latex[length=2mm]},thick}]
+\node[app] (m) {Message $m$\newline và secret $s$};
+\node[app,right=of m] (proof) {Circom witness\newline Groth16 prover};
+\node[app,right=of proof] (pack) {Đóng gói\newline 4B length + message + proof};
+\node[box,below=17mm of pack] (api) {HTTP job / WebSocket\newline điều khiển + chunks};
+\node[box,left=of api] (native) {C++ native\newline Annex-B + CAVLC};
+\node[box,left=of native] (cover) {Cover H.264\newline Annex-B};
+\node[box,right=of api] (stego) {Bitstream\newline đã nhúng};
+\node[box,right=of stego] (extract) {Blind extraction\newline theo cùng khóa};
+\node[app,right=of extract] (verify) {Client giải gói\newline Groth16 verify};
+\draw[arr] (m)--(proof); \draw[arr] (proof)--(pack); \draw[arr] (pack)--(api);
+\draw[arr] (cover)--(native); \draw[arr] (native)--(api); \draw[arr] (api)--(stego);
+\draw[arr] (stego)--(extract); \draw[arr] (extract)--(verify);
+\end{tikzpicture}}
+\caption{Các khối ứng dụng và video. Dữ liệu được nhúng trong residual H.264; hệ thống không dùng SEI làm nơi chứa payload.}
+\label{fig:architecture}
+\end{figure}
+Hình \ref{fig:architecture} phân biệt proof với carrier: Groth16 tạo bằng chứng một lần cho message, còn C++ chỉ xử lý bitstream và không chạy prover trong vòng lặp camera. Khi tích hợp, cần giữ đúng payload contract giữa bước đóng gói, embed và blind extract; native live channel hiện không tự gọi Circom/snarkjs verifier.
+
+\begin{table}[H]\centering\small
+\caption{Thành phần và hợp đồng dữ liệu chính.}
+\begin{tabularx}{\textwidth}{p{3.1cm}p{4.1cm}X}
+\toprule Khối & Đầu vào & Đầu ra / trách nhiệm\\\midrule
+Circom/snarkjs & $m,s$, circuit artifacts & Witness, Groth16 proof và public signals.\\
+Payload packer & Message và proof bytes & Blob ứng dụng: 4 byte độ dài message, message, proof compact.\\
+Annex-B/NAL reader & Byte stream H.264 & NAL unit, header, EBSP/RBSP; đọc cả khi start code vắt qua chunk.\\
+CAVLC parser/candidate collector & IDR I-slice Baseline/CAVLC & Cấu trúc residual và offset của sign-bit candidate.\\
+Scheduler/patcher & Candidate, bit payload, khóa & Sửa sign bit, dựng lại NAL/Annex-B và xuất stego stream.\\
+Blind extractor/verifier & Stego, khóa; proof và public inputs & Payload bytes; quyết định proof đúng/sai cho relation trong circuit.\\
+\bottomrule
+\end{tabularx}
+\end{table}
+Các hàng trên mô tả luồng ứng dụng ZK và các thành phần video liên quan; không nên hiểu rằng mọi API mode đang nối đầy đủ tất cả khối. Phần API bên dưới chỉ rõ hai đường HTTP job và WebSocket live, cùng giới hạn hiện tại của quan hệ giữa native stream với Groth16.
+
+\section{Benchmark và kết quả chính}
+Phần này được đưa lên trước phần giải thích mã hóa để người đọc biết ngay điều gì đã chạy được. Số liệu bên dưới lấy từ run mới \texttt{20260924T150707Z\_2be60c}; chạy trên Windows 11 Pro, ASUS TUF Gaming F15 FX507ZM, Intel Core i7-12700H, RAM 25.37 GB, Python 3.12.10. Native pipeline đo CPU; GPU RTX 3060 không tham gia xử lý.
+
+\subsection{Thiết kế phép đo}
+Tập thử gồm 9 clip Y4M (Akiyo, City, Coastguard, Container, Deadline, Football, Foreman, Foreman 300-frame, Hall Monitor), mỗi clip ở 352$\times$288, 640$\times$480 và 1280$\times$960: 27 cấu hình, tối đa 30 frame/cấu hình. Encoder là FFmpeg/libx264 Constrained Baseline, CAVLC, QP 22, GOP=1/all-intra, không B-frame, một thread và một slice/IDR. Hai cỡ lớn được phóng từ nguồn CIF nên là stress test phân giải, không phải nội dung camera native HD.
+
+\begin{table}[H]\centering\small
+\caption{Các số đo đại diện của file pipeline. Median được tính trong từng nhóm 9 clip ở cùng độ phân giải.}
+\begin{tabular}{lrrr}\toprule
+Chỉ số & 352$\times$288 & 640$\times$480 & 1280$\times$960\\\midrule
+Median output FPS & 215.23 & 66.96 & 12.95\\
+Median native RSS (MB) & 9.70 & 17.11 & 45.82\\
+Median source-to-stego PSNR-Y (dB) & 43.77 & 45.17 & 46.81\\
+Số cấu hình qua gate & 9/9 & 9/9 & 9/9\\
+\bottomrule\end{tabular}
+\end{table}
+Output FPS bằng số frame encode chia thời gian embed native; nó không bao gồm capture camera, khởi động encoder hay thời gian scan capacity. RSS là peak lấy mẫu của tiến trình native embed, không phải toàn bộ ứng dụng và có thể bỏ lỡ spike ngắn. Trung vị giảm từ 215.23 xuống 12.95 FPS khi tăng độ phân giải 352$\times$288 lên 1280$\times$960; do đó kết quả không hỗ trợ kết luận đạt realtime 30 FPS ở mọi độ phân giải.
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}[x=0.92cm,y=0.48cm]
+\draw[->] (0,0)--(9,0) node[right]{FPS};
+\foreach \x/\lab in {0/0,2/50,4/100,6/150,8/200}{
+  \draw (\x,0.08)--(\x,-0.08) node[below]{\scriptsize \lab};}
+\foreach \y/\name/\v/\w in {1/352x288/215.23/8.61,2/640x480/66.96/2.68,3/1280x960/12.95/0.52}{
+  \node[left] at (0,\y+0.18){\scriptsize \name};
+  \fill[blue!45] (0,\y)--(\w,\y)--(\w,\y+0.35)--(0,\y+0.35)--cycle;
+  \node[right] at (\w,\y+0.18){\scriptsize \v};}
+\end{tikzpicture}
+\caption{Median output throughput theo độ phân giải trong 27 case file pipeline. Thang ngang có mốc đến 200 FPS để thể hiện rõ các nhóm thấp hơn; cột 352$\times$288 vượt mốc 200 và số 215.23 được ghi cạnh cột.}
+\label{fig:fps-resolution}
+\end{figure}
+Đây là phép đo embed offline trên đoạn H.264 đã encode, không phải đo end-to-end từ cảm biến. Ở 640$\times$480, median 66.96 FPS cao hơn mục tiêu 30 trên clip ngắn của benchmark; ở 1280$\times$960, median 12.95 FPS thấp hơn mục tiêu. Kết luận hợp lý là throughput phụ thuộc mạnh vào độ phân giải và nội dung, chưa thể tuyên bố realtime tổng thể.
+
+\begin{table}[H]\centering\small
+\caption{Tóm tắt chất lượng ảnh và kết quả kiểm tra chức năng.}
+\begin{tabular}{p{6.2cm}p{3cm}p{4.8cm}}\toprule
+Đại lượng & Kết quả & Cách đọc\\\midrule
+Gate chức năng & 27/27 & Embed, strict FFmpeg decode, blind extract đúng khóa và từ chối khóa sai.\\
+Trung bình PSNR-Y source-to-stego & 46.84 dB & Bao gồm cả nén H.264 lossy và nhúng.\\
+Trung bình SSIM source-to-stego & 0.99025 & Tương đồng cấu trúc trung bình trên 27 cấu hình.\\
+PSNR-Y thấp nhất trên frame bị sửa & 32.76 dB & Một số frame có suy giảm thấy được.\\
+Frame/case có PSNR dưới 40 dB & 13/27 & 40 dB là mốc tham khảo, không phải gate chức năng.\\
+Capacity scan & median 9.61 s; max 96.25 s & Tách biệt với embed time; tìm candidate tốn thời gian đáng kể.\\
+\bottomrule\end{tabular}
+\end{table}
+PSNR-Y đo sai khác cường độ luma theo dB; cao hơn thường đồng nghĩa sai số bình phương thấp hơn. SSIM nằm gần 1 khi cấu trúc hai ảnh tương tự. Source-to-stego gộp hai nguồn sai khác (nén và nhúng), còn cover-to-stego đối chiếu bản H.264 sạch với bản stego để cô lập ảnh hưởng nhúng. Mỗi case chỉ mang payload vào một phần nhỏ frame, nên PSNR trung bình cả clip có thể che mất frame lỗi; cần xem giá trị theo từng frame trong CSV.
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}[x=0.72cm,y=0.12cm]
+\draw[->] (0,0)--(13,0) node[right]{dB};
+\foreach \x/\lab in {0/30,2/35,4/40,6/45,8/50,10/55,12/60}{\draw (\x,0.6)--(\x,-0.6) node[below]{\scriptsize \lab};}
+\draw[dashed,red!70!black] (4,-0.4)--(4,3.8) node[above,align=center]{\scriptsize 40 dB\scriptsize mốc tham khảo};
+\node[left] at (0,1){\scriptsize frame sửa thấp nhất};
+\fill[orange!70] (0,1)--(1.104,1)--(1.104,1.7)--(0,1.7)--cycle;
+\node[right] at (1.104,1.35){\scriptsize 32.76};
+\node[left] at (0,2.5){\scriptsize mean source-to-stego};
+\fill[blue!55] (0,2.5)--(6.736,2.5)--(6.736,3.2)--(0,3.2)--cycle;
+\node[right] at (6.736,2.85){\scriptsize 46.84};
+\end{tikzpicture}
+\caption{So sánh PSNR-Y trung bình toàn cấu hình với frame bị nhúng có chất lượng thấp nhất.}
+\label{fig:quality-gap}
+\end{figure}
+Khoảng cách giữa 46.84 dB toàn cấu hình và 32.76 dB frame xấu nhất cho thấy vì sao chỉ nhìn trung bình là chưa đủ. Hệ thống qua gate giải mã/khôi phục nhưng chưa đảm bảo ngưỡng chất lượng đồng đều; cải thiện candidate selection và giảm biến dạng trên từng frame là việc ưu tiên.
+
+\subsection{Proof system và luồng camera}
+\begin{table}[H]\centering\small
+\caption{Đo thật Groth16 và PLONK trên cùng circuit, witness và message; mỗi hệ có một trial.}
+\begin{tabularx}{\textwidth}{p{3cm}p{2.4cm}p{2.4cm}X}\toprule
+Chỉ số & Groth16 BN254 & PLONK KZG & Diễn giải\\\midrule
+Witness & 433.93 ms & 422.59 ms & Có thời gian khởi động Node.\\
+Prove & 2.581 s & 831.695 s & PLONK khoảng 13.86 phút ở phép đo này.\\
+Verify & 848.36 ms & 1,013.60 ms & Một trial mỗi hệ, chưa có khoảng tin cậy.\\
+Peak RSS prover & 1.12 GB & 19.82 GB & Lấy mẫu mỗi 10 ms, có thể hụt peak ngắn.\\
+Proof serialized & 129 B compact / 808 B JSON & 2,251 B JSON & Compact serializer hiện có cho Groth16.\\
+Setup/artifact & zkey có sẵn; provenance chưa audit & setup ~668 s; proving key 21.88 GB & PLONK dùng transcript PoT local power 18.\\
+\bottomrule\end{tabularx}
+\end{table}
+Trong phép đo đơn này, Groth16 có proof compact nhỏ hơn và prove nhanh hơn đáng kể. Đây không phải so sánh ổn định theo thống kê và không bao gồm Halo2, STARK/RISC Zero hay Bulletproofs vì chưa có triển khai cùng circuit trong repo. Circuit có 62,553 constraints, chứng minh quan hệ hash/commitment của message và secret; nó không tự chứng minh nguồn camera hoặc toàn vẹn toàn bộ video.
+
+\begin{table}[H]\centering\small
+\caption{Một lần chạy camera E2E 60 giây có payload chứa proof Groth16 thật (run 24).}
+\begin{tabular}{p{6cm}p{3cm}p{4.8cm}}\toprule
+Đại lượng & Kết quả & Cách đọc\\\midrule
+Frame ghi/giải mã & 450 / 450 & FFmpeg strict decode thành công.\\
+Throughput & 7.608 FPS active; 7.331 gồm startup & Thấp hơn mục tiêu 30 FPS.\\
+Proof và payload & Proof 129 B; verify đúng & Proof tạo trước capture, verify sau extraction.\\
+Negative checks & Khóa sai và message sửa bị từ chối & Xác nhận đúng payload/statement trong lần chạy.\\
+PSNR-YUV420 toàn video / frame sửa thấp nhất & 65.23 / 46.78 dB & Mean SSIM luma 0.999928.\\
+Process-tree peak RSS & 188.84 MB & Gồm tiến trình API, FFmpeg và native; lấy mẫu mỗi 100 ms.\\
+\bottomrule\end{tabular}
+\end{table}
+Run 24 chứng minh đường E2E camera đã truyền proof thật qua WebSocket/native H.264, blind-extract và verify sau capture. Proof-generation mất 4.016 s ngoài capture path; verification mất 2.074 s sau extraction. Đây là một run đơn: nó chứng minh hoạt động ở cấu hình đã thử, không chứng minh ổn định lâu dài hay realtime 30 FPS.
+
+\section{Từ ảnh đến H.264: nhìn thấy từng bước}
+\subsection{RGB, Y, Cb, Cr và lấy mẫu màu}
+\begin{figure}[H]\centering
+\resizebox{\textwidth}{!}{\begin{tikzpicture}[x=1mm,y=1mm]
+\draw[rounded corners,fill=blue!12] (0,0) rectangle (46,32);
+\fill[blue!24] (0,16) rectangle (46,32); \fill[green!22] (0,0) rectangle (46,16);
+\draw[fill=gray!35] (4,11) rectangle (15,25); \draw[fill=brown!45] (24,6) rectangle (39,23);
+\draw[fill=gray!65] (21,6) rectangle (42,8);
+\node[below] at (23,-2){\small RGB scene};
+\draw[-{Latex[length=2mm]},thick] (48,16)--(60,16) node[midway,above]{\scriptsize color transform};
+\draw[fill=gray!68] (64,18) rectangle (101,42); \node[anchor=north west] at (66,40){\small Y};
+\foreach \x in {0,1,...,9}{\draw[gray!50] (64+3.7*\x,18)--(64+3.7*\x,42);}
+\foreach \y in {0,...,5}{\draw[gray!50] (64,18+4*\y)--(101,18+4*\y);}
+\draw[fill=green!45] (71,-4) rectangle (98,14); \node[anchor=north west] at (73,12){\small Cb};
+\foreach \x in {0,...,6}{\draw[green!60!black] (71+3.85*\x,-4)--(71+3.85*\x,14);}
+\foreach \y in {0,...,3}{\draw[green!60!black] (71,-4+4.5*\y)--(98,-4+4.5*\y);}
+\draw[fill=blue!38] (103,-18) rectangle (130,0); \node[anchor=north west] at (105,-2){\small Cr};
+\foreach \x in {0,...,6}{\draw[blue!65] (103+3.85*\x,-18)--(103+3.85*\x,0);}
+\foreach \y in {0,...,3}{\draw[blue!65] (103,-18+4.5*\y)--(130,-18+4.5*\y);}
+\node[align=left,text width=56mm] at (166,13) {Y: độ sáng, giữ đầy đủ\newline
+Cb: sai khác xanh--vàng\newline
+Cr: sai khác đỏ--lục\newline
+YUV 4:2:0: Cb/Cr mỗi mặt phẳng có một nửa chiều ngang và chiều dọc};
+\end{tikzpicture}}
+\caption{Minh họa tự dựng RGB được phân thành ba mặt phẳng. Độ phân giải mỗi mặt phẳng màu thực tế phụ thuộc pixel format; benchmark dùng YUV420.}
+\label{fig:ycbcr}
+\end{figure}
+RGB mô tả màu theo ba thành phần đỏ, lục, lam; encoder thường chuyển sang biểu diễn luma/chroma. Với YUV420, mỗi mẫu Cb/Cr đại diện vùng 2$\times$2 pixel, vì mắt nhạy với độ sáng hơn sai khác màu. Frame 352$\times$288 do đó giữ mặt phẳng Y 352$\times$288, còn mỗi chroma plane là 176$\times$144. Hình này là sơ đồ giải thích, không phải frame benchmark.
+
+\subsection{Macroblock, dự đoán và residual}
+\begin{figure}[H]\centering
+\resizebox{\textwidth}{!}{\begin{tikzpicture}[x=1mm,y=1mm]
+\draw[rounded corners,fill=cyan!10] (0,0) rectangle (58,42);
+\fill[blue!15] (0,20) rectangle (58,42); \fill[green!18] (0,0) rectangle (58,20);
+\draw[fill=gray!35] (5,19) rectangle (19,34); \draw[fill=brown!40] (31,7) rectangle (52,27);
+\draw[fill=gray!60] (28,7) rectangle (54,9);
+\foreach \x in {0,...,4}{\draw[gray!70] (\x*14.5,0)--(\x*14.5,42);}
+\foreach \y in {0,...,3}{\draw[gray!70] (0,\y*14)--(58,\y*14);}
+\draw[red,very thick] (29,7) rectangle (43,21);
+\node[below] at (29,-3){Frame chia thành macroblock 16$\times$16};
+\draw[-{Latex[length=2mm]},thick] (59,21)--(71,21);
+\node[draw,rounded corners,fill=yellow!10,align=center,text width=38mm,minimum height=16mm] (pred) at (92,21) {Dự đoán intra\newline hoặc từ frame tham chiếu};
+\draw[-{Latex[length=2mm]},thick] (112,21)--(124,21);
+\node[draw,rounded corners,fill=orange!10,align=center,text width=36mm,minimum height=16mm] (res) at (145,21) {Residual = pixel gốc\newline $-$ pixel dự đoán};
+\draw[-{Latex[length=2mm]},thick] (165,21)--(177,21);
+\node[draw,rounded corners,fill=blue!8,align=center,text width=42mm,minimum height=16mm] at (201,21) {Transform 4$\times$4\newline $\rightarrow$ quantize $\rightarrow$ CAVLC};
+\end{tikzpicture}}
+\caption{Macroblock là vùng ảnh được mã hóa cùng thông tin dự đoán và residual; ô đỏ là ví dụ vùng được phóng to.}
+\label{fig:macroblock}
+\end{figure}
+Encoder không chỉ lấy các pixel rồi biến thẳng thành bit. Nó hình thành dự đoán, trừ dự đoán khỏi block nguồn để lấy residual, biến đổi residual thành hệ số tần số, lượng tử hóa các hệ số và cuối cùng entropy-code chúng. Với all-intra, frame không tham chiếu frame trước; trong mã native hiện tại đường embed tập trung IDR I-slice/CAVLC.
+
+\subsection{Lượng tử hóa và bảng QP}
+H.264 không bắt buộc một ma trận quantization duy nhất áp dụng cho mọi block. QP xác định mức bước lượng tử hóa; scaling lists (nếu có) điều chỉnh tương quan tần số và loại block. Dưới đây là chu kỳ hệ số bước cơ sở chuẩn hóa theo QP, với $q=\lfloor QP/6\rfloor$, $r=QP\bmod 6$, và $Q_{step}=V_r\,2^q$; hệ số $V_r$ theo quan hệ QP trong \href{https://www.itu.int/dms_pubrec/itu-t/rec/h/T-REC-H.264-202606-I%21%21SUM-HTM-E.htm}{ITU-T H.264 phiên bản 16}. Đây là mô hình bước lượng tử để đọc QP, không phải thay thế phép biến đổi/rounding integer chính xác ở encoder.
+
+\begin{table}[H]\centering\small
+\caption{Hệ số bước lượng tử cơ sở theo phần dư QP modulo 6.}
+\begin{tabular}{crrr}\toprule
+$r=QP\bmod6$ & $V_r$ & QP mẫu & $Q_{step}$ chuẩn hóa\\\midrule
+0 & 0.6250 & 0 & 0.6250\\
+1 & 0.6875 & 1 & 0.6875\\
+2 & 0.8125 & 2 & 0.8125\\
+3 & 0.8750 & 3 & 0.8750\\
+4 & 1.0000 & 4 & 1.0000\\
+5 & 1.1250 & 5 & 1.1250\\
+\bottomrule\end{tabular}
+\end{table}
+Khi QP tăng 6, bước cơ sở tăng gấp đôi; hệ số nhỏ dễ bị lượng tử về 0. Benchmark đặt QP=22, tương ứng $q=3$, $r=4$; bước cơ sở chuẩn hóa bằng $1\times2^3=8$ trước khi tính đến scaling/shift của từng vị trí. QP cao tiết kiệm bit hơn nhưng thường làm giảm chi tiết. Hệ số sửa để nhúng được chọn sau lượng tử hóa, vì thay đổi coefficient trước bước này sẽ bị encoder ghi đè.
+
+\begin{figure}[H]\centering
+\resizebox{\textwidth}{!}{\begin{tikzpicture}[x=1mm,y=1mm]
+\node[align=center] at (28,42){\small Residual sample};
+\node[align=center] at (82,42){\small Coefficient sau transform};
+\node[align=center] at (141,42){\small Sau lượng tử hóa (ví dụ)};
+\foreach \r in {0,...,3}{\foreach \c in {0,...,3}{
+  \pgfmathsetmacro{\x}{8+10*\c}\pgfmathsetmacro{\y}{22-10*\r}
+  \draw[fill=blue!5] (\x,\y) rectangle ++(10,10);
+  \ifnum\r=0 \ifnum\c=0 \node at (\x+5,\y+5){8};\else \node at (\x+5,\y+5){1};\fi
+  \else \ifnum\r=1 \ifnum\c=0 \node at (\x+5,\y+5){-2};\else \node at (\x+5,\y+5){0};\fi
+  \else \node at (\x+5,\y+5){0};\fi\fi
+}}
+\draw[-{Latex[length=2mm]},thick] (53,22)--(61,22);
+\foreach \r in {0,...,3}{\foreach \c in {0,...,3}{
+  \pgfmathsetmacro{\x}{66+10*\c}\pgfmathsetmacro{\y}{22-10*\r}
+  \draw[fill=orange!8] (\x,\y) rectangle ++(10,10);
+  \ifnum\r=0 \ifnum\c=0 \node at (\x+5,\y+5){32};\else \node at (\x+5,\y+5){4};\fi
+  \else \ifnum\r=1 \ifnum\c=0 \node at (\x+5,\y+5){-8};\else \node at (\x+5,\y+5){0};\fi
+  \else \node at (\x+5,\y+5){0};\fi\fi
+}}
+\draw[-{Latex[length=2mm]},thick] (111,22)--(120,22);
+\foreach \r in {0,...,3}{\foreach \c in {0,...,3}{
+  \pgfmathsetmacro{\x}{125+10*\c}\pgfmathsetmacro{\y}{22-10*\r}
+  \draw[fill=green!8] (\x,\y) rectangle ++(10,10);
+  \ifnum\r=0 \ifnum\c=0 \node at (\x+5,\y+5){4};\else \node at (\x+5,\y+5){1};\fi
+  \else \ifnum\r=1 \ifnum\c=0 \node at (\x+5,\y+5){-1};\else \node at (\x+5,\y+5){0};\fi
+  \else \node at (\x+5,\y+5){0};\fi\fi
+}}
+\node[below,align=center,text width=160mm] at (91,-21){Số liệu được dựng để minh họa phép chia và làm tròn, không phải trace từ file encode. Trong benchmark H.264, bộ mã hóa áp dụng integer transform, scaling factor, shift và rounding theo vị trí; vì vậy không dùng phép chia 8 giản lược để tái tạo bit-exact.};
+\end{tikzpicture}}
+\caption{Ví dụ số học minh họa: một residual block tạo ra hệ số biến đổi, sau đó lượng tử hóa làm hệ số nhỏ trở thành 0.}
+\label{fig:quant-example}
+\end{figure}
+Ví dụ cho thấy lượng tử hóa làm thưa ma trận coefficient để entropy coder mã hóa ít symbol hơn, đổi lại mất thông tin không thể khôi phục hoàn toàn. Hệ thống nhúng sửa dấu coefficient đã lượng tử hóa và không thay QP; vì vậy nó không thể khôi phục chi tiết đã mất từ bước nén.
+
+\subsection{Cấu hình encode tái lập}
+Benchmark gọi FFmpeg/libx264 trên Y4M. Phần chính của lệnh benchmark như sau:
+\begin{lstlisting}[language=bash]
+ffmpeg -i input.y4m -frames:v 30 \
+  -vf scale=W:H:flags=lanczos,format=yuv420p \
+  -c:v libx264 -preset ultrafast -tune zerolatency \
+  -profile:v baseline -qp 22 -g 1 -bf 0 -threads 1 -pix_fmt yuv420p \
+  -x264-params "keyint=1:min-keyint=1:scenecut=0:repeat-headers=1:slices=1:threads=1" \
+  -f h264 output.h264
+\end{lstlisting}
+Các flag quyết định điều kiện benchmark, không phải quy tắc của mọi H.264. Constrained Baseline dùng CAVLC; \texttt{-g 1 -bf 0} tạo all-intra không B-frame; một thread/slice làm run kiểm soát dễ lặp hơn nhưng khác cấu hình camera thực tế.
+
+\section{NAL, slice và loại frame I/P/B}
+\subsection{Từ Annex-B bytes đến NAL header}
+Annex-B là cách đóng khung byte stream H.264 bằng start code 3 hoặc 4 byte; NAL parser là phần mềm tìm marker, tách NAL, đọc header và chuyển EBSP/RBSP. Đầu stream ví dụ: \texttt{00 00 00 01 67 ...} (SPS), \texttt{00 00 00 01 68 ...} (PPS), \texttt{00 00 00 01 65 ...} (IDR slice). Byte header có \texttt{forbidden\_zero\_bit}, \texttt{nal\_ref\_idc}, \texttt{nal\_unit\_type}; giá trị type 5 nhận diện IDR slice. Start code không phải là header NAL.
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}[node distance=5mm and 4mm,cell/.style={draw,minimum height=11mm,align=center,font=\ttfamily\small},arr/.style={-{Latex[length=2mm]},thick}]
+\node[cell,fill=gray!8,text width=24mm] (sc) {00 00 00 01\newline start code};
+\node[cell,right=of sc,fill=red!10,text width=20mm] (hdr) {65\newline NAL header};
+\node[cell,right=of hdr,fill=blue!7,text width=22mm] (ebsp) {EBSP\newline slice bytes};
+\node[cell,right=of ebsp,fill=green!8,text width=22mm] (rbsp) {RBSP\newline syntax bits};
+\node[cell,right=of rbsp,fill=yellow!10,text width=28mm] (slice) {slice header\\+ residual};
+\draw[arr] (sc)--(hdr);\draw[arr] (hdr)--(ebsp);\draw[arr] (ebsp)--(rbsp);\draw[arr] (rbsp)--(slice);
+\end{tikzpicture}
+\caption{Giải phẫu NAL IDR minh họa. \texttt{0x65} có NAL type 5; payload sau header cần unescape trước khi đọc syntax.}
+\label{fig:nal-format}
+\end{figure}
+Parser tìm start code qua luồng byte, lấy NAL header, rồi bỏ byte emulation-prevention \texttt{03} để khôi phục RBSP. Trong streaming, start code có thể bị chia giữa hai chunk; reader giữ đoạn đuôi chưa đủ marker trước khi đọc chunk tiếp theo. Vì Annex-B là framing, parser mới là thuật toán xử lý cấu trúc bên trong từng unit.
+
+\subsection{I/P/B không đồng nhất với NAL type}
+I, P, B là kiểu slice/dự đoán; IDR là điểm làm mới trạng thái tham chiếu được báo bởi loại NAL. Slice header có trường \texttt{slice\_type}; mã hóa chuẩn modulo 5 cho biết P/B/I/SP/SI. Ví dụ \texttt{slice\_type=2} là I, còn \texttt{slice\_type=7} cũng tương đương I (giá trị lặp cho phép). Một I-slice không nhất thiết là IDR; P/B-slice thường nằm trong NAL type 1. B-frame có thể dự đoán hai chiều nhưng không phải cứ có B là luôn dùng hai tham chiếu trong mọi macroblock.
+
+\begin{figure}[H]\centering
+\resizebox{\textwidth}{!}{\begin{tikzpicture}[node distance=13mm and 14mm,fr/.style={draw,rounded corners,minimum width=25mm,minimum height=14mm,align=center},arr/.style={-{Latex[length=2mm]},thick}]
+\node[fr,fill=green!10] (i) {IDR / I\newline intra};
+\node[fr,fill=blue!8,right=of i] (p) {P\newline tham chiếu trước};
+\node[fr,fill=orange!10,right=of p] (b) {B\newline tham chiếu trước/sau};
+\node[fr,fill=blue!8,right=of b] (p2) {P\newline tham chiếu trước};
+\draw[arr] (i)--(p);\draw[arr] (p)--(b);\draw[arr] (b)--(p2);
+\draw[arr,dashed] (i.north east) to[bend left=18] (b.north west);
+\draw[arr,dashed] (p2.south west) to[bend right=18] (b.south east);
+\end{tikzpicture}}
+\caption{Ví dụ quan hệ tham chiếu theo thứ tự hiển thị, chỉ minh họa khái niệm. Benchmark của dự án dùng GOP=1 nên không có chuỗi P/B này.}
+\label{fig:frame-types}
+\end{figure}
+
+\subsection{Hàm parser trong source}
+\begin{lstlisting}[language=Python]
+# src/bitstream/h264.py
+NALParser.parse(data) -> List[NALUnit]
+NALParser._find_start_codes() / _extract_nal_unit(...)
+iter_annex_b_nal_units(path, chunk_size=64*1024) -> Iterator[NALUnit]
+SliceHeaderParser.parse() -> SliceHeader
+MacroblockParser.parse_macroblock() -> MacroblockData
+TraceableCAVLCParser.extract_with_offsets(nal, sps, pps, ...) -> dict
+\end{lstlisting}
+Parser NAL tìm start code, tách unit, đọc ba trường header và bỏ emulation-prevention bytes. Streaming iterator giữ dữ liệu qua ranh giới chunk. Slice-header parser đọc Exp-Golomb fields như first macroblock, slice type và PPS id, rồi các trường phụ thuộc SPS/PPS. Hàm macroblock parser đọc loại macroblock; với P-slice inter macroblock, đọc reference index và motion-vector difference; với intra macroblock, đọc prediction mode; sau đó xử lý coded-block-pattern, QP delta và residual. Traceable CAVLC parser giải mã coefficient đồng thời ghi offset bit để patch đúng vị trí. Các hàm cùng tên ở listing trên là tên trong source Python; native embedding benchmark hiện chỉ dùng IDR I-slice Baseline/CAVLC.
+
+Đường native hẹp hơn parser Python tổng quát. Nó tách Annex-B, ghi nhớ SPS/PPS, lọc và giải mã IDR I-slice, rồi thu offset dấu của trailing-one. Các tên hàm của từng bước được liệt kê trong mã bên dưới. Native embedding hiện nhắm Baseline/CAVLC IDR I-slice; không suy luận rằng đường này đã sửa được mọi P/B/GOP.
+
+\begin{lstlisting}[language=C++]
+// native/src/cavlc_stream.cpp (lược phần kiểm tra lỗi)
+split_annex_b(annex_b)
+inspect_baseline_idr_headers(annex_b)
+decode_baseline_i_idr_slices(annex_b)
+collect_cavlc_trailing_one_sign_candidates(slices)
+patch_annex_b_nal_rbsp(annex_b, nal_index, patches)
+auto units = split_annex_b(annex_b);
+for (const auto& nal : units) {
+    const auto rbsp = nal.rbsp();
+    if (nal.nal_unit_type == 7) parse_baseline_sps(rbsp);
+    else if (nal.nal_unit_type == 8) parse_baseline_pps(rbsp);
+    else if (nal.is_idr()) decode_baseline_i_idr_slice(rbsp, sps, pps);
+}
+\end{lstlisting}
+Đoạn mã là sơ đồ rút gọn theo trình tự thật: giữ SPS/PPS để diễn giải slice, chỉ đi vào decoder với IDR. Hàm thực tế còn kiểm tra PPS/SPS có tồn tại và parse header trước khi bắt đầu đọc macroblock residual; vì vậy parse thất bại thì không nên coi bitstream là input được hỗ trợ.
+
+\section{Residual 4$\times$4, CAVLC và vị trí nhúng}
+Một residual block 4$\times$4 sau transform/quantization là ma trận coefficient có thể thưa. CAVLC quét hệ số theo thứ tự zig-zag và mã hóa token gồm số hệ số khác 0 (TotalCoeff), số trailing-one (TrailingOnes), dấu, level và run/zero. Candidate của hệ thống là sign bit gắn với trailing-one có magnitude 1; nhúng bit 0/1 bằng cách chọn dấu âm/dương, không thay magnitude. Ma trận dưới đây là minh họa cấu trúc, không phải dump coefficient benchmark.
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}[x=1mm,y=1mm]
+\node at (18,39){\small Coefficient trước};\node at (58,39){\small Sau nhúng bit};
+\foreach \r in {0,...,3}{\foreach \c in {0,...,3}{
+  \pgfmathsetmacro{\x}{2+8*\c}\pgfmathsetmacro{\y}{12-8*\r}
+  \draw[fill=blue!5] (\x,\y) rectangle ++(8,8);
+  \draw[fill=blue!5] (42+8*\c,\y) rectangle ++(8,8);
+  \pgfmathtruncatemacro{\idx}{4*\r+\c}
+  \ifnum\idx=0 \node at (\x+4,\y+4){4};\node at (46+8*\c,\y+4){4};
+  \else\ifnum\idx=1 \node at (\x+4,\y+4){1};\node at (46+8*\c,\y+4){-1};
+  \else\ifnum\idx=5 \node at (\x+4,\y+4){-1};\node at (46+8*\c,\y+4){-1};
+  \else\node at (\x+4,\y+4){0};\node at (46+8*\c,\y+4){0};\fi\fi\fi
+}}
+\draw[-{Latex[length=2mm]},thick] (36,10)--(40,10);
+\node[below,align=center,text width=105mm] at (42,-23){Bit payload đổi dấu $+1\leftrightarrow-1$; magnitude giữ nguyên. Đây là ví dụ sign-bit, không phải toàn bộ codeword CAVLC.};
+\end{tikzpicture}
+\caption{Minh họa một sign bit trong ma trận coefficient thưa. Bộ giải mã CAVLC cần giữ chính xác cấu trúc token và offset bit.}
+\label{fig:sign-bit}
+\end{figure}
+
+\begin{lstlisting}[language=C++]
+// native/src/cavlc_stream.cpp (tên hàm thực trong dự án)
+decode_cavlc_luma_block(...)
+decode_baseline_i_idr_slice(...)
+collect_cavlc_trailing_one_sign_candidates(slices)
+patch_annex_b_nal_rbsp(annex_b, nal_index, patches)
+\end{lstlisting}
+Candidate collector chỉ thêm vị trí khi token có sign-bit offset; mỗi candidate ghi NAL index, macroblock, loại residual, block index và bit offset. Patcher chuyển EBSP sang RBSP, áp dụng patch có độ dài cố định, dựng lại EBSP và assemble Annex-B. Giữ độ dài patch cố định quan trọng vì thay đổi codeword VLC có thể làm lệch parser của mọi block sau. Gate strict decode xác nhận decoder chấp nhận stream; nó không thay phép đo PSNR/SSIM.
+
+Trong pipeline Python ZK, payload được pack theo trường độ dài 4 byte big-endian, message, rồi proof 129 byte. Message 12 byte cho blob 145 byte, tức cần $145\times8=1{,}160$ bit candidate nếu không có framing khác. Native live API hiện dùng hợp đồng payload/channel riêng; code API không tự chạy prover/verifier cùng lúc. Sự tách biệt này phải được tính đến khi đánh giá end-to-end.
+
+\section{Groth16: payload, circuit và setup}
+\subsection{Quan hệ được chứng minh}
+Circuit nhận message $m$ và secret $s$; tính $h=\operatorname{SHA256}(m)$ và commitment $c=\operatorname{SHA256}(h\,\|\,s)$, đồng thời kiểm tra độ dài message. Public signals là $h$, $c$ và length; secret là private witness. Benchmark đo 62,553 constraints. Verifier trả true chỉ khi proof hợp lệ với public signals/verification key đã dùng; sửa public input làm lần thử bị bác bỏ.
+
+Proof không chứng minh rằng camera cụ thể đã quay video, timestamp là thật, hay toàn bộ stream không bị chỉnh sửa. Để đạt các tính chất đó, circuit hoặc một cơ chế ký/attestation khác phải ràng buộc commitment với dữ liệu video, thiết bị và thời gian; đây chưa phải kết quả hiện tại.
+
+\subsection{Các hàm và artifacts}
+Python \texttt{embed(...)} trong \texttt{src/embedder.py} gọi bridge để tạo proof, serialize proof 129 byte, pack payload, phân tích cover, chọn candidate an toàn, nhúng bit rồi gọi reconstructor dựng stream. Phía trích xuất khôi phục payload bytes trước khi client giải mã proof và gọi Groth16 verifier. Circuit compilation tạo R1CS/WASM/witness generator; trusted setup tạo proving key và verification key, không chạy lại theo từng video.
+
+\begin{lstlisting}[language=Python]
+# src/embedder.py - luồng nghiệp vụ chính (rút gọn, chia qua các helper)
+proof, public = bridge.generate_proof_for_payload(message, secret_key)
+proof_bytes = bridge.proof_to_bytes(proof)
+payload_blob = pack(message, proof_bytes)
+coeffs, frame_data, nC, lengths, overrides, safe = _resolve_video_analysis(...)
+embedder = PayloadEmbedder(max_modifications_per_block=1)
+modified, bits = embedder.embed_payload(coeffs, payload_blob,
+                                        nC_map=nC, nal_length_map=lengths,
+                                        t1_override_map=overrides,
+                                        frame_verified_data=frame_data, ...)
+BitstreamReconstructor().reconstruct_video(video_path, modified, output_path, ...)
+\end{lstlisting}
+Tên helper trong đoạn rút gọn diễn tả bước xử lý. Trong source, prover bridge, bộ nhúng payload và bitstream reconstructor chịu trách nhiệm các bước tương ứng. Kết quả nhúng được lọc theo block mà reconstructor thật sự áp dụng; danh sách candidate dự kiến không tự động được coi là bit đã ghi.
+
+\section{API và kết nối}
+\subsection{HTTP file jobs}
+\begin{figure}[H]\centering
+\resizebox{\textwidth}{!}{\begin{tikzpicture}[node distance=8mm,box/.style={draw,rounded corners,align=center,text width=36mm,minimum height=18mm,fill=blue!5},arr/.style={-{Latex[length=2mm]},thick}]
+\node[box] (client) {Client\newline multipart: video, message, key};
+\node[box,right=of client] (api) {FastAPI\newline validate request; return 202 + job id};
+\node[box,right=of api] (worker) {Worker pool\newline configured embed/extract handler};
+\node[box,right=of worker] (file) {Artifact\newline stego.h264 or payload.bin};
+\draw[arr] (client)--(api);
+\draw[arr] (api)--(worker);
+\draw[arr] (worker)--(file);
+\end{tikzpicture}}
+\caption{HTTP file flow. Client upload không phải kết nối camera trực tiếp; job chạy trong worker và artifact được tải khi hoàn tất.}
+\label{fig:http-flow}
+\end{figure}
+Embed gửi multipart video cùng message và key tới \texttt{/api/v1/jobs/embed}; service trả HTTP 202 với job id. Sau đó client poll endpoint trạng thái job rồi tải artifact qua endpoint artifact. Extract gửi stego video, key và giới hạn độ dài; artifact trả payload. \texttt{/health} kiểm tra service. HTTP route verify nhận stego/original/key ở mode tương ứng; native service hiện được khởi tạo với verify handler tắt, nên không giả định endpoint đó khả dụng trên mọi cấu hình.
+
+\subsection{WebSocket camera stream}
+\begin{figure}[H]\centering
+\resizebox{\textwidth}{!}{\begin{tikzpicture}[node distance=8mm and 7mm,box/.style={draw,rounded corners,align=center,text width=35mm,minimum height=14mm,fill=green!6},arr/.style={-{Latex[length=2mm]},thick}]
+\node[box] (cam) {Client/camera\newline FFmpeg H.264};
+\node[box,right=of cam] (ws) {WebSocket\newline /api/v1/stream};
+\node[box,right=of ws] (py) {Python adapter\newline bounded queues};
+\node[box,right=of py] (cpp) {C++ child\newline stdin/stdout};
+\draw[arr] (cam)--node[above,font=\scriptsize]{1. JSON control} (ws);
+\draw[arr] (cam) to[bend right=18] node[below,font=\scriptsize]{2. binary H.264 chunks} (ws);
+\draw[arr] (ws)--(py);\draw[arr] (py)--(cpp);
+\draw[arr] (cpp) to[bend left=28] node[above,font=\scriptsize]{stego chunks hoặc payload} (ws);
+\end{tikzpicture}}
+\caption{WebSocket stream là giao thức điều khiển + media chunks; output embed là binary stream, còn extract trả payload qua JSON.}
+\label{fig:ws-flow}
+\end{figure}
+Client mở WebSocket có Bearer authorization rồi gửi JSON control: thao tác, key, và khi embed thì message; extract gửi giới hạn độ dài payload. Sau phản hồi \texttt{ready}, client gửi từng H.264 chunk dạng binary; adapter chuyển sang stdin tiến trình C++ theo backpressure. Khi embed, output native được gửi lại dưới dạng binary chunks và kết thúc bằng thông điệp trạng thái; khi extract, payload được trả JSON Base64. Code giới hạn buffer 64 KiB high-water/16 KiB low-water và ghi nhận native resource samples.
+
+\begin{lstlisting}[language=Python]
+# src/api/native_handlers.py - quy trình stream (lược)
+start = json.loads(control_text)
+process = await asyncio.create_subprocess_exec(
+    executable, *arguments, stdin=PIPE, stdout=PIPE, stderr=PIPE)
+await websocket.send_json({"type": "ready", "operation": operation})
+# binary websocket chunks -> native stdin; native stdout -> websocket
+await process.stdin.drain()       # backpressure
+await websocket.send_bytes(chunk) # embed output
+\end{lstlisting}
+Luồng này thể hiện dữ liệu nào đi qua từng hop, nhưng không tạo ra TLS, camera attestation hay proof verification tự động. API key/payload control và media stream là dữ liệu đầu vào; client vẫn cần nhận kết quả, khôi phục payload và kiểm tra Groth16 theo đúng circuit contract nếu đang dùng luồng ZK.
+
+\section{Kết luận và giới hạn}
+Kết quả xác nhận file pipeline chạy thành công ở 27/27 cấu hình thử, có strict decode và blind extraction đúng/sai khóa; run camera E2E cũng mang proof Groth16 thật qua stream, trích xuất và xác minh sau capture. Camera throughput là 7.608 FPS, thấp hơn 30 FPS; chất lượng frame xấu nhất trong file benchmark là 32.76 dB; năng lực native được xác nhận chủ yếu ở IDR I-slice CAVLC all-intra. Chưa có cơ sở khẳng định hỗ trợ mọi GOP, P/B-frame, CABAC hoặc đạt realtime ở mọi kích thước.
+
+Ưu tiên kỹ thuật tiếp theo là lặp lại camera E2E proof-bearing nhiều lần và tăng tốc capture-to-output, đồng thời áp ngưỡng chất lượng theo từng frame. So sánh với hệ khác cần dùng cùng video, QP, payload, độ phân giải và điều kiện host; phép đo hiện tại chưa chứng minh ưu thế tổng thể.
+
+\section*{Artifacts benchmark được dùng}
+\begin{itemize}
+\item Media run \texttt{20260924T150707Z\_2be60c}: \texttt{video\_pipeline\_new.json}.
+\item Per-frame CSV: \texttt{quality\_per\_frame\_new.csv} trong cùng thư mục run.
+\item ZKP: \texttt{zkp\_new.json}; camera: \texttt{realtime\_camera\_runs\_20260924.json}.
+\item Quy trình chạy: \texttt{NEW\_BENCHMARKS.md}.
+\end{itemize}
+
+\end{document}

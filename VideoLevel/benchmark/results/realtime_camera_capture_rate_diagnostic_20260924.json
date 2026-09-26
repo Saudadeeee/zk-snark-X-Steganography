@@ -1,0 +1,156 @@
+{
+  "diagnostic": "DirectShow camera source-rate isolation",
+  "measured_at": "2026-09-24",
+  "device": "USB2.0 HD UVC WebCam",
+  "host_pipeline": {
+    "ffmpeg": "8.0.1-essentials_build-www.gyan.dev",
+    "capture_resolution": "352x288",
+    "requested_fps": 30,
+    "dshow_rtbufsize_bytes": 262144,
+    "scope": "host diagnostic only; not an edge-target measurement"
+  },
+  "host_camera_identity": {
+    "computer_model": "ASUS TUF Gaming F15 FX507ZM",
+    "operating_system": "Windows 11 Pro",
+    "build": "26100",
+    "camera_hardware_id": "USB\\VID_13D3&PID_56A2&MI_00",
+    "driver_provider": "Microsoft",
+    "driver_name": "USB Video Device",
+    "driver_version": "10.0.26100.9444",
+    "driver_inf": "usbvideo.inf",
+    "camera_exposure": {
+      "api": "DirectShow IAMCameraControl::GetRange/Get",
+      "query_succeeded": true,
+      "property": "CameraControl_Exposure",
+      "unit": "log2 seconds",
+      "min_log2_seconds": -8,
+      "max_log2_seconds": 0,
+      "step": 1,
+      "default_log2_seconds": -6,
+      "capability_flags": 3,
+      "supports_auto": true,
+      "supports_manual": true,
+      "current_log2_seconds": -6,
+      "current_flags": 1,
+      "current_is_auto": true,
+      "reported_current_exposure_seconds": 0.015625,
+      "manual_range_includes_at_least_1_over_30_seconds": true,
+      "set_called": false,
+      "interpretation": "The reported 1/64 s value is shorter than 1/30 s and does not explain the observed 7.5 FPS by exposure duration alone. This property read is not a sensor timestamp or proof of actual integration time."
+    }
+  },
+  "runs": [
+    {
+      "mode": "YUYV422 rawvideo passthrough; no encoder",
+      "command": "ffmpeg -f dshow -rtbufsize 256K -pixel_format yuyv422 -video_size 352x288 -framerate 30 -i video=USB2.0 HD UVC WebCam -t 60 -an -c:v copy -f rawvideo pipe:1",
+      "exit_code": 0,
+      "wall_elapsed_seconds": 61.364,
+      "requested_capture_seconds": 60,
+      "frame_bytes": 202752,
+      "frames_observed_from_fixed_size_raw_output": 450,
+      "trailing_partial_frame_bytes": 0,
+      "raw_bytes": 91238400,
+      "active_frame_rate_fps": 7.5,
+      "frame_completion_interarrival_p50_ms": 128.3263,
+      "frame_completion_interarrival_p95_ms": 156.99,
+      "frame_completion_interarrival_max_ms": 172.5901
+    },
+    {
+      "mode": "MJPEG passthrough; no software encoder",
+      "command": "ffmpeg -f dshow -rtbufsize 256K -video_size 352x288 -framerate 30 -vcodec mjpeg -i video=USB2.0 HD UVC WebCam -t 60 -an -c:v copy -f image2pipe -vcodec copy pipe:1",
+      "exit_code": 0,
+      "wall_elapsed_seconds": 61.39,
+      "jpeg_frames_observed_from_eoi_markers": 450,
+      "compressed_bytes": 2557750,
+      "frame_completion_interarrival_p50_ms": 129.989,
+      "frame_completion_interarrival_p95_ms": 155.3098,
+      "frame_completion_interarrival_max_ms": 160.7573
+    },
+    {
+      "mode": "libx264 Baseline/CAVLC, fps_mode passthrough",
+      "requested_capture_seconds": 20,
+      "input_mode": "DirectShow default MJPEG at requested 352x288@30",
+      "encoder_output_frames": 150,
+      "encoder_log_elapsed_seconds": 20.17,
+      "encoder_pts_duration_seconds": 19.93,
+      "encoder_effective_fps": 7.5,
+      "exit_code": 0
+    },
+    {
+      "mode": "libx264 Baseline/CAVLC, default output synchronization",
+      "requested_capture_seconds": 20,
+      "input_mode": "DirectShow default MJPEG at requested 352x288@30",
+      "encoder_output_frames": 150,
+      "encoder_log_elapsed_seconds": 20.16,
+      "encoder_pts_duration_seconds": 19.93,
+      "encoder_effective_fps": 7.5,
+      "exit_code": 0
+    },
+    {
+      "mode": "libx264 Baseline/CAVLC to raw H.264, default output synchronization",
+      "command": "ffmpeg -f dshow -rtbufsize 256K -video_size 352x288 -framerate 30 -i video=USB2.0 HD UVC WebCam -t 20 -an -c:v libx264 -preset ultrafast -profile:v baseline -coder 0 -pix_fmt yuv420p -x264-params keyint=1:min-keyint=1:scenecut=0:repeat-headers=1 -g 1 -qp 22 -f h264 NUL",
+      "exit_code": 0,
+      "encoder_output_frames": 600,
+      "input_frames_inferred_from_encoder_duplicate_counter": 150,
+      "encoder_duplicate_frames_reported": 450,
+      "encoder_dropped_frames_reported": 0,
+      "encoder_log_elapsed_seconds": 20.15,
+      "encoder_pts_duration_seconds": 19.99,
+      "encoder_effective_fps": 30.0
+    },
+    {
+      "mode": "libx264 Baseline/CAVLC to raw H.264, fps_mode passthrough",
+      "command": "ffmpeg -f dshow -rtbufsize 256K -video_size 352x288 -framerate 30 -i video=USB2.0 HD UVC WebCam -t 20 -an -fps_mode passthrough -c:v libx264 -preset ultrafast -profile:v baseline -coder 0 -pix_fmt yuv420p -x264-params keyint=1:min-keyint=1:scenecut=0:repeat-headers=1 -g 1 -qp 22 -f h264 NUL",
+      "exit_code": 0,
+      "encoder_output_frames": 150,
+      "encoder_duplicate_frames_reported": 0,
+      "encoder_log_elapsed_seconds": 20.17,
+      "encoder_pts_duration_seconds": 19.93,
+      "encoder_effective_fps": 7.5
+    },
+    {
+      "mode": "YUYV422 rawvideo passthrough at lowest advertised 30 FPS resolution; no encoder",
+      "command": "ffmpeg -hide_banner -nostats -stats_period 1 -f dshow -rtbufsize 256K -pixel_format yuyv422 -video_size 160x120 -framerate 30 -i video=USB2.0 HD UVC WebCam -t 20 -an -fps_mode passthrough -f null NUL",
+      "exit_code": 0,
+      "requested_capture_seconds": 20,
+      "wall_elapsed_seconds": 21.196,
+      "input_reported_mode_fps": 30,
+      "frames_observed_by_ffmpeg": 150,
+      "active_frame_rate_fps": 7.5,
+      "ffmpeg_reported_speed": 0.989
+    },
+    {
+      "mode": "MJPEG decode to null with default DirectShow device timestamps",
+      "command": "ffmpeg -hide_banner -nostats -stats_period 1 -f dshow -rtbufsize 256K -video_size 352x288 -framerate 30 -i video=USB2.0 HD UVC WebCam -t 10 -an -fps_mode passthrough -f null NUL",
+      "exit_code": 0,
+      "requested_capture_seconds": 10,
+      "wall_elapsed_seconds": 11.172,
+      "input_reported_mode_fps": 30,
+      "frames_observed_by_ffmpeg": 75,
+      "active_frame_rate_fps": 7.5,
+      "ffmpeg_reported_speed": 0.975,
+      "use_video_device_timestamps": true
+    },
+    {
+      "mode": "MJPEG decode to null with wall-clock timestamps",
+      "command": "ffmpeg -hide_banner -nostats -stats_period 1 -use_video_device_timestamps false -f dshow -rtbufsize 256K -video_size 352x288 -framerate 30 -i video=USB2.0 HD UVC WebCam -t 10 -an -fps_mode passthrough -f null NUL",
+      "exit_code": 0,
+      "requested_capture_seconds": 10,
+      "wall_elapsed_seconds": 11.223,
+      "input_reported_mode_fps": 30,
+      "frames_observed_by_ffmpeg": 75,
+      "active_frame_rate_fps": 7.5,
+      "ffmpeg_reported_speed": 0.975,
+      "use_video_device_timestamps": false
+    }
+  ],
+  "advertised_modes": [
+    { "format": "mjpeg", "resolution": "352x288", "fps": 30 },
+    { "format": "yuyv422", "resolution": "352x288", "fps": 30 },
+    { "format": "mjpeg", "resolution": "160x120", "fps": 30 },
+    { "format": "yuyv422", "resolution": "160x120", "fps": 30 },
+    { "format": "mjpeg", "resolution": "1280x720", "fps": 30 },
+    { "format": "yuyv422", "resolution": "1280x720", "fps": 10 }
+  ],
+  "interpretation": "The camera advertises 30 FPS at 352x288 and 160x120, but independent raw YUYV and compressed MJPEG passthrough at 352x288 both yielded about 7.5 delivered frames/s in 60-second tests. A 20-second read-only raw YUYV test at 160x120 also produced 150 frames (7.5 FPS; FFmpeg speed 0.989x), so lowering spatial resolution alone did not restore the requested rate. Two sequential 10-second MJPEG decode-to-null sessions, one with default device timestamps and one using wall-clock timestamps, each delivered 75 frames (7.5 FPS; speed 0.975x); changing timestamp source did not restore frame delivery. The sessions were not simultaneous. Exposure query reports 1/64 s in auto; this is not an independent integration-time measurement. The matching low rate across raw and compressed output types and both tested resolutions indicates the bottleneck is before encoding and not explained by output synchronization; root cause within DirectShow delivery, device pacing, USB/host scheduling, or camera state remains unresolved. Raw-H.264 output with default synchronization emitted 600 frames in 20 seconds from 150 camera frames and FFmpeg reported 450 duplicates; setting -fps_mode passthrough emitted only the 150 source frames. The corrected 60-second full WebSocket/native E2E likewise emitted 450 frames at 7.608 FPS, with zero dropped chunks and all strict-decode/proof/key gates passing. Earlier 60-second/300-second E2E runs used default raw-H.264 synchronization, so their approximately 30-FPS output counts include synthetic duplicates and do not prove camera acquisition rate."
+}

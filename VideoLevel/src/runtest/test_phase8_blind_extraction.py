@@ -2,15 +2,12 @@
 
 import os
 import sys
-from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from src.blind import (
     blind_payload_bits,
-    embed_blind,
     sign_invariant_positions,
-    verify_blind,
 )
 from src.blind_sync import (
     BLIND_MIN_SIGN_COEFFICIENT_INDEX,
@@ -22,24 +19,10 @@ from src.embedder import _filter_reconstructed_positions
 from src.embedder import _resolve_video_analysis
 from src.core.stego import PayloadEmbedder
 from src.runtest._helpers import (
-    get_circuits_dir,
-    get_output,
-    get_video,
-    node_available,
     run_test,
     section,
     summarise,
-    SKIP,
 )
-
-
-SECRET_KEY = b"blind-e2e-key-material-for-cavlc"
-# Blind extraction must be validated on an asset with capacity headroom.  The
-# 300-frame fixture can expose exactly 1,096 sign flags, which is only enough
-# for a four-byte message plus the fixed Groth16 envelope; analysis variation
-# correctly makes that edge case fail closed.  The 600-frame fixture leaves
-# room for a normal integration message and exercises the same CAVLC path.
-MESSAGE = b"blind-e2e"
 
 
 def t_blind_positions_use_sign_only_and_keep_order():
@@ -150,54 +133,11 @@ def t_blind_sign_patch_targets_only_the_cavlc_sign_flag():
     assert _trailing_one_sign_offsets(bytes.fromhex("4180"), 0, nC=0, max_num_coeff=16) == [2]
 
 
-def _remove_blind_artifacts(output_path: str) -> None:
-    for suffix in ("", ".positions.json", ".meta.json", ".manifest.json", ".lattice.json"):
-        artifact = Path(f"{output_path}{suffix}")
-        if artifact.exists():
-            artifact.unlink()
+def t_native_websocket_blind_fixture_round_trip():
+    """Exercise the deployed native CAVLC blind channel, not Python fallback."""
+    from src.runtest.test_native_http_channel import t_native_authenticated_websocket_live_round_trip
 
-
-def t_blind_round_trip_without_cover_or_sidecars():
-    if not node_available():
-        SKIP("blind_round_trip_without_cover_or_sidecars", "node not found on PATH")
-        return
-
-    video = get_video("deadline_cif_q22_g1_600f.h264")
-    if not os.path.isfile(video):
-        SKIP("blind_round_trip_without_cover_or_sidecars", "blind E2E video asset unavailable")
-        return
-
-    output = get_output("test_p8_blind_e2e.h264")
-    _remove_blind_artifacts(output)
-    try:
-        embedded = embed_blind(
-            video_path=video,
-            message=MESSAGE,
-            output_path=output,
-            circuits_dir=get_circuits_dir(),
-            secret_key=SECRET_KEY,
-            use_analysis_cache=True,
-        )
-        assert os.path.isfile(output), "blind embed must produce a stego bitstream"
-        assert embedded.bits_embedded == blind_payload_bits(message_length=len(MESSAGE))
-
-        # A blind receiver must not use the original cover or any generated sidecar.
-        for suffix in (".positions.json", ".meta.json", ".manifest.json", ".lattice.json"):
-            sidecar = Path(f"{output}{suffix}")
-            if sidecar.exists():
-                sidecar.unlink()
-
-        verified = verify_blind(
-            stego_video_path=output,
-            circuits_dir=get_circuits_dir(),
-            secret_key=SECRET_KEY,
-            message_length=len(MESSAGE),
-            use_analysis_cache=True,
-        )
-        assert verified.valid, "blind verification must succeed without cover or sidecars"
-        assert verified.message == MESSAGE
-    finally:
-        _remove_blind_artifacts(output)
+    t_native_authenticated_websocket_live_round_trip()
 
 
 def main():
@@ -214,7 +154,7 @@ def main():
         run_test("blind_candidates_can_require_high_frequency_ac_signs", t_blind_candidates_can_require_high_frequency_ac_signs),
         run_test("blind_operating_point_excludes_the_lowest_ac_band", t_blind_operating_point_excludes_the_lowest_ac_band),
         run_test("blind_sign_patch_targets_only_the_cavlc_sign_flag", t_blind_sign_patch_targets_only_the_cavlc_sign_flag),
-        run_test("blind_round_trip_without_cover_or_sidecars", t_blind_round_trip_without_cover_or_sidecars),
+        run_test("native_websocket_blind_fixture_round_trip", t_native_websocket_blind_fixture_round_trip),
     ]
     sys.exit(summarise(results, "Phase 8"))
 

@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iterator>
 #include <numeric>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -735,6 +736,62 @@ int main() {
     CHECK(nals[2].is_idr());
     CHECK(nals[2].rbsp() == std::vector<std::uint8_t>({0x88, 0x00, 0x00, 0x01}));
     CHECK(zkstego::assemble_annex_b(nals) == annex_b);
+
+    // Incremental reader must recognize a four-byte start code split across
+    // its 64 KiB input reads while retaining no more than the configured NAL.
+    std::vector<std::uint8_t> large_first_nal{0x00, 0x00, 0x00, 0x01, 0x65};
+    large_first_nal.resize(65534U, 0x55);
+    const std::vector<std::uint8_t> final_nal{0x00, 0x00, 0x00, 0x01, 0x41, 0x80};
+    auto incremental_bytes = large_first_nal;
+    incremental_bytes.insert(incremental_bytes.end(), final_nal.begin(), final_nal.end());
+    const std::string incremental_text(
+        reinterpret_cast<const char*>(incremental_bytes.data()), incremental_bytes.size());
+    std::istringstream incremental_input(incremental_text, std::ios::in | std::ios::binary);
+    zkstego::AnnexBNalStreamReader incremental_reader(incremental_input, 70000U);
+    std::vector<std::uint8_t> streamed_nal;
+    CHECK(incremental_reader.read_next(streamed_nal));
+    CHECK(streamed_nal == large_first_nal);
+    CHECK(incremental_reader.read_next(streamed_nal));
+    CHECK(streamed_nal == final_nal);
+    CHECK(!incremental_reader.read_next(streamed_nal));
+
+    large_first_nal.resize(65535U, 0x55);
+    const std::vector<std::uint8_t> final_three_byte_nal{0x00, 0x00, 0x01, 0x41, 0x80};
+    incremental_bytes = large_first_nal;
+    incremental_bytes.insert(incremental_bytes.end(), final_three_byte_nal.begin(), final_three_byte_nal.end());
+    const std::string incremental_three_text(
+        reinterpret_cast<const char*>(incremental_bytes.data()), incremental_bytes.size());
+    std::istringstream incremental_three_input(incremental_three_text, std::ios::in | std::ios::binary);
+    zkstego::AnnexBNalStreamReader incremental_three_reader(incremental_three_input, 70000U);
+    CHECK(incremental_three_reader.read_next(streamed_nal));
+    CHECK(streamed_nal == large_first_nal);
+    CHECK(incremental_three_reader.read_next(streamed_nal));
+    CHECK(streamed_nal == final_three_byte_nal);
+    CHECK(!incremental_three_reader.read_next(streamed_nal));
+
+    std::vector<std::uint8_t> oversized_nal{0x00, 0x00, 0x01, 0x65};
+    oversized_nal.resize(32U, 0x55);
+    const std::string oversized_text(reinterpret_cast<const char*>(oversized_nal.data()), oversized_nal.size());
+    std::istringstream oversized_input(oversized_text, std::ios::in | std::ios::binary);
+    zkstego::AnnexBNalStreamReader bounded_reader(oversized_input, 16U);
+    bool oversized_rejected = false;
+    try {
+        static_cast<void>(bounded_reader.read_next(streamed_nal));
+    } catch (const std::invalid_argument&) {
+        oversized_rejected = true;
+    }
+    CHECK(oversized_rejected);
+
+    const std::string invalid_prefix_text("x\0\0\1\x65", 5U);
+    std::istringstream invalid_prefix_input(invalid_prefix_text, std::ios::in | std::ios::binary);
+    zkstego::AnnexBNalStreamReader invalid_prefix_reader(invalid_prefix_input);
+    bool invalid_prefix_rejected = false;
+    try {
+        static_cast<void>(invalid_prefix_reader.read_next(streamed_nal));
+    } catch (const std::invalid_argument&) {
+        invalid_prefix_rejected = true;
+    }
+    CHECK(invalid_prefix_rejected);
 
     const auto patched_annex_b = zkstego::patch_annex_b_nal_rbsp(
         annex_b,

@@ -15,6 +15,7 @@ Run:
 
 import os
 import sys
+from unittest.mock import patch
 
 # Allow running directly from project root or via run_all.py
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -99,6 +100,24 @@ def t_blob_structure():
     assert len(blob) == 4 + len(msg) + PROOF_SIZE_BYTES
 
 
+def t_verify_proof_for_payload_public_api():
+    from src.zk_proof import ZKSnarkBridge
+
+    bridge = ZKSnarkBridge(get_circuits_dir())
+    message, key, proof = b"client API payload", b"k" * 32, {"proof": "fixture"}
+    public_signals = bridge._build_public_signals(message, key)
+    with patch.object(bridge, "verify", return_value=True) as verify:
+        assert bridge.verify_proof_for_payload(proof, message, key)
+        verify.assert_called_once_with(proof, public_signals)
+
+    for invalid_message, invalid_key in ((b"", key), (message, b"short")):
+        try:
+            bridge.verify_proof_for_payload(proof, invalid_message, invalid_key)
+        except ValueError:
+            continue
+        raise AssertionError("proof verification must reject empty messages and non-32-byte keys")
+
+
 def t_zk_generate_and_verify():
     if not node_available():
         SKIP("zk_generate_and_verify", "node not found on PATH")
@@ -111,6 +130,14 @@ def t_zk_generate_and_verify():
     assert "pi_a" in proof_dict and "pi_c" in proof_dict, "proof missing pi_a/pi_c"
     ok = bridge.verify(proof_dict, public_dict)
     assert ok, "Groth16 verify returned False for a freshly-generated proof"
+    assert bridge.verify_proof_for_payload(proof_dict, TEST_MSG, SECRET_KEY), \
+        "public proof-payload verification failed for a freshly-generated proof"
+    assert public_dict[-1] == str(len(TEST_MSG)), \
+        "Groth16 public signal order must place payload length last"
+    altered_public = list(public_dict)
+    altered_public[-1] = str(int(altered_public[-1]) + 1)
+    assert not bridge.verify(proof_dict, altered_public), \
+        "Groth16 proof unexpectedly verified with a modified public payload length"
 
 
 def t_zk_tampered_message_fails():
@@ -121,10 +148,8 @@ def t_zk_tampered_message_fails():
     from src.zk_proof import ZKSnarkBridge
     bridge = ZKSnarkBridge(circuits)
     proof_dict, _ = bridge.generate_proof_for_payload(TEST_MSG, SECRET_KEY)
-    # Build public signals for a DIFFERENT message
     tampered     = b"tampered payload"
-    public_wrong = bridge._build_public_signals(tampered, SECRET_KEY)
-    ok = bridge.verify(proof_dict, public_wrong)
+    ok = bridge.verify_proof_for_payload(proof_dict, tampered, SECRET_KEY)
     assert not ok, "verify should return False for tampered message"
 
 
@@ -153,6 +178,7 @@ def main():
         run_test("proof_size_129",            t_proof_size_129),
         run_test("blob_bit_length_formula",   t_blob_bit_length_formula),
         run_test("blob_structure",            t_blob_structure),
+        run_test("verify_proof_for_payload_public_api", t_verify_proof_for_payload_public_api),
         run_test("zk_generate_and_verify",    t_zk_generate_and_verify),
         run_test("zk_tampered_message_fails", t_zk_tampered_message_fails),
         run_test("zk_rejects_invalid_payload_lengths", t_zk_rejects_invalid_payload_lengths),
