@@ -12,6 +12,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from benchmark.streaming_capacity_scan import (
+    _scan_segments,
     frame_cut_points,
     main,
     summarize_raw_capacity,
@@ -44,6 +45,20 @@ def t_rejects_invalid_frame_partitions():
 def t_accepts_complete_full_and_partial_final_segment():
     assert validate_segment_partition(300, 100, [100, 100, 100]) == 300
     assert validate_segment_partition(250, 100, [100, 100, 50]) == 250
+
+
+def t_short_video_is_analyzed_as_one_segment_without_ffmpeg_split():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        video = Path(temp_dir) / "short.h264"
+        video.write_bytes(b"short-video")
+        fake_analysis = ([], {}, {}, {}, {}, [(0, 0, 1), (1, 0, 1)])
+        with patch("benchmark._common.load_or_build_benchmark_analysis", return_value=fake_analysis), patch(
+            "benchmark.streaming_capacity_scan._run"
+        ) as run_command:
+            frame_counts, raw_bits = _scan_segments(video, 100, 50)
+        assert frame_counts == [50]
+        assert raw_bits == [2]
+        run_command.assert_not_called()
 
 
 def t_raw_capacity_report_is_explicitly_not_quality_validated():
@@ -114,6 +129,7 @@ def main_test():
         run_test("frame_cut_points_exclude_zero_and_terminal_boundary", t_frame_cut_points_exclude_zero_and_terminal_boundary),
         run_test("rejects_invalid_frame_partitions", t_rejects_invalid_frame_partitions),
         run_test("accepts_complete_full_and_partial_final_segment", t_accepts_complete_full_and_partial_final_segment),
+        run_test("short_video_is_analyzed_as_one_segment_without_ffmpeg_split", t_short_video_is_analyzed_as_one_segment_without_ffmpeg_split),
         run_test("raw_capacity_report_is_explicitly_not_quality_validated", t_raw_capacity_report_is_explicitly_not_quality_validated),
         run_test("report_rejects_mismatched_segment_arrays", t_report_rejects_mismatched_segment_arrays),
         run_test("cli_writes_report_for_a_valid_measured_partition", t_cli_writes_report_for_a_valid_measured_partition),
