@@ -93,7 +93,7 @@ def summarize_raw_capacity(
     )
     return {
         "measurement": "raw_safe_cavlc_candidates_only",
-        "asset": asset,
+        "asset": Path(asset).name,
         "frame_count": frame_count,
         "frames_per_segment": frames_per_segment,
         "segment_count": len(segment_frame_counts),
@@ -250,7 +250,7 @@ def scan_video(
         {
             "video_bytes": video_path.stat().st_size,
             "video_sha256": _sha256_file(video_path),
-            "proof_artifact": str(proof_path),
+            "proof_artifact": proof_path.name,
             "proof_sha256": _sha256_file(proof_path),
             "ffmpeg_version": _ffmpeg_version(ffmpeg),
             "elapsed_sec": round(time.perf_counter() - started, 3),
