@@ -52,6 +52,29 @@ These source-level checks do not establish cryptographic security. The current
 environment blocker and missing application-specific relation remain; changing
 libraries would not by itself make the embedded-video ZKP complete.
 
+### LNP22 execution probe
+
+An isolated checkout of `KarpelesLab/lnp22` at commit
+`878cf9d5bf73ae387b73a0843edc3364fd0f6be4` was tested outside the project
+worktree with Go 1.26.2 on Windows/amd64:
+
+| Measurement | Observed result |
+|---|---:|
+| `go test ./...` | 10 packages passed |
+| One default-parameter linear-relation proof JSON | 15,647 bytes |
+| Public statement JSON (`A`, `t`) | 48,400 bytes |
+| One proof-generation run | 5.643 ms |
+| One verification run | 2.884 ms |
+| Upstream verifier result | `valid=true` |
+
+This was one smoke measurement, not a benchmark distribution. The witness and
+statement were generated as `t = A*s` by the upstream example pattern. It does
+not prove a payload, video, H.264 embedding policy, or provenance statement;
+the statement size is not included in the proof JSON and must be provisioned
+independently. The repository's green tests and this probe do not establish an
+independent cryptographic audit. Treat these numbers only as an experimental
+size/runtime feasibility point, not as an accepted system backend.
+
 ## What is integrated
 
 - Immutable upstream pin: `10eafeca4cd53ff4fc54193dce904dbd0026fefd`.
