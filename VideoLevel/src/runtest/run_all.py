@@ -28,6 +28,7 @@ PHASES = [
     ("Phase 6", "Near-blind + Manifest", "test_phase6_near_blind_manifest.py"),
     ("Phase 7", "Regression Cases", "test_phase7_regression_cases.py"),
     ("Phase 12", "Lattice capacity gate", "test_phase12_lattice_capacity_gate.py"),
+    ("Phase 13", "Streaming raw capacity scan", "test_phase13_streaming_capacity_scan.py"),
 ]
 
 SEP  = '-' * 58
