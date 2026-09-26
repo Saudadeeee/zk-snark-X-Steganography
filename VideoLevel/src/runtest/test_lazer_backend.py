@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from subprocess import CompletedProcess
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -75,6 +77,21 @@ def t_lazer_runner_refuses_an_unsupported_container_host_before_execution() -> N
     assert not called
 
 
+def t_lazer_preflight_reports_a_missing_docker_daemon() -> None:
+    from src.lazer_backend import assess_docker_lazer_host
+
+    with patch("src.lazer_backend.shutil.which", return_value="docker.exe"), patch(
+        "src.lazer_backend.subprocess.run",
+        return_value=CompletedProcess(args=["docker", "info"], returncode=1, stdout="", stderr="daemon unavailable"),
+    ) as run:
+        assessment = assess_docker_lazer_host()
+
+    assert not assessment.ready
+    assert not assessment.docker_available
+    assert "docker_daemon_unavailable" in assessment.blockers
+    run.assert_called_once()
+
+
 def main() -> None:
     section("LaZer Linux backend")
     results = [
@@ -82,6 +99,7 @@ def main() -> None:
         run_test("lazer_preflight_fails_closed_without_avx512_or_linux", t_lazer_preflight_fails_closed_without_avx512_or_linux),
         run_test("lazer_lock_is_pinned_and_declares_the_general_relation_demo", t_lazer_lock_is_pinned_and_declares_the_general_relation_demo),
         run_test("lazer_runner_refuses_an_unsupported_container_host_before_execution", t_lazer_runner_refuses_an_unsupported_container_host_before_execution),
+        run_test("lazer_preflight_reports_a_missing_docker_daemon", t_lazer_preflight_reports_a_missing_docker_daemon),
     ]
     raise SystemExit(summarise(results, "LaZer Linux backend"))
 
