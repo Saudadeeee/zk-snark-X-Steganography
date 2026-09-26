@@ -35,8 +35,9 @@ def t_embed_bits_preserves_non_byte_aligned_length() -> None:
 
     assert embedded == 3
     assert embedder.last_used_safe_positions == positions
-    modified_map = {(mb, block): values for mb, block, values in modified}
-    assert [modified_map[(mb, block)][1] & 1 for mb, block, _ in positions] == [1, 0, 1]
+    updated_map = {(mb, block): values for mb, block, values in coefficients}
+    updated_map.update({(mb, block): values for mb, block, values in modified})
+    assert [updated_map[(mb, block)][1] & 1 for mb, block, _ in positions] == [1, 0, 1]
 
 
 def t_embed_bits_rejects_non_binary_values() -> None:
