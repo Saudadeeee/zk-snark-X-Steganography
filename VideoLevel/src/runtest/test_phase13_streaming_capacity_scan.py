@@ -15,6 +15,7 @@ from benchmark.streaming_capacity_scan import (
     _scan_segments,
     frame_cut_points,
     main,
+    next_patchability_target,
     summarize_raw_capacity,
     validate_segment_partition,
 )
@@ -55,10 +56,23 @@ def t_short_video_is_analyzed_as_one_segment_without_ffmpeg_split():
         with patch("benchmark._common.load_or_build_benchmark_analysis", return_value=fake_analysis), patch(
             "benchmark.streaming_capacity_scan._run"
         ) as run_command:
-            frame_counts, raw_bits = _scan_segments(video, 100, 50)
+            frame_counts, raw_bits, patchable_bits = _scan_segments(video, 100, 50)
         assert frame_counts == [50]
         assert raw_bits == [2]
+        assert patchable_bits is None
         run_command.assert_not_called()
+
+
+def t_patchability_target_balances_remaining_bits_over_chunks():
+    assert next_patchability_target(1053680, 0, 145984, 30) == 35123
+    assert next_patchability_target(1053680, 35123, 145984, 29) == 35123
+    assert next_patchability_target(1053680, 1053680, 145984, 0) == 0
+
+
+def t_patchability_target_is_bounded_by_raw_chunk_capacity():
+    assert next_patchability_target(1000, 0, 100, 3) == 100
+    assert next_patchability_target(1000, 100, 800, 2) == 450
+    assert next_patchability_target(1000, 400, 800, 2) == 300
 
 
 def t_raw_capacity_report_is_explicitly_not_quality_validated():
@@ -77,6 +91,50 @@ def t_raw_capacity_report_is_explicitly_not_quality_validated():
     assert report["patchability_validated"] is False
     assert report["quality_validated"] is False
     assert report["raw_fit_is_sufficient_for_embedding"] is False
+
+
+def t_patchability_report_confirms_exact_payload_only_when_enough_positions_passes():
+    common = {
+        "asset": "clip.h264",
+        "frame_count": 250,
+        "frames_per_segment": 100,
+        "segment_frame_counts": [100, 100, 50],
+        "raw_safe_bits_by_segment": [10000, 10000, 10000],
+        "proof_bytes": 400,
+        "framing_bytes": 8,
+    }
+    confirmed = summarize_raw_capacity(
+        **common,
+        patchable_safe_bits_by_segment=[1200, 1200, 864],
+    )
+    assert confirmed["patchability_confirmed_bits"] == 3264
+    assert confirmed["patchability_validated"] is True
+    assert confirmed["patchability_result"] == "proof_payload_positions_confirmed"
+    assert confirmed["quality_validated"] is False
+
+    inconclusive = summarize_raw_capacity(
+        **common,
+        patchable_safe_bits_by_segment=[1000, 500, 500],
+    )
+    assert inconclusive["patchability_validated"] is False
+    assert inconclusive["patchability_result"] == "inconclusive_candidate_shortfall"
+    assert inconclusive["insufficient_patchable_candidates_proven"] is False
+
+
+def t_report_rejects_patchable_counts_above_raw_candidates():
+    try:
+        summarize_raw_capacity(
+            asset="clip.h264",
+            frame_count=100,
+            frames_per_segment=100,
+            segment_frame_counts=[100],
+            raw_safe_bits_by_segment=[10],
+            proof_bytes=1,
+            patchable_safe_bits_by_segment=[11],
+        )
+    except ValueError:
+        return
+    raise AssertionError("patchable positions above raw candidates were accepted")
 
 
 def t_report_rejects_mismatched_segment_arrays():
@@ -103,7 +161,7 @@ def t_cli_writes_report_for_a_valid_measured_partition():
         proof.write_bytes(b"proof")
 
         with patch("benchmark.streaming_capacity_scan._probe_frame_count", return_value=2), patch(
-            "benchmark.streaming_capacity_scan._scan_segments", return_value=([2], [10])
+            "benchmark.streaming_capacity_scan._scan_segments", return_value=([2], [10], None)
         ), patch("benchmark.streaming_capacity_scan._ffmpeg_version", return_value="ffmpeg test"):
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
@@ -130,7 +188,11 @@ def main_test():
         run_test("rejects_invalid_frame_partitions", t_rejects_invalid_frame_partitions),
         run_test("accepts_complete_full_and_partial_final_segment", t_accepts_complete_full_and_partial_final_segment),
         run_test("short_video_is_analyzed_as_one_segment_without_ffmpeg_split", t_short_video_is_analyzed_as_one_segment_without_ffmpeg_split),
+        run_test("patchability_target_balances_remaining_bits_over_chunks", t_patchability_target_balances_remaining_bits_over_chunks),
+        run_test("patchability_target_is_bounded_by_raw_chunk_capacity", t_patchability_target_is_bounded_by_raw_chunk_capacity),
         run_test("raw_capacity_report_is_explicitly_not_quality_validated", t_raw_capacity_report_is_explicitly_not_quality_validated),
+        run_test("patchability_report_confirms_exact_payload_only_when_enough_positions_passes", t_patchability_report_confirms_exact_payload_only_when_enough_positions_passes),
+        run_test("report_rejects_patchable_counts_above_raw_candidates", t_report_rejects_patchable_counts_above_raw_candidates),
         run_test("report_rejects_mismatched_segment_arrays", t_report_rejects_mismatched_segment_arrays),
         run_test("cli_writes_report_for_a_valid_measured_partition", t_cli_writes_report_for_a_valid_measured_partition),
     ]
