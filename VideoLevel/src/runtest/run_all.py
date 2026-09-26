@@ -30,6 +30,7 @@ PHASES = [
     ("Phase 12", "Lattice capacity gate", "test_phase12_lattice_capacity_gate.py"),
     ("Phase 13", "Streaming raw capacity scan", "test_phase13_streaming_capacity_scan.py"),
     ("Phase 14", "LaZer backend preflight", "test_lazer_backend.py"),
+    ("Phase 15", "Exact-bit payload embedding", "test_phase15_payload_bits.py"),
 ]
 
 SEP  = '-' * 58

@@ -632,13 +632,37 @@ class PayloadEmbedder:
         Returns:
             (modified_coefficients, bits_embedded)
         """
-        # Convert payload to bits
-        payload_bits = self._bytes_to_bits(payload)
+        return self.embed_bits(
+            coefficients,
+            self._bytes_to_bits(payload),
+            nC_map=nC_map,
+            nal_length_map=nal_length_map,
+            t1_override_map=t1_override_map,
+            frame_verified_data=frame_verified_data,
+            ffmpeg_validator=ffmpeg_validator,
+            pre_validated_positions=pre_validated_positions,
+        )
+
+    def embed_bits(self, coefficients: List[Tuple[int, int, List[int]]],
+                   payload_bits: List[int], nC_map: Optional[Dict[Tuple[int, int], int]] = None,
+                   nal_length_map: Optional[Dict[Tuple[int, int], int]] = None,
+                   t1_override_map: Optional[Dict[Tuple[int, int], int]] = None,
+                   frame_verified_data: Optional[Dict[int, Tuple[Dict, Dict]]] = None,
+                   ffmpeg_validator=None,
+                   pre_validated_positions=None) -> Tuple[List[Tuple[int, int, List[int]]], int]:
+        """Embed an exact bit vector without adding byte-alignment padding.
+
+        This is useful when a serialized payload is streamed over independently
+        processed video chunks whose carrier capacities are not byte-aligned.
+        """
+        bits = list(payload_bits)
+        if any(not isinstance(bit, int) or bit not in (0, 1) for bit in bits):
+            raise ValueError("payload_bits must contain only integer values 0 or 1")
 
         # Use safety filter if enabled
         if self.use_safety_filter and self.safety_filter:
             return self._embed_with_safety_filter(
-                coefficients, payload_bits, nC_map, nal_length_map,
+                coefficients, bits, nC_map, nal_length_map,
                 t1_override_map, frame_verified_data, ffmpeg_validator, pre_validated_positions)
         raise EmbeddingError("use_safety_filter=False embedding path is not implemented")
     
