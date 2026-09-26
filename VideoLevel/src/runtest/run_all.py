@@ -7,12 +7,12 @@ Usage:
 Exit code: 0 if all phases pass, 1 if any phase fails, 2 if any phase is incomplete.
 """
 
+import argparse
 import io
 import os
 import re
 import subprocess
 import sys
-import argparse
 
 # -- Locate project root and test files --------------------------------- #
 
@@ -29,6 +29,7 @@ PHASES = [
     ("Phase 7", "Regression Cases", "test_phase7_regression_cases.py"),
     ("Phase 12", "Lattice capacity gate", "test_phase12_lattice_capacity_gate.py"),
     ("Phase 13", "Streaming raw capacity scan", "test_phase13_streaming_capacity_scan.py"),
+    ("Phase 14", "LaZer backend preflight", "test_lazer_backend.py"),
 ]
 
 SEP  = '-' * 58
@@ -49,6 +50,7 @@ def run_phase(label: str, description: str, filename: str):
     result   = subprocess.run(
         [sys.executable, filepath],
         cwd=ROOT,
+        check=False,
         capture_output=True,
         text=True,
         encoding='utf-8',
