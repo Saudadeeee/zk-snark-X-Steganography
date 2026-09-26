@@ -1,12 +1,17 @@
 """Tests for the proof-size versus measured in-video capacity gate."""
 
+import contextlib
+import io
+import json
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from benchmark.lattice_in_video_feasibility import assess_capacity
+from benchmark.lattice_in_video_feasibility import assess_capacity, main
 
 
 class LatticeInVideoCapacityGateTests(unittest.TestCase):
@@ -40,6 +45,35 @@ class LatticeInVideoCapacityGateTests(unittest.TestCase):
         ):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 assess_capacity(**kwargs)
+
+    def test_cli_reads_exact_artifact_and_returns_infeasible_status(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact = Path(temp_dir) / "proof.bin"
+            artifact.write_bytes(b"proof-bytes")
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main([
+                    "--proof-artifact", str(artifact),
+                    "--capacity-bits", "80",
+                    "--framing-bytes", "2",
+                ])
+
+        self.assertEqual(exit_code, 3)
+        self.assertEqual(json.loads(stdout.getvalue())["shortfall_bits"], 24)
+
+    def test_cli_returns_success_only_when_measured_capacity_is_enough(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact = Path(temp_dir) / "proof.bin"
+            artifact.write_bytes(b"proof-bytes")
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main([
+                    "--proof-artifact", str(artifact),
+                    "--capacity-bits", "104",
+                    "--framing-bytes", "2",
+                ])
+
+        self.assertEqual(exit_code, 0)
 
 
 if __name__ == "__main__":

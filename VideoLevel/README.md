@@ -11,7 +11,7 @@ Hide a fixed commitment to an ML-DSA-65 authenticated lattice sidecar inside H.2
 
 ## Overview
 
-The default system embeds a proof binding into H.264 bitstreams without leaving the compressed-domain workflow. It:
+The active lattice path embeds a commitment/reference to a signed receipt, not a zero-knowledge proof. It:
 
 1. Generates an ML-DSA-65 signed receipt for the payload hash.
 2. Stores it as `.lattice.json`.
@@ -22,7 +22,7 @@ The default system embeds a proof binding into H.264 bitstreams without leaving 
 5. Locates CAVLC-safe candidate positions in IDR frames.
 6. Applies length-preserving coefficient/sign modifications.
 7. Reconstructs a valid H.264 bitstream.
-8. Extracts the reference, verifies the ML-DSA signature and sidecar binding.
+8. Extracts the reference, loads the receipt sidecar, and verifies the ML-DSA signature.
 
 ### New Features (IEEE-ready)
 
@@ -166,7 +166,7 @@ VideoLevel/
 |   |-- embedder.py               Public embed API
 |   |-- verifier.py               Public verify API
 |   |-- verifier_blind.py         Near-blind verification
-|   |-- lattice_pq.py             ML-KEM/ML-DSA + transparent lattice-ZKP sidecar
+|   |-- lattice_pq.py             ML-KEM/ML-DSA receipts + disabled research ZKP prototype
 |   `-- zk_proof.py               Legacy Groth16 migration bridge
 |-- plan.md                       Current freeze plan
 `-- README.md
@@ -362,6 +362,9 @@ py -3.12 benchmark/sec2_capacity.py
 py -3.12 benchmark/sec4_security.py
 py -3.12 benchmark/sec6_performance.py
 
+# Compare actual proof bytes with measured capacity for one video/configuration
+py -3.12 -m benchmark.lattice_in_video_feasibility --proof-artifact path/to/proof.bin --capacity-bits 1232 --framing-bytes 16
+
 # Statistical with error bars (IEEE-valid)
 py -3.12 benchmark/statistical_benchmark.py --section sec1 --runs 3
 
@@ -380,6 +383,10 @@ py -3.12 -m benchmark.trust_corpus
 # Print a ready-to-paste external corpus manifest entry
 py -3.12 -m benchmark.trust_corpus register-file --id sample-001 --path data/external/trust_corpus/sample_001.h264 --source-uri https://example.org/dataset --license CC-BY-4.0 --codec h264 --container raw_h264 --frame-count 300 --resolution 352x288 --source "Example Dataset"
 ```
+
+The in-video feasibility command is a strict size check, not a proof verifier.
+It exits `0` when proof plus framing fits and `3` when it does not; provide a
+fresh quality-validated capacity for the exact video and embedding settings.
 
 Upgrade-v2 application-level trust workflows are exposed through
 `src.trust.workflows` for provenance anchoring, fingerprint registry lookup,
@@ -447,7 +454,7 @@ See `doc/trust_corpus_onboarding.md` for the step-by-step corpus playbook.
 1. Verifying the Ed25519 manifest and its stego/positions hashes
 2. Rebuilding extraction offsets from the stego bitstream
 3. Extracting from the stored operating positions
-4. Verifying the ZK proof
+4. Verifying the ML-DSA receipt and its in-video commitment (not a ZKP)
 
 ### Threat model summary
 
