@@ -17,7 +17,6 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-
 LAZER_LOCK_VERSION = 1
 LAZER_REQUIRED_FLAGS = frozenset({"avx512f", "aes"})
 LAZER_PREFLIGHT_IMAGE = "debian@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171"
