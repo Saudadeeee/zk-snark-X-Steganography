@@ -8,14 +8,14 @@ LaZer until an application relation and its proof serialization are reviewed.
 
 from __future__ import annotations
 
-import json
 import argparse
+import json
 import platform
 import shutil
 import subprocess
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable
 
 
 LAZER_LOCK_VERSION = 1
@@ -108,6 +108,23 @@ def assess_lazer_host(
     )
 
 
+def _docker_daemon_available() -> bool:
+    """Check the Docker Engine, not merely whether the CLI binary is installed."""
+    if shutil.which("docker") is None:
+        return False
+    try:
+        completed = subprocess.run(
+            ["docker", "info", "--format", "{{.ServerVersion}}"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
+
+
 def _linux_cpu_flags() -> set[str]:
     cpuinfo = Path("/proc/cpuinfo")
     if not cpuinfo.is_file():
@@ -121,7 +138,7 @@ def _linux_cpu_flags() -> set[str]:
 def assess_current_lazer_host() -> LazerHostAssessment:
     return assess_lazer_host(
         system_name=platform.system(), machine=platform.machine(),
-        cpu_flags=_linux_cpu_flags(), docker_available=shutil.which("docker") is not None,
+        cpu_flags=_linux_cpu_flags(), docker_available=_docker_daemon_available(),
     )
 
 
@@ -129,6 +146,15 @@ def assess_docker_lazer_host(image: str = LAZER_PREFLIGHT_IMAGE) -> LazerHostAss
     """Assess the CPU flags actually visible to an amd64 Linux container."""
     if shutil.which("docker") is None:
         return assess_lazer_host(system_name="", machine="", cpu_flags=(), docker_available=False)
+    if not _docker_daemon_available():
+        return LazerHostAssessment(
+            system_name="",
+            machine="",
+            cpu_flags=(),
+            docker_available=False,
+            ready=False,
+            blockers=("docker_daemon_unavailable",),
+        )
     completed = subprocess.run(
         ["docker", "run", "--rm", "--platform", "linux/amd64", image, "sh", "-c", "uname -s; uname -m; grep -m1 '^flags' /proc/cpuinfo || true"],
         check=False, capture_output=True, text=True, timeout=30,
