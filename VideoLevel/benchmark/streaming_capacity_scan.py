@@ -166,11 +166,16 @@ def _scan_segments(
     """Segment at requested IDRs and analyze one chunk at a time."""
     video_path = Path(video_path).resolve(strict=True)
     cuts = frame_cut_points(total_frames, frames_per_segment)
-    if not cuts:
-        raise ValueError("video is shorter than one requested segment")
 
     os.environ["BENCHMARK_DISABLE_ANALYSIS_CACHE"] = "1"
     from benchmark._common import load_or_build_benchmark_analysis
+
+    if not cuts:
+        analysis = load_or_build_benchmark_analysis(video_path, force=True)
+        raw_bits = len(analysis[-1])
+        del analysis
+        gc.collect()
+        return [total_frames], [raw_bits]
 
     with tempfile.TemporaryDirectory(prefix="zkstego-capacity-") as temp_dir:
         pattern = str(Path(temp_dir) / "segment_%05d.h264")
