@@ -206,7 +206,12 @@ def _validate_context_statement_and_modulus(
 ) -> tuple[VideoZkpStatement, bytes]:
     if not isinstance(statement, VideoZkpStatement):
         raise ValueError("statement must be a VideoZkpStatement")
-    if isinstance(modulus, bool) or not isinstance(modulus, int) or not _is_prime_u64(modulus):
+    if (
+        isinstance(modulus, bool)
+        or not isinstance(modulus, int)
+        or modulus < 3
+        or not _is_prime_u64(modulus)
+    ):
         raise ValueError("modulus must be a prime integer in the unsigned 64-bit range")
     canonical_statement = VideoZkpStatement.from_dict(statement.to_dict())
     return canonical_statement, canonical_statement.to_public_bytes()
