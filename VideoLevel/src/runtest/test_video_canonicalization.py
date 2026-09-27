@@ -136,7 +136,7 @@ def t_video_hash_rejects_blocks_not_applied_by_reconstructor() -> None:
             try:
                 canonical_video_sha256(source, [(1, 2, 0)])
             except RuntimeError as error:
-                assert "did not apply every carrier block" in str(error)
+                assert "did not apply exactly the carrier blocks" in str(error)
             else:
                 raise AssertionError("unapplied carrier normalization must not be hashed")
 
