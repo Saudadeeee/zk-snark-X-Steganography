@@ -17,12 +17,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from benchmark._common import RESULTS_DIR, cache_load, cache_save
-from benchmark.locked_operating_contract import load_best_locked_operating_contract
+from benchmark._common import RESULTS_DIR, cache_load, cache_save, load_sec1_positions
+from benchmark.locked_operating_contract import (
+    LOCKED_CHAOS_KEY,
+    load_best_locked_operating_contract,
+)
 from src.blind_sync import derive_blind_positions_validated_pool_proxy
 
 CACHE_KEY = "blind_core_trial"
-SECRET_KEY = b"zk_mv_stego_2026_secret_key!!!!!"
+BLIND_SYNC_KEY = LOCKED_CHAOS_KEY
 MESSAGE = b"Hello ZK-Stego"
 PREFERRED_SEQUENCES = [
     "coastguard_q22_g1",
@@ -73,6 +76,22 @@ def _select_operating_asset(required_bits: int) -> tuple[str, str, str, int]:
     )
 
 
+def _position_match_stats(
+    derived: list[tuple[int, int, int]],
+    reference: list[tuple[int, int, int]],
+) -> dict[str, float | int]:
+    derived_set = {tuple(int(value) for value in position) for position in derived}
+    reference_set = {tuple(int(value) for value in position) for position in reference}
+    overlap = len(derived_set & reference_set)
+    prefix_match = sum(left == right for left, right in zip(derived, reference))
+    return {
+        "set_overlap": overlap,
+        "set_overlap_ratio": overlap / max(1, len(derived_set)),
+        "prefix_match": prefix_match,
+        "prefix_match_ratio": prefix_match / max(1, len(derived)),
+    }
+
+
 def collect_data(force: bool = False) -> dict:
     cached = cache_load(CACHE_KEY)
     if cached and not force:
@@ -87,18 +106,19 @@ def collect_data(force: bool = False) -> dict:
     cover_positions, cover_metadata = run_isolated(
         _derive_blind_positions_worker,
         video_path,
-        SECRET_KEY,
+        BLIND_SYNC_KEY,
         required_bits,
     )
     stego_positions, stego_metadata = run_isolated(
         _derive_blind_positions_worker,
         str(stego_path),
-        SECRET_KEY,
+        BLIND_SYNC_KEY,
         required_bits,
     )
 
-    set_overlap = len(set(cover_positions) & set(stego_positions))
-    prefix_match = sum(1 for a, b in zip(cover_positions, stego_positions) if a == b)
+    cover_stego_match = _position_match_stats(cover_positions, stego_positions)
+    embedded_positions = load_sec1_positions(seq_name, validated_pool=False)
+    blind_embedding_match = _position_match_stats(stego_positions, embedded_positions)
 
     data = {
         "sequence": seq_name,
@@ -107,10 +127,15 @@ def collect_data(force: bool = False) -> dict:
         "required_bits": required_bits,
         "cover_positions": len(cover_positions),
         "stego_positions": len(stego_positions),
-        "set_overlap": set_overlap,
-        "set_overlap_ratio": set_overlap / max(1, len(cover_positions)),
-        "prefix_match": prefix_match,
-        "prefix_match_ratio": prefix_match / max(1, len(cover_positions)),
+        "cover_stego_set_overlap": cover_stego_match["set_overlap"],
+        "cover_stego_set_overlap_ratio": cover_stego_match["set_overlap_ratio"],
+        "cover_stego_prefix_match": cover_stego_match["prefix_match"],
+        "cover_stego_prefix_match_ratio": cover_stego_match["prefix_match_ratio"],
+        "embedded_positions": len(embedded_positions),
+        "blind_embedding_set_overlap": blind_embedding_match["set_overlap"],
+        "blind_embedding_set_overlap_ratio": blind_embedding_match["set_overlap_ratio"],
+        "blind_embedding_prefix_match": blind_embedding_match["prefix_match"],
+        "blind_embedding_prefix_match_ratio": blind_embedding_match["prefix_match_ratio"],
         "cover_metadata": cover_metadata,
         "stego_metadata": stego_metadata,
     }
@@ -121,10 +146,19 @@ def collect_data(force: bool = False) -> dict:
 def run(force: bool = False) -> dict:
     print("\n=== Blind Core Trial ===")
     data = collect_data(force=force)
+    print(f"  [{data['sequence']}] cover/stego derived positions:")
     print(
-        f"  [{data['sequence']}] cover/stego overlap={data['set_overlap']}/{data['cover_positions']} "
-        f"({data['set_overlap_ratio']:.3f}), prefix={data['prefix_match']}/{data['cover_positions']} "
-        f"({data['prefix_match_ratio']:.3f})"
+        f"    overlap={data['cover_stego_set_overlap']}/{data['cover_positions']} "
+        f"({data['cover_stego_set_overlap_ratio']:.3f}), "
+        f"prefix={data['cover_stego_prefix_match']}/{data['cover_positions']} "
+        f"({data['cover_stego_prefix_match_ratio']:.3f})"
+    )
+    print(f"  Blind-derived vs embedded positions sidecar (benchmark ground truth only):")
+    print(
+        f"    overlap={data['blind_embedding_set_overlap']}/{data['stego_positions']} "
+        f"({data['blind_embedding_set_overlap_ratio']:.3f}), "
+        f"prefix={data['blind_embedding_prefix_match']}/{data['stego_positions']} "
+        f"({data['blind_embedding_prefix_match_ratio']:.3f})"
     )
     print(f"  [saved] {(RESULTS_DIR / f'{CACHE_KEY}.json').name}")
     return data

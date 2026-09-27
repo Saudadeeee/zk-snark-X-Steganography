@@ -42,15 +42,21 @@ class BlindOperatingContract:
     dedup_per_block: bool = True
     max_bits_per_idr: int = 0
     metadata_bound: bool = False
+    require_bitstream_patchable: bool = False
+    patchability_headroom: int = 256
+    max_modifications_per_block: int = 1
 
 
 DEFAULT_VALIDATED_POOL_PROXY_CONTRACT = BlindOperatingContract(
-    version="validated-pool-proxy-v1",
+    version="validated-pool-patchable-v2",
     signbit_only=False,
     bottom_rows=0,
     dedup_per_block=True,
     max_bits_per_idr=0,
     metadata_bound=False,
+    require_bitstream_patchable=True,
+    patchability_headroom=256,
+    max_modifications_per_block=1,
 )
 
 DEFAULT_BLIND_HEADER_CONTRACT = BlindOperatingContract(
@@ -447,6 +453,23 @@ def derive_blind_positions_operating_contract(
     ordered = ChaosTransformer(ordering_secret).shuffle_positions(candidates)
     if contract.dedup_per_block:
         ordered = _dedup_per_block(ordered)
+    if contract.require_bitstream_patchable:
+        if contract.patchability_headroom < 0:
+            raise ValueError("patchability_headroom must be non-negative")
+        if contract.max_modifications_per_block < 1:
+            raise ValueError("max_modifications_per_block must be positive")
+        from .embedder import _prune_patchable_positions
+
+        patchable_target = max(
+            required_bits + contract.patchability_headroom,
+            int(required_bits * 1.30),
+        )
+        ordered = _prune_patchable_positions(
+            ordered,
+            frame_verified_data,
+            required_bits=patchable_target,
+            max_modifications_per_block=contract.max_modifications_per_block,
+        )
     if contract.max_bits_per_idr > 0:
         ordered = _cap_per_idr(
             ordered,

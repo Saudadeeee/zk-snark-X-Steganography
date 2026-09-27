@@ -33,6 +33,7 @@ PHASES = [
     ("Phase 15", "Exact-bit payload embedding", "test_phase15_payload_bits.py"),
     ("Phase 16", "Single-pass blind analysis", "test_phase16_blind_analysis_single_pass.py"),
     ("Phase 17", "Isolated blind-analysis worker", "test_phase17_blind_worker_isolation.py"),
+    ("Phase 18", "Blind patchability contract", "test_phase18_blind_patchability_contract.py"),
 ]
 
 SEP  = '-' * 58
