@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 from types import SimpleNamespace
 
 from benchmark.blind_core_trial import (
+    _position_match_stats,
     _select_operating_asset,
     _worker_process_id,
     run_isolated,
@@ -44,11 +45,26 @@ def t_asset_selection_uses_locked_sidecar_contract() -> None:
     assert asset == ("deadline_q22_g1_600f", "cover.h264", "stego.h264", 1232)
 
 
+def t_position_comparison_measures_set_and_order() -> None:
+    derived = [(1, 0, 2), (2, 0, 1), (3, 0, 4)]
+    embedded = [(1, 0, 2), (2, 0, 3), (4, 0, 4)]
+
+    stats = _position_match_stats(derived, embedded)
+
+    assert stats == {
+        "set_overlap": 1,
+        "set_overlap_ratio": 1 / 3,
+        "prefix_match": 1,
+        "prefix_match_ratio": 1 / 3,
+    }
+
+
 def main() -> None:
     section("Phase 17 - Isolated blind-analysis worker")
     results = [
         run_test("worker_runs_in_separate_process", t_worker_runs_in_separate_process),
         run_test("asset_selection_uses_locked_sidecar_contract", t_asset_selection_uses_locked_sidecar_contract),
+        run_test("position_comparison_measures_set_and_order", t_position_comparison_measures_set_and_order),
     ]
     raise SystemExit(summarise(results, "Phase 17"))
 
