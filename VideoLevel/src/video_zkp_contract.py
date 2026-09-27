@@ -193,3 +193,42 @@ def build_video_zkp_statement(
         registry_epoch=unsigned["registry_epoch"], policy_canonical=policy_canonical,
         statement_id=statement_id,
     )
+
+
+def verify_video_zkp_statement_binding(
+    statement: VideoZkpStatement,
+    registry: object,
+    issuer_public_key: bytes,
+    *,
+    expected_relation_id: str,
+    expected_policy_hash: str,
+    minimum_epoch: int = 0,
+) -> tuple[str, int]:
+    """Verify canonical statement fields against verifier-pinned registry data.
+
+    The relation ID, policy hash, issuer key, and minimum registry epoch are
+    verifier configuration. They must not be copied from ``statement`` or a
+    video. This helper validates the statement/registry trust binding only; it
+    does not verify a ZK proof or the files named by relation artifact hashes.
+    """
+    from .zkp_registry import SignedZkpRelationRegistry
+
+    if not isinstance(statement, VideoZkpStatement):
+        raise ValueError("statement must be a VideoZkpStatement")
+    if not isinstance(registry, SignedZkpRelationRegistry):
+        raise ValueError("registry must be a SignedZkpRelationRegistry")
+
+    # Reparse to reject manually constructed or mutated dataclass instances
+    # whose cached statement_id does not match the canonical public bytes.
+    canonical_statement = VideoZkpStatement.from_dict(statement.to_dict())
+    statement_policy_hash = policy_hash(json.loads(canonical_statement.policy_canonical))
+    return registry.verify_statement_binding(
+        issuer_public_key,
+        statement_relation_id=canonical_statement.relation_id,
+        expected_relation_id=expected_relation_id,
+        statement_policy_hash=statement_policy_hash,
+        expected_policy_hash=expected_policy_hash,
+        statement_registry_root=canonical_statement.registry_root,
+        statement_registry_epoch=canonical_statement.registry_epoch,
+        minimum_epoch=minimum_epoch,
+    )
