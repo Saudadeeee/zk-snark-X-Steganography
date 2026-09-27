@@ -2,7 +2,9 @@ package main
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/KarpelesLab/lnp22/nizk"
@@ -82,7 +84,8 @@ func TestProofRejectsChangedContext(t *testing.T) {
 	baseStatement := &nizk.Statement{A: baseMatrix, T: baseTarget}
 	witness := &nizk.Witness{S: baseWitness}
 
-	units, _, err := deriveUnits([]byte("video statement A"), params.Ring.Q)
+	contextBytes := []byte("video statement A")
+	units, contextDigest, err := deriveUnits(contextBytes, params.Ring.Q)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,15 +100,54 @@ func TestProofRejectsChangedContext(t *testing.T) {
 	if !nizk.VerifyLinear(proofParams, statement, proof) {
 		t.Fatal("proof did not verify against its original context")
 	}
+	proofBytes, err := json.Marshal(proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relationBytes, err := marshalPublicRelation(
+		proofParams,
+		statement,
+		params.K,
+		params.L,
+		len(units),
+		contextDigest,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid, err := verifySerializedArtifacts(contextBytes, relationBytes, proofBytes)
+	if err != nil || !valid {
+		t.Fatalf("serialized proof and parameter manifest did not verify: valid=%t err=%v", valid, err)
+	}
 
 	mutatedUnits := append([]int64(nil), units...)
-	mutatedUnits[0] = mutatedUnits[0]% (params.Ring.Q-1) + 1
+	mutatedUnits[0] = mutatedUnits[0]%(params.Ring.Q-1) + 1
 	_, mutatedStatement, _, err := augmentLinearRelation(params, baseStatement, witness, mutatedUnits)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if nizk.VerifyLinear(proofParams, mutatedStatement, proof) {
 		t.Fatal("proof verified after context mutation")
+	}
+	valid, err = verifySerializedArtifacts([]byte("video statement B"), relationBytes, proofBytes)
+	if err == nil && valid {
+		t.Fatal("serialized proof verified after context mutation")
+	}
+}
+
+func TestReadCanonicalContextRejectsOversizedInput(t *testing.T) {
+	input := strings.NewReader(strings.Repeat("x", maxCanonicalContextBytes+1))
+	if _, err := readCanonicalContext(input); err == nil {
+		t.Fatal("oversized canonical context was accepted")
+	}
+}
+
+func TestValidateOutputPathsRejectsAliases(t *testing.T) {
+	if err := validateOutputPaths("results/proof.json", "results/./proof.json"); err == nil {
+		t.Fatal("equivalent proof and relation output paths were accepted")
+	}
+	if err := validateOutputPaths("results/proof.json", "results/relation.json"); err != nil {
+		t.Fatalf("distinct output paths were rejected: %v", err)
 	}
 }
 
