@@ -96,6 +96,16 @@ def t_statement_mutation_changes_public_augmented_relation() -> None:
     assert first.matrix != second.matrix or first.lazer_t != second.lazer_t
 
 
+def t_context_relation_rejects_statement_of_wrong_type() -> None:
+    from src.video_zkp_contract import _validate_context_statement_and_modulus
+
+    try:
+        _validate_context_statement_and_modulus("not a statement", 101)  # type: ignore[arg-type]
+    except TypeError:
+        return
+    raise AssertionError("wrong statement type must raise TypeError")
+
+
 def t_context_relation_rejects_bad_modulus_and_ragged_polynomials() -> None:
     from src.video_zkp_contract import (
         _validate_context_statement_and_modulus,
@@ -136,6 +146,10 @@ def main() -> None:
         run_test(
             "statement_mutation_changes_public_augmented_relation",
             t_statement_mutation_changes_public_augmented_relation,
+        ),
+        run_test(
+            "context_relation_rejects_statement_of_wrong_type",
+            t_context_relation_rejects_statement_of_wrong_type,
         ),
         run_test(
             "context_relation_rejects_bad_modulus_and_ragged_polynomials",
