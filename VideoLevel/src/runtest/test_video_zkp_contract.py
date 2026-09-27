@@ -113,6 +113,93 @@ def t_manifest_preserves_a_future_zkp_statement_identifier() -> None:
     assert restored.proof.statement_id == statement_id
 
 
+def t_statement_registry_binding_uses_verifier_pins_and_rejects_mutations() -> None:
+    from src.lattice_pq import LatticeSigner
+    from src.video_zkp_contract import (
+        build_video_zkp_statement,
+        payload_commitment,
+        policy_hash,
+        verify_video_zkp_statement_binding,
+    )
+    from src.zkp_registry import SignedZkpRelationRegistry
+
+    policy = {
+        "codec": "h264-baseline-cavlc",
+        "embedding_strategy": "t1_sign_flip",
+        "max_modifications_per_block": 1,
+        "proof_backend": "lazer",
+    }
+    descriptor = {
+        "zkp_suite": "lazer-v1",
+        "constraint_module_hash": "11" * 32,
+        "verifier_key_hash": "22" * 32,
+        "parameter_set_hash": "33" * 32,
+        "policy_hash": policy_hash(policy),
+    }
+    issuer_public_key, issuer_private_key = LatticeSigner.generate_keypair()
+    registry = SignedZkpRelationRegistry.create(epoch=12, relations=[descriptor]).sign(
+        issuer_private_key, signer_id="issuer-v1"
+    )
+    relation_id = registry.relations[0].relation_id
+    statement = build_video_zkp_statement(
+        session_id=bytes(range(32)),
+        payload_commitment_hex=payload_commitment(b"payload", b"o" * 32),
+        cover_hash="41" * 32,
+        stego_hash="42" * 32,
+        positions_hash="43" * 32,
+        relation_id=relation_id,
+        registry_root=registry.root(),
+        registry_epoch=registry.epoch,
+        policy=policy,
+    )
+
+    assert verify_video_zkp_statement_binding(
+        statement,
+        registry,
+        issuer_public_key,
+        expected_relation_id=relation_id,
+        expected_policy_hash=descriptor["policy_hash"],
+        minimum_epoch=10,
+    ) == (registry.root(), registry.epoch)
+
+    invalid_cases = [
+        {
+            "statement": build_video_zkp_statement(
+                bytes(range(32)), statement.payload_commitment, "41" * 32, "42" * 32,
+                "43" * 32, "ff" * 32, registry.root(), registry.epoch, policy,
+            ),
+            "expected_relation_id": relation_id,
+            "expected_policy_hash": descriptor["policy_hash"],
+        },
+        {
+            "statement": build_video_zkp_statement(
+                bytes(range(32)), statement.payload_commitment, "41" * 32, "42" * 32,
+                "43" * 32, relation_id, "ff" * 32, registry.epoch, policy,
+            ),
+            "expected_relation_id": relation_id,
+            "expected_policy_hash": descriptor["policy_hash"],
+        },
+        {
+            "statement": statement,
+            "expected_relation_id": relation_id,
+            "expected_policy_hash": "ee" * 32,
+        },
+    ]
+    for case in invalid_cases:
+        try:
+            verify_video_zkp_statement_binding(
+                case["statement"],
+                registry,
+                issuer_public_key,
+                expected_relation_id=case["expected_relation_id"],
+                expected_policy_hash=case["expected_policy_hash"],
+                minimum_epoch=10,
+            )
+        except ValueError:
+            continue
+        raise AssertionError("statement binding accepted an unpinned relation, root, or policy")
+
+
 def main() -> None:
     section("PQ video ZKP statement contract")
     results = [
@@ -121,6 +208,7 @@ def main() -> None:
         run_test("statement_rejects_ambiguous_or_wrongly_sized_inputs", t_statement_rejects_ambiguous_or_wrongly_sized_inputs),
         run_test("payload_commitment_is_opening_bound_and_statement_parser_rejects_tampering", t_payload_commitment_is_opening_bound_and_statement_parser_rejects_tampering),
         run_test("manifest_preserves_a_future_zkp_statement_identifier", t_manifest_preserves_a_future_zkp_statement_identifier),
+        run_test("statement_registry_binding_uses_verifier_pins_and_rejects_mutations", t_statement_registry_binding_uses_verifier_pins_and_rejects_mutations),
     ]
     raise SystemExit(summarise(results, "PQ video ZKP statement contract"))
 
