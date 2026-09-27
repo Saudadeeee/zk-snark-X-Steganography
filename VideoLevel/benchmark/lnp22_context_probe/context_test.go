@@ -119,6 +119,12 @@ func TestProofRejectsChangedContext(t *testing.T) {
 	if err != nil || !valid {
 		t.Fatalf("serialized proof and parameter manifest did not verify: valid=%t err=%v", valid, err)
 	}
+	if _, err := verifySerializedArtifacts(nil, relationBytes, proofBytes); err == nil || !strings.Contains(err.Error(), "context bytes size") {
+		t.Fatalf("empty canonical context did not hit the input bound: %v", err)
+	}
+	if _, err := verifySerializedArtifacts(make([]byte, maxCanonicalContextBytes+1), relationBytes, proofBytes); err == nil || !strings.Contains(err.Error(), "context bytes size") {
+		t.Fatalf("oversized canonical context did not hit the input bound: %v", err)
+	}
 
 	mutatedUnits := append([]int64(nil), units...)
 	mutatedUnits[0] = mutatedUnits[0]%(params.Ring.Q-1) + 1
