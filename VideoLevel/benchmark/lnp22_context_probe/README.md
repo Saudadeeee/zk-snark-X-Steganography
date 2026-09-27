@@ -62,3 +62,7 @@ verification passed and changing the context was rejected. The proof SHA-256
 was `27936e592d79595cb632466de90324689512627db95ed9ace2159ce57732548b`.
 This is a single timing sample for the random base relation described above,
 not a video ZKP benchmark or an estimate of end-to-end embedding performance.
+The serialized augmented rows were also independently reconstructed with the
+project's Python `derive_statement_context_units()` implementation: all 12
+context limbs matched exactly for this statement. This checks cross-language
+encoding consistency only; it does not validate the meaning of the relation.
