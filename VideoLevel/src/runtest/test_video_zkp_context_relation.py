@@ -97,9 +97,19 @@ def t_statement_mutation_changes_public_augmented_relation() -> None:
 
 
 def t_context_relation_rejects_bad_modulus_and_ragged_polynomials() -> None:
-    from src.video_zkp_contract import build_context_augmented_lattice_relation
+    from src.video_zkp_contract import (
+        _validate_context_statement_and_modulus,
+        build_context_augmented_lattice_relation,
+    )
 
     statement = _statement()
+    try:
+        _validate_context_statement_and_modulus(statement, 2)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("binary modulus accepted for nonzero-limb encoding")
+
     for matrix, target, modulus in (
         ((((1,),),), ((1,),), 15),
         ((((1, 2),),), ((1,),), 101),
