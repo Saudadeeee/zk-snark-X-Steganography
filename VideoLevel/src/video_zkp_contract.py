@@ -205,7 +205,7 @@ def _validate_context_statement_and_modulus(
     statement: VideoZkpStatement, modulus: int
 ) -> tuple[VideoZkpStatement, bytes]:
     if not isinstance(statement, VideoZkpStatement):
-        raise ValueError("statement must be a VideoZkpStatement")
+        raise TypeError("statement must be a VideoZkpStatement")
     if (
         isinstance(modulus, bool)
         or not isinstance(modulus, int)
@@ -303,7 +303,6 @@ def build_context_augmented_lattice_relation(
         or not first_row
     ):
         raise ValueError("matrix must have at least one column")
-    row_count = len(matrix)
     column_count = len(first_row)
     first_element = first_row[0]
     if (
