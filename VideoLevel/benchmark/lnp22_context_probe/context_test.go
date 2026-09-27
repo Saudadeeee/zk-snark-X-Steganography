@@ -4,12 +4,29 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"math/big"
+	"runtime/debug"
 	"strings"
 	"testing"
 
 	"github.com/KarpelesLab/lnp22/nizk"
 	"github.com/KarpelesLab/lnp22/ring"
 )
+
+func TestLNP22GoModuleVersionContainsPinnedCommit(t *testing.T) {
+	buildInfo, ok := debug.ReadBuildInfo()
+	if !ok {
+		t.Fatal("Go build information is unavailable")
+	}
+	for _, dependency := range buildInfo.Deps {
+		if dependency.Path == "github.com/KarpelesLab/lnp22" {
+			if !strings.Contains(dependency.Version, "-"+pinnedLNP22Revision[:12]) {
+				t.Fatalf("LNP22 module version %q does not identify pinned commit %s", dependency.Version, pinnedLNP22Revision)
+			}
+			return
+		}
+	}
+	t.Fatal("LNP22 module pin is missing from Go build information")
+}
 
 func TestDeriveUnitsEncodesStatementDigest(t *testing.T) {
 	const modulus int64 = 8_380_417
@@ -126,6 +143,18 @@ func TestProofRejectsChangedContext(t *testing.T) {
 	}
 	if _, err := verifySerializedArtifacts(contextBytes, relationBytes, proofBytes, strings.Repeat("0", 64)); err == nil || !strings.Contains(err.Error(), "trusted base relation digest") {
 		t.Fatalf("proof was not rejected against a different verifier-pinned relation: %v", err)
+	}
+	var changedBase publicRelation
+	if err := json.Unmarshal(relationBytes, &changedBase); err != nil {
+		t.Fatal(err)
+	}
+	changedBase.Statement.A[0][0][1] = 1
+	changedRelationBytes, err := json.Marshal(changedBase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verifySerializedArtifacts(contextBytes, changedRelationBytes, proofBytes, trustedRelationDigest); err == nil || !strings.Contains(err.Error(), "trusted base relation digest") {
+		t.Fatalf("proof was not rejected after a canonical base relation mutation: %v", err)
 	}
 	if _, err := verifySerializedArtifacts(nil, relationBytes, proofBytes, trustedRelationDigest); err == nil || !strings.Contains(err.Error(), "context bytes size") {
 		t.Fatalf("empty canonical context did not hit the input bound: %v", err)
