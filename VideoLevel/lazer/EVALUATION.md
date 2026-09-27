@@ -112,6 +112,33 @@ The current LaZer preflight on this host returned
 was built or run, so there is still no reviewed lattice-ZK backend connected
 to the video pipeline.
 
+### Carrier-map re-derivation probe
+
+On the same Foreman CIF 150-frame input, an unvalidated one-byte smoke embed
+was analyzed again from the resulting stego video. The output and machine
+readable reports are preserved under
+`tmp/goal-blind-probe-dpqjkz5v/` (`position_probe.json`,
+`used_vs_rederived.json`, and `stego.h264`). The probe observed:
+
+- Cover and stego analysis each produced 139,551 raw carrier candidates in
+  identical order and with identical sets.
+- Re-running patchability on cover and stego produced 576 candidates with the
+  same set.
+- The embedder used 320 positions. They were an order-preserving subsequence
+  of the re-derived list, but not its first 320: the first difference was at
+  candidate index 211, where `(36805, 14, -12)` was skipped by final
+  reconstruction and later positions filled the payload budget.
+- Analysis took 61.816 s for the cover and 62.098 s for the stego; embedding
+  took 9.159 s. These are single cold-cache observations, not a benchmark
+  distribution. This probe did not run strict decode validation.
+
+This indicates that carrier discovery itself is stable for this sample, while
+the set actually applied by reconstruction can omit positions. The signed
+positions metadata currently records that omission. A video-only extractor
+must either make reconstruction failures deterministic before embedding or
+carry a recoverable skip map in an in-video bootstrap; assuming the first N
+re-derived positions is incorrect. The packet currently has no such skip map.
+
 ## What is integrated
 
 - Immutable upstream pin: `10eafeca4cd53ff4fc54193dce904dbd0026fefd`.
