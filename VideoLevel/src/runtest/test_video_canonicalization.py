@@ -32,7 +32,7 @@ def t_lsb_carriers_normalize_magnitude_and_handle_unit_value() -> None:
         coefficients, [(1, 4, 0), (1, 4, 1), (1, 4, 2)]
     )
 
-    assert normalized == [(1, 4, [2, -4, 0] + [0] * 13)]
+    assert normalized == [(1, 4, [2, -4, 2] + [0] * 13)]
 
 
 def t_empty_carrier_set_returns_no_modifications() -> None:
@@ -102,7 +102,7 @@ def t_video_hash_reconstructs_a_carrier_normalized_stream() -> None:
         ):
             def write_canonical_stream(*args, **kwargs):
                 Path(args[2]).write_bytes(expected_stream)
-                return {"success": True}
+                return {"success": True, "applied_block_keys": [(1, 2)]}
 
             reconstructor.return_value.reconstruct_video.side_effect = write_canonical_stream
             digest = canonical_video_sha256(source, [(1, 2, 0)])
@@ -110,6 +110,35 @@ def t_video_hash_reconstructs_a_carrier_normalized_stream() -> None:
         assert digest == hashlib.sha256(expected_stream).hexdigest()
         call = reconstructor.return_value.reconstruct_video.call_args
         assert call.args[1] == [(1, 2, [2, 0, 0] + [0] * 13)]
+
+
+def t_video_hash_rejects_blocks_not_applied_by_reconstructor() -> None:
+    import tempfile
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        source = Path(temp_dir) / "cover.h264"
+        source.write_bytes(b"input stream")
+        coefficients = [(1, 2, [3, 0, 0] + [0] * 13)]
+        with (
+            patch(
+                "src.core.analysis_cache.load_or_build_video_analysis",
+                return_value=(coefficients, {1: "frame"}, {}, {}, {}, []),
+            ),
+            patch("src.core.analysis_cache.load_or_build_reconstruction_context", return_value={}),
+            patch("src.bitstream.bitstream_ops.BitstreamReconstructor") as reconstructor,
+        ):
+            def skip_patching(*args, **kwargs):
+                Path(args[2]).write_bytes(b"unchanged source")
+                return {"success": True, "applied_block_keys": []}
+
+            reconstructor.return_value.reconstruct_video.side_effect = skip_patching
+            try:
+                canonical_video_sha256(source, [(1, 2, 0)])
+            except RuntimeError as error:
+                assert "did not apply every carrier block" in str(error)
+            else:
+                raise AssertionError("unapplied carrier normalization must not be hashed")
 
 
 def main() -> None:
@@ -123,6 +152,7 @@ def main() -> None:
         run_test("duplicate_carrier_is_rejected", t_duplicate_carrier_is_rejected),
         run_test("empty_carrier_list_hashes_original_without_parsing", t_empty_carrier_list_hashes_original_without_parsing),
         run_test("video_hash_reconstructs_a_carrier_normalized_stream", t_video_hash_reconstructs_a_carrier_normalized_stream),
+        run_test("video_hash_rejects_blocks_not_applied_by_reconstructor", t_video_hash_rejects_blocks_not_applied_by_reconstructor),
     ]
     raise SystemExit(summarise(results, "Video carrier canonicalization"))
 
