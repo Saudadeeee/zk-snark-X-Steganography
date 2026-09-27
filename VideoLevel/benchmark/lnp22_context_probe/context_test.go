@@ -12,15 +12,15 @@ import (
 	"github.com/KarpelesLab/lnp22/ring"
 )
 
-func TestLNP22GoModuleVersionContainsPinnedCommit(t *testing.T) {
+func TestLNP22GoModuleVersionMatchesManifestPin(t *testing.T) {
 	buildInfo, ok := debug.ReadBuildInfo()
 	if !ok {
 		t.Fatal("Go build information is unavailable")
 	}
 	for _, dependency := range buildInfo.Deps {
 		if dependency.Path == "github.com/KarpelesLab/lnp22" {
-			if !strings.Contains(dependency.Version, "-"+pinnedLNP22Revision[:12]) {
-				t.Fatalf("LNP22 module version %q does not identify pinned commit %s", dependency.Version, pinnedLNP22Revision)
+			if dependency.Version != pinnedLNP22ModuleVersion || dependency.Sum != pinnedLNP22ModuleSum {
+				t.Fatalf("LNP22 module version/checksum %q %q do not match manifest pin %s %s", dependency.Version, dependency.Sum, pinnedLNP22ModuleVersion, pinnedLNP22ModuleSum)
 			}
 			return
 		}
