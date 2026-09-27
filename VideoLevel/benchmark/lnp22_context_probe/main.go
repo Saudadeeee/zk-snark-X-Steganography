@@ -7,7 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"time"
 
@@ -33,15 +32,6 @@ type report struct {
 	SecurityStatus              string  `json:"security_status"`
 }
 
-type publicRelation struct {
-	Protocol string          `json:"protocol"`
-	Q        int64           `json:"q"`
-	N        int             `json:"n"`
-	K        int             `json:"k"`
-	L        int             `json:"l"`
-	A        *nizk.Statement `json:"statement"`
-}
-
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -56,12 +46,12 @@ func run() error {
 	if *proofPath == "" || *relationPath == "" {
 		return errors.New("-proof-out and -relation-out are required")
 	}
-	contextBytes, err := io.ReadAll(os.Stdin)
+	if err := validateOutputPaths(*proofPath, *relationPath); err != nil {
+		return err
+	}
+	contextBytes, err := readCanonicalContext(os.Stdin)
 	if err != nil {
 		return fmt.Errorf("read canonical statement from stdin: %w", err)
-	}
-	if len(contextBytes) == 0 {
-		return errors.New("canonical statement on stdin must not be empty")
 	}
 
 	baseParams := nizk.DefaultParams()
@@ -112,28 +102,42 @@ func run() error {
 		return errors.New("proof unexpectedly verified after statement-context mutation")
 	}
 
-	relationBytes, err := json.Marshal(publicRelation{
-		Protocol: "lnp22-linear-context-probe-v1",
-		Q:        params.Ring.Q,
-		N:        params.Ring.N,
-		K:        params.K,
-		L:        params.L,
-		A:        statement,
-	})
+	relationBytes, err := marshalPublicRelation(
+		params,
+		statement,
+		baseParams.K,
+		baseParams.L,
+		len(units),
+		contextDigest,
+	)
 	if err != nil {
 		return fmt.Errorf("serialize public relation: %w", err)
 	}
-	if err := os.WriteFile(*proofPath, proofBytes, 0o600); err != nil {
+	serializedValid, err := verifySerializedArtifacts(contextBytes, relationBytes, proofBytes)
+	if err != nil {
+		return fmt.Errorf("verify serialized artifacts: %w", err)
+	}
+	if !serializedValid {
+		return errors.New("serialized proof artifact failed verification")
+	}
+	if err := writeExclusive(*proofPath, proofBytes); err != nil {
 		return fmt.Errorf("write proof artifact: %w", err)
 	}
-	if err := os.WriteFile(*relationPath, relationBytes, 0o600); err != nil {
+	if err := writeExclusive(*relationPath, relationBytes); err != nil {
+		cleanupErr := os.Remove(*proofPath)
+		if cleanupErr != nil && !os.IsNotExist(cleanupErr) {
+			return errors.Join(
+				fmt.Errorf("write public relation artifact: %w", err),
+				fmt.Errorf("remove proof artifact after relation write failure: %w", cleanupErr),
+			)
+		}
 		return fmt.Errorf("write public relation artifact: %w", err)
 	}
 	proofHash := sha256.Sum256(proofBytes)
 	contextHash := sha256.Sum256(contextBytes)
 	result := report{
 		Backend:                     "LNP22 experimental linear relation",
-		PinnedRevision:              "878cf9d5bf73ae387b73a0843edc3364fd0f6be4",
+		PinnedRevision:              pinnedLNP22Revision,
 		ContextDigestSHA256:         fmt.Sprintf("%x", contextHash),
 		ContextDigestSHA3:           fmt.Sprintf("%x", contextDigest),
 		ContextUnitCount:            len(units),
@@ -149,4 +153,31 @@ func run() error {
 		SecurityStatus:              "experimental; source implementation and application relation are not independently audited",
 	}
 	return json.NewEncoder(os.Stdout).Encode(result)
+}
+
+func writeExclusive(path string, data []byte) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		closeErr := file.Close()
+		removeErr := os.Remove(path)
+		return errors.Join(err, cleanupErrors(closeErr, removeErr))
+	}
+	if err := file.Close(); err != nil {
+		removeErr := os.Remove(path)
+		return errors.Join(err, cleanupErrors(removeErr))
+	}
+	return nil
+}
+
+func cleanupErrors(errs ...error) error {
+	var failures []error
+	for _, err := range errs {
+		if err != nil && !os.IsNotExist(err) {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }
