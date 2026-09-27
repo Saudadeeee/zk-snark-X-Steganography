@@ -14,11 +14,13 @@ if str(ROOT) not in sys.path:
 from types import SimpleNamespace
 
 from benchmark.blind_core_trial import (
+    BLIND_SYNC_KEY,
     _position_match_stats,
     _select_operating_asset,
     _worker_process_id,
     run_isolated,
 )
+from benchmark.locked_operating_contract import LOCKED_CHAOS_KEY
 from src.runtest._helpers import run_test, section, summarise
 
 
@@ -59,12 +61,17 @@ def t_position_comparison_measures_set_and_order() -> None:
     }
 
 
+def t_blind_sync_key_matches_embedder_chaos_key() -> None:
+    assert BLIND_SYNC_KEY == LOCKED_CHAOS_KEY
+
+
 def main() -> None:
     section("Phase 17 - Isolated blind-analysis worker")
     results = [
         run_test("worker_runs_in_separate_process", t_worker_runs_in_separate_process),
         run_test("asset_selection_uses_locked_sidecar_contract", t_asset_selection_uses_locked_sidecar_contract),
         run_test("position_comparison_measures_set_and_order", t_position_comparison_measures_set_and_order),
+        run_test("blind_sync_key_matches_embedder_chaos_key", t_blind_sync_key_matches_embedder_chaos_key),
     ]
     raise SystemExit(summarise(results, "Phase 17"))
 
