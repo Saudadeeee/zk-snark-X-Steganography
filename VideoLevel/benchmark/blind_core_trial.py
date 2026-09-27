@@ -10,17 +10,67 @@ the architecture is still being shaped.
 """
 
 import json
+import os
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from benchmark._common import OUTPUT_DIR, RESULTS_DIR, cache_load, cache_save, select_best_sec1_operating_asset
+from benchmark._common import RESULTS_DIR, cache_load, cache_save
+from benchmark.locked_operating_contract import load_best_locked_operating_contract
 from src.blind_sync import derive_blind_positions_validated_pool_proxy
 
 CACHE_KEY = "blind_core_trial"
 SECRET_KEY = b"zk_mv_stego_2026_secret_key!!!!!"
 MESSAGE = b"Hello ZK-Stego"
+PREFERRED_SEQUENCES = [
+    "coastguard_q22_g1",
+    "deadline_q22_g1_600f",
+    "deadline_q22_g1",
+    "coastguard_q22_g1_1000f",
+    "foreman_q22_g1",
+]
+
+
+def _worker_process_id() -> int:
+    """Return the executing process ID; also used to verify isolation."""
+    return os.getpid()
+
+
+def _derive_blind_positions_worker(
+    video_path: str,
+    sync_key: bytes,
+    required_bits: int,
+) -> tuple[list[tuple[int, int, int]], dict]:
+    positions, metadata = derive_blind_positions_validated_pool_proxy(
+        video_path,
+        sync_key,
+        required_bits=required_bits,
+        use_analysis_cache=False,
+    )
+    return positions, metadata.__dict__
+
+
+def run_isolated(worker, *args):
+    """Run one video analysis in a disposable process to release parser heap."""
+    with ProcessPoolExecutor(max_workers=1) as executor:
+        return executor.submit(worker, *args).result()
+
+
+def _select_operating_asset(required_bits: int) -> tuple[str, str, str, int]:
+    contract = load_best_locked_operating_contract(
+        required_bits=required_bits,
+        preferred_sequences=PREFERRED_SEQUENCES,
+    )
+    if contract is None:
+        raise RuntimeError("No verified SEC1 operating asset meets required_bits")
+    return (
+        contract.sequence_name,
+        contract.video_path,
+        contract.stego_path,
+        int(contract.bits_required),
+    )
 
 
 def collect_data(force: bool = False) -> dict:
@@ -29,34 +79,22 @@ def collect_data(force: bool = False) -> dict:
         print("  [cache hit] blind core trial")
         return cached
 
-    required_bits = (4 + len(MESSAGE) + 129) * 8
-    seq_name, video_path = select_best_sec1_operating_asset(
-        required_bits=1232,
-        preferred_sequences=[
-            "coastguard_q22_g1",
-            "deadline_q22_g1",
-            "coastguard_q22_g1_1000f",
-            "foreman_q22_g1",
-        ],
-    )
-    if not seq_name or not video_path:
-        raise RuntimeError("No SEC1 operating asset available for blind core trial")
-
-    stego_path = OUTPUT_DIR / f"sec1_stego_{seq_name}.h264"
+    seq_name, video_path, stego_path, required_bits = _select_operating_asset(required_bits=1232)
+    stego_path = Path(stego_path)
     if not stego_path.exists():
         raise RuntimeError(f"Missing SEC1 stego artifact for {seq_name}")
 
-    cover_positions, cover_metadata = derive_blind_positions_validated_pool_proxy(
+    cover_positions, cover_metadata = run_isolated(
+        _derive_blind_positions_worker,
         video_path,
         SECRET_KEY,
-        required_bits=required_bits,
-        use_analysis_cache=True,
+        required_bits,
     )
-    stego_positions, stego_metadata = derive_blind_positions_validated_pool_proxy(
+    stego_positions, stego_metadata = run_isolated(
+        _derive_blind_positions_worker,
         str(stego_path),
         SECRET_KEY,
-        required_bits=required_bits,
-        use_analysis_cache=True,
+        required_bits,
     )
 
     set_overlap = len(set(cover_positions) & set(stego_positions))
@@ -73,8 +111,8 @@ def collect_data(force: bool = False) -> dict:
         "set_overlap_ratio": set_overlap / max(1, len(cover_positions)),
         "prefix_match": prefix_match,
         "prefix_match_ratio": prefix_match / max(1, len(cover_positions)),
-        "cover_metadata": cover_metadata.__dict__,
-        "stego_metadata": stego_metadata.__dict__,
+        "cover_metadata": cover_metadata,
+        "stego_metadata": stego_metadata,
     }
     cache_save(CACHE_KEY, data)
     return data

@@ -32,6 +32,7 @@ PHASES = [
     ("Phase 14", "LaZer backend preflight", "test_lazer_backend.py"),
     ("Phase 15", "Exact-bit payload embedding", "test_phase15_payload_bits.py"),
     ("Phase 16", "Single-pass blind analysis", "test_phase16_blind_analysis_single_pass.py"),
+    ("Phase 17", "Isolated blind-analysis worker", "test_phase17_blind_worker_isolation.py"),
 ]
 
 SEP  = '-' * 58
