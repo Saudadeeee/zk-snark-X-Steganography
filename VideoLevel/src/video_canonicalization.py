@@ -89,6 +89,8 @@ def canonicalize_carrier_coefficients(
             canonical_value = 1
         else:
             magnitude = abs(value) & ~1
+            if magnitude == 0:
+                magnitude = 2
             canonical_value = magnitude if value > 0 else -magnitude
 
         if canonical_value == value:
@@ -161,4 +163,17 @@ def canonical_video_sha256(
             raise RuntimeError("H.264 reconstruction failed during canonicalization")
         if not canonical_path.is_file() or canonical_path.stat().st_size == 0:
             raise RuntimeError("H.264 canonicalization produced no output stream")
+        if not isinstance(result, dict) or not isinstance(result.get("applied_block_keys"), list):
+            raise RuntimeError("H.264 reconstruction omitted applied-block evidence")
+        expected_blocks = {(macroblock, block) for macroblock, block, _ in modifications}
+        try:
+            applied_blocks = {
+                (int(key[0]), int(key[1]))
+                for key in result["applied_block_keys"]
+                if isinstance(key, (tuple, list)) and len(key) == 2
+            }
+        except (TypeError, ValueError, IndexError) as error:
+            raise RuntimeError("H.264 reconstruction returned malformed applied-block evidence") from error
+        if expected_blocks != applied_blocks:
+            raise RuntimeError("H.264 reconstruction did not apply exactly the carrier blocks")
         return digest_file(canonical_path)
