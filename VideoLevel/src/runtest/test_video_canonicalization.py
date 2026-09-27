@@ -17,6 +17,14 @@ from src.video_canonicalization import (
 )
 
 
+def _pack_bits(bits: str) -> bytes:
+    packed = bytearray((len(bits) + 7) // 8)
+    for index, bit in enumerate(bits):
+        if bit == "1":
+            packed[index // 8] |= 1 << (7 - index % 8)
+    return bytes(packed)
+
+
 def t_sign_carriers_normalize_to_positive_trailing_one() -> None:
     coefficients = [(3, 7, [0, -1, 2] + [0] * 13)]
 
@@ -85,13 +93,12 @@ def t_empty_carrier_list_hashes_original_without_parsing() -> None:
 
 def t_canonical_digest_masks_variable_length_carrier_codewords() -> None:
     from types import SimpleNamespace
-    from bitstring import BitArray
 
     def parsed_nal(level: int, carrier_code: str):
         prefix = "10110110"
         suffix = "10010110"
         bits = prefix + carrier_code + suffix
-        rbsp = BitArray(bin=bits).tobytes()
+        rbsp = _pack_bits(bits)
         nal = SimpleNamespace(
             nal_unit_type=5,
             forbidden_zero_bit=0,
@@ -114,13 +121,12 @@ def t_canonical_digest_masks_variable_length_carrier_codewords() -> None:
 
 def t_canonical_digest_still_binds_noncarrier_bits() -> None:
     from types import SimpleNamespace
-    from bitstring import BitArray
 
     def parsed_nal(prefix: str):
         carrier = "101"
         suffix = "10010110"
         bits = prefix + carrier + suffix
-        rbsp = BitArray(bin=bits).tobytes()
+        rbsp = _pack_bits(bits)
         nal = SimpleNamespace(
             nal_unit_type=5,
             forbidden_zero_bit=0,
@@ -161,32 +167,6 @@ def t_video_hash_uses_parsed_nal_and_carrier_ranges() -> None:
             parser.nal_units = [nal]
             assert canonical_video_sha256(source, positions) == "ab" * 32
             digest.assert_called_once_with([nal], frames, positions)
-    import tempfile
-    from unittest.mock import patch
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        source = Path(temp_dir) / "cover.h264"
-        source.write_bytes(b"input stream")
-        coefficients = [(1, 2, [3, 0, 0] + [0] * 13)]
-        with (
-            patch(
-                "src.core.analysis_cache.load_or_build_video_analysis",
-                return_value=(coefficients, {1: "frame"}, {}, {}, {}, []),
-            ),
-            patch("src.core.analysis_cache.load_or_build_reconstruction_context", return_value={}),
-            patch("src.bitstream.bitstream_ops.BitstreamReconstructor") as reconstructor,
-        ):
-            def skip_patching(*args, **kwargs):
-                Path(args[2]).write_bytes(b"unchanged source")
-                return {"success": True, "applied_block_keys": []}
-
-            reconstructor.return_value.reconstruct_video.side_effect = skip_patching
-            try:
-                canonical_video_sha256(source, [(1, 2, 0)])
-            except RuntimeError as error:
-                assert "did not apply exactly the carrier blocks" in str(error)
-            else:
-                raise AssertionError("unapplied carrier normalization must not be hashed")
 
 
 def main() -> None:

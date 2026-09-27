@@ -8,9 +8,10 @@ an authenticated source; callers must bind the ordered positions separately.
 from __future__ import annotations
 
 import hashlib
-import tempfile
+import struct
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any, Mapping
 
 
 CoefficientBlock = tuple[int, int, Sequence[int]]
@@ -111,14 +112,13 @@ def canonical_video_sha256(
     video_path: str | Path,
     carrier_positions: Sequence[CarrierPosition],
 ) -> str:
-    """Hash the H.264 byte stream after normalizing the specified carriers.
+    """Hash the carrier-normalized H.264 syntax without re-encoding slices.
 
     Carrier locations must be supplied in the same global macroblock/block
-    coordinate system used by the embedder. The source video is never
-    modified. This function performs a full H.264 analysis and CAVLC
-    reconstruction when normalization changes coefficients, so it is
-    intentionally an offline commitment operation rather than a per-frame
-    real-time primitive.
+    coordinate system used by the embedder. Non-carrier NAL/RBSP bits are
+    committed verbatim. Each luma residual block containing a carrier is
+    represented by its canonicalized coefficient vector instead of its
+    variable-length CAVLC codeword. The source video is never modified.
     """
     source = Path(video_path).expanduser().resolve(strict=True)
     if not source.is_file():
@@ -135,45 +135,142 @@ def canonical_video_sha256(
         return digest_file(source)
 
     from .bitstream.bitstream_ops import BitstreamReconstructor
-    from .core.analysis_cache import (
-        load_or_build_reconstruction_context,
-        load_or_build_video_analysis,
-    )
+    from .bitstream.h264 import H264BitstreamParser
+    from .core.pipeline import extract_all_idr_blocks
 
-    coefficients, frame_data, _, _, _, _ = load_or_build_video_analysis(
-        str(source), use_cache=True
+    parser = H264BitstreamParser(str(source))
+    parser.parse()
+    _, frame_data, _, _, _ = extract_all_idr_blocks(
+        str(source), BitstreamReconstructor(), parser=parser
     )
-    modifications = canonicalize_carrier_coefficients(coefficients, carrier_positions)
-    if not modifications:
-        return digest_file(source)
+    return canonical_h264_digest(parser.nal_units, frame_data, carrier_positions)
 
-    context = load_or_build_reconstruction_context(str(source), use_cache=True)
-    reconstructor = BitstreamReconstructor()
-    with tempfile.TemporaryDirectory(prefix="zkstego-canonical-h264-") as temp_dir:
-        canonical_path = Path(temp_dir) / "canonical.h264"
-        result = reconstructor.reconstruct_video(
-            str(source),
-            modifications,
-            str(canonical_path),
-            max_slices=None,
-            frame_verified_data=frame_data,
-            reconstruction_context=context,
+
+def canonical_h264_digest(
+    nal_units: Sequence[Any],
+    frame_verified_data: Mapping[int, tuple[dict, dict, bytes]],
+    carrier_positions: Sequence[CarrierPosition],
+) -> str:
+    """Hash parsed NALs while replacing carrier-containing residual blocks.
+
+    The representation is length-delimited and domain-separated. It preserves
+    all non-carrier RBSP bits exactly while serializing complete affected
+    coefficient blocks as signed 64-bit values. Thus a different CAVLC
+    codeword length for the normalized carrier does not shift or invalidate
+    later syntax bits.
+    """
+    from .bitstream.bitstream_ops import BitArray
+
+    positions = list(carrier_positions)
+    if len(set(tuple(position) for position in positions)) != len(positions):
+        raise ValueError("duplicate carrier position")
+
+    frame_offsets = sorted(frame_verified_data)
+    frame_positions: dict[int, list[CarrierPosition]] = {offset: [] for offset in frame_offsets}
+    position_frames: dict[CarrierPosition, int] = {}
+    for offset in frame_offsets:
+        _, frame_blocks, _ = frame_verified_data[offset]
+        for position in positions:
+            key = (position[0], position[1])
+            if key in frame_blocks:
+                if position in position_frames:
+                    raise ValueError(f"carrier maps to multiple IDR frames: {position}")
+                position_frames[position] = offset
+                frame_positions[offset].append(position)
+    missing_positions = set(positions) - set(position_frames)
+    if missing_positions:
+        raise ValueError(f"carrier position is absent from parsed IDR blocks: {sorted(missing_positions)}")
+
+    digest = hashlib.sha256(b"zkstego/canonical-h264-carrier-normalization/v1\x00")
+    nal_index = 0
+    idr_index = 0
+    for nal in nal_units:
+        nal_type = int(nal.nal_unit_type)
+        digest.update(b"NAL\x00")
+        digest.update(
+            struct.pack(
+                ">QBBBB",
+                nal_index,
+                nal_type,
+                int(nal.forbidden_zero_bit),
+                int(nal.nal_ref_idc),
+                int(nal.start_code_size),
+            )
         )
-        if isinstance(result, dict) and result.get("success") is False:
-            raise RuntimeError("H.264 reconstruction failed during canonicalization")
-        if not canonical_path.is_file() or canonical_path.stat().st_size == 0:
-            raise RuntimeError("H.264 canonicalization produced no output stream")
-        if not isinstance(result, dict) or not isinstance(result.get("applied_block_keys"), list):
-            raise RuntimeError("H.264 reconstruction omitted applied-block evidence")
-        expected_blocks = {(macroblock, block) for macroblock, block, _ in modifications}
-        try:
-            applied_blocks = {
-                (int(key[0]), int(key[1]))
-                for key in result["applied_block_keys"]
-                if isinstance(key, (tuple, list)) and len(key) == 2
-            }
-        except (TypeError, ValueError, IndexError) as error:
-            raise RuntimeError("H.264 reconstruction returned malformed applied-block evidence") from error
-        if expected_blocks != applied_blocks:
-            raise RuntimeError("H.264 reconstruction did not apply exactly the carrier blocks")
-        return digest_file(canonical_path)
+        nal_index += 1
+        if nal_type != 5:
+            raw_rbsp = bytes(nal.rbsp_byte)
+            digest.update(b"RAW\x00" + struct.pack(">Q", len(raw_rbsp)) + raw_rbsp)
+            continue
+
+        if idr_index >= len(frame_offsets):
+            raise ValueError("more IDR NAL units than parsed IDR frame data")
+        frame_offset = frame_offsets[idr_index]
+        idr_index += 1
+        offsets, frame_blocks, frame_rbsp = frame_verified_data[frame_offset]
+        if bytes(nal.rbsp_byte) != bytes(frame_rbsp):
+            raise ValueError("IDR NAL does not match its parsed frame data")
+        current_positions = frame_positions[frame_offset]
+        if not current_positions:
+            raw_rbsp = bytes(nal.rbsp_byte)
+            digest.update(b"RAW\x00" + struct.pack(">Q", len(raw_rbsp)) + raw_rbsp)
+            continue
+
+        normalization = canonicalize_carrier_coefficients(
+            [(mb, block, levels) for (mb, block), levels in frame_blocks.items()],
+            current_positions,
+        )
+        normalized_blocks = {
+            (mb, block): levels for mb, block, levels in normalization
+        }
+        affected_keys = sorted({(mb, block) for mb, block, _ in current_positions})
+        bitstream = BitArray(bytes(nal.rbsp_byte))
+        syntax_end = _rbsp_syntax_bit_length(bytes(nal.rbsp_byte))
+        cursor = 0
+        for key in sorted(affected_keys, key=lambda block_key: offsets.get(block_key, {}).get("start_bit", -1)):
+            block_offset = offsets.get(key)
+            if not isinstance(block_offset, dict):
+                raise ValueError(f"carrier block has no CAVLC bit range: {key}")
+            start = block_offset.get("start_bit")
+            end = block_offset.get("end_bit")
+            if (
+                isinstance(start, bool)
+                or not isinstance(start, int)
+                or isinstance(end, bool)
+                or not isinstance(end, int)
+                or not cursor <= start < end <= syntax_end
+            ):
+                raise ValueError(f"carrier block has an invalid CAVLC bit range: {key}")
+            _update_raw_bit_segment(digest, bitstream, cursor, start)
+            levels = normalized_blocks.get(key, frame_blocks[key])
+            digest.update(b"BLOCK\x00" + struct.pack(">QII", key[0], key[1], len(levels)))
+            for level in levels:
+                if isinstance(level, bool) or not isinstance(level, int):
+                    raise ValueError(f"carrier block contains a non-integer coefficient: {key}")
+                digest.update(struct.pack(">q", level))
+            cursor = end
+        _update_raw_bit_segment(digest, bitstream, cursor, syntax_end)
+
+    if idr_index != len(frame_offsets):
+        raise ValueError("parsed IDR frame data does not match the NAL stream")
+    return digest.hexdigest()
+
+
+def _rbsp_syntax_bit_length(rbsp: bytes) -> int:
+    """Return the position after the RBSP stop bit, excluding alignment zeros."""
+    for byte_index in range(len(rbsp) - 1, -1, -1):
+        value = rbsp[byte_index]
+        if value:
+            trailing_zero_count = (value & -value).bit_length() - 1
+            return byte_index * 8 + 8 - trailing_zero_count
+    raise ValueError("RBSP contains no stop bit")
+
+
+def _update_raw_bit_segment(digest: Any, bitstream: Any, start: int, end: int) -> None:
+    """Add one length-delimited packed raw RBSP segment to a digest."""
+    import numpy as np
+
+    bits = bitstream[start:end]
+    digest.update(b"BITS\x00" + struct.pack(">Q", end - start))
+    if bits:
+        digest.update(np.packbits(np.asarray(bits, dtype=np.uint8)).tobytes())

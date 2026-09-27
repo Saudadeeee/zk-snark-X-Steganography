@@ -96,6 +96,17 @@ run embedded 320 payload bits using 576 FFmpeg-validated candidates, of which
 with empty stderr. That output was temporary and the run was not a repeatable
 benchmark artifact.
 
+A follow-up real-video commitment check on the same one-byte payload took
+163.908 seconds for `embed(..., ffmpeg_validate=True)`. It embedded 320 bits,
+reported 576 FFmpeg-validated and 400 patchable carriers, recomputed the
+statement commitment successfully from the output video and returned carrier
+list, and rejected the same check with one carrier removed. A separate strict
+FFmpeg decode returned exit code 0 with empty stderr. This is one instrumented
+smoke run, not a latency distribution; the output and keys were temporary.
+The emitted manifest identified the backend as `ml-dsa-65-attestation`, so
+this verifies commitment consistency only, not a lattice-ZK proof or
+video-only blind extraction.
+
 The current LaZer preflight on this host returned
 `{"blockers":["docker_daemon_unavailable"],"ready":false}`. No LaZer proof
 was built or run, so there is still no reviewed lattice-ZK backend connected

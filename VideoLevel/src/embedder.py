@@ -41,6 +41,7 @@ from .zk_proof             import ZKSnarkBridge, pack
 from .lattice_pq           import LatticeReceipt, pack_lattice_reference
 from .video_zkp_contract   import build_video_zkp_statement, payload_commitment, policy_hash
 from .zkp_registry         import REGISTRY_ZKP_SUITE, SignedZkpRelationRegistry
+from .video_canonicalization import canonical_video_sha256
 from .manifest             import (
     StegoManifest,
     PayloadMetadata,
@@ -649,7 +650,7 @@ def embed(
             session_id=proof_bytes,
             payload_commitment_hex=payload_commitment(message, zkp_payload_opening),
             cover_hash=cover_file_hash,
-            stego_hash=stego_file_hash,
+            stego_hash=canonical_video_sha256(output_path, used_positions),
             positions_hash=used_positions_hash,
             relation_id=zkp_relation_id,
             registry_root=zkp_registry_binding[0],

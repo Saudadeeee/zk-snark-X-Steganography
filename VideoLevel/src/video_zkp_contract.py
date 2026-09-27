@@ -14,18 +14,19 @@ from dataclasses import dataclass
 from typing import Any
 
 
-VIDEO_ZKP_STATEMENT_VERSION = "1.0.0"
-VIDEO_ZKP_STATEMENT_PROTOCOL = "zkstego-pq-video-statement-v1"
+VIDEO_ZKP_STATEMENT_VERSION = "2.0.0"
+VIDEO_ZKP_STATEMENT_PROTOCOL = "zkstego-pq-video-statement-v2"
 VIDEO_ZKP_HASH_ALGORITHMS = {
     "cover_hash": "sha256(file-bytes)",
     "positions_hash": "sha256(canonical-json)",
-    "stego_hash": "sha256(file-bytes)",
+    "stego_hash": "sha256(canonical-h264-carrier-normalization-v1)",
     "payload_commitment": "sha3-256(domain||opening||payload)",
     "relation_id": "sha256(relation-descriptor-canonical-json)",
     "registry_root": "sha256(domain||issuer-bound-registry-payload-canonical-json)",
     "statement_id": "sha3-256(domain||canonical-json)",
 }
-_DOMAIN = b"zkstego/pq-video-statement/v1/"
+_PAYLOAD_DOMAIN = b"zkstego/pq-video-statement/v1/"
+_STATEMENT_DOMAIN = b"zkstego/pq-video-statement/v2/"
 _POLICY_FIELDS = {
     "codec",
     "embedding_strategy",
@@ -50,7 +51,7 @@ def payload_commitment(payload: bytes, opening: bytes) -> str:
         raise ValueError("payload must be non-empty bytes")
     if not isinstance(opening, bytes) or len(opening) != 32:
         raise ValueError("opening must be exactly 32 random bytes")
-    return hashlib.sha3_256(_DOMAIN + b"payload/" + opening + payload).hexdigest()
+    return hashlib.sha3_256(_PAYLOAD_DOMAIN + b"payload/" + opening + payload).hexdigest()
 
 
 def _canonical_policy(policy: dict[str, Any]) -> str:
@@ -184,7 +185,9 @@ def build_video_zkp_statement(
         "hash_algorithms": VIDEO_ZKP_HASH_ALGORITHMS,
         "policy": json.loads(policy_canonical),
     }
-    statement_id = hashlib.sha3_256(_DOMAIN + b"statement/" + _canonical_json_bytes(unsigned)).hexdigest()
+    statement_id = hashlib.sha3_256(
+        _STATEMENT_DOMAIN + b"statement/" + _canonical_json_bytes(unsigned)
+    ).hexdigest()
     return VideoZkpStatement(
         version=unsigned["version"], protocol=unsigned["protocol"], session_id=unsigned["session_id"],
         payload_commitment=unsigned["payload_commitment"], cover_hash=unsigned["cover_hash"],
@@ -193,6 +196,26 @@ def build_video_zkp_statement(
         registry_epoch=unsigned["registry_epoch"], policy_canonical=policy_canonical,
         statement_id=statement_id,
     )
+
+
+def verify_video_zkp_video_commitment(
+    statement: VideoZkpStatement,
+    video_path: str,
+    carrier_positions: list[tuple[int, int, int]],
+) -> bool:
+    """Recompute the carrier-normalized video digest in a public statement.
+
+    This checks only that the supplied video and carrier list reproduce
+    ``statement.stego_hash``. It does not validate a ZK proof, the carrier-list
+    origin, the cover hash, or a relation registry. Those remain separate
+    verifier obligations.
+    """
+    if not isinstance(statement, VideoZkpStatement):
+        raise ValueError("statement must be a VideoZkpStatement")
+    canonical_statement = VideoZkpStatement.from_dict(statement.to_dict())
+    from .video_canonicalization import canonical_video_sha256
+
+    return canonical_video_sha256(video_path, carrier_positions) == canonical_statement.stego_hash
 
 
 def verify_video_zkp_statement_binding(
