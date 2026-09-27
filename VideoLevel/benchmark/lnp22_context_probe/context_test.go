@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"runtime/debug"
 	"strings"
@@ -19,6 +21,9 @@ func TestLNP22GoModuleVersionMatchesManifestPin(t *testing.T) {
 	}
 	for _, dependency := range buildInfo.Deps {
 		if dependency.Path == "github.com/KarpelesLab/lnp22" {
+			if dependency.Replace != nil {
+				t.Fatalf("LNP22 module was replaced by %q@%q", dependency.Replace.Path, dependency.Replace.Version)
+			}
 			if dependency.Version != pinnedLNP22ModuleVersion || dependency.Sum != pinnedLNP22ModuleSum {
 				t.Fatalf("LNP22 module version/checksum %q %q do not match manifest pin %s %s", dependency.Version, dependency.Sum, pinnedLNP22ModuleVersion, pinnedLNP22ModuleSum)
 			}
@@ -140,6 +145,19 @@ func TestProofRejectsChangedContext(t *testing.T) {
 	valid, err := verifySerializedArtifacts(contextBytes, relationBytes, proofBytes, trustedRelationDigest)
 	if err != nil || !valid {
 		t.Fatalf("serialized proof and parameter manifest did not verify: valid=%t err=%v", valid, err)
+	}
+	invalidProof := *proof
+	invalidProof.Z = append(invalidProof.Z[:0:0], proof.Z...)
+	invalidProof.Z[0] = append(invalidProof.Z[0][:0:0], proof.Z[0]...)
+	invalidProof.Z[0][0]++
+	invalidProofBytes, err := json.Marshal(invalidProof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var verifyOutput bytes.Buffer
+	err = verifyCommand(contextBytes, relationBytes, invalidProofBytes, trustedRelationDigest, &verifyOutput)
+	if !errors.Is(err, errProofRejected) || !strings.Contains(verifyOutput.String(), `"valid":false`) {
+		t.Fatalf("invalid proof CLI result must return rejection and JSON valid=false: output=%s err=%v", verifyOutput.String(), err)
 	}
 	if _, err := verifySerializedArtifacts(contextBytes, relationBytes, proofBytes, strings.Repeat("0", 64)); err == nil || !strings.Contains(err.Error(), "trusted base relation digest") {
 		t.Fatalf("proof was not rejected against a different verifier-pinned relation: %v", err)
