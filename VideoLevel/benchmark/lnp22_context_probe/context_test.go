@@ -107,6 +107,7 @@ func TestProofRejectsChangedContext(t *testing.T) {
 	relationBytes, err := marshalPublicRelation(
 		proofParams,
 		statement,
+		baseStatement,
 		params.K,
 		params.L,
 		len(units),
@@ -115,14 +116,21 @@ func TestProofRejectsChangedContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	valid, err := verifySerializedArtifacts(contextBytes, relationBytes, proofBytes)
+	trustedRelationDigest, err := baseRelationDigest(params, baseStatement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid, err := verifySerializedArtifacts(contextBytes, relationBytes, proofBytes, trustedRelationDigest)
 	if err != nil || !valid {
 		t.Fatalf("serialized proof and parameter manifest did not verify: valid=%t err=%v", valid, err)
 	}
-	if _, err := verifySerializedArtifacts(nil, relationBytes, proofBytes); err == nil || !strings.Contains(err.Error(), "context bytes size") {
+	if _, err := verifySerializedArtifacts(contextBytes, relationBytes, proofBytes, strings.Repeat("0", 64)); err == nil || !strings.Contains(err.Error(), "trusted base relation digest") {
+		t.Fatalf("proof was not rejected against a different verifier-pinned relation: %v", err)
+	}
+	if _, err := verifySerializedArtifacts(nil, relationBytes, proofBytes, trustedRelationDigest); err == nil || !strings.Contains(err.Error(), "context bytes size") {
 		t.Fatalf("empty canonical context did not hit the input bound: %v", err)
 	}
-	if _, err := verifySerializedArtifacts(make([]byte, maxCanonicalContextBytes+1), relationBytes, proofBytes); err == nil || !strings.Contains(err.Error(), "context bytes size") {
+	if _, err := verifySerializedArtifacts(make([]byte, maxCanonicalContextBytes+1), relationBytes, proofBytes, trustedRelationDigest); err == nil || !strings.Contains(err.Error(), "context bytes size") {
 		t.Fatalf("oversized canonical context did not hit the input bound: %v", err)
 	}
 
@@ -135,7 +143,7 @@ func TestProofRejectsChangedContext(t *testing.T) {
 	if nizk.VerifyLinear(proofParams, mutatedStatement, proof) {
 		t.Fatal("proof verified after context mutation")
 	}
-	valid, err = verifySerializedArtifacts([]byte("video statement B"), relationBytes, proofBytes)
+	valid, err = verifySerializedArtifacts([]byte("video statement B"), relationBytes, proofBytes, trustedRelationDigest)
 	if err == nil && valid {
 		t.Fatal("serialized proof verified after context mutation")
 	}
@@ -149,7 +157,7 @@ func TestProofRejectsChangedContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := verifySerializedArtifacts(contextBytes, malformedRelation, proofBytes); err == nil {
+	if _, err := verifySerializedArtifacts(contextBytes, malformedRelation, proofBytes, trustedRelationDigest); err == nil {
 		t.Fatal("relation with non-canonical field coefficient was accepted")
 	}
 }
