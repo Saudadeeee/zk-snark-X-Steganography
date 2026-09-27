@@ -82,22 +82,25 @@ def t_traceable_h264_parser_retains_absolute_ranges_only_when_requested() -> Non
     idr = next(nal for nal in parser.nal_units if int(nal.nal_unit_type) == 5)
 
     traced = TraceableCAVLCParser(track_coefficient_bit_ranges=True)
-    offsets = traced.extract_with_offsets(idr, sps, pps)["offsets"]
+    result = traced.extract_with_offsets(idr, sps, pps)
+    offsets = result["offsets"]
+    blocks = result["blocks"]
+    observed_ranges = 0
     for (mb_idx, block_idx), block_offsets in offsets.items():
         if block_idx >= 16 or block_offsets.get("bit_length", 0) <= 0:
             continue
         ranges = block_offsets.get("coefficient_bit_ranges")
         if ranges is None:
             continue
-        assert len(ranges) == 16
+        assert len(ranges) == len(blocks[(mb_idx, block_idx)])
         block_start = block_offsets["start_bit"]
         block_end = block_offsets["end_bit"]
         assert all(
             bit_range is None or block_start <= bit_range[0] < bit_range[1] <= block_end
             for bit_range in ranges
         )
-        return
-    raise AssertionError("traceable parser did not retain any luma coefficient bit ranges")
+        observed_ranges += 1
+    assert observed_ranges > 0, "traceable parser did not retain any luma coefficient bit ranges"
 
 
 def main() -> None:
