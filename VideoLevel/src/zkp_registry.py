@@ -158,6 +158,58 @@ class SignedZkpRelationRegistry:
             raise ValueError("relation is not registered for this ZKP suite")
         return self.root(), self.epoch
 
+    def verify_statement_binding(
+        self,
+        issuer_public_key: bytes,
+        *,
+        statement_relation_id: str,
+        expected_relation_id: str,
+        statement_policy_hash: str,
+        expected_policy_hash: str,
+        statement_registry_root: str,
+        statement_registry_epoch: int,
+        minimum_epoch: int = 0,
+    ) -> tuple[str, int]:
+        """Verify a statement against verifier-pinned relation configuration.
+
+        The expected relation and policy must come from verifier configuration,
+        not from the statement or video.  The signed registry proves that this
+        exact relation is issuer-authorized; its root and epoch must also match
+        the statement.  This validates registry binding only: callers must
+        separately verify that the relation module, verifier key, and parameter
+        artifacts match the hashes in the registered descriptor.
+        """
+        if isinstance(minimum_epoch, bool) or not isinstance(minimum_epoch, int) or minimum_epoch < 0:
+            raise ValueError("minimum_epoch must be a non-negative integer")
+        if isinstance(statement_registry_epoch, bool) or not isinstance(statement_registry_epoch, int):
+            raise ValueError("statement_registry_epoch must be an integer")
+
+        statement_relation_id = _digest(statement_relation_id, "statement_relation_id")
+        expected_relation_id = _digest(expected_relation_id, "expected_relation_id")
+        statement_policy_hash = _digest(statement_policy_hash, "statement_policy_hash")
+        expected_policy_hash = _digest(expected_policy_hash, "expected_policy_hash")
+        statement_registry_root = _digest(statement_registry_root, "statement_registry_root")
+
+        if statement_relation_id != expected_relation_id:
+            raise ValueError("statement relation does not match verifier-pinned relation")
+        if statement_policy_hash != expected_policy_hash:
+            raise ValueError("statement policy does not match verifier-pinned policy")
+        if self.epoch < minimum_epoch:
+            raise ValueError("signed relation registry is older than the verifier minimum epoch")
+        if statement_registry_epoch != self.epoch:
+            raise ValueError("statement registry epoch does not match the signed registry")
+        if not self.verify(issuer_public_key):
+            raise ValueError("relation registry signature did not verify against the issuer trust anchor")
+
+        root, epoch = self.resolve(
+            expected_relation_id,
+            REGISTRY_ZKP_SUITE,
+            expected_policy_hash,
+        )
+        if root != statement_registry_root:
+            raise ValueError("statement registry root does not match the signed registry")
+        return root, epoch
+
     def to_dict(self) -> dict[str, Any]:
         if self.signature is None or self.signer_id is None:
             raise ValueError("registry must be signed before serialization")
