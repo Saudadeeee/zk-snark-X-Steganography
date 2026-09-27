@@ -149,7 +149,7 @@ func TestProofRejectsChangedContext(t *testing.T) {
 	invalidProof := *proof
 	invalidProof.Z = append(invalidProof.Z[:0:0], proof.Z...)
 	invalidProof.Z[0] = append(invalidProof.Z[0][:0:0], proof.Z[0]...)
-	invalidProof.Z[0][0]++
+	invalidProof.Z[0][0] = (invalidProof.Z[0][0] + 1) % params.Ring.Q
 	invalidProofBytes, err := json.Marshal(invalidProof)
 	if err != nil {
 		t.Fatal(err)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"crypto/sha3"
 	"encoding/binary"
 	"encoding/hex"
@@ -21,25 +22,28 @@ import (
 const contextDomain = "zkstego/lazer-context-binding/v1/"
 const maxCanonicalContextBytes = 1 << 20
 const maxProbeArtifactBytes = 16 << 20
+const pinnedLNP22ModuleVersion = "v0.1.1"
+const pinnedLNP22ModuleSum = "h1:7iSrrkrzYDxOF8Dx34OSzNZ6o6GD0URS5DrTE5BjA3w="
 const pinnedLNP22Revision = "878cf9d5bf73ae387b73a0843edc3364fd0f6be4"
 
 type proofParameterManifest struct {
-	Version          string  `json:"version"`
-	Backend          string  `json:"backend"`
-	Revision         string  `json:"revision"`
-	ContextDomain    string  `json:"context_domain"`
-	ContextDigest    string  `json:"context_digest_sha3_256"`
-	ContextUnitCount int     `json:"context_unit_count"`
-	Q                int64   `json:"q"`
-	N                int     `json:"n"`
-	BaseK            int     `json:"base_k"`
-	BaseL            int     `json:"base_l"`
-	K                int     `json:"k"`
-	L                int     `json:"l"`
-	Kappa            int     `json:"kappa"`
-	Beta             int64   `json:"beta"`
-	Sigma            float64 `json:"sigma"`
-	BoundZ           int64   `json:"bound_z"`
+	Version            string  `json:"version"`
+	Backend            string  `json:"backend"`
+	Revision           string  `json:"revision"`
+	ContextDomain      string  `json:"context_domain"`
+	ContextDigest      string  `json:"context_digest_sha3_256"`
+	BaseRelationSHA256 string  `json:"base_relation_sha256"`
+	ContextUnitCount   int     `json:"context_unit_count"`
+	Q                  int64   `json:"q"`
+	N                  int     `json:"n"`
+	BaseK              int     `json:"base_k"`
+	BaseL              int     `json:"base_l"`
+	K                  int     `json:"k"`
+	L                  int     `json:"l"`
+	Kappa              int     `json:"kappa"`
+	Beta               int64   `json:"beta"`
+	Sigma              float64 `json:"sigma"`
+	BoundZ             int64   `json:"bound_z"`
 }
 
 type publicRelation struct {
@@ -101,29 +105,37 @@ func validateOutputPaths(proofPath, relationPath string) error {
 func marshalPublicRelation(
 	params *nizk.Params,
 	statement *nizk.Statement,
+	baseStatement *nizk.Statement,
 	baseK, baseL, unitCount int,
 	contextDigest [32]byte,
 ) ([]byte, error) {
-	if params == nil || statement == nil || baseK <= 0 || baseL <= 0 || unitCount <= 0 {
+	if params == nil || statement == nil || baseStatement == nil || baseK <= 0 || baseL <= 0 || unitCount <= 0 {
 		return nil, errors.New("complete proof parameters, statement, and base dimensions are required")
 	}
+	baseParams := *params
+	baseParams.K, baseParams.L = baseK, baseL
+	baseDigest, err := baseRelationDigest(&baseParams, baseStatement)
+	if err != nil {
+		return nil, err
+	}
 	manifest := proofParameterManifest{
-		Version:          "lnp22-context-probe-artifact-v1",
-		Backend:          "LNP22",
-		Revision:         pinnedLNP22Revision,
-		ContextDomain:    contextDomain,
-		ContextDigest:    hex.EncodeToString(contextDigest[:]),
-		ContextUnitCount: unitCount,
-		Q:                params.Ring.Q,
-		N:                params.Ring.N,
-		BaseK:            baseK,
-		BaseL:            baseL,
-		K:                params.K,
-		L:                params.L,
-		Kappa:            params.Kappa,
-		Beta:             params.Beta,
-		Sigma:            params.Sigma,
-		BoundZ:           params.BoundZ,
+		Version:            "lnp22-context-probe-artifact-v1",
+		Backend:            "LNP22",
+		Revision:           pinnedLNP22Revision,
+		ContextDomain:      contextDomain,
+		ContextDigest:      hex.EncodeToString(contextDigest[:]),
+		BaseRelationSHA256: baseDigest,
+		ContextUnitCount:   unitCount,
+		Q:                  params.Ring.Q,
+		N:                  params.Ring.N,
+		BaseK:              baseK,
+		BaseL:              baseL,
+		K:                  params.K,
+		L:                  params.L,
+		Kappa:              params.Kappa,
+		Beta:               params.Beta,
+		Sigma:              params.Sigma,
+		BoundZ:             params.BoundZ,
 	}
 	return json.Marshal(publicRelation{
 		Protocol:   "lnp22-linear-context-probe-v1",
@@ -135,7 +147,7 @@ func marshalPublicRelation(
 // verifySerializedArtifacts reconstructs pinned public parameters, checks the
 // context augmentation shape, then verifies a proof using only serialized
 // relation/proof artifacts and canonical public context bytes.
-func verifySerializedArtifacts(contextBytes, relationBytes, proofBytes []byte) (bool, error) {
+func verifySerializedArtifacts(contextBytes, relationBytes, proofBytes []byte, trustedBaseRelationSHA256 string) (bool, error) {
 	if len(contextBytes) == 0 || len(contextBytes) > maxCanonicalContextBytes {
 		return false, fmt.Errorf("context bytes size must be between 1 and %d bytes", maxCanonicalContextBytes)
 	}
@@ -166,6 +178,9 @@ func verifySerializedArtifacts(contextBytes, relationBytes, proofBytes []byte) (
 	if manifest.ContextDigest != hex.EncodeToString(digest[:]) || manifest.ContextUnitCount != len(units) {
 		return false, errors.New("canonical context does not match relation artifact digest")
 	}
+	if !isSHA256Hex(trustedBaseRelationSHA256) || manifest.BaseRelationSHA256 != trustedBaseRelationSHA256 {
+		return false, errors.New("relation artifact does not match verifier trusted base relation digest")
+	}
 	if manifest.Q != 8_380_417 || manifest.N != 256 || manifest.BaseK != 4 || manifest.BaseL != 5 ||
 		manifest.K != manifest.BaseK+len(units) || manifest.L != manifest.BaseL+len(units) ||
 		manifest.Kappa != 60 || manifest.Beta != 1 || manifest.Sigma != 350 || manifest.BoundZ != 1400 {
@@ -187,18 +202,32 @@ func verifySerializedArtifacts(contextBytes, relationBytes, proofBytes []byte) (
 			return false, errors.New("relation artifact target contains an invalid polynomial")
 		}
 	}
-	if !contextAugmentationMatches(relation.Statement, manifest, units) {
-		return false, errors.New("relation artifact context rows do not match the canonical statement")
-	}
-
 	proofRing, err := ring.New(manifest.N, manifest.Q)
 	if err != nil {
 		return false, fmt.Errorf("rebuild proof ring: %w", err)
 	}
-	params := &nizk.Params{
-		Ring: proofRing, K: manifest.K, L: manifest.L, Kappa: manifest.Kappa,
-		Beta: manifest.Beta, Sigma: manifest.Sigma, BoundZ: manifest.BoundZ,
+	baseParams := *paramsForManifest(manifest, proofRing)
+	baseParams.K, baseParams.L = manifest.BaseK, manifest.BaseL
+	baseStatement := &nizk.Statement{
+		A: make(ring.PolyMat, manifest.BaseK),
+		T: make(ring.PolyVec, manifest.BaseK),
 	}
+	for row := 0; row < manifest.BaseK; row++ {
+		baseStatement.A[row] = append(ring.PolyVec(nil), relation.Statement.A[row][:manifest.BaseL]...)
+		baseStatement.T[row] = relation.Statement.T[row]
+	}
+	actualBaseDigest, err := baseRelationDigest(&baseParams, baseStatement)
+	if err != nil {
+		return false, err
+	}
+	if actualBaseDigest != trustedBaseRelationSHA256 || actualBaseDigest != manifest.BaseRelationSHA256 {
+		return false, errors.New("relation artifact does not match verifier trusted base relation digest")
+	}
+	if !contextAugmentationMatches(relation.Statement, manifest, units) {
+		return false, errors.New("relation artifact context rows do not match the canonical statement")
+	}
+
+	params := paramsForManifest(manifest, proofRing)
 	if err := params.Validate(); err != nil {
 		return false, fmt.Errorf("validate proof parameter manifest: %w", err)
 	}
@@ -210,6 +239,61 @@ func verifySerializedArtifacts(contextBytes, relationBytes, proofBytes []byte) (
 		return false, errors.New("proof artifact has invalid dimensions")
 	}
 	return nizk.VerifyLinear(params, relation.Statement, &proof), nil
+}
+
+func paramsForManifest(manifest proofParameterManifest, proofRing *ring.Ring) *nizk.Params {
+	return &nizk.Params{
+		Ring: proofRing, K: manifest.K, L: manifest.L, Kappa: manifest.Kappa,
+		Beta: manifest.Beta, Sigma: manifest.Sigma, BoundZ: manifest.BoundZ,
+	}
+}
+
+func isSHA256Hex(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	decoded, err := hex.DecodeString(value)
+	return err == nil && hex.EncodeToString(decoded) == value
+}
+
+func baseRelationDigest(params *nizk.Params, statement *nizk.Statement) (string, error) {
+	if params == nil || params.Ring == nil || statement == nil || params.K <= 0 || params.L <= 0 ||
+		len(statement.A) != params.K || len(statement.T) != params.K {
+		return "", errors.New("complete base relation parameters and statement are required")
+	}
+	for row := 0; row < params.K; row++ {
+		if len(statement.A[row]) != params.L || !canonicalPolynomial(statement.T[row], params.Ring.N, params.Ring.Q) {
+			return "", errors.New("base relation dimensions or target polynomial are invalid")
+		}
+		for column := 0; column < params.L; column++ {
+			if !canonicalPolynomial(statement.A[row][column], params.Ring.N, params.Ring.Q) {
+				return "", errors.New("base relation contains a non-canonical polynomial")
+			}
+		}
+	}
+	descriptor := struct {
+		Protocol string          `json:"protocol"`
+		Q        int64           `json:"q"`
+		N        int             `json:"n"`
+		K        int             `json:"k"`
+		L        int             `json:"l"`
+		Kappa    int             `json:"kappa"`
+		Beta     int64           `json:"beta"`
+		Sigma    float64         `json:"sigma"`
+		BoundZ   int64           `json:"bound_z"`
+		A        *nizk.Statement `json:"statement"`
+	}{
+		Protocol: "lnp22-registered-base-linear-relation-v1",
+		Q:        params.Ring.Q, N: params.Ring.N, K: params.K, L: params.L,
+		Kappa: params.Kappa, Beta: params.Beta, Sigma: params.Sigma, BoundZ: params.BoundZ,
+		A: statement,
+	}
+	encoded, err := json.Marshal(descriptor)
+	if err != nil {
+		return "", fmt.Errorf("encode canonical base relation: %w", err)
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:]), nil
 }
 
 func contextAugmentationMatches(statement *nizk.Statement, manifest proofParameterManifest, units []int64) bool {

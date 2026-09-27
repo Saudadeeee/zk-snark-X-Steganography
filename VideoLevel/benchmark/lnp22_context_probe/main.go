@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -19,6 +20,7 @@ type report struct {
 	PinnedRevision              string  `json:"pinned_revision"`
 	ContextDigestSHA256         string  `json:"context_digest_sha256"`
 	ContextDigestSHA3           string  `json:"context_digest_sha3_256"`
+	BaseRelationSHA256          string  `json:"base_relation_sha256"`
 	ContextUnitCount            int     `json:"context_unit_count"`
 	AugmentedRows               int     `json:"augmented_rows"`
 	AugmentedWitnessPolynomials int     `json:"augmented_witness_polynomials"`
@@ -32,6 +34,8 @@ type report struct {
 	SecurityStatus              string  `json:"security_status"`
 }
 
+var errProofRejected = errors.New("proof verification failed")
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -40,9 +44,16 @@ func main() {
 }
 
 func run() error {
+	verifyMode := flag.Bool("verify", false, "verify serialized probe artifacts instead of generating a proof")
 	proofPath := flag.String("proof-out", "", "write serialized proof JSON to this path")
 	relationPath := flag.String("relation-out", "", "write augmented public relation JSON to this path")
+	proofInputPath := flag.String("proof-in", "", "read serialized proof JSON from this path in verify mode")
+	relationInputPath := flag.String("relation-in", "", "read augmented public relation JSON from this path in verify mode")
+	trustedBaseRelation := flag.String("trusted-base-relation-sha256", "", "verifier-configured SHA-256 pin for the base relation")
 	flag.Parse()
+	if *verifyMode {
+		return runVerify(*proofInputPath, *relationInputPath, *trustedBaseRelation)
+	}
 	if *proofPath == "" || *relationPath == "" {
 		return errors.New("-proof-out and -relation-out are required")
 	}
@@ -105,6 +116,7 @@ func run() error {
 	relationBytes, err := marshalPublicRelation(
 		params,
 		statement,
+		baseStatement,
 		baseParams.K,
 		baseParams.L,
 		len(units),
@@ -113,7 +125,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("serialize public relation: %w", err)
 	}
-	serializedValid, err := verifySerializedArtifacts(contextBytes, relationBytes, proofBytes)
+	baseDigest, err := baseRelationDigest(baseParams, baseStatement)
+	if err != nil {
+		return fmt.Errorf("derive verifier-pinned base relation digest: %w", err)
+	}
+	serializedValid, err := verifySerializedArtifacts(contextBytes, relationBytes, proofBytes, baseDigest)
 	if err != nil {
 		return fmt.Errorf("verify serialized artifacts: %w", err)
 	}
@@ -140,6 +156,7 @@ func run() error {
 		PinnedRevision:              pinnedLNP22Revision,
 		ContextDigestSHA256:         fmt.Sprintf("%x", contextHash),
 		ContextDigestSHA3:           fmt.Sprintf("%x", contextDigest),
+		BaseRelationSHA256:          baseDigest,
 		ContextUnitCount:            len(units),
 		AugmentedRows:               params.K,
 		AugmentedWitnessPolynomials: params.L,
@@ -153,6 +170,66 @@ func run() error {
 		SecurityStatus:              "experimental; source implementation and application relation are not independently audited",
 	}
 	return json.NewEncoder(os.Stdout).Encode(result)
+}
+
+func runVerify(proofPath, relationPath, trustedBaseRelationSHA256 string) error {
+	if proofPath == "" || relationPath == "" || trustedBaseRelationSHA256 == "" {
+		return errors.New("verify mode requires -proof-in, -relation-in, and -trusted-base-relation-sha256")
+	}
+	contextBytes, err := readCanonicalContext(os.Stdin)
+	if err != nil {
+		return fmt.Errorf("read canonical statement from stdin: %w", err)
+	}
+	proofBytes, err := readArtifactFile(proofPath)
+	if err != nil {
+		return fmt.Errorf("read proof artifact: %w", err)
+	}
+	relationBytes, err := readArtifactFile(relationPath)
+	if err != nil {
+		return fmt.Errorf("read relation artifact: %w", err)
+	}
+	return verifyCommand(contextBytes, relationBytes, proofBytes, trustedBaseRelationSHA256, os.Stdout)
+}
+
+func verifyCommand(contextBytes, relationBytes, proofBytes []byte, trustedBaseRelationSHA256 string, output io.Writer) error {
+	if output == nil {
+		return errors.New("verification result writer is required")
+	}
+	valid, err := verifySerializedArtifacts(contextBytes, relationBytes, proofBytes, trustedBaseRelationSHA256)
+	if err != nil {
+		return fmt.Errorf("verify serialized artifacts: %w", err)
+	}
+	if err := json.NewEncoder(output).Encode(struct {
+		Backend                 string `json:"backend"`
+		Valid                   bool   `json:"valid"`
+		TrustedBaseRelationHash string `json:"trusted_base_relation_sha256"`
+	}{
+		Backend:                 "LNP22 experimental context-bound linear relation",
+		Valid:                   valid,
+		TrustedBaseRelationHash: trustedBaseRelationSHA256,
+	}); err != nil {
+		return fmt.Errorf("write verification result: %w", err)
+	}
+	if !valid {
+		return errProofRejected
+	}
+	return nil
+}
+
+func readArtifactFile(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxProbeArtifactBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 || len(data) > maxProbeArtifactBytes {
+		return nil, fmt.Errorf("artifact size must be between 1 and %d bytes", maxProbeArtifactBytes)
+	}
+	return data, nil
 }
 
 func writeExclusive(path string, data []byte) error {
