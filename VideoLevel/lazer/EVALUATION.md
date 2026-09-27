@@ -75,6 +75,32 @@ independently. The repository's green tests and this probe do not establish an
 independent cryptographic audit. Treat these numbers only as an experimental
 size/runtime feasibility point, not as an accepted system backend.
 
+### In-repository SIS prototype size probe
+
+On 2026-09-27, `LatticeZkProof.create(b"x", b"k" * 32)` generated one
+`sis-linear-fiat-shamir-v1` transcript in 0.159 seconds. Its canonical JSON
+artifact was 131,692 bytes (1,053,536 bits): the base64 `responses` field alone
+was 87,384 bytes and `commitments` was 43,692 bytes. This is a single
+measurement, not a performance benchmark, and this prototype is explicitly not
+an accepted or independently reviewed ZKP backend.
+
+For `foreman_cif_q18_g1_150f.h264`, the recorded raw safe-carrier count is
+139,551 bits. Even treating every raw candidate as usable gives an upper bound
+about 7.55 times smaller than that prototype's JSON transcript, before adding
+any payload framing. The actual patchable/FFmpeg-clean capacity is lower. This
+does not establish impossibility for every video or every proof system; it
+does establish that this prototype cannot be embedded in that measured video
+under the current carrier representation. The separate one-byte FFmpeg smoke
+run embedded 320 payload bits using 576 FFmpeg-validated candidates, of which
+400 passed patchability filtering; strict FFmpeg decode returned exit code 0
+with empty stderr. That output was temporary and the run was not a repeatable
+benchmark artifact.
+
+The current LaZer preflight on this host returned
+`{"blockers":["docker_daemon_unavailable"],"ready":false}`. No LaZer proof
+was built or run, so there is still no reviewed lattice-ZK backend connected
+to the video pipeline.
+
 ## What is integrated
 
 - Immutable upstream pin: `10eafeca4cd53ff4fc54193dce904dbd0026fefd`.
