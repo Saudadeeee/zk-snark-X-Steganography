@@ -7,7 +7,10 @@ an authenticated source; callers must bind the ordered positions separately.
 
 from __future__ import annotations
 
+import hashlib
+import tempfile
 from collections.abc import Sequence
+from pathlib import Path
 
 
 CoefficientBlock = tuple[int, int, Sequence[int]]
@@ -100,3 +103,62 @@ def canonicalize_carrier_coefficients(
         (macroblock, block, levels)
         for (macroblock, block), levels in sorted(normalized_by_block.items())
     ]
+
+
+def canonical_video_sha256(
+    video_path: str | Path,
+    carrier_positions: Sequence[CarrierPosition],
+) -> str:
+    """Hash the H.264 byte stream after normalizing the specified carriers.
+
+    Carrier locations must be supplied in the same global macroblock/block
+    coordinate system used by the embedder. The source video is never
+    modified. This function performs a full H.264 analysis and CAVLC
+    reconstruction when normalization changes coefficients, so it is
+    intentionally an offline commitment operation rather than a per-frame
+    real-time primitive.
+    """
+    source = Path(video_path).expanduser().resolve(strict=True)
+    if not source.is_file():
+        raise ValueError("video_path must identify a regular file")
+
+    def digest_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    if not carrier_positions:
+        return digest_file(source)
+
+    from .bitstream.bitstream_ops import BitstreamReconstructor
+    from .core.analysis_cache import (
+        load_or_build_reconstruction_context,
+        load_or_build_video_analysis,
+    )
+
+    coefficients, frame_data, _, _, _, _ = load_or_build_video_analysis(
+        str(source), use_cache=True
+    )
+    modifications = canonicalize_carrier_coefficients(coefficients, carrier_positions)
+    if not modifications:
+        return digest_file(source)
+
+    context = load_or_build_reconstruction_context(str(source), use_cache=True)
+    reconstructor = BitstreamReconstructor()
+    with tempfile.TemporaryDirectory(prefix="zkstego-canonical-h264-") as temp_dir:
+        canonical_path = Path(temp_dir) / "canonical.h264"
+        result = reconstructor.reconstruct_video(
+            str(source),
+            modifications,
+            str(canonical_path),
+            max_slices=None,
+            frame_verified_data=frame_data,
+            reconstruction_context=context,
+        )
+        if isinstance(result, dict) and result.get("success") is False:
+            raise RuntimeError("H.264 reconstruction failed during canonicalization")
+        if not canonical_path.is_file() or canonical_path.stat().st_size == 0:
+            raise RuntimeError("H.264 canonicalization produced no output stream")
+        return digest_file(canonical_path)
