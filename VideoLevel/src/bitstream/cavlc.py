@@ -1039,6 +1039,7 @@ class CoefficientBlock:
     total_coeffs: int  # Number of non-zero coefficients
     trailing_ones: int  # Number of trailing ±1 values
     total_zeros: int  # Total number of zeros
+    coefficient_bit_ranges: List[Tuple[int, int] | None] | None = None
     
     
 class CAVLCDecoder:
@@ -1053,12 +1054,15 @@ class CAVLCDecoder:
     5. run_before: Number of zeros before each coefficient
     """
     
-    def __init__(self, reader):
+    def __init__(self, reader, *, track_coefficient_bit_ranges: bool = False):
         """
         Args:
             reader: BitstreamReader instance positioned at residual data
+            track_coefficient_bit_ranges: Retain each non-zero coefficient's
+                encoded bit interval for canonical carrier normalization.
         """
         self.reader = reader
+        self.track_coefficient_bit_ranges = track_coefficient_bit_ranges
         
     def decode_block_cavlc(self, nC: int, max_num_coeff: int = 16, debug_key=None) -> CoefficientBlock:
         """
@@ -1092,18 +1096,31 @@ class CAVLCDecoder:
                 levels=[0] * max_num_coeff,
                 total_coeffs=0,
                 trailing_ones=0,
-                total_zeros=0
+                total_zeros=0,
+                coefficient_bit_ranges=(
+                    [None] * max_num_coeff if self.track_coefficient_bit_ranges else None
+                ),
             )
         
         # Step 2: Decode signs of trailing ones
         trailing_signs = []
+        trailing_sign_ranges: List[Tuple[int, int]] = []
         for _ in range(trailing_ones):
+            sign_start = self.reader.position
             sign = self.reader.read_bits(1)
+            if self.track_coefficient_bit_ranges:
+                trailing_sign_ranges.append((sign_start, self.reader.position))
             trailing_signs.append(-1 if sign else 1)
         
         # Step 3: Decode remaining levels
         levels_remaining = total_coeffs - trailing_ones
-        level_values = self._decode_levels(levels_remaining, trailing_ones, total_coeffs)
+        level_bit_ranges: List[Tuple[int, int]] = []
+        level_values = self._decode_levels(
+            levels_remaining,
+            trailing_ones,
+            total_coeffs,
+            bit_ranges=level_bit_ranges if self.track_coefficient_bit_ranges else None,
+        )
         
         # Step 4: Decode total_zeros
         if total_coeffs < max_num_coeff:
@@ -1129,6 +1146,21 @@ class CAVLCDecoder:
             runs_forward,
             max_num_coeff
         )
+
+        coefficient_bit_ranges = None
+        if self.track_coefficient_bit_ranges:
+            coefficient_bit_ranges = [None] * max_num_coeff
+            # CAVLC emits non-zero values in reverse scan order. Reversing the
+            # bit ranges alongside levels and runs maps each encoded interval
+            # back to the coefficient's forward zig-zag index.
+            encoded_ranges = list(reversed(trailing_sign_ranges + level_bit_ranges))
+            coefficient_index = 0
+            for run, bit_range in zip(runs_forward, encoded_ranges):
+                coefficient_index += run
+                if coefficient_index >= max_num_coeff:
+                    raise ValueError("decoded CAVLC coefficient range exceeds block bounds")
+                coefficient_bit_ranges[coefficient_index] = bit_range
+                coefficient_index += 1
         
         # Debug: log what we decoded
         if debug_key and debug_key[0] == 0 and debug_key[1] in [16, 17, 18, 19]:
@@ -1139,7 +1171,8 @@ class CAVLCDecoder:
             levels=coeffs,
             total_coeffs=total_coeffs,
             trailing_ones=trailing_ones,
-            total_zeros=total_zeros
+            total_zeros=total_zeros,
+            coefficient_bit_ranges=coefficient_bit_ranges,
         )
     
     def _decode_coeff_token(self, nC: int) -> Tuple[int, int]:
@@ -1227,7 +1260,14 @@ class CAVLCDecoder:
             except Exception:
                 return (0, 0)
     
-    def _decode_levels(self, count: int, trailing_ones: int, total_coeffs: int) -> List[int]:
+    def _decode_levels(
+        self,
+        count: int,
+        trailing_ones: int,
+        total_coeffs: int,
+        *,
+        bit_ranges: List[Tuple[int, int]] | None = None,
+    ) -> List[int]:
         """
         Decode remaining coefficient levels (non-trailing-one values)
         
@@ -1247,6 +1287,7 @@ class CAVLCDecoder:
             suffixLength = 0
 
         for i in range(count):
+            level_start = self.reader.position
             # Decode level_prefix (unary code)
             level_prefix = 0
             while self.reader.read_bits(1) == 0:
@@ -1293,7 +1334,9 @@ class CAVLCDecoder:
                 # abs_level = (levelCode - sign_bit + 2) / 2
                 abs_level = (levelCode - sign_bit + 2) >> 1
 
-            
+            if bit_ranges is not None:
+                bit_ranges.append((level_start, self.reader.position))
+
             # Apply sign (1 = negative, 0 = positive)
             level = -abs_level if sign_bit else abs_level
             

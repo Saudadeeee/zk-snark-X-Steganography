@@ -1117,11 +1117,14 @@ class TraceableCAVLCParser:
     Returns both:
     - blocks: {(mb_idx, block_idx): [coeffs]}
     - offsets: {(mb_idx, block_idx): {'start_bit': int, 'end_bit': int, 'bit_length': int}}
+      Optionally includes absolute RBSP bit ranges per coefficient when
+      ``track_coefficient_bit_ranges=True``.
     """
     
-    def __init__(self):
+    def __init__(self, *, track_coefficient_bit_ranges: bool = False):
         self.neighbor_coeffs = {}
         self.block_offsets = {}  # Track bit offsets
+        self.track_coefficient_bit_ranges = track_coefficient_bit_ranges
     
     def extract_with_offsets(self, nal, sps: SPSData, pps: PPSData, global_mb_idx: int = 0) -> Dict:
         """
@@ -1168,7 +1171,10 @@ class TraceableCAVLCParser:
             slice_qp = 26 + pps.pic_init_qp_minus26 + slice_header.slice_qp_delta
             
             mb_parser = MacroblockParser(reader, slice_header.slice_type)
-            cavlc_decoder = CAVLCDecoder(reader)
+            cavlc_decoder = CAVLCDecoder(
+                reader,
+                track_coefficient_bit_ranges=self.track_coefficient_bit_ranges,
+            )
             
             blocks = {}  # {(mb_idx, block_idx): [coeffs]}
             mb_metadata = {}  # {mb_idx: {'mb_type': ..., 'cbp': ...}}
@@ -1347,7 +1353,7 @@ class TraceableCAVLCParser:
                                 # Storing bit_length=0 offsets causes patcher to try patching 0-bit
                                 # regions (always fails with our_enc=N vs NAL=0 mismatch).
                                 if block_end_bit > block_start_bit:
-                                    self.block_offsets[cache_key] = {
+                                    block_offset = {
                                         'start_bit': block_start_bit,
                                         'end_bit': block_end_bit,
                                         'bit_length': block_end_bit - block_start_bit,
@@ -1356,6 +1362,11 @@ class TraceableCAVLCParser:
                                         'trailing_ones': int(block.trailing_ones),
                                         'max_num_coeff': int(max_coeffs),
                                     }
+                                    if block.coefficient_bit_ranges is not None:
+                                        coefficient_ranges = list(block.coefficient_bit_ranges[:16])
+                                        coefficient_ranges.extend([None] * (16 - len(coefficient_ranges)))
+                                        block_offset['coefficient_bit_ranges'] = coefficient_ranges
+                                    self.block_offsets[cache_key] = block_offset
                                 # else: bit_length==0 ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ VLC decode failure (reader rewound) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â no valid offset
                                 
                                 # Update neighbor cache WITH SAME KEY FORMAT
