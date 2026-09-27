@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -146,6 +147,207 @@ class VideoZkpStatement:
         if data["statement_id"] != rebuilt.statement_id:
             raise ValueError("statement_id does not match the canonical statement")
         return rebuilt
+
+
+@dataclass(frozen=True)
+class ContextAugmentedLatticeRelation:
+    """Experimental public linear instance binding a LaZer relation to video context.
+
+    This data structure is not a proof and has not received cryptographic review.
+    ``lazer_t`` follows LaZer's demonstrated ``A*s + t = 0`` convention.
+    """
+
+    matrix: tuple[tuple[tuple[int, ...], ...], ...]
+    lazer_t: tuple[tuple[int, ...], ...]
+    witness_suffix: tuple[tuple[int, ...], ...]
+    context_units: tuple[int, ...]
+
+
+_LAZER_CONTEXT_DOMAIN = b"zkstego/lazer-context-binding/v1/"
+_U64_MAX = (1 << 64) - 1
+_MILLER_RABIN_BASES_U64 = (2, 325, 9375, 28178, 450775, 9780504, 1795265022)
+
+
+def _is_prime_u64(value: int) -> bool:
+    """Deterministically test primality for integers in the unsigned 64-bit range."""
+    if value < 2 or value > _U64_MAX:
+        return False
+    small_primes = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37)
+    for prime in small_primes:
+        if value == prime:
+            return True
+        if value % prime == 0:
+            return False
+
+    odd_part = value - 1
+    powers_of_two = 0
+    while odd_part % 2 == 0:
+        powers_of_two += 1
+        odd_part //= 2
+
+    for base in _MILLER_RABIN_BASES_U64:
+        witness = base % value
+        if witness == 0:
+            continue
+        residue = pow(witness, odd_part, value)
+        if residue in (1, value - 1):
+            continue
+        for _ in range(powers_of_two - 1):
+            residue = residue * residue % value
+            if residue == value - 1:
+                break
+        else:
+            return False
+    return True
+
+
+def _validate_context_statement_and_modulus(
+    statement: VideoZkpStatement, modulus: int
+) -> tuple[VideoZkpStatement, bytes]:
+    if not isinstance(statement, VideoZkpStatement):
+        raise ValueError("statement must be a VideoZkpStatement")
+    if isinstance(modulus, bool) or not isinstance(modulus, int) or not _is_prime_u64(modulus):
+        raise ValueError("modulus must be a prime integer in the unsigned 64-bit range")
+    canonical_statement = VideoZkpStatement.from_dict(statement.to_dict())
+    return canonical_statement, canonical_statement.to_public_bytes()
+
+
+def derive_statement_context_units(
+    statement: VideoZkpStatement, modulus: int
+) -> tuple[int, ...]:
+    """Encode a canonical statement digest as nonzero elements of a prime field.
+
+    The little-endian base-``modulus - 1`` digits are shifted by one, so every
+    returned element is a unit modulo ``modulus``. This is a building block for
+    an experimental LaZer public-instance transform, not a ZK proof.
+    """
+    canonical_statement, statement_bytes = _validate_context_statement_and_modulus(
+        statement, modulus
+    )
+    del canonical_statement
+    digest = hashlib.sha3_256(
+        _LAZER_CONTEXT_DOMAIN
+        + len(statement_bytes).to_bytes(8, "big")
+        + statement_bytes
+    ).digest()
+    remaining = int.from_bytes(digest, "big")
+    base = modulus - 1
+    target_range = 1 << (8 * len(digest))
+    unit_count = 1
+    capacity = base
+    while capacity < target_range:
+        capacity *= base
+        unit_count += 1
+
+    units: list[int] = []
+    for _ in range(unit_count):
+        remaining, digit = divmod(remaining, base)
+        units.append(digit + 1)
+    if remaining:
+        raise ArithmeticError("internal error: statement digest did not fit in field limbs")
+    return tuple(units)
+
+
+def _polynomial_coefficients(value: object, degree: int, modulus: int) -> tuple[int, ...]:
+    if (
+        not isinstance(value, Sequence)
+        or isinstance(value, (str, bytes, bytearray))
+        or len(value) != degree
+    ):
+        raise ValueError("every ring element must be a coefficient sequence of equal degree")
+    if any(isinstance(coefficient, bool) or not isinstance(coefficient, int) for coefficient in value):
+        raise ValueError("ring coefficients must be integers")
+    return tuple(coefficient % modulus for coefficient in value)
+
+
+def build_context_augmented_lattice_relation(
+    statement: VideoZkpStatement,
+    matrix: Sequence[Sequence[Sequence[int]]],
+    target: Sequence[Sequence[int]],
+    modulus: int,
+) -> ContextAugmentedLatticeRelation:
+    """Build an experimental LaZer relation instance tied to a video statement.
+
+    The base relation is ``A*s = target`` over ``Z_q[X]/(X^d + 1)``. Diagonal
+    context rows add public unit equations ``h_i*b_i = h_i``; the returned
+    witness suffix is ``b_i = 1``. A caller must also constrain each auxiliary
+    witness polynomial to coefficient infinity norm at most one. The result
+    must not be treated as secure or passed to a proof backend until the exact
+    LaZer parameterization and this transform receive independent review.
+    """
+    canonical_statement, _statement_bytes = _validate_context_statement_and_modulus(
+        statement, modulus
+    )
+    if (
+        not isinstance(matrix, Sequence)
+        or isinstance(matrix, (str, bytes, bytearray))
+        or not matrix
+    ):
+        raise ValueError("matrix must be a non-empty rectangular sequence")
+    if (
+        not isinstance(target, Sequence)
+        or isinstance(target, (str, bytes, bytearray))
+        or len(target) != len(matrix)
+    ):
+        raise ValueError("target must contain one ring element for each matrix row")
+
+    first_row = matrix[0]
+    if (
+        not isinstance(first_row, Sequence)
+        or isinstance(first_row, (str, bytes, bytearray))
+        or not first_row
+    ):
+        raise ValueError("matrix must have at least one column")
+    row_count = len(matrix)
+    column_count = len(first_row)
+    first_element = first_row[0]
+    if (
+        not isinstance(first_element, Sequence)
+        or isinstance(first_element, (str, bytes, bytearray))
+        or not first_element
+    ):
+        raise ValueError("matrix elements must be non-empty polynomial coefficient sequences")
+    degree = len(first_element)
+    base_matrix: list[tuple[tuple[int, ...], ...]] = []
+    for row in matrix:
+        if (
+            not isinstance(row, Sequence)
+            or isinstance(row, (str, bytes, bytearray))
+            or len(row) != column_count
+        ):
+            raise ValueError("matrix must be rectangular")
+        base_matrix.append(
+            tuple(_polynomial_coefficients(element, degree, modulus) for element in row)
+        )
+    base_target = tuple(
+        _polynomial_coefficients(element, degree, modulus) for element in target
+    )
+
+    units = derive_statement_context_units(canonical_statement, modulus)
+    zero = (0,) * degree
+    context_rows: list[tuple[tuple[int, ...], ...]] = []
+    for index, unit in enumerate(units):
+        row = [zero] * (column_count + len(units))
+        row[column_count + index] = (unit,) + (0,) * (degree - 1)
+        context_rows.append(tuple(row))
+
+    augmented_matrix = tuple(
+        tuple(row) + (zero,) * len(units) for row in base_matrix
+    ) + tuple(context_rows)
+    public_target = base_target + tuple(
+        (unit,) + (0,) * (degree - 1) for unit in units
+    )
+    lazer_t = tuple(
+        tuple((-coefficient) % modulus for coefficient in polynomial)
+        for polynomial in public_target
+    )
+    witness_suffix = tuple((1,) + (0,) * (degree - 1) for _ in units)
+    return ContextAugmentedLatticeRelation(
+        matrix=augmented_matrix,
+        lazer_t=lazer_t,
+        witness_suffix=witness_suffix,
+        context_units=units,
+    )
 
 
 def build_video_zkp_statement(
