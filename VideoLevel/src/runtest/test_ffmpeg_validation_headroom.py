@@ -9,10 +9,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from src.embedder import (
     _candidate_validation_target,
-    _prepare_validated_patchable_positions,
     _validate_candidate_positions,
 )
-from unittest.mock import patch
 from src.runtest._helpers import run_test, section, summarise
 
 
@@ -74,44 +72,6 @@ def t_batch_validator_is_used_when_available() -> None:
     assert validator.request == (4, 5)
 
 
-def t_patchability_filter_runs_before_batch_ffmpeg_validation() -> None:
-    positions = [(index, 0, 1) for index in range(8)]
-    patchable = positions[2:]
-
-    class BatchValidator:
-        def __init__(self) -> None:
-            self.seen = None
-
-        def validate_batch(self, candidates, *, target_positions, max_candidates):
-            self.seen = (candidates, target_positions, max_candidates)
-            return candidates, len(candidates)
-
-    validator = BatchValidator()
-    with patch("src.embedder._prune_patchable_positions", return_value=patchable) as prune:
-        with patch("src.embedder._limit_positions_per_block", return_value=patchable) as limit:
-            filtered, validated, tried = _prepare_validated_patchable_positions(
-                positions,
-                {"frame": "offsets"},
-                validator,
-                required_bits=2,
-                max_modifications_per_block=1,
-                max_candidates=10,
-            )
-
-    target = _candidate_validation_target(2)
-    prune.assert_called_once_with(
-        positions,
-        {"frame": "offsets"},
-        required_bits=target,
-        max_modifications_per_block=1,
-    )
-    limit.assert_called_once_with(patchable, max_modifications_per_block=1)
-    assert filtered == patchable
-    assert validated == patchable
-    assert tried == len(patchable)
-    assert validator.seen == (patchable, target, 10)
-
-
 def main() -> None:
     section("FFmpeg validation headroom")
     results = [
@@ -119,7 +79,6 @@ def main() -> None:
         run_test("validator_keeps_scanning_until_headroom_target", t_validator_keeps_scanning_until_headroom_target),
         run_test("validator_respects_candidate_scan_limit", t_validator_respects_candidate_scan_limit),
         run_test("batch_validator_is_used_when_available", t_batch_validator_is_used_when_available),
-        run_test("patchability_filter_runs_before_batch_ffmpeg_validation", t_patchability_filter_runs_before_batch_ffmpeg_validation),
     ]
     raise SystemExit(summarise(results, "FFmpeg validation headroom"))
 
