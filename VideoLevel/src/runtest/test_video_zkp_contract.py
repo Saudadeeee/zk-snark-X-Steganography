@@ -29,11 +29,28 @@ def _statement() -> object:
 
 
 def t_statement_is_canonical_and_binds_every_video_artifact() -> None:
+    from src.video_zkp_contract import VIDEO_ZKP_HASH_ALGORITHMS
+
     statement = _statement()
 
-    assert statement.protocol == "zkstego-pq-video-statement-v1"
+    assert statement.protocol == "zkstego-pq-video-statement-v2"
+    assert VIDEO_ZKP_HASH_ALGORITHMS["stego_hash"] == "sha256(canonical-h264-carrier-normalization-v1)"
     assert len(statement.statement_id) == 64
     assert statement.to_public_bytes() == statement.to_public_bytes()
+
+
+def t_video_commitment_is_recomputed_from_video_and_carrier_positions() -> None:
+    from unittest.mock import patch
+
+    from src.video_zkp_contract import verify_video_zkp_video_commitment
+
+    statement = _statement()
+    positions = [(4, 8, -1), (9, 2, 3)]
+    with patch("src.video_canonicalization.canonical_video_sha256", return_value=statement.stego_hash) as digest:
+        assert verify_video_zkp_video_commitment(statement, "stego.h264", positions)
+        digest.assert_called_once_with("stego.h264", positions)
+    with patch("src.video_canonicalization.canonical_video_sha256", return_value="ff" * 32):
+        assert not verify_video_zkp_video_commitment(statement, "stego.h264", positions)
 
 
 def t_statement_id_changes_for_payload_video_positions_or_policy() -> None:
@@ -204,6 +221,7 @@ def main() -> None:
     section("PQ video ZKP statement contract")
     results = [
         run_test("statement_is_canonical_and_binds_every_video_artifact", t_statement_is_canonical_and_binds_every_video_artifact),
+        run_test("video_commitment_is_recomputed_from_video_and_carrier_positions", t_video_commitment_is_recomputed_from_video_and_carrier_positions),
         run_test("statement_id_changes_for_payload_video_positions_or_policy", t_statement_id_changes_for_payload_video_positions_or_policy),
         run_test("statement_rejects_ambiguous_or_wrongly_sized_inputs", t_statement_rejects_ambiguous_or_wrongly_sized_inputs),
         run_test("payload_commitment_is_opening_bound_and_statement_parser_rejects_tampering", t_payload_commitment_is_opening_bound_and_statement_parser_rejects_tampering),
