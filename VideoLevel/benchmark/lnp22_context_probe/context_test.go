@@ -73,14 +73,14 @@ func TestAugmentationAddsSatisfiableContextRows(t *testing.T) {
 
 func TestProofRejectsChangedContext(t *testing.T) {
 	params := nizk.DefaultParams()
-	params.K = 1
-	params.L = 1
-	baseMatrix := params.Ring.NewPolyMat(1, 1)
-	baseMatrix[0][0] = params.Ring.One()
-	baseTarget := params.Ring.NewPolyVec(1)
-	baseTarget[0] = params.Ring.One()
-	baseWitness := params.Ring.NewPolyVec(1)
-	baseWitness[0] = params.Ring.One()
+	baseMatrix := params.Ring.NewPolyMat(params.K, params.L)
+	baseTarget := params.Ring.NewPolyVec(params.K)
+	baseWitness := params.Ring.NewPolyVec(params.L)
+	for row := range baseMatrix {
+		baseMatrix[row][row] = params.Ring.One()
+		baseTarget[row] = params.Ring.One()
+		baseWitness[row] = params.Ring.One()
+	}
 	baseStatement := &nizk.Statement{A: baseMatrix, T: baseTarget}
 	witness := &nizk.Witness{S: baseWitness}
 
@@ -132,6 +132,19 @@ func TestProofRejectsChangedContext(t *testing.T) {
 	valid, err = verifySerializedArtifacts([]byte("video statement B"), relationBytes, proofBytes)
 	if err == nil && valid {
 		t.Fatal("serialized proof verified after context mutation")
+	}
+
+	var relation publicRelation
+	if err := json.Unmarshal(relationBytes, &relation); err != nil {
+		t.Fatal(err)
+	}
+	relation.Statement.A[0][0][0] = relation.Parameters.Q
+	malformedRelation, err := json.Marshal(relation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verifySerializedArtifacts(contextBytes, malformedRelation, proofBytes); err == nil {
+		t.Fatal("relation with non-canonical field coefficient was accepted")
 	}
 }
 
