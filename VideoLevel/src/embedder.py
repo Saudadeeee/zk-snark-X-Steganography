@@ -171,6 +171,32 @@ def _limit_positions_per_block(
     return limited
 
 
+def _candidate_validation_target(required_bits: int) -> int:
+    """Return the FFmpeg candidate count needed before patchability filtering."""
+    if required_bits <= 0:
+        return 0
+    return max(required_bits + 256, int(required_bits * 1.30))
+
+
+def _validate_candidate_positions(
+    positions: list[tuple[int, int, int]],
+    validator,
+    *,
+    target_positions: int,
+    max_candidates: int,
+) -> tuple[list[tuple[int, int, int]], int]:
+    """Validate candidates until the target count or bounded scan limit is reached."""
+    validated: list[tuple[int, int, int]] = []
+    tried = 0
+    for position in positions:
+        if len(validated) >= target_positions or tried >= max_candidates:
+            break
+        tried += 1
+        if validator(position):
+            validated.append(position)
+    return validated, tried
+
+
 @dataclass
 class EmbedResult:
     """Result returned by embed()."""
@@ -420,20 +446,20 @@ def embed(
                 if embedding_strategy == MATRIX_EMBEDDING_STRATEGY
                 else len(payload_blob) * 8
             )
+            _validation_target = _candidate_validation_target(_required)
             _max_tries = max(_required * 5, 2000)
             _total_candidates = len(safe_positions)
-            _validated: list = []
-            _tried = 0
-            for p in safe_positions:
-                if len(_validated) >= _required or _tried >= _max_tries:
-                    break
-                _tried += 1
-                if _vfn(p[0], p[1], p[2]):
-                    _validated.append(p)
+            _validated, _tried = _validate_candidate_positions(
+                safe_positions,
+                lambda p: _vfn(p[0], p[1], p[2]),
+                target_positions=_validation_target,
+                max_candidates=_max_tries,
+            )
             _cleanup()
             logger.info(
-                "[FFmpeg] %d/%d passed (tried %d/%d candidates, needed %d)",
-                len(_validated), _tried, _tried, _total_candidates, _required,
+                "[FFmpeg] %d/%d passed (tried %d/%d candidates, target %d for %d payload positions)",
+                len(_validated), _total_candidates, _tried, _total_candidates,
+                _validation_target, _required,
             )
             safe_positions = _validated
             ffmpeg_validated_bits = len(safe_positions)
@@ -444,7 +470,7 @@ def embed(
             if embedding_strategy == MATRIX_EMBEDDING_STRATEGY
             else len(payload_blob) * 8
         )
-        headroom_positions = max(required_positions + 256, int(required_positions * 1.30))
+        headroom_positions = _candidate_validation_target(required_positions)
         safe_positions = _prune_patchable_positions(
             safe_positions,
             frame_verified_data,
