@@ -32,6 +32,7 @@ def t_asset_selection_uses_locked_sidecar_contract() -> None:
         sequence_name="deadline_q22_g1_600f",
         video_path="cover.h264",
         stego_path="stego.h264",
+        bits_required=1232,
     )
     with patch(
         "benchmark.blind_core_trial.load_best_locked_operating_contract",
@@ -40,7 +41,7 @@ def t_asset_selection_uses_locked_sidecar_contract() -> None:
         asset = _select_operating_asset(required_bits=1232)
 
     load_contract.assert_called_once()
-    assert asset == ("deadline_q22_g1_600f", "cover.h264", "stego.h264")
+    assert asset == ("deadline_q22_g1_600f", "cover.h264", "stego.h264", 1232)
 
 
 def main() -> None:
