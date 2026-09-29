@@ -59,6 +59,35 @@ func TestDeriveUnitsEncodesStatementDigest(t *testing.T) {
 	}
 }
 
+func TestDeriveUnitsSeparatesProtocolDomains(t *testing.T) {
+	statement := []byte(`{"payload_commitment":"abc","session":"domain-test"}`)
+	legacyUnits, legacyDigest, err := deriveUnits(statement, 8_380_417)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixedUnits, fixedDigest, err := deriveUnitsWithDomain(statement, 8_380_417, fixedContextDomain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacyDigest == fixedDigest || bytes.Equal(
+		mustJSON(t, legacyUnits), mustJSON(t, fixedUnits),
+	) {
+		t.Fatal("protocol-specific context domain did not separate the derived units")
+	}
+	if _, _, err := deriveUnitsWithDomain(statement, 8_380_417, ""); err == nil {
+		t.Fatal("empty protocol context domain was accepted")
+	}
+}
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
+}
+
 func TestAugmentationAddsSatisfiableContextRows(t *testing.T) {
 	baseRing, err := ring.New(2, 5)
 	if err != nil {

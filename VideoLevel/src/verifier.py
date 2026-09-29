@@ -1,5 +1,5 @@
 """
-verifier.py — Public API: Extract and verify a ZK proof from a stego video.
+verifier.py — Public API: Extract and verify the selected attestation/proof backend.
 
 Quick start:
     from src.verifier import verify, VerifyResult
@@ -100,7 +100,7 @@ def _get_bridge(circuits_dir: str) -> ZKSnarkBridge:
 @dataclass
 class VerifyResult:
     """Result returned by verify()."""
-    valid:          bool            # True if ZK proof verifies successfully
+    valid:          bool            # True if the selected backend verifies successfully
     message:        Optional[bytes] # Extracted message (None if invalid)
     proof_dict:     Optional[dict]  # Raw proof dict (None if unpack failed)
     public_dict:    Optional[list]  # Public signals (None if unpack failed)
@@ -125,7 +125,12 @@ def verify(
     embedding_strategy: str = "t1_sign_flip",
 ) -> VerifyResult:
     """
-    Extract and verify the ZK proof embedded in a stego H.264 video.
+    Extract the in-video payload and verify the selected backend.
+
+    For the default ``proof_backend="lattice"``, the video contains a
+    commitment/reference to an ML-DSA receipt in a sidecar; this is
+    authentication, not a zero-knowledge proof. The experimental
+    ``lattice_zkp`` backend is disabled.
 
     Pipeline:
         1. Parse original video  — reconstruct embedding position map
@@ -134,7 +139,7 @@ def verify(
         3. Extract bits          — read T1 signs from stego video
        3b. [Chaos] Arnold Cat Map unscramble payload bits (if chaos_key)
         4. Unpack blob           — split into (message, proof_bytes)
-        5. Verify ZK proof       — snarkjs groth16 verify
+        5. Verify selected backend — ML-DSA receipt authentication or legacy Groth16
 
     Args:
         stego_video_path:    Path to the stego H.264 video.

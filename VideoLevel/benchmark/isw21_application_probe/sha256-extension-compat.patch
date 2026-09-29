@@ -1,0 +1,11 @@
+diff --git a/libsnark/gadgetlib1/gadgets/hashes/sha256/sha256_aux.tcc b/libsnark/gadgetlib1/gadgets/hashes/sha256/sha256_aux.tcc
+--- a/libsnark/gadgetlib1/gadgets/hashes/sha256/sha256_aux.tcc
++++ b/libsnark/gadgetlib1/gadgets/hashes/sha256/sha256_aux.tcc
+@@ -288,2 +288,5 @@
+-        const long v = (this->pb.lc_val(X[i]) + this->pb.lc_val(Y[i]) + this->pb.lc_val(Z[i])).as_ulong();
+-        this->pb.val(result_bits[i]) = FieldT(v / 2);
++        const unsigned int v =
++            static_cast<unsigned int>(this->pb.lc_val(X[i]) == FieldT::one()) +
++            static_cast<unsigned int>(this->pb.lc_val(Y[i]) == FieldT::one()) +
++            static_cast<unsigned int>(this->pb.lc_val(Z[i]) == FieldT::one());
++        this->pb.val(result_bits[i]) = FieldT(v / 2U);

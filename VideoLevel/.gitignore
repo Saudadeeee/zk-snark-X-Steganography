@@ -62,6 +62,7 @@ node_modules/
 !benchmark/results/trust_architecture_diagnostic.json
 !benchmark/results/trust_corpus_validation.json
 !benchmark/trust_corpus_manifest.json
+!lazer/LAZER_TOOLKIT_CANDIDATE.lock.json
 !src/runtest/demo_embed_verify.py
 !src/runtest/test_*.py
 !src/runtest/test_future_trust_architecture.py
@@ -71,6 +72,7 @@ data/external/trust_corpus/*.mp4
 # Temporary files
 *.tmp
 *.bak
+.venv*/
 .cache/
 .pytest_cache/
 
@@ -79,6 +81,10 @@ benchmark_*/
 # Benchmark cache artifacts
 benchmark/results/_idr_cache_*.pkl
 benchmark/results/_proof_payload_cache.bin
+
+# Local presentation scratch (not project source or final deliverables)
+.build-presentation/
+.chart-data-*/
 
 # Debug & scratch scripts
 debug_*.py

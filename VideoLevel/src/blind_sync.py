@@ -14,12 +14,73 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
+import struct
+import tempfile
+import zlib
 from dataclasses import dataclass
 from typing import Optional
 
 from .core.analysis_cache import load_or_build_video_analysis
 from .core.chaos import ChaosTransformer
 from .core.stego import CAVLCSafetyFilter
+from .core.stego import stable_blind_candidate_index as _stable_candidate_index
+
+BLIND_ENVELOPE_MAGIC = b"ZKVP"
+BLIND_ENVELOPE_VERSION = 1
+BLIND_ENVELOPE_KIND_DATA = 1
+BLIND_ENVELOPE_PREFIX_BYTES = 10
+BLIND_ENVELOPE_HEADER_BYTES = 14
+MAX_BLIND_PAYLOAD_BYTES = 16 * 1024 * 1024
+
+
+def pack_blind_payload(payload: bytes) -> bytes:
+    """Frame payload bytes with version, type, exact length, and CRC-32."""
+    if not isinstance(payload, bytes):
+        raise TypeError("payload must be bytes")
+    if len(payload) > MAX_BLIND_PAYLOAD_BYTES:
+        raise ValueError("payload exceeds blind-envelope size limit")
+    prefix = struct.pack(
+        ">4sBBI",
+        BLIND_ENVELOPE_MAGIC,
+        BLIND_ENVELOPE_VERSION,
+        BLIND_ENVELOPE_KIND_DATA,
+        len(payload),
+    )
+    checksum = zlib.crc32(prefix + payload) & 0xFFFFFFFF
+    return prefix + struct.pack(">I", checksum) + payload
+
+
+def parse_blind_payload_header(header: bytes) -> int:
+    """Validate fixed framing fields and return the declared payload length."""
+    if not isinstance(header, bytes) or len(header) != BLIND_ENVELOPE_HEADER_BYTES:
+        raise ValueError(f"blind payload header must be {BLIND_ENVELOPE_HEADER_BYTES} bytes")
+    magic, version, kind, payload_length = struct.unpack(">4sBBI", header[:BLIND_ENVELOPE_PREFIX_BYTES])
+    if magic != BLIND_ENVELOPE_MAGIC:
+        raise ValueError("blind payload magic mismatch")
+    if version != BLIND_ENVELOPE_VERSION:
+        raise ValueError("unsupported blind payload version")
+    if kind != BLIND_ENVELOPE_KIND_DATA:
+        raise ValueError("unsupported blind payload kind")
+    if payload_length > MAX_BLIND_PAYLOAD_BYTES:
+        raise ValueError("declared blind payload exceeds size limit")
+    return payload_length
+
+
+def unpack_blind_payload(envelope: bytes) -> bytes:
+    """Validate exact envelope length and CRC before returning payload bytes."""
+    if not isinstance(envelope, bytes) or len(envelope) < BLIND_ENVELOPE_HEADER_BYTES:
+        raise ValueError("blind payload envelope is truncated")
+    payload_length = parse_blind_payload_header(envelope[:BLIND_ENVELOPE_HEADER_BYTES])
+    expected_length = BLIND_ENVELOPE_HEADER_BYTES + payload_length
+    if len(envelope) != expected_length:
+        raise ValueError("blind payload envelope length mismatch")
+    prefix = envelope[:BLIND_ENVELOPE_PREFIX_BYTES]
+    checksum = struct.unpack(">I", envelope[BLIND_ENVELOPE_PREFIX_BYTES:BLIND_ENVELOPE_HEADER_BYTES])[0]
+    payload = envelope[BLIND_ENVELOPE_HEADER_BYTES:]
+    if zlib.crc32(prefix + payload) & 0xFFFFFFFF != checksum:
+        raise ValueError("blind payload checksum mismatch")
+    return payload
 
 
 @dataclass
@@ -32,6 +93,26 @@ class BlindPublicMetadata:
     patchable_block_count: int
     stable_candidate_count: int
     candidate_fingerprint: str
+    analysis_profile: str = "full-v1"
+
+
+@dataclass(frozen=True)
+class BlindVideoPayloadResult:
+    payload: bytes
+    metadata: BlindPublicMetadata
+    envelope_size_bytes: int
+    carriers_used: int
+    carrier_positions: tuple[tuple[int, int, int], ...]
+
+
+@dataclass(frozen=True)
+class BlindVideoEmbedResult:
+    output_path: str
+    metadata: BlindPublicMetadata
+    payload_bytes: int
+    envelope_bytes: int
+    carriers_used: int
+    modified_carriers: int
 
 
 @dataclass
@@ -45,6 +126,7 @@ class BlindOperatingContract:
     require_bitstream_patchable: bool = False
     patchability_headroom: int = 256
     max_modifications_per_block: int = 1
+    stable_carriers_only: bool = False
 
 
 DEFAULT_VALIDATED_POOL_PROXY_CONTRACT = BlindOperatingContract(
@@ -67,23 +149,6 @@ DEFAULT_BLIND_HEADER_CONTRACT = BlindOperatingContract(
     max_bits_per_idr=1,
     metadata_bound=False,
 )
-
-
-def _stable_candidate_index(coeffs: list[int], trailing_positions: set[int]) -> Optional[int]:
-    """
-    Pick a coefficient index using properties that are more stable than LSB/sign.
-
-    Priority:
-    1. first AC coefficient with abs >= 2 and not a trailing-one slot
-    2. first non-zero AC coefficient not in trailing-one slots
-    """
-    for idx in range(1, len(coeffs)):
-        if coeffs[idx] != 0 and idx not in trailing_positions and abs(coeffs[idx]) >= 2:
-            return idx
-    for idx in range(1, len(coeffs)):
-        if coeffs[idx] != 0 and idx not in trailing_positions:
-            return idx
-    return None
 
 
 def build_blind_stable_candidates(
@@ -116,6 +181,8 @@ def _metadata_from_analysis(
     frame_verified_data: dict,
     nal_length_map: dict,
     safe_positions: list[tuple[int, int, int]],
+    *,
+    analysis_profile: str = "full-v1",
 ) -> tuple[BlindPublicMetadata, list[tuple[int, int, int]]]:
     """Build blind synchronization metadata from an existing video analysis."""
     stable_candidates = build_blind_stable_candidates(coefficients, nal_length_map)
@@ -124,7 +191,11 @@ def _metadata_from_analysis(
         json.dumps(serialized, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
     ).hexdigest()
     metadata = BlindPublicMetadata(
-        version="blind-sync-v1",
+        version=(
+            "blind-sync-stable-v1"
+            if analysis_profile == "stable-blind-v1"
+            else "blind-sync-v1"
+        ),
         codec="h264",
         profile="baseline-cavlc",
         idr_count=len(frame_verified_data),
@@ -134,6 +205,7 @@ def _metadata_from_analysis(
         ),
         stable_candidate_count=len(stable_candidates),
         candidate_fingerprint=candidate_fingerprint,
+        analysis_profile=analysis_profile,
     )
     return metadata, stable_candidates
 
@@ -430,17 +502,26 @@ def derive_blind_positions_operating_contract(
         use_cache=use_analysis_cache,
         force_refresh=force_analysis_refresh,
         cache_dir=analysis_cache_dir,
+        stable_blind_only=(
+            contract.stable_carriers_only and not contract.signbit_only
+        ),
     )
+    stable_profile = contract.stable_carriers_only and not contract.signbit_only
     metadata, _stable_candidates = _metadata_from_analysis(
         coefficients,
         frame_verified_data,
         nal_length_map,
         safe_positions,
+        analysis_profile="stable-blind-v1" if stable_profile else "full-v1",
     )
     seed_base = derive_seed_base(metadata)
     ordering_secret = derive_ordering_key(sync_key, seed_base) if contract.metadata_bound else bytes(sync_key)
 
-    candidates = list(safe_positions)
+    if contract.stable_carriers_only:
+        safe_set = set(safe_positions)
+        candidates = [pos for pos in _stable_candidates if pos in safe_set]
+    else:
+        candidates = list(safe_positions)
     if contract.signbit_only:
         candidates = _filter_signbit_positions(candidates)
     if contract.bottom_rows > 0:
@@ -458,6 +539,7 @@ def derive_blind_positions_operating_contract(
             raise ValueError("patchability_headroom must be non-negative")
         if contract.max_modifications_per_block < 1:
             raise ValueError("max_modifications_per_block must be positive")
+    if contract.require_bitstream_patchable and not stable_profile:
         from .embedder import _prune_patchable_positions
 
         patchable_target = max(
@@ -477,6 +559,217 @@ def derive_blind_positions_operating_contract(
             max_bits_per_idr=contract.max_bits_per_idr,
         )
     return ordered[:required_bits], metadata
+
+
+def embed_blind_video_payload(
+    cover_video_path: str,
+    output_video_path: str,
+    payload: bytes,
+    sync_key: bytes,
+    contract: BlindOperatingContract,
+) -> BlindVideoEmbedResult:
+    """Embed a self-framed payload into H.264 residuals without sidecar output.
+
+    This experimental channel API does not create or assert a ZKP. The caller
+    supplies already generated proof bytes and remains responsible for their
+    cryptographic meaning and public-statement binding.
+    """
+    if not isinstance(payload, bytes):
+        raise TypeError("payload must be bytes")
+    if not isinstance(sync_key, bytes) or not sync_key:
+        raise ValueError("sync_key must be non-empty bytes")
+    if not contract.stable_carriers_only or not contract.require_bitstream_patchable:
+        raise ValueError("sidecar-free embedding requires stable, patchability-checked carriers")
+    if contract.max_modifications_per_block != 1:
+        raise ValueError("stable-carrier embedding requires one modification per block")
+    if os.path.exists(output_video_path):
+        raise FileExistsError(f"Output video already exists: {output_video_path}")
+    if not os.path.isfile(cover_video_path):
+        raise FileNotFoundError(f"Cover video not found: {cover_video_path}")
+    output_parent = os.path.dirname(os.path.abspath(output_video_path))
+    if not os.path.isdir(output_parent):
+        raise FileNotFoundError(f"Output directory not found: {output_parent}")
+
+    from .bitstream.bitstream_ops import BitstreamReconstructor
+    from .core.stego import PayloadEmbedder
+    from .embedder import _strict_validate_h264_decode
+
+    envelope = pack_blind_payload(payload)
+    required_bits = len(envelope) * 8
+    analysis = load_or_build_video_analysis(
+        cover_video_path,
+        use_cache=True,
+        stable_blind_only=True,
+    )
+    coefficients, frame_data, n_c_map, nal_lengths, t1_overrides = analysis[:5]
+    positions, metadata = derive_blind_positions_operating_contract(
+        cover_video_path,
+        sync_key,
+        required_bits,
+        contract,
+        use_analysis_cache=True,
+    )
+    if len(positions) != required_bits:
+        raise ValueError(
+            f"insufficient stable patchable capacity: need {required_bits} carriers, got {len(positions)}"
+        )
+
+    embedder = PayloadEmbedder(
+        max_modifications_per_block=contract.max_modifications_per_block
+    )
+    modified, embedded_bits = embedder.embed_payload(
+        coefficients,
+        envelope,
+        nC_map=n_c_map,
+        nal_length_map=nal_lengths,
+        t1_override_map=t1_overrides,
+        frame_verified_data=frame_data,
+        pre_validated_positions=positions,
+    )
+    if embedded_bits != required_bits:
+        raise RuntimeError(f"short embed: wrote {embedded_bits} of {required_bits} bits")
+
+    suffix = os.path.splitext(output_video_path)[1] or ".h264"
+    fd, candidate_path = tempfile.mkstemp(
+        prefix=".zkstego-candidate-", suffix=suffix, dir=output_parent
+    )
+    os.close(fd)
+    os.unlink(candidate_path)
+    try:
+        stats = BitstreamReconstructor().reconstruct_video(
+            cover_video_path,
+            modified,
+            candidate_path,
+            max_slices=None,
+            frame_verified_data=frame_data,
+        )
+        if not stats.get("success") or not os.path.isfile(candidate_path):
+            raise RuntimeError(f"H.264 reconstruction failed: {stats}")
+        expected_blocks = {
+            (int(mb), int(block))
+            for mb, block, _coefficients in modified
+        }
+        applied_blocks = {
+            (int(mb), int(block))
+            for mb, block in stats.get("applied_block_keys", [])
+        }
+        missing_blocks = expected_blocks - applied_blocks
+        if missing_blocks:
+            preview = sorted(missing_blocks)[:8]
+            skipped_reasons = stats.get("skipped_block_reasons", {})
+            reason_preview = {
+                key: skipped_reasons.get(key, "no_skip_reason_reported")
+                for key in preview
+            }
+            offset_preview = {}
+            for block_key in preview:
+                offset_data = next(
+                    (
+                        offsets.get(block_key)
+                        for offsets, _blocks, _rbsp in frame_data.values()
+                        if block_key in offsets
+                    ),
+                    None,
+                )
+                if offset_data is not None:
+                    offset_preview[block_key] = {
+                        field: offset_data.get(field)
+                        for field in ("nC", "validated_nC", "start_bit", "end_bit", "bit_length")
+                    }
+            raise RuntimeError(
+                "reconstruction did not apply all embedded carrier blocks; "
+                f"{len(missing_blocks)} missing, first={reason_preview}, "
+                f"verified_offsets={offset_preview}"
+            )
+        _strict_validate_h264_decode(candidate_path)
+        os.rename(candidate_path, output_video_path)
+    except Exception:
+        if os.path.exists(candidate_path):
+            os.unlink(candidate_path)
+        raise
+
+    return BlindVideoEmbedResult(
+        output_path=output_video_path,
+        metadata=metadata,
+        payload_bytes=len(payload),
+        envelope_bytes=len(envelope),
+        carriers_used=embedded_bits,
+        modified_carriers=len(embedder.last_modified_safe_positions),
+    )
+
+
+def extract_blind_video_payload(
+    video_path: str,
+    sync_key: bytes,
+    contract: BlindOperatingContract,
+) -> BlindVideoPayloadResult:
+    """Extract a self-framed payload using only a stego video and verifier config.
+
+    This experimental payload-channel API does not verify a ZKP. The caller
+    must pass the returned bytes to the selected proof verifier.
+    """
+    if not isinstance(sync_key, bytes) or not sync_key:
+        raise ValueError("sync_key must be non-empty bytes")
+    if not contract.stable_carriers_only:
+        raise ValueError("video-only extraction requires stable_carriers_only=True")
+
+    from .core.pipeline import _extract_bits_from_decoded_analysis
+
+    analysis = load_or_build_video_analysis(
+        video_path,
+        use_cache=True,
+        stable_blind_only=True,
+    )
+    frame_verified_data = analysis[1]
+    n_c_map = analysis[2]
+
+    header_bits = BLIND_ENVELOPE_HEADER_BYTES * 8
+    header_positions, metadata = derive_blind_positions_operating_contract(
+        video_path,
+        sync_key,
+        header_bits,
+        contract,
+        use_analysis_cache=True,
+    )
+    if len(header_positions) != header_bits:
+        raise ValueError("video does not contain enough stable carriers for the envelope header")
+    header = _extract_bits_from_decoded_analysis(
+        stego_video_path=video_path,
+        embed_safe_positions=header_positions,
+        frame_verified_data=frame_verified_data,
+        nC_map=n_c_map,
+        payload_bits=header_bits,
+        max_modifications_per_block=contract.max_modifications_per_block,
+    )
+    payload_length = parse_blind_payload_header(header)
+    envelope_size = BLIND_ENVELOPE_HEADER_BYTES + payload_length
+    envelope_bits = envelope_size * 8
+
+    positions, _ = derive_blind_positions_operating_contract(
+        video_path,
+        sync_key,
+        envelope_bits,
+        contract,
+        use_analysis_cache=True,
+    )
+    if len(positions) != envelope_bits:
+        raise ValueError("video does not contain enough stable carriers for the declared payload")
+    envelope = _extract_bits_from_decoded_analysis(
+        stego_video_path=video_path,
+        embed_safe_positions=positions,
+        frame_verified_data=frame_verified_data,
+        nC_map=n_c_map,
+        payload_bits=envelope_bits,
+        max_modifications_per_block=contract.max_modifications_per_block,
+    )
+    payload = unpack_blind_payload(envelope)
+    return BlindVideoPayloadResult(
+        payload=payload,
+        metadata=metadata,
+        envelope_size_bytes=envelope_size,
+        carriers_used=envelope_bits,
+        carrier_positions=tuple(positions),
+    )
 
 
 def derive_blind_positions_validated_pool_proxy(

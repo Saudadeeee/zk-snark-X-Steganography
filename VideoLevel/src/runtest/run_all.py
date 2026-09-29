@@ -20,7 +20,7 @@ ROOT     = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 RUNTEST  = os.path.join(ROOT, 'src', 'runtest')
 
 PHASES = [
-    ("Phase 1", "ZK Proof",           "test_phase1_zk_proof.py"),
+    ("Phase 1", "Legacy Groth16 (not lattice)", "test_phase1_zk_proof.py"),
     ("Phase 2", "H264 Parser",         "test_phase2_h264_parser.py"),
     ("Phase 3", "Safety + Embed",      "test_phase3_safety_embed.py"),
     ("Phase 4", "Reconstruct",         "test_phase4_reconstruct.py"),
@@ -34,6 +34,20 @@ PHASES = [
     ("Phase 16", "Single-pass blind analysis", "test_phase16_blind_analysis_single_pass.py"),
     ("Phase 17", "Isolated blind-analysis worker", "test_phase17_blind_worker_isolation.py"),
     ("Phase 18", "Blind patchability contract", "test_phase18_blind_patchability_contract.py"),
+    ("Phase 19", "Experimental local HTTP API", "test_lnp22_http_api.py"),
+    ("Phase 28", "Fail-closed experimental lattice ZKP", "test_lattice_zkp.py"),
+]
+
+PYTEST_PHASES = [
+    ("Phase 20", "Strict H.264 output gate", "test_phase19_strict_decode_gate.py"),
+    ("Phase 21", "Analysis-cache patchability context", "test_phase20_analysis_cache_patchability_context.py"),
+    ("Phase 22", "Application retry contract", "test_phase21_application_retry_contract.py"),
+    ("Phase 23", "Parser integrity trust gate", "test_phase22_parser_integrity_gate.py"),
+    ("Phase 24", "Video-only blind carrier sync", "test_video_only_blind_sync_integration.py"),
+    ("Phase 25", "Blind payload envelope", "test_blind_payload_envelope.py"),
+    ("Phase 26", "Blind payload chunk framing", "test_blind_payload_chunks.py"),
+    ("Phase 27", "Segmented blind video transport", "test_blind_sync_streaming.py"),
+    ("Phase 29", "Stable blind carrier analysis", "test_blind_stable_analysis.py"),
 ]
 
 SEP  = '-' * 58
@@ -73,6 +87,50 @@ def run_phase(label: str, description: str, filename: str):
 
     passed, failed, skipped = _count_results(stdout)
     return passed, failed, skipped, result.returncode
+
+
+def run_pytest_phase(label: str, description: str, filename: str):
+    """Run one pytest-style phase and fail closed if it collects no tests."""
+    filepath = os.path.join(RUNTEST, filename)
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", filepath],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    output = result.stdout + result.stderr
+    for line in output.splitlines():
+        print(f"  {line}")
+
+    summary_line = next(
+        (
+            line
+            for line in reversed(output.splitlines())
+            if re.search(r"\b\d+ (?:passed|failed|skipped|error|errors)\b", line)
+        ),
+        None,
+    )
+    counts = {name: 0 for name in ("passed", "failed", "skipped", "error", "errors")}
+    if summary_line is not None:
+        for count, name in re.findall(
+            r"(\d+) (passed|failed|skipped|error|errors)\b", summary_line
+        ):
+            counts[name] += int(count)
+
+    passed = counts["passed"]
+    failed = counts["failed"] + counts["error"] + counts["errors"]
+    skipped = counts["skipped"]
+    if result.returncode != 0 and failed == 0:
+        failed = 1
+    if summary_line is None and result.returncode == 0:
+        failed = 1
+        print("  [RUNNER ERROR] pytest exited successfully without a test summary")
+
+    exit_code = 1 if failed else (2 if skipped else result.returncode)
+    return passed, failed, skipped, exit_code
 
 
 def _status_from_exit_code(code: int) -> str:
@@ -119,6 +177,20 @@ def main():
             f"  {label} result: {passed}/{total_run} passed, "
             f"{failed} failed, {skipped} skipped  [{status}]"
         )
+
+    if not args.quick:
+        for label, desc, filename in PYTEST_PHASES:
+            print(f"\n>>> Running {label} - {desc}")
+            print(SEP)
+            passed, failed, skipped, code = run_pytest_phase(label, desc, filename)
+            print(SEP)
+            total_run = passed + failed + skipped
+            status = _status_from_exit_code(code)
+            summary.append((label, desc, passed, failed, skipped, status))
+            print(
+                f"  {label} result: {passed}/{total_run} passed, "
+                f"{failed} failed, {skipped} skipped  [{status}]"
+            )
 
     # Final summary table
     print()

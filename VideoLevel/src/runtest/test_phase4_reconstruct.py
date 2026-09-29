@@ -17,11 +17,11 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from src.runtest._helpers      import section, run_test, summarise, get_video, get_output
-from src.core.pipeline import extract_all_idr_blocks
-
-from src.core.stego import PayloadEmbedder
 from src.bitstream.bitstream_ops import BitstreamReconstructor
+from src.core.pipeline import extract_all_idr_blocks
+from src.core.stego import PayloadEmbedder
+from src.embedder import _strict_validate_h264_decode
+from src.runtest._helpers import get_output, get_video, run_test, section, summarise
 
 # -- Fixtures ----------------------------------------------------------- #
 
@@ -93,6 +93,11 @@ def t_output_valid_h264():
         f"Stego file does not start with NAL start code, got {header.hex()}"
 
 
+def t_output_strictly_decodes():
+    _build_fixture()
+    _strict_validate_h264_decode(STEGO_OUT)
+
+
 def t_patcher_zero_skips():
     _, _, _, _, stats, patcher_log = _build_fixture()
     lines = [l.strip() for l in patcher_log.splitlines() if '[PATCHER]' in l]
@@ -107,7 +112,7 @@ def t_patcher_zero_skips():
         f"reconstruct_video returned success=False: {stats}"
     # At least one patcher line should report success
     success_lines = [l for l in lines if 'Successfully patched' in l]
-    assert len(success_lines) > 0, f"No '[PATCHER] Successfully patched' lines found"
+    assert len(success_lines) > 0, "No '[PATCHER] Successfully patched' lines found"
 
 
 def t_file_size_within_bounds():
@@ -147,6 +152,7 @@ def main():
     results = [
         run_test("output_file_created",     t_output_file_created),
         run_test("output_valid_h264",       t_output_valid_h264),
+        run_test("output_strictly_decodes", t_output_strictly_decodes),
         run_test("patcher_zero_skips",      t_patcher_zero_skips),
         run_test("file_size_within_bounds", t_file_size_within_bounds),
         run_test("reconstruct_stats_ok",    t_reconstruct_stats_ok),

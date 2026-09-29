@@ -4,3 +4,4 @@ scipy
 scikit-image
 cryptography
 pqcrypto==1.0.0
+psutil

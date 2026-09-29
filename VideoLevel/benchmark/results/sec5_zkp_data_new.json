@@ -1,0 +1,59 @@
+{
+  "schema_version": 2,
+  "scope": "Groth16 is a measured comparison baseline, not the current lattice system.",
+  "proof_systems": {
+    "Groth16 BN128\n(measured baseline)": {
+      "proof_size_bytes": 129,
+      "proof_bearing_payload_bytes": 147,
+      "prove_time_ms": 7042.439266668225,
+      "verify_time_ms": 2208.225266668402,
+      "trusted_setup": true,
+      "universal_setup": false,
+      "simulated": false,
+      "trials": 3,
+      "measurement_scope": "end-to-end Python bridge wall time, including subprocess overhead"
+    },
+    "PLONK (KZG)": {
+      "proof_size_bytes": 768,
+      "prove_time_ms": 85000,
+      "verify_time_ms": 12.0,
+      "trusted_setup": true,
+      "universal_setup": true,
+      "simulated": true,
+      "measurement_method": "literature estimate; not executed by this benchmark",
+      "comparable_to_groth16": false
+    },
+    "STARKs (FRI)": {
+      "proof_size_bytes": 45000,
+      "prove_time_ms": 200000,
+      "verify_time_ms": 50.0,
+      "trusted_setup": false,
+      "universal_setup": false,
+      "simulated": true,
+      "measurement_method": "literature estimate; not executed by this benchmark",
+      "comparable_to_groth16": false
+    },
+    "Bulletproofs": {
+      "proof_size_bytes": 672,
+      "prove_time_ms": 1200,
+      "verify_time_ms": 900.0,
+      "trusted_setup": false,
+      "universal_setup": false,
+      "simulated": true,
+      "measurement_method": "literature estimate; not executed by this benchmark",
+      "comparable_to_groth16": false
+    }
+  },
+  "signature_baselines": {
+    "ECDSA P-256": {
+      "category": "digital_signature",
+      "zero_knowledge": false,
+      "algorithm": "ECDSA P-256 with SHA-256",
+      "signature_size_bytes_mean": 70.88,
+      "signing_time_ms_mean": 0.623494000028586,
+      "verification_time_ms_mean": 0.25642600005085114,
+      "trials": 50,
+      "simulated": false
+    }
+  }
+}

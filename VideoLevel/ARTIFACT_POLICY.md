@@ -1,6 +1,6 @@
 # Artifact Policy
 
-Last updated: 2026-06-09
+Last updated: 2026-09-29
 
 This policy defines which files are part of the current reproducible baseline
 and which files are rebuildable diagnostics or local cache.
@@ -70,6 +70,9 @@ These files can be regenerated and should normally stay out of commits unless a
 specific paper table depends on them:
 
 - `.cache/**`
+- `tmp/benchmark_new_smoke/**` (legacy PLONK smoke-run workspace, not current lattice-ZKP evidence)
+- `demo/runs/*/python_analysis_cache/**` (rebuildable analysis pickles, not demo outputs)
+- `.build-presentation/**` and `.chart-data-*/**` (presentation build/chart scratch)
 - `.pytest_cache/**`
 - `__pycache__/**`
 - `benchmark/results/_idr_cache_*.pkl`
@@ -102,6 +105,8 @@ Use the controlled helper first:
 py -3.12 benchmark/clean_artifacts.py --diagnostic
 py -3.12 benchmark/clean_artifacts.py --stego
 py -3.12 benchmark/clean_artifacts.py --cache
+py -3.12 benchmark/clean_artifacts.py --heavy-local
+py -3.12 benchmark/clean_artifacts.py --presentation-scratch
 ```
 
 Manual cleanup is acceptable for local-only artifacts:
@@ -110,6 +115,18 @@ Manual cleanup is acceptable for local-only artifacts:
 Remove-Item -Recurse -Force .pytest_cache
 Remove-Item -Recurse -Force .cache
 ```
+
+`--heavy-local` checks that its exact local workdirs contain no Git-tracked
+files or linked paths before removal; it leaves source videos, the demo's H.264
+outputs, and benchmark reports intact. Audit `--all-rebuildable` separately
+before using it: the older diagnostic/stego/cache deletion branches do not
+have the same linked-path and Git-tracked safeguards.
+
+`--presentation-scratch` removes only the root-level build/chart scratch
+directories after checking for tracked files and linked paths. Its one allowed
+`node_modules` junction is unlinked without deleting the external dependency
+target. It does **not** remove `.codex-finalizer`, which contains presentation
+deck candidates and must be classified separately before deletion.
 
 ## Policy Notes
 

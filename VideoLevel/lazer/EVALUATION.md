@@ -30,6 +30,61 @@ CPU flags. In particular, it does not confirm or supersede the earlier
 AVX-512F result; restore the engine and rerun the preflight before attempting
 any LaZer build or proof execution.
 
+### WSL host capability check (2026-09-27)
+
+The Windows host reports an Intel Core i7-12700H. The only registered WSL
+distribution is Docker Desktop's internal `docker-desktop` distribution; it
+is not a separate user-managed Linux development distribution. Reading its
+`/proc/cpuinfo` flags returned `aes` and `avx2`, but not `avx512f`. The Docker
+CLI also still cannot connect to `//./pipe/dockerDesktopLinuxEngine`.
+
+This closes the local fallback check: the available WSL kernel is Linux
+x86-64, but the AVX-512F prerequisite is not exposed, and the Docker engine is
+unavailable. No LaZer build or proof execution was attempted. A suitable host
+must expose AVX-512F and AES to the proof process; restarting Docker alone
+would not address the missing AVX-512F flag observed in this WSL environment.
+
+### Latest runtime preflight (2026-09-27)
+
+The preflight was rerun from the current worktree with
+`py -3.12 -m src.lazer_backend`. Docker's Linux x86-64 engine is available and
+the inspected CPU flags include AES, but the container-visible flags still do
+not include AVX-512F. The command returned:
+
+```json
+{"blockers":["avx512f_required"],"machine":"x86_64","ready":false,"system_name":"Linux"}
+```
+
+This supersedes the earlier `docker_daemon_unavailable` snapshot only for
+Docker availability; it does **not** remove the AVX-512F blocker. No LaZer
+container build, proof generation or verification was run in this check.
+
+### Direct host CPU confirmation (2026-09-28)
+
+The Windows host was queried directly with `Win32_Processor`; it reports an
+Intel Core i7-12700H (14 cores / 20 logical processors). Intel's product
+specification lists SSE4.1, SSE4.2, and AVX2 as the instruction-set extensions
+for this exact SKU, with no AVX-512 entry:
+[Intel Core i7-12700H specifications](https://www.intel.com/content/www/us/en/products/sku/132228/intel-core-i712700h-processor-24m-cache-up-to-4-70-ghz/specifications.html).
+This agrees with the prior WSL/Docker flag checks: the available local host
+cannot satisfy LaZer's documented AVX-512F prerequisite, regardless of
+restarting Docker or changing the container image. This is a host capability
+finding, not a LaZer build or proof test; no LaZer execution was attempted.
+
+### Current runtime recheck (2026-09-28)
+
+`py -3.12 -m src.lazer_backend` was rerun from the current worktree. The
+Docker-visible environment reports Linux/x86-64 and `docker_available=true`,
+but its CPU flag list does not include `avx512f`; the command exits 0 with
+`ready=false` and blocker `avx512f_required`. No LaZer image build, proof
+generation, or verification was attempted. This recheck confirms that the
+current machine still cannot execute the pinned LaZer candidate; it does not
+change the host prerequisite or the missing application-relation review.
+The repository's custom contract suite also passed via
+`py -3.12 src/runtest/test_lazer_backend.py` (6/6), including the missing-
+AVX-512 fail-closed case. Pytest does not collect this file because the
+project's test functions use its `t_` naming/custom runner convention.
+
 ## Alternative implementation check (2026-09-27)
 
 No inspected alternative is currently a justified production replacement for
@@ -107,10 +162,12 @@ The emitted manifest identified the backend as `ml-dsa-65-attestation`, so
 this verifies commitment consistency only, not a lattice-ZK proof or
 video-only blind extraction.
 
-The current LaZer preflight on this host returned
-`{"blockers":["docker_daemon_unavailable"],"ready":false}`. No LaZer proof
-was built or run, so there is still no reviewed lattice-ZK backend connected
-to the video pipeline.
+An earlier LaZer preflight snapshot on this host returned
+`{"blockers":["docker_daemon_unavailable"],"ready":false}`. That result is
+historical; Docker later became available, while the current blocker is the
+missing AVX-512F instruction as documented in the rechecks below. No LaZer
+proof was built or run, so there is still no reviewed lattice-ZK backend
+connected to the video pipeline.
 
 ### Carrier-map re-derivation probe
 
@@ -169,5 +226,28 @@ end-to-end AVX-512 fixture run are implemented and reviewed.
 
 The next valid execution target is a Linux x86-64 host exposing `avx512f` and
 `aes` to Docker. On that target, run the commands in `lazer/README.md`, save
-the proof/verification timing, then implement a separately reviewed sidecar
-relation before routing any production video through LaZer.
+the proof/verification timing, then implement a separately reviewed
+application relation and embed the serialized proof into H.264 residual
+carriers before routing any video through LaZer.
+
+## Current host recheck (2026-09-28)
+
+The preflight was rerun from the current worktree with
+`py -3.12 -m src.lazer_backend`. Docker Desktop is now available and reports
+20 logical CPUs; the Docker-visible assessment is Linux/x86-64 with AES, but
+returns `ready: false` and the sole blocker `avx512f_required`. The Windows
+host CPU reports Intel Core i7-12700H, which does not expose AVX-512F. Thus the
+older wording that Docker itself is unavailable is stale; the current blocker
+is CPU ISA compatibility. No LaZer build or proof run was attempted because
+the guarded preflight correctly rejects this host. This does not change the
+need for a supported runner and an independently reviewed application
+relation.
+
+The guarded command `py -3.12 -m src.lazer_backend --run` was also executed;
+it exited 1 before invoking Docker, with
+`RuntimeError: LaZer execution blocked: avx512f_required`. The official LaZer
+README lists Linux x86-64, AVX-512 and AES as build/run requirements
+([upstream README](https://github.com/lazer-crypto/lazer/blob/main/README.md)).
+The upstream Labrador repository describes its code as research-only and not
+security-reviewed or production-validated
+([upstream Labrador README](https://github.com/lazer-crypto/labrador)).

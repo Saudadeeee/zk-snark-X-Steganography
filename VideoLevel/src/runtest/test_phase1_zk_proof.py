@@ -1,5 +1,5 @@
 """
-test_phase1_zk_proof.py - Phase 1: ZK-SNARK Proof Generation, Serialization, Verification
+test_phase1_zk_proof.py - Legacy Groth16 utility tests (not the lattice-ZKP goal)
 
 Tests:
   1. pack_unpack_roundtrip        - pack/unpack preserves message and proof bytes
@@ -20,13 +20,20 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from src.runtest._helpers import (
-    section, run_test, summarise, SKIP,
-    get_circuits_dir, node_available,
+    SKIP,
+    get_circuits_dir,
+    node_available,
+    run_test,
+    section,
+    summarise,
 )
-
 from src.zk_proof import (
-    pack, unpack, proof_to_bytes, bytes_to_proof, blob_bit_length,
     PROOF_SIZE_BYTES,
+    blob_bit_length,
+    bytes_to_proof,
+    pack,
+    proof_to_bytes,
+    unpack,
 )
 
 # -- Fixtures ------------------------------------------------------------ #
@@ -131,7 +138,7 @@ def t_zk_tampered_message_fails():
 # -- Main --------------------------------------------------------------- #
 
 def main():
-    section("Phase 1 - ZK-SNARK Proof: Format, Serialization, Verification")
+    section("Phase 1 - Legacy Groth16 utility: Format, Serialization, Verification")
     results = [
         run_test("pack_unpack_roundtrip",     t_pack_unpack_roundtrip),
         run_test("proof_bytes_roundtrip",     t_proof_bytes_roundtrip),

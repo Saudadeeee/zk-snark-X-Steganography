@@ -105,11 +105,32 @@ Current committed SEC4 artifact (`benchmark/results/sec4_security_data.json`) re
 
 ### SEC5: ZKP Overhead
 
-Current committed SEC5 artifact (`benchmark/results/sec5_zkp_data.json`) records:
-- **Groth16 packed proof-bearing payload**: `147 B`
-- **Groth16 prove time**: `1556.58 ms`
-- **Groth16 verify time**: `8.5 ms`
-- Alternative systems remain much larger or slower in the committed comparison artifact
+The historical SEC5 artifact (`benchmark/results/sec5_zkp_data.json`) is retained,
+but must not be used for conclusions: it labels an ECDSA signature as
+"ZK-Schnorr", reports a packed payload as proof size, and hard-codes Groth16
+verification time to `8.5 ms`. The corrected script separates the ECDSA
+signature baseline from ZKP systems, measures Groth16 end-to-end bridge wall
+time, and writes new artifacts without overwriting history:
+
+```powershell
+py -3.12 benchmark/sec5_zkp.py --force
+```
+
+Outputs are `benchmark/results/sec5_zkp_data_new.json`,
+`sec5_proof_size_new.png`, `sec5_timing_new.png`, and
+`sec5_properties_heatmap_new.png`. PLONK/STARK/Bulletproof values remain
+explicitly marked illustrative literature estimates, not same-machine
+measurements; they are not fair quantitative comparisons. Groth16 is a
+comparison baseline, not the current lattice proof system. ECDSA is an
+authentication signature and does not provide zero knowledge.
+
+Corrected run on this development machine (three Groth16 trials, 50 ECDSA
+trials): Groth16 proof `129 B`, packed proof-bearing payload `147 B`, mean
+prove `7042.44 ms`, and mean verify `2208.23 ms` including bridge/subprocess
+overhead. ECDSA mean signature size was `70.88 B`, signing `0.623 ms`, and
+verification `0.256 ms`; those signature timings are not a ZKP comparison.
+These measurements are implementation- and machine-specific, and Groth16 is
+not evidence for the lattice proof's performance or security.
 
 ### SEC6: Performance
 
@@ -225,7 +246,7 @@ result = embed(
     video_path="data/encoded/foreman_cif_q22_g1.h264",
     message=message,
     output_path="data/output/stego.h264",
-    circuits_dir="",  # unused by the default lattice_zkp backend
+    circuits_dir="",  # legacy compatibility argument; no ZKP backend is enabled
     secret_key=witness_key,
     chaos_key=chaos_key,
     lattice_private_key=lattice_private_key,
@@ -491,13 +512,18 @@ See `doc/trust_corpus_onboarding.md` for the step-by-step corpus playbook.
 
 ---
 
-## Paper-Ready Outputs
+## Existing Benchmark Outputs (Not Yet Paper-Ready)
+
+These existing results are development artifacts, not a publication-ready
+evaluation. The sections have different scopes and validation levels; use the
+source JSON/reproduction commands and the corrected SEC5 notes above before
+making comparative claims.
 
 For IEEE TIP/TIFS submission:
 
 1. **Quality** (SEC1): locked `akiyo_q22_g1` contract embeds `1232/1232` bits with `53.01 dB` full-video PSNR and `40.30 dB` minimum modified-frame PSNR
 2. **Security** (SEC4): chi-square p-value `0.9622`, SPA `0.03762`, RS `0.0` at operating point
-3. **ZKP Overhead** (SEC5): current committed artifact reports 147 B packed Groth16 payload, 1556.58 ms prove, 8.5 ms verify
+3. **ZKP Overhead** (SEC5): the historical artifact is invalid for quantitative claims; the corrected `_new` rerun measured a 129 B Groth16 proof (147 B packed payload), 7042.44 ms proving, and 2208.23 ms verification. Alternative ZKP figures are literature estimates only, and this is not a lattice-proof measurement.
 4. **Performance** (SEC6): current committed artifact reports 59.0s pre-processing, 26.1s operational, 85.0s total on `akiyo_q22_g1`
 5. **Statistical** (statistical_benchmark.py): 3+ runs with mean/std
 6. **Audit** (sec1_audit.py): Quality guard reason logs

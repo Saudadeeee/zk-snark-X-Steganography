@@ -1,0 +1,34 @@
+{
+  "lock_version": 1,
+  "status": "research_candidate_not_integrated",
+  "repository": "https://github.com/lazer-crypto/lazer.git",
+  "revision": "59a52f74ca39584edf77b4b8b7437dbd48f9ad94",
+  "submodules": {
+    "src/labrados": {
+      "repository": "https://github.com/lazer-crypto/labrador.git",
+      "revision": "3f95485139ffaa65fe572da809b90772901372e5"
+    }
+  },
+  "paper": "https://eprint.iacr.org/2026/1289",
+  "paper_title": "A Toolkit for Succinct Lattice-Based Zero Knowledge Proofs",
+  "upstream_reproduction_target": "python/succinct_zkp",
+  "reviewed_examples": [
+    "membership_proof.py",
+    "blind_signatures.py"
+  ],
+  "application_relation": "not_implemented",
+  "proof_wire_serialization": "not_provided_by_reviewed_python_or_native_api",
+  "measured_proof_size_bytes": null,
+  "paper_reported_zk_proof_size": "around 110 KB; not an exact serialized-byte measurement",
+  "required_host": [
+    "Linux x86-64",
+    "AVX-512",
+    "AES"
+  ],
+  "current_host_preflight": "blocked: avx512f_required",
+  "notes": [
+    "This candidate lock does not change lazer/LAZER.lock.json or select an active backend.",
+    "The reviewed commitment hash has a paper-stated cryptanalysis caveat.",
+    "No video/session/carrier relation, in-band proof serialization, or end-to-end integration is present."
+  ]
+}

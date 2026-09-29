@@ -22,7 +22,6 @@ from ..bitstream.h264 import H264BitstreamParser
 from .pipeline import extract_all_idr_blocks
 from .stego import CAVLCSafetyFilter
 
-
 ROOT = Path(__file__).resolve().parent.parent.parent
 CACHE_SCHEMA_VERSION = 2
 
@@ -73,6 +72,21 @@ def _warn_legacy_cache_dir(cache_dir: str | Path | None) -> None:
         )
 
 
+def _evict_other_cached_videos(active_key: str | None) -> None:
+    """Keep at most one video's large analysis resident in this process.
+
+    Pass ``None`` before rebuilding to release stale entries for the same path
+    too. Call while holding ``_LOCK``. A caller that already received an
+    analysis keeps its own references, so removing a cache entry does not
+    mutate any in-flight operation; it only releases data no longer referenced
+    elsewhere.
+    """
+    for cache in (_VIDEO_ANALYSIS_CACHE, _RECONSTRUCTION_CONTEXT_CACHE):
+        for cached_key in tuple(cache):
+            if active_key is None or cached_key != active_key:
+                cache.pop(cached_key, None)
+
+
 def _build_reconstruction_context(
     video_path: str | Path,
     parser: H264BitstreamParser | None = None,
@@ -103,6 +117,7 @@ def _build_reconstruction_context(
         else 264
     )
     return {
+        "parser": parser,
         "nal_units": parser.nal_units,
         "sps": sps,
         "pps": pps,
@@ -116,19 +131,29 @@ def load_or_build_video_analysis(
     use_cache: bool = True,
     force_refresh: bool = False,
     cache_dir: str | Path | None = None,
+    stable_blind_only: bool = False,
 ) -> tuple:
-    """Return trusted, process-local cover-video analysis."""
+    """Return trusted analysis, optionally validating only blind-stable carriers.
+
+    The stable profile still runs the exact CAVLC patchability, bit-length, and
+    forward-decode checks; it avoids evaluating unrelated carrier positions.
+    """
     _warn_legacy_cache_dir(cache_dir)
     path = Path(video_path)
     if not path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
 
     key = _cache_key(path)
-    fingerprint = _video_fingerprint(path)
+    video_fingerprint = _video_fingerprint(path)
+    fingerprint = {
+        **video_fingerprint,
+        "analysis_profile": "stable-blind-v1" if stable_blind_only else "full-v1",
+    }
     with _LOCK:
         cached = _VIDEO_ANALYSIS_CACHE.get(key)
         if use_cache and not force_refresh and cached and cached[0] == fingerprint:
             return cached[1]
+        _evict_other_cached_videos(None)
 
     parser = H264BitstreamParser(str(path))
     parser.parse()
@@ -136,19 +161,26 @@ def load_or_build_video_analysis(
     coefficients, frame_verified_data, n_c_map, nal_length_map, t1_override_map = extract_all_idr_blocks(
         str(path), reconstructor, parser=parser
     )
+    if stable_blind_only and (not frame_verified_data or not nal_length_map):
+        raise RuntimeError(
+            "stable blind analysis requires trusted CAVLC offsets and patchability metadata"
+        )
     safe_positions = CAVLCSafetyFilter().get_safe_positions(
         coefficients,
         nC_map=n_c_map,
         nal_length_map=nal_length_map,
         t1_override_map=t1_override_map,
+        frame_verified_data=frame_verified_data,
+        stable_carriers_only=stable_blind_only,
     )
     data = (coefficients, frame_verified_data, n_c_map, nal_length_map, t1_override_map, safe_positions)
 
     if use_cache:
         context = _build_reconstruction_context(path, parser=parser)
         with _LOCK:
+            _evict_other_cached_videos(key)
             _VIDEO_ANALYSIS_CACHE[key] = (fingerprint, data)
-            _RECONSTRUCTION_CONTEXT_CACHE[key] = (fingerprint, context)
+            _RECONSTRUCTION_CONTEXT_CACHE[key] = (video_fingerprint, context)
     return data
 
 
@@ -171,10 +203,12 @@ def load_or_build_reconstruction_context(
         cached = _RECONSTRUCTION_CONTEXT_CACHE.get(key)
         if use_cache and not force_refresh and cached and cached[0] == fingerprint:
             return cached[1]
+        _evict_other_cached_videos(None)
 
     data = _build_reconstruction_context(path)
     if use_cache:
         with _LOCK:
+            _evict_other_cached_videos(key)
             _RECONSTRUCTION_CONTEXT_CACHE[key] = (fingerprint, data)
     return data
 

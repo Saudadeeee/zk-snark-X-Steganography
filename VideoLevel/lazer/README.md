@@ -7,6 +7,12 @@ It is intentionally **not** connected to `embed()` or `verify()`. LaZer is a
 research library and this project does not yet define, parameterize, serialize,
 or externally review a lattice proof relation for the video protocol.
 
+The newer LaZer Toolkit candidate is tracked separately in
+[`LAZER_TOOLKIT_CANDIDATE.lock.json`](LAZER_TOOLKIT_CANDIDATE.lock.json). That
+file pins the research source only; it does not change the active demo lock,
+provide a video application relation, or mean that a binary proof serializer
+or backend is available.
+
 ## Target host
 
 Run only on Linux x86-64 with `avx512f` and `aes` CPU flags. Check the exact

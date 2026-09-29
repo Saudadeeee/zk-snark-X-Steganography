@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import struct
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 
 CoefficientBlock = tuple[int, int, Sequence[int]]
@@ -111,6 +111,9 @@ def canonicalize_carrier_coefficients(
 def canonical_video_sha256(
     video_path: str | Path,
     carrier_positions: Sequence[CarrierPosition],
+    *,
+    parser: Any | None = None,
+    frame_verified_data: Mapping[int, tuple[dict, dict, bytes]] | None = None,
 ) -> str:
     """Hash the carrier-normalized H.264 syntax without re-encoding slices.
 
@@ -131,18 +134,24 @@ def canonical_video_sha256(
                 digest.update(chunk)
         return digest.hexdigest()
 
+    if (parser is None) != (frame_verified_data is None):
+        raise ValueError("parser and frame_verified_data must be provided together")
+
     if not carrier_positions:
         return digest_file(source)
 
-    from .bitstream.bitstream_ops import BitstreamReconstructor
-    from .bitstream.h264 import H264BitstreamParser
-    from .core.pipeline import extract_all_idr_blocks
+    if parser is None:
+        from .bitstream.bitstream_ops import BitstreamReconstructor
+        from .bitstream.h264 import H264BitstreamParser
+        from .core.pipeline import extract_all_idr_blocks
 
-    parser = H264BitstreamParser(str(source))
-    parser.parse()
-    _, frame_data, _, _, _ = extract_all_idr_blocks(
-        str(source), BitstreamReconstructor(), parser=parser
-    )
+        parser = H264BitstreamParser(str(source))
+        parser.parse()
+        _, frame_data, _, _, _ = extract_all_idr_blocks(
+            str(source), BitstreamReconstructor(), parser=parser
+        )
+    else:
+        frame_data = frame_verified_data
     return canonical_h264_digest(parser.nal_units, frame_data, carrier_positions)
 
 

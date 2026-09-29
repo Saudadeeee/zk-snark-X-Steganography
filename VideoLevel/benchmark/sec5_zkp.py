@@ -1,12 +1,14 @@
 """
-Section 5 — ZKP System Comparison
-====================================
-Compares this work's Groth16 (BN128) proof system against alternatives:
-  1. Groth16 BN128        — this work, real measurements
-  2. ZK-Schnorr (P-256)   — implemented here using `cryptography` library
+Section 5 — ZKP System Comparison (corrected artifact: *_new)
+===============================================================
+Compares a measured Groth16 implementation with literature-only estimates:
+  1. Groth16 BN128        — measured baseline; not the current lattice system
   3. PLONK (KZG)          — literature [Gabizon et al., 2019]
   4. STARKs (FRI)         — literature [Ben-Sasson et al., 2018]
   5. Bulletproofs         — literature [Bünz et al., 2018]
+
+An ECDSA P-256 signature is measured separately as a non-ZKP authentication
+baseline. It is deliberately excluded from proof-system charts and tables.
 
 Metrics:
   - Proof size (bytes)
@@ -16,42 +18,44 @@ Metrics:
   - Circuit expressive power
 
 Produces:
-  - sec5_proof_size.png      : Proof size comparison bar chart
-  - sec5_timing.png          : Prove/verify time comparison
-  - sec5_properties.png      : Qualitative property heatmap
+  - sec5_zkp_data_new.json
+  - sec5_proof_size_new.png  : Proof systems only; hatched = literature estimate
+  - sec5_timing_new.png      : Proof systems only; bridge wall time is measured
+  - sec5_properties_heatmap_new.png
 """
 
-import os
 import sys
 import time
 from pathlib import Path
 
-import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from benchmark._common import (
-    PALETTE, setup_style, save_fig, cache_save, cache_load,
-    annotate_literature,
+    PALETTE,
+    cache_load,
+    cache_save,
+    save_fig,
+    setup_style,
 )
 
-CACHE_KEY = "sec5_zkp_data"
+CACHE_KEY = "sec5_zkp_data_new"
 
 # -------------------------------------------------------------------------
-# ZK-Schnorr implementation (P-256 / ECDSA-based commitment)
+# ECDSA signature baseline (not zero knowledge)
 # -------------------------------------------------------------------------
 
-def _measure_schnorr(n_trials: int = 20) -> dict:
-    """
-    Measure ZK-Schnorr performance using P-256 digital signature
-    (Schnorr signature is a ZKPoK of the discrete log; same complexity).
-    """
-    from cryptography.hazmat.primitives.asymmetric.ec import (
-        SECP256R1, generate_private_key, ECDSA,
-    )
+def _measure_ecdsa_signature(n_trials: int = 20) -> dict:
+    """Measure ECDSA signing and verification; this is not a ZKP."""
+    from cryptography.exceptions import InvalidSignature
     from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric.ec import (
+        ECDSA,
+        SECP256R1,
+        generate_private_key,
+    )
 
     message = b"ZK-Stego benchmark payload - foreman CIF sequence"
     curve   = SECP256R1()
@@ -59,30 +63,35 @@ def _measure_schnorr(n_trials: int = 20) -> dict:
     private_key  = generate_private_key(curve)
     public_key   = private_key.public_key()
 
-    prove_times  = []
-    verify_times = []
-    proof_sizes  = []
+    signing_times = []
+    verification_times = []
+    signature_sizes = []
 
     for _ in range(n_trials):
         t0  = time.perf_counter()
         sig = private_key.sign(message, ECDSA(hashes.SHA256()))
-        prove_times.append((time.perf_counter() - t0) * 1000)
-        proof_sizes.append(len(sig))
+        signing_times.append((time.perf_counter() - t0) * 1000)
+        signature_sizes.append(len(sig))
 
         t0 = time.perf_counter()
         try:
             public_key.verify(sig, message, ECDSA(hashes.SHA256()))
             ok = True
-        except Exception:
+        except InvalidSignature:
             ok = False
-        verify_times.append((time.perf_counter() - t0) * 1000)
+        if not ok:
+            raise RuntimeError("ECDSA signature verification failed during benchmark")
+        verification_times.append((time.perf_counter() - t0) * 1000)
 
     return {
-        "proof_size_bytes": int(np.mean(proof_sizes)),
-        "prove_time_ms":    float(np.mean(prove_times)),
-        "verify_time_ms":   float(np.mean(verify_times)),
-        "trusted_setup":    False,
-        "universal_setup":  False,
+        "category": "digital_signature",
+        "zero_knowledge": False,
+        "algorithm": "ECDSA P-256 with SHA-256",
+        "signature_size_bytes_mean": float(np.mean(signature_sizes)),
+        "signing_time_ms_mean": float(np.mean(signing_times)),
+        "verification_time_ms_mean": float(np.mean(verification_times)),
+        "trials": n_trials,
+        "simulated": False,
     }
 
 
@@ -91,8 +100,8 @@ def _measure_schnorr(n_trials: int = 20) -> dict:
 # -------------------------------------------------------------------------
 def _measure_groth16(n_trials: int = 3) -> dict:
     """Measure Groth16 prove/verify via actual snarkjs."""
+    from benchmark._common import CIRCUITS_DIR
     from src.zk_proof import ZKSnarkBridge, pack
-    from benchmark._common import ROOT, CIRCUITS_DIR
 
     bridge = ZKSnarkBridge(str(CIRCUITS_DIR))
     secret_key = bytes(range(32))
@@ -101,6 +110,7 @@ def _measure_groth16(n_trials: int = 3) -> dict:
     prove_times  = []
     verify_times = []
     proof_sizes  = []
+    payload_sizes = []
 
     for i in range(n_trials):
         print(f"    Groth16 trial {i+1}/{n_trials} …")
@@ -111,29 +121,32 @@ def _measure_groth16(n_trials: int = 3) -> dict:
         # Pack proof to bytes (actual blob size)
         proof_bytes = bridge.proof_to_bytes(proof_dict)
         blob = pack(message, proof_bytes)
-        proof_sizes.append(len(blob))
+        proof_sizes.append(len(proof_bytes))
+        payload_sizes.append(len(blob))
 
         t0 = time.perf_counter()
         valid = bridge.verify(proof_dict, public_dict)
-        
-        # SnarkJS CLI via subprocess includes ~800ms+ Node.js startup overhead.
-        # Real native Groth16 verification (libsnark/bellman) takes 5-10 ms.
-        # We record 8.5 ms for fair apples-to-apples comparison with literature.
-        verify_times.append(8.5)
+        verify_times.append((time.perf_counter() - t0) * 1000)
+        if not valid:
+            raise RuntimeError("Groth16 verification failed during benchmark")
 
     return {
         "proof_size_bytes": int(np.mean(proof_sizes)),
-        # Subtract ~800ms Node.js startup overhead from prove time
-        "prove_time_ms":    float(np.mean(prove_times)) - 800.0,
+        "proof_bearing_payload_bytes": int(np.mean(payload_sizes)),
+        "prove_time_ms":    float(np.mean(prove_times)),
         "verify_time_ms":   float(np.mean(verify_times)),
         "trusted_setup":    True,
         "universal_setup":  False,
+        "simulated":        False,
+        "trials":           n_trials,
+        "measurement_scope": "end-to-end Python bridge wall time, including subprocess overhead",
     }
 
 
 # -------------------------------------------------------------------------
 # Literature values for other ZKP systems
-# All values at roughly equivalent statement complexity (256-bit secret commit)
+# Illustrative literature estimates, not measurements of executable baselines.
+# These values are not guaranteed to represent equivalent statements or setups.
 # Sources:
 #   PLONK: Gabizon, Williamson, Ciobotaru (2019) — Table 1
 #   STARKs: Ben-Sasson et al. (2018) + ZKProof benchmarks 2023
@@ -147,6 +160,8 @@ LITERATURE_ZKP = {
         "trusted_setup":    True,
         "universal_setup":  True,
         "simulated":        True,
+        "measurement_method": "literature estimate; not executed by this benchmark",
+        "comparable_to_groth16": False,
     },
     "STARKs (FRI)": {
         "proof_size_bytes": 45_000,   # ~45 KB (large due to FRI)
@@ -155,6 +170,8 @@ LITERATURE_ZKP = {
         "trusted_setup":    False,
         "universal_setup":  False,
         "simulated":        True,
+        "measurement_method": "literature estimate; not executed by this benchmark",
+        "comparable_to_groth16": False,
     },
     "Bulletproofs": {
         "proof_size_bytes": 672,      # 64-bit range proof
@@ -163,6 +180,8 @@ LITERATURE_ZKP = {
         "trusted_setup":    False,
         "universal_setup":  False,
         "simulated":        True,
+        "measurement_method": "literature estimate; not executed by this benchmark",
+        "comparable_to_groth16": False,
     },
 }
 
@@ -170,39 +189,43 @@ LITERATURE_ZKP = {
 # -------------------------------------------------------------------------
 # Data collection
 # -------------------------------------------------------------------------
+def build_comparison_report(
+    proof_systems: dict, signature_baselines: dict
+) -> dict:
+    """Keep zero-knowledge proof measurements distinct from signatures."""
+    return {
+        "schema_version": 2,
+        "scope": "Groth16 is a measured comparison baseline, not the current lattice system.",
+        "proof_systems": proof_systems,
+        "signature_baselines": signature_baselines,
+    }
+
+
 def collect_data(force: bool = False) -> dict:
     cached = cache_load(CACHE_KEY)
     if cached and not force:
         print("  [cache hit] sec5 — skipping ZKP benchmarks")
         return cached
 
-    data: dict = {}
+    proof_systems: dict = {}
 
-    print("  Measuring Groth16 (this work) …")
+    print("  Measuring Groth16 comparison baseline …")
     try:
-        data["Groth16 BN128\n(This Work)"] = _measure_groth16(n_trials=3)
-        data["Groth16 BN128\n(This Work)"]["simulated"] = False
+        proof_systems["Groth16 BN128\n(measured baseline)"] = _measure_groth16(n_trials=3)
     except Exception as e:
-        print(f"  [warn] Groth16 measure failed: {e} — using estimated values")
-        data["Groth16 BN128\n(This Work)"] = {
-            "proof_size_bytes": 274,
-            "prove_time_ms":    62_000,
-            "verify_time_ms":   8.5,
-            "trusted_setup":    True,
-            "universal_setup":  False,
-            "simulated":        True,
-        }
+        raise RuntimeError(
+            "Groth16 measurement failed; refusing to substitute estimated values"
+        ) from e
 
-    print("  Measuring ZK-Schnorr (P-256) …")
-    schnorr = _measure_schnorr(n_trials=50)
-    schnorr["simulated"] = False
-    data["ZK-Schnorr\n(P-256)"] = schnorr
+    print("  Measuring ECDSA P-256 signature baseline (not a ZKP) …")
+    signature_baselines = {"ECDSA P-256": _measure_ecdsa_signature(n_trials=50)}
 
     for name, vals in LITERATURE_ZKP.items():
-        data[name] = vals
+        proof_systems[name] = vals
 
-    cache_save(CACHE_KEY, data)
-    return data
+    report = build_comparison_report(proof_systems, signature_baselines)
+    cache_save(CACHE_KEY, report)
+    return report
 
 
 # -------------------------------------------------------------------------
@@ -210,15 +233,16 @@ def collect_data(force: bool = False) -> dict:
 # -------------------------------------------------------------------------
 def plot_proof_size(data: dict) -> None:
     setup_style()
-    fig, ax = plt.subplots(figsize=(10, 5))
+    with plt.rc_context({"figure.constrained_layout.use": False}):
+        fig, ax = plt.subplots(figsize=(10, 5))
 
-    methods = list(data.keys())
-    sizes   = [data[m]["proof_size_bytes"] for m in methods]
-    is_sim  = [data[m].get("simulated", True) for m in methods]
+    proof_systems = data["proof_systems"]
+    methods = list(proof_systems)
+    sizes = [proof_systems[m]["proof_size_bytes"] for m in methods]
+    is_sim = [proof_systems[m].get("simulated", True) for m in methods]
 
     colors_map = {
-        "Groth16 BN128\n(This Work)": PALETTE["groth16"],
-        "ZK-Schnorr\n(P-256)":        PALETTE["schnorr"],
+        "Groth16 BN128\n(measured baseline)": PALETTE["groth16"],
         "PLONK (KZG)":                PALETTE["plonk"],
         "STARKs (FRI)":               PALETTE["stark"],
         "Bulletproofs":               PALETTE["bulletproof"],
@@ -242,8 +266,13 @@ def plot_proof_size(data: dict) -> None:
                 bar.get_height() * 1.15,
                 label, ha="center", va="bottom", fontsize=9)
 
-    annotate_literature(ax, "Hatched bars = literature values; see sec. refs in COMPARISON_WITH_SOTA.md")
-    save_fig(fig, "sec5_proof_size")
+    fig.subplots_adjust(bottom=0.22)
+    fig.text(
+        0.5, 0.015,
+        "* Hatched bars are unexecuted literature estimates, not comparable measurements.",
+        ha="center", fontsize=8, color="#777777", style="italic",
+    )
+    save_fig(fig, "sec5_proof_size_new")
 
 
 # -------------------------------------------------------------------------
@@ -251,16 +280,17 @@ def plot_proof_size(data: dict) -> None:
 # -------------------------------------------------------------------------
 def plot_timing(data: dict) -> None:
     setup_style()
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+    with plt.rc_context({"figure.constrained_layout.use": False}):
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
 
-    methods    = list(data.keys())
-    prove_ms   = [data[m]["prove_time_ms"]  for m in methods]
-    verify_ms  = [data[m]["verify_time_ms"] for m in methods]
-    is_sim     = [data[m].get("simulated", True) for m in methods]
+    proof_systems = data["proof_systems"]
+    methods = list(proof_systems)
+    prove_ms = [proof_systems[m]["prove_time_ms"] for m in methods]
+    verify_ms = [proof_systems[m]["verify_time_ms"] for m in methods]
+    is_sim = [proof_systems[m].get("simulated", True) for m in methods]
 
     colors_map = {
-        "Groth16 BN128\n(This Work)": PALETTE["groth16"],
-        "ZK-Schnorr\n(P-256)":        PALETTE["schnorr"],
+        "Groth16 BN128\n(measured baseline)": PALETTE["groth16"],
         "PLONK (KZG)":                PALETTE["plonk"],
         "STARKs (FRI)":               PALETTE["stark"],
         "Bulletproofs":               PALETTE["bulletproof"],
@@ -293,8 +323,13 @@ def plot_timing(data: dict) -> None:
                     bar.get_height() * 1.15,
                     label, ha="center", va="bottom", fontsize=8.5)
 
-    annotate_literature(ax2, "Hatched = literature; Schnorr measured on this machine")
-    save_fig(fig, "sec5_timing")
+    fig.subplots_adjust(bottom=0.22)
+    fig.text(
+        0.5, 0.015,
+        "* Hatched = literature estimates; Groth16 = end-to-end bridge wall time incl. subprocess overhead.",
+        ha="center", fontsize=8, color="#777777", style="italic",
+    )
+    save_fig(fig, "sec5_timing_new")
 
 
 # -------------------------------------------------------------------------
@@ -306,7 +341,8 @@ def plot_properties_heatmap(data: dict) -> None:
     """
     setup_style()
 
-    methods = list(data.keys())
+    proof_systems = data["proof_systems"]
+    methods = list(proof_systems)
     criteria = [
         "Proof size\n(compact)",
         "Prove speed\n(fast)",
@@ -317,25 +353,18 @@ def plot_properties_heatmap(data: dict) -> None:
         "ZK + embed\nintegration",
     ]
 
-    # Score matrix [0=bad, 1=ok, 2=good] for each (method, criterion)
-    # Proof size: Schnorr=2, Groth16=2, Bulletproof=1, PLONK=1, STARK=0
-    # Prove speed: Schnorr=2, Groth16=0, Bulletproof=1, PLONK=0, STARK=0
-    # Verify speed: Groth16=2, PLONK=2, Schnorr=2, Bulletproof=1, STARK=1
-    # No trusted setup: Schnorr=2, STARK=2, Bulletproof=2, PLONK=0, Groth16=0
-    # Universal setup: PLONK=2, others=0
-    # Arbitrary circuits: Groth16=2, PLONK=2, STARK=2, Schnorr=0, Bulletproof=1
-    # ZK+embed: only this work
+    # Manual illustrative scores only; not measured and not an objective ranking.
     scores_map = {
-        "Groth16 BN128\n(This Work)": [2, 0, 2, 0, 0, 2, 2],
-        "ZK-Schnorr\n(P-256)":        [2, 2, 2, 2, 0, 0, 0],
-        "PLONK (KZG)":                [1, 0, 2, 0, 2, 2, 0],
-        "STARKs (FRI)":               [0, 0, 1, 2, 0, 2, 0],
-        "Bulletproofs":               [1, 1, 1, 2, 0, 1, 0],
+        "Groth16 BN128\n(measured baseline)": [2, 0, 2, 0, 0, 2, 0],
+        "PLONK (KZG)":                        [1, 0, 2, 0, 2, 2, 0],
+        "STARKs (FRI)":                       [0, 0, 1, 2, 0, 2, 0],
+        "Bulletproofs":                       [1, 1, 1, 2, 0, 1, 0],
     }
 
-    matrix = np.array([scores_map.get(m, [1]*len(criteria)) for m in methods])
+    matrix = np.array([scores_map.get(m, [1] * len(criteria)) for m in methods])
 
-    fig, ax = plt.subplots(figsize=(12, 5))
+    with plt.rc_context({"figure.constrained_layout.use": False}):
+        fig, ax = plt.subplots(figsize=(12, 5))
     cmap = plt.get_cmap("RdYlGn")
     im = ax.imshow(matrix.T, cmap=cmap, vmin=0, vmax=2, aspect="auto")
 
@@ -343,7 +372,7 @@ def plot_properties_heatmap(data: dict) -> None:
     ax.set_xticklabels(methods, fontsize=10)
     ax.set_yticks(range(len(criteria)))
     ax.set_yticklabels(criteria, fontsize=10)
-    ax.set_title("§5  ZKP Property Comparison\n(green = better)", fontweight="bold")
+    ax.set_title("§5  ZKP Property Comparison (qualitative)\n(green = better)", fontweight="bold")
 
     cell_labels = {0: "[X] Poor", 1: "~ OK", 2: "[OK] Good"}
     for i, method in enumerate(methods):
@@ -356,7 +385,14 @@ def plot_properties_heatmap(data: dict) -> None:
     plt.colorbar(im, ax=ax, ticks=[0, 1, 2],
                  label="Quality (0=poor, 1=ok, 2=good)")
 
-    save_fig(fig, "sec5_properties_heatmap")
+    fig.subplots_adjust(bottom=0.20)
+    fig.text(
+        0.5, 0.015,
+        "Illustrative manual ratings only; criteria are not normalized or independently validated.",
+        ha="center", fontsize=8, color="#777777", style="italic",
+    )
+
+    save_fig(fig, "sec5_properties_heatmap_new")
 
 
 # -------------------------------------------------------------------------

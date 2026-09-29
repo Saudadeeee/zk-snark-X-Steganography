@@ -10,11 +10,13 @@ Merged module combining:
 Reference: ITU-T H.264 Specification Section 9.2
 """
 
-from typing import List, Tuple
 import logging
+from collections import OrderedDict
+from dataclasses import dataclass
+from functools import lru_cache
+from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
-from dataclasses import dataclass
 
 from .bitstream_io import BitstreamWriter
 
@@ -322,8 +324,8 @@ TOTAL_ZEROS_2x2 = {
     1: { # TotalCoeff = 1
         '1': 0,
         '01': 1,
-        '00': 2,
-        '000': 3, # Implicit?
+        '001': 2,
+        '000': 3,
     },
     2: { # TotalCoeff = 2
         '1': 0,
@@ -402,8 +404,41 @@ COEFF_TOKEN_NC_6_7 = {
     '0100000010': (16, 3),
 }
 
-# For nC >= 8 (Table 9-5(e)) - uses fixed length code (FLC)
-# FLC(6 bits): 2 bits for TrailingOnes, 4 bits for TotalCoeff
+# Table 9-5 coeff_token code lengths/bits, indexed by
+# nC class, (TotalCoeff * 4 + TrailingOnes). The fourth row is the nC >= 8
+# fixed-width VLC table; its codeword is not the raw (TC << 2) | T1 value.
+_COEFF_TOKEN_CODE_LENGTHS = (
+    (1, 0, 0, 0, 6, 2, 0, 0, 8, 6, 3, 0, 9, 8, 7, 5, 10, 9, 8, 6, 11, 10, 9, 7, 13, 11, 10, 8, 13, 13, 11, 9, 13, 13, 13, 10, 14, 14, 13, 11, 14, 14, 14, 13, 15, 15, 14, 14, 15, 15, 15, 14, 16, 15, 15, 15, 16, 16, 16, 15, 16, 16, 16, 16, 16, 16, 16, 16),
+    (2, 0, 0, 0, 6, 2, 0, 0, 6, 5, 3, 0, 7, 6, 6, 4, 8, 6, 6, 4, 8, 7, 7, 5, 9, 8, 8, 6, 11, 9, 9, 6, 11, 11, 11, 7, 12, 11, 11, 9, 12, 12, 12, 11, 12, 12, 12, 11, 13, 13, 13, 12, 13, 13, 13, 13, 13, 14, 13, 13, 14, 14, 14, 13, 14, 14, 14, 14),
+    (4, 0, 0, 0, 6, 4, 0, 0, 6, 5, 4, 0, 6, 5, 5, 4, 7, 5, 5, 4, 7, 5, 5, 4, 7, 6, 6, 4, 7, 6, 6, 4, 8, 7, 7, 5, 8, 8, 7, 6, 9, 8, 8, 7, 9, 9, 8, 8, 9, 9, 9, 8, 10, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10),
+    (6, 0, 0, 0, 6, 6, 0, 0, 6, 6, 6, 0, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6),
+)
+_COEFF_TOKEN_CODE_BITS = (
+    (1, 0, 0, 0, 5, 1, 0, 0, 7, 4, 1, 0, 7, 6, 5, 3, 7, 6, 5, 3, 7, 6, 5, 4, 15, 6, 5, 4, 11, 14, 5, 4, 8, 10, 13, 4, 15, 14, 9, 4, 11, 10, 13, 12, 15, 14, 9, 12, 11, 10, 13, 8, 15, 1, 9, 12, 11, 14, 13, 8, 7, 10, 9, 12, 4, 6, 5, 8),
+    (3, 0, 0, 0, 11, 2, 0, 0, 7, 7, 3, 0, 7, 10, 9, 5, 7, 6, 5, 4, 4, 6, 5, 6, 7, 6, 5, 8, 15, 6, 5, 4, 11, 14, 13, 4, 15, 10, 9, 4, 11, 14, 13, 12, 8, 10, 9, 8, 15, 14, 13, 12, 11, 10, 9, 12, 7, 11, 6, 8, 9, 8, 10, 1, 7, 6, 5, 4),
+    (15, 0, 0, 0, 15, 14, 0, 0, 11, 15, 13, 0, 8, 12, 14, 12, 15, 10, 11, 11, 11, 8, 9, 10, 9, 14, 13, 9, 8, 10, 9, 8, 15, 14, 13, 13, 11, 14, 10, 12, 15, 10, 13, 12, 11, 14, 9, 12, 8, 10, 13, 8, 13, 7, 9, 12, 9, 12, 11, 10, 5, 8, 7, 6, 1, 4, 3, 2),
+    (3, 0, 0, 0, 0, 1, 0, 0, 4, 5, 6, 0, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63),
+)
+
+
+def _build_coeff_token_table(table_index: int) -> dict[str, tuple[int, int]]:
+    table: dict[str, tuple[int, int]] = {}
+    for total_coeffs in range(17):
+        for trailing_ones in range(min(total_coeffs, 3) + 1):
+            index = total_coeffs * 4 + trailing_ones
+            code_length = _COEFF_TOKEN_CODE_LENGTHS[table_index][index]
+            if code_length:
+                code = _COEFF_TOKEN_CODE_BITS[table_index][index]
+                table[f"{code:0{code_length}b}"] = (total_coeffs, trailing_ones)
+    return table
+
+
+# Replace legacy hand-transcribed maps with the normative Table 9-5 values.
+COEFF_TOKEN_NC_0_1 = _build_coeff_token_table(0)
+COEFF_TOKEN_NC_2_3 = _build_coeff_token_table(1)
+COEFF_TOKEN_NC_4_5 = _build_coeff_token_table(2)
+COEFF_TOKEN_NC_6_7 = COEFF_TOKEN_NC_4_5
+COEFF_TOKEN_NC_8_PLUS = _build_coeff_token_table(3)
 
 
 # Table 9-7: total_zeros VLC for different TotalCoeff values
@@ -731,6 +766,68 @@ RUN_BEFORE_TABLES = {
     },
 }
 
+# H.264 Table 9-10 has one shared table for zerosLeft >= 7. The longer
+# zero-prefix codewords represent runs 7..14; they are not fixed-width codes.
+RUN_BEFORE_TABLES[4] = {
+    '11': 0,
+    '10': 1,
+    '01': 2,
+    '001': 3,
+    '000': 4,
+}
+_RUN_BEFORE_7_PLUS = {
+    **{f"{code:03b}": run for run, code in enumerate((7, 6, 5, 4, 3, 2, 1))},
+    **{("0" * (run - 4)) + "1": run for run in range(7, 15)},
+}
+for _zeros_left in range(7, 15):
+    RUN_BEFORE_TABLES[_zeros_left] = {
+        code: run for code, run in _RUN_BEFORE_7_PLUS.items() if run <= _zeros_left
+    }
+
+
+class _ImmutableVlcTable(dict):
+    """A dict-compatible VLC table that cannot invalidate cached prefixes."""
+
+    def _reject_mutation(self, *args, **kwargs):
+        raise TypeError("built-in VLC tables are immutable")
+
+    __setitem__ = _reject_mutation
+    __delitem__ = _reject_mutation
+    clear = _reject_mutation
+    pop = _reject_mutation
+    popitem = _reject_mutation
+    setdefault = _reject_mutation
+    update = _reject_mutation
+    __ior__ = _reject_mutation
+
+
+def _freeze_vlc_table(table: dict) -> _ImmutableVlcTable:
+    return _ImmutableVlcTable(table)
+
+
+# The module's normative tables are shared across thousands of block decodes.
+# Freeze their mappings after construction so their cached prefix indexes can
+# never become stale. Custom tables passed to decode_vlc remain mutable and are
+# deliberately not cached.
+COEFF_TOKEN_NC_0_1 = _freeze_vlc_table(COEFF_TOKEN_NC_0_1)
+COEFF_TOKEN_NC_2_3 = _freeze_vlc_table(COEFF_TOKEN_NC_2_3)
+COEFF_TOKEN_NC_4_5 = _freeze_vlc_table(COEFF_TOKEN_NC_4_5)
+COEFF_TOKEN_NC_6_7 = COEFF_TOKEN_NC_4_5
+COEFF_TOKEN_NC_8_PLUS = _freeze_vlc_table(COEFF_TOKEN_NC_8_PLUS)
+COEFF_TOKEN_CHROMA_DC = _freeze_vlc_table(COEFF_TOKEN_CHROMA_DC)
+TOTAL_ZEROS_2x2 = {
+    total_coeffs: _freeze_vlc_table(table)
+    for total_coeffs, table in TOTAL_ZEROS_2x2.items()
+}
+TOTAL_ZEROS_TABLES = {
+    total_coeffs: _freeze_vlc_table(table)
+    for total_coeffs, table in TOTAL_ZEROS_TABLES.items()
+}
+RUN_BEFORE_TABLES = {
+    zeros_left: _freeze_vlc_table(table)
+    for zeros_left, table in RUN_BEFORE_TABLES.items()
+}
+
 
 def get_coeff_token_table(nC: int):
     """
@@ -751,13 +848,10 @@ def get_coeff_token_table(nC: int):
         return COEFF_TOKEN_NC_0_1
     elif nC < 4:
         return COEFF_TOKEN_NC_2_3
-    elif nC < 6:
-        return COEFF_TOKEN_NC_4_5
     elif nC < 8:
-        return COEFF_TOKEN_NC_6_7
+        return COEFF_TOKEN_NC_4_5
     else:
-        # Use FLC(6) - fixed length code
-        return 'FLC6'
+        return COEFF_TOKEN_NC_8_PLUS
 
 # ...
 
@@ -795,7 +889,10 @@ def get_run_before_table(zeros_left: int):
     if zeros_left > 14:
         # For zerosLeft > 14, use table for 14
         zeros_left = 14
-    
+
+    if zeros_left >= 7:
+        return RUN_BEFORE_TABLES[zeros_left]
+
     if zeros_left in RUN_BEFORE_TABLES:
         return RUN_BEFORE_TABLES[zeros_left]
     else:
@@ -803,6 +900,59 @@ def get_run_before_table(zeros_left: int):
 
 
 # Helper function to decode VLC from bitstream
+_VLC_LONGER_PREFIX_CACHE_MAX_ENTRIES = 64
+_VLC_LONGER_PREFIX_CACHE: OrderedDict[
+    int, tuple[dict, frozenset[str]]
+] = OrderedDict()
+_VLC_BUILTIN_TABLES = {
+    id(table): table
+    for table in (
+        COEFF_TOKEN_NC_0_1,
+        COEFF_TOKEN_NC_2_3,
+        COEFF_TOKEN_NC_4_5,
+        COEFF_TOKEN_NC_6_7,
+        COEFF_TOKEN_NC_8_PLUS,
+        COEFF_TOKEN_CHROMA_DC,
+        *TOTAL_ZEROS_2x2.values(),
+        *TOTAL_ZEROS_TABLES.values(),
+        *RUN_BEFORE_TABLES.values(),
+    )
+}
+
+
+def _build_longer_vlc_prefixes(vlc_table: dict) -> frozenset[str]:
+    return frozenset(
+        code[:prefix_length]
+        for code in vlc_table.keys()
+        for prefix_length in range(1, len(code))
+    )
+
+
+def _longer_vlc_prefixes(vlc_table: dict) -> frozenset[str]:
+    """Return prefixes that have at least one longer VLC code.
+
+    Only module-owned CAVLC tables are cached; callers may supply and mutate
+    custom dictionaries, so those are indexed afresh on every decode. The
+    built-in tables are fixed after module initialization. Cache their identity
+    to make per-bit checks O(1); strong references prevent identity reuse and
+    the bounded cache limits retained entries.
+    """
+    if _VLC_BUILTIN_TABLES.get(id(vlc_table)) is not vlc_table:
+        return _build_longer_vlc_prefixes(vlc_table)
+
+    table_id = id(vlc_table)
+    cached = _VLC_LONGER_PREFIX_CACHE.get(table_id)
+    if cached is not None and cached[0] is vlc_table:
+        _VLC_LONGER_PREFIX_CACHE.move_to_end(table_id)
+        return cached[1]
+
+    prefixes = _build_longer_vlc_prefixes(vlc_table)
+    if len(_VLC_LONGER_PREFIX_CACHE) >= _VLC_LONGER_PREFIX_CACHE_MAX_ENTRIES:
+        _VLC_LONGER_PREFIX_CACHE.popitem(last=False)
+    _VLC_LONGER_PREFIX_CACHE[table_id] = (vlc_table, prefixes)
+    return prefixes
+
+
 def decode_vlc(reader, vlc_table: dict, max_bits: int = 16, debug: bool = False) -> tuple:
     """
     Decode variable length code from bitstream using LONGEST-MATCH strategy
@@ -830,6 +980,7 @@ def decode_vlc(reader, vlc_table: dict, max_bits: int = 16, debug: bool = False)
         ValueError: If no valid code found in bitstream
     """
     start_pos = reader.tell()
+    longer_prefixes = _longer_vlc_prefixes(vlc_table)
     code_str = ''
     longest_match = None
     longest_match_len = 0
@@ -851,11 +1002,8 @@ def decode_vlc(reader, vlc_table: dict, max_bits: int = 16, debug: bool = False)
                 if debug:
                     logger.debug(f"      [decode_vlc] Found match: '{code_str}' -> {longest_match}")
                 
-                # Optimization: Check if any longer codes exist with this prefix
-                # If not, we can stop early
-                has_longer = any(k.startswith(code_str) and len(k) > len(code_str) 
-                                for k in vlc_table.keys())
-                if not has_longer:
+                # Stop once the matched code cannot be a prefix of a longer one.
+                if code_str not in longer_prefixes:
                     # This is definitely the longest match, stop here
                     if debug:
                         logger.debug(f"      [decode_vlc] No longer codes, stopping at '{code_str}'")
@@ -901,7 +1049,9 @@ def build_reverse_coeff_token_table(nC: int) -> dict:
     return reverse
 
 
-def build_reverse_total_zeros_table(total_coeffs: int) -> dict:
+def build_reverse_total_zeros_table(
+    total_coeffs: int, is_chroma_dc: bool = False
+) -> dict:
     """
     Build reverse lookup table for total_zeros encoding
     
@@ -911,7 +1061,7 @@ def build_reverse_total_zeros_table(total_coeffs: int) -> dict:
     Returns:
         Dictionary mapping total_zeros -> bit_string
     """
-    forward_table = get_total_zeros_table(total_coeffs)
+    forward_table = get_total_zeros_table(total_coeffs, is_chroma_dc)
     reverse = {}
     
     for bit_string, tz in forward_table.items():
@@ -939,6 +1089,7 @@ def build_reverse_run_before_table(zeros_left: int) -> dict:
     return reverse
 
 
+@lru_cache(maxsize=1024)
 def find_coeff_token_code(total_coeffs: int, trailing_ones: int, nC: int) -> str:
     """
     Find VLC code for coeff_token
@@ -951,30 +1102,6 @@ def find_coeff_token_code(total_coeffs: int, trailing_ones: int, nC: int) -> str
     Returns:
         Bit string for VLC code
     """
-    # Handle TC=0 (all zeros) - use coeff0_token table from x264
-    if total_coeffs == 0 and trailing_ones == 0:
-        # x264_coeff0_token[6] from tables.c line 1798
-        if nC < 2:
-            return '1'        # nC=0,1
-        elif nC < 4:
-            return '11'       # nC=2,3
-        elif nC < 6:
-            return '1111'     # nC=4,5
-        elif nC < 8:
-            return '000011'   # nC=6,7
-        elif nC == -1:
-            return '01'
-        elif nC == -2:
-            return '1'
-        else:
-            # Should not happen
-            return '1'
-    
-    if nC >= 8:
-        # Use FLC: 6 bits total, bits[5:4]=T1 (upper 2), bits[3:0]=TC (lower 4)
-        code = (trailing_ones << 4) | (total_coeffs & 0xF)
-        return f"{code:06b}"
-    
     reverse_table = build_reverse_coeff_token_table(nC)
     
     key = (total_coeffs, trailing_ones)
@@ -984,13 +1111,17 @@ def find_coeff_token_code(total_coeffs: int, trailing_ones: int, nC: int) -> str
     return reverse_table[key]
 
 
-def find_total_zeros_code(total_zeros: int, total_coeffs: int) -> str:
+@lru_cache(maxsize=1024)
+def find_total_zeros_code(
+    total_zeros: int, total_coeffs: int, is_chroma_dc: bool = False
+) -> str:
     """
     Find VLC code for total_zeros
     
     Args:
         total_zeros: 0 to (15 - total_coeffs)
         total_coeffs: 1-15
+        is_chroma_dc: Use the dedicated 2x2 chroma-DC VLC table.
     
     Returns:
         Bit string for VLC code
@@ -998,7 +1129,7 @@ def find_total_zeros_code(total_zeros: int, total_coeffs: int) -> str:
     if total_coeffs == 16:
         return ""  # No zeros possible
     
-    reverse_table = build_reverse_total_zeros_table(total_coeffs)
+    reverse_table = build_reverse_total_zeros_table(total_coeffs, is_chroma_dc)
     
     if total_zeros not in reverse_table:
         raise ValueError(f"Invalid total_zeros: {total_zeros} for TC={total_coeffs}")
@@ -1006,6 +1137,7 @@ def find_total_zeros_code(total_zeros: int, total_coeffs: int) -> str:
     return reverse_table[total_zeros]
 
 
+@lru_cache(maxsize=1024)
 def find_run_before_code(run_before: int, zeros_left: int) -> str:
     """
     Find VLC code for run_before
@@ -1130,7 +1262,7 @@ class CAVLCDecoder:
             total_zeros = 0
         
         # Step 5: Decode run_before values
-        runs = self._decode_runs(total_coeffs, total_zeros)
+        runs = self._decode_runs(total_coeffs, total_zeros, max_num_coeff)
         
         # Step 6: Reconstruct coefficient array with zigzag order
         # Combine levels: trailing ones first, then non-trailing levels
@@ -1175,7 +1307,7 @@ class CAVLCDecoder:
             coefficient_bit_ranges=coefficient_bit_ranges,
         )
     
-    def _decode_coeff_token(self, nC: int) -> Tuple[int, int]:
+    def _decode_coeff_token_legacy(self, nC: int) -> Tuple[int, int]:
         """
         Decode coeff_token using VLC table WITH ROBUST ERROR RECOVERY
 
@@ -1260,6 +1392,34 @@ class CAVLCDecoder:
             except Exception:
                 return (0, 0)
     
+    def _decode_coeff_token(self, nC: int) -> Tuple[int, int]:
+        """Decode one coeff_token using only its normative nC table.
+
+        A malformed/truncated token must not be converted into an all-zero
+        block or retried against a different table: either behavior can hide
+        bitstream desynchronization and produce plausible but incorrect data.
+        """
+        table = get_coeff_token_table(nC)
+        start_pos = self.reader.tell()
+        if not isinstance(table, dict) or not table:
+            raise ValueError(f"No coeff_token table for nC={nC}")
+
+        try:
+            total_coeffs, trailing_ones = decode_vlc(self.reader, table, max_bits=16)
+        except ValueError as exc:
+            self.reader.seek(start_pos)
+            raise ValueError(
+                f"Invalid coeff_token for nC={nC} at bit {start_pos}: {exc}"
+            ) from exc
+
+        if not (0 <= total_coeffs <= 16 and 0 <= trailing_ones <= min(3, total_coeffs)):
+            self.reader.seek(start_pos)
+            raise ValueError(
+                f"Invalid coeff_token values TC={total_coeffs}, T1={trailing_ones} "
+                f"for nC={nC} at bit {start_pos}"
+            )
+        return total_coeffs, trailing_ones
+
     def _decode_levels(
         self,
         count: int,
@@ -1317,22 +1477,14 @@ class CAVLCDecoder:
                         levelCode += (1 << (level_prefix - 3)) - 4096
                     levelCode += self.reader.read_bits(level_prefix - 3)
             
-            # Convert levelCode to actual level value
-            # H.264 Section 9.2.2.1:
-            # - Normal: levelCode = 2*abs_level - 2 + sign_bit
-            # - After 3 T1s: levelCode = 2*abs_level + sign_bit (bias +3 correction)
+            # Apply the first-level offset from H.264 9.2.2.1 before mapping
+            # levelCode to signed magnitude.
+            if i == 0 and trailing_ones < 3:
+                levelCode += 2
+
+            # Even levelCode maps positive; odd levelCode maps negative.
             sign_bit = levelCode & 1  # LSB is sign (0=positive, 1=negative)
-            
-            if i == 0 and trailing_ones == 3:
-                # First level after 3 T1s: special decoding
-                # levelCode = 2*(abs_level - 2) + sign_bit
-                # Solve: abs_level = (levelCode - sign_bit)/2 + 2
-                abs_level = (levelCode - sign_bit) >> 1
-                abs_level += 2
-            else:
-                # levelCode = 2*abs_level - 2 + sign_bit
-                # abs_level = (levelCode - sign_bit + 2) / 2
-                abs_level = (levelCode - sign_bit + 2) >> 1
+            abs_level = (levelCode - sign_bit + 2) >> 1
 
             if bit_ranges is not None:
                 bit_ranges.append((level_start, self.reader.position))
@@ -1357,78 +1509,78 @@ class CAVLCDecoder:
         return levels
     
     def _decode_total_zeros(self, total_coeffs: int, max_num_coeff: int, is_chroma_dc: bool = False) -> int:
-        """
-        Decode total_zeros using VLC table based on TotalCoeffs
-        
-        CRITICAL: Must use VLC table correctly. When table lookup fails, 
-        returning 0 is safer than read_ue() which can consume excessive bits.
-        """
-        # Edge case: if all coefficients present, no total_zeros encoded
-        if total_coeffs >= max_num_coeff:
+        """Decode `total_zeros`; reject invalid VLC instead of guessing."""
+        if not (0 < total_coeffs <= max_num_coeff <= 16):
+            raise ValueError(
+                f"Invalid total_zeros context TC={total_coeffs}, max={max_num_coeff}"
+            )
+        if total_coeffs == max_num_coeff:
             return 0
-        
+
         table = get_total_zeros_table(total_coeffs, is_chroma_dc)
-        
         if not table:
-            # No VLC table for this total_coeffs (shouldn't happen for TC=1-15)
-            # Return max possible zeros as safe fallback
-            return max_num_coeff - total_coeffs
-        
+            raise ValueError(
+                f"No total_zeros VLC table for TC={total_coeffs}, chroma_dc={is_chroma_dc}"
+            )
+
+        start_pos = self.reader.tell()
         try:
             total_zeros = decode_vlc(self.reader, table, max_bits=9)
-            
-            # Validate result is within valid range
-            max_tz = max_num_coeff - total_coeffs
-            if total_zeros > max_tz or total_zeros < 0:
-                # Decoded value out of range - VLC decode bug or bitstream corruption
-                # Clamp to safe range
-                return max(0, min(total_zeros, max_tz))
-            
-            return total_zeros
-        except ValueError as e:
-            # VLC decode failed - bitstream desync or corrupted
-            # Return 0 as safest assumption (all non-zero coefficients packed together)
-            # This is better than read_ue() which can consume 10+ bits incorrectly
-            return 0
-    
-    def _decode_runs(self, total_coeffs: int, total_zeros: int) -> list:
-        """
-        Decode run_before values (zeros before each non-zero coeff)
-        """
+        except ValueError as exc:
+            self.reader.seek(start_pos)
+            raise ValueError(
+                f"Invalid total_zeros VLC for TC={total_coeffs} at bit {start_pos}: {exc}"
+            ) from exc
+
+        max_zeros = max_num_coeff - total_coeffs
+        if not (0 <= total_zeros <= max_zeros):
+            self.reader.seek(start_pos)
+            raise ValueError(
+                f"total_zeros={total_zeros} exceeds valid range [0,{max_zeros}] "
+                f"for TC={total_coeffs} at bit {start_pos}"
+            )
+        return total_zeros
+
+    def _decode_runs(
+        self, total_coeffs: int, total_zeros: int, max_num_coeff: int = 16
+    ) -> list[int]:
+        """Decode run_before values, failing on invalid or truncated VLCs."""
+        if not (1 <= total_coeffs <= max_num_coeff <= 16):
+            raise ValueError(
+                f"Invalid run_before context TC={total_coeffs}, max={max_num_coeff}"
+            )
+        if not (0 <= total_zeros <= max_num_coeff - total_coeffs):
+            raise ValueError(
+                f"Invalid total_zeros={total_zeros} for TC={total_coeffs}, max={max_num_coeff}"
+            )
+
         runs = []
         zeros_left = total_zeros
-        
-        # Optimization: if no zeros, all runs are 0
-        if total_zeros == 0:
-            return [0] * total_coeffs
-        
-        for i in range(total_coeffs - 1):
-            if zeros_left > 0:
-                # Get run_before table for current zeros_left
-                table = get_run_before_table(zeros_left)
-                
-                if table:
-                    try:
-                        run = decode_vlc(self.reader, table, max_bits=11)
-                        # Clamp run to zeros_left to prevent negative zeros_left
-                        run = min(run, zeros_left)
-                        runs.append(run)
-                        zeros_left -= run
-                    except ValueError:
-                        # VLC decode failed - decode_vlc already rewound the reader
-                        # SAFE FALLBACK: use run=0 (no bits consumed, stays in sync)
-                        # Do NOT use read_ue() here - it consumes excessive bits and desynchronizes!
-                        runs.append(0)
-                        # zeros_left unchanged (no zeros consumed)
-                else:
-                    # No table available - safe default
-                    runs.append(0)
-            else:
+        for _ in range(total_coeffs - 1):
+            if zeros_left == 0:
                 runs.append(0)
-        
-        # Last coefficient gets all remaining zeros
+                continue
+
+            table = get_run_before_table(zeros_left)
+            if not table:
+                raise ValueError(f"No run_before VLC table for zeros_left={zeros_left}")
+            start_pos = self.reader.tell()
+            try:
+                run = decode_vlc(self.reader, table, max_bits=11)
+            except ValueError as exc:
+                self.reader.seek(start_pos)
+                raise ValueError(
+                    f"Invalid run_before VLC with zeros_left={zeros_left} at bit {start_pos}: {exc}"
+                ) from exc
+            if not (0 <= run <= zeros_left):
+                self.reader.seek(start_pos)
+                raise ValueError(
+                    f"run_before={run} exceeds zeros_left={zeros_left} at bit {start_pos}"
+                )
+            runs.append(run)
+            zeros_left -= run
+
         runs.append(zeros_left)
-        
         return runs
     
     def _reconstruct_coefficients(self, levels: List[int], runs: List[int], 
@@ -1505,8 +1657,8 @@ class CAVLCEncoder:
             max_num_coeff: Maximum coefficients (16 for 4x4, 15 for chroma DC)
             debug_key: Optional (mb_idx, block_idx) for debugging
             override_total_coeffs: Override for total_coeffs (for re-encoding with preserved suffixLength)
-            override_trailing_ones: Override T1 count to match original decoder's T1 (prevents
-                                    encoder from choosing a higher T1 than the original)
+            override_trailing_ones: Optional assertion of the block's canonical
+                                    TrailingOnes count; mismatches are rejected.
         """
         analysis = self._analyze_block(coeffs, max_num_coeff, override_total_coeffs=override_total_coeffs,
                                        override_trailing_ones=override_trailing_ones)
@@ -1557,7 +1709,8 @@ class CAVLCEncoder:
             
             total_zeros_code = find_total_zeros_code(
                 analysis.total_zeros,
-                analysis.total_coeffs
+                analysis.total_coeffs,
+                is_chroma_dc=(nC == -1),
             )
             self.writer.write_bit_string(total_zeros_code)
         
@@ -1574,8 +1727,8 @@ class CAVLCEncoder:
             max_num_coeff: Maximum number of coefficients
             override_total_coeffs: If provided, use this total_coeffs for suffixLength calculation
                                    (used when re-encoding modified blocks to preserve bit length)
-            override_trailing_ones: If provided, force this T1 count (capped at actual trailing ±1 count).
-                                    Used by BitstreamPatcher to match original encoder's T1 choice.
+            override_trailing_ones: If provided, it must equal the actual trailing
+                                    ±1 count (capped at three); other values are invalid.
 
         Returns:
             BlockAnalysis with all parameters
@@ -1639,12 +1792,22 @@ class CAVLCEncoder:
             else:
                 break
 
-        # Apply override_trailing_ones if provided
-        # Cap at the actual count (can't claim more T1s than exist)
+        # The coeff_token's TrailingOnes value must equal the actual number of
+        # consecutive +/-1 levels (capped at three). Under-reporting is not a
+        # harmless alternate encoding: the first remaining level is decoded
+        # with the H.264 +2 adjustment, so a hidden +/-1 can decode to another
+        # coefficient. Over-reporting is equally invalid.
         if override_trailing_ones is not None:
-            capped = min(override_trailing_ones, trailing_ones)
-            trailing_ones = capped
-            trailing_signs = trailing_signs[:capped]
+            if (
+                isinstance(override_trailing_ones, bool)
+                or not isinstance(override_trailing_ones, int)
+                or not 0 <= override_trailing_ones <= 3
+            ):
+                raise ValueError("override_trailing_ones must be an integer from 0 to 3")
+            if override_trailing_ones != trailing_ones:
+                raise ValueError(
+                    "override_trailing_ones must match the coefficient block's trailing ones"
+                )
         
         # Calculate total_zeros (H.264 Section 9.2.1)
         # total_zeros = number of zero-valued coefficients BEFORE the last non-zero coefficient
@@ -1734,31 +1897,22 @@ class CAVLCEncoder:
         # Initialize suffix length per H.264 Section 9.2.2.1 EXACTLY
         # CRITICAL: Must match H.264 spec precisely for round-trip encoding!
         #
-        # H.264 spec initialization:
-        # if( TotalCoeff( coeff_token ) > 10 )
-        #     suffixLength = 1
-        # else
-        #     suffixLength = 0
-        # if( TotalCoeff( coeff_token ) > 3 && TrailingOnes( coeff_token ) == 3 )
-        #     suffixLength++
+        # H.264 9.2.2.1 initialization (same condition used by the decoder):
+        # suffixLength = 1 iff TotalCoeff > 10 and TrailingOnes < 3.
         
         # Use total_coeffs_for_suffix (not total_coeffs) to preserve bit length
         # when re-encoding modified blocks with override_total_coeffs
-        if analysis.total_coeffs_for_suffix > 10:
+        if analysis.total_coeffs_for_suffix > 10 and analysis.trailing_ones < 3:
             suffixLength = 1
         else:
             suffixLength = 0
-        
-        # Special case: if total_coeffs > 3 and all 3 trailing ones present
-        if analysis.total_coeffs_for_suffix > 3 and analysis.trailing_ones == 3:
-            suffixLength += 1
         
         for i, level in enumerate(levels_to_encode):
             abs_level = abs(level)
             sign = 1 if level < 0 else 0
             
             # Calculate levelCode WITH sign embedded (H.264 Section 9.2.2.1 Table 9-6)
-            if i == 0 and analysis.trailing_ones == 3:
+            if i == 0 and analysis.trailing_ones < 3:
                 levelCode = (abs_level - 2) * 2 + sign
             else:
                 levelCode = (abs_level - 1) * 2 + sign

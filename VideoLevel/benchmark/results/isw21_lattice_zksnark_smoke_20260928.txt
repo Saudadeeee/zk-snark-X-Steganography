@@ -1,0 +1,168 @@
+q_log = 108
+q_rescale = 1684330191549
+b = 214923454510919237360418816
+pt_dim = 32
+n = 2045
+s = 40
+Reset time counters for profiling
+
+================================================================================
+(enter) Test R1CS lattice SNARK
+================================================================================
+
+(enter) Call to generate_r1cs_example_with_field_input	[             ]	(0.0000s x0.92 from start)
+(leave) Call to generate_r1cs_example_with_field_input	[0.0050s x1.00]	(0.0050s x1.00 from start)
+(enter) Call to R1CS lattice SNARK         	[             ]	(0.0051s x1.00 from start)
+
+================================================================================
+R1CS lattice SNARK Generator
+================================================================================
+
+  (enter) Generating LWE secret key          	[             ]	(0.1763s x1.00 from start)
+  (leave) Generating LWE secret key          	[4.7579s x1.00]	(4.9342s x1.00 from start)
+  (enter) Generating QAP queries             	[             ]	(4.9345s x1.00 from start)
+[MESSAGE] Step Radix 2 with big + rounded_small 10240
+    (enter) Call to r1cs_to_qap_instance_map_with_evaluation	[             ]	(4.9347s x1.00 from start)
+[MESSAGE] Step Radix 2 with big + rounded_small 10240
+      (enter) Compute evaluations of A, B, C, H at t	[             ]	(4.9350s x1.00 from start)
+      (leave) Compute evaluations of A, B, C, H at t	[0.0046s x1.00]	(4.9396s x1.00 from start)
+    (leave) Call to r1cs_to_qap_instance_map_with_evaluation	[0.0049s x1.00]	(4.9396s x1.00 from start)
+    * QAP number of variables: 10002
+    * QAP pre degree: 10000
+    * QAP degree: 10240
+    * QAP number of input variables: 100
+    (enter) Call to r1cs_to_qap_instance_map_with_evaluation	[             ]	(4.9396s x1.00 from start)
+[MESSAGE] Step Radix 2 with big + rounded_small 10240
+      (enter) Compute evaluations of A, B, C, H at t	[             ]	(4.9398s x1.00 from start)
+      (leave) Compute evaluations of A, B, C, H at t	[0.0049s x1.00]	(4.9447s x1.00 from start)
+    (leave) Call to r1cs_to_qap_instance_map_with_evaluation	[0.0051s x1.00]	(4.9447s x1.00 from start)
+    (enter) Call to r1cs_to_qap_instance_map_with_evaluation	[             ]	(4.9447s x1.00 from start)
+[MESSAGE] Step Radix 2 with big + rounded_small 10240
+      (enter) Compute evaluations of A, B, C, H at t	[             ]	(4.9449s x1.00 from start)
+      (leave) Compute evaluations of A, B, C, H at t	[0.0046s x1.00]	(4.9496s x1.00 from start)
+    (leave) Call to r1cs_to_qap_instance_map_with_evaluation	[0.0049s x1.00]	(4.9496s x1.00 from start)
+    (enter) Call to r1cs_to_qap_instance_map_with_evaluation	[             ]	(4.9496s x1.00 from start)
+[MESSAGE] Step Radix 2 with big + rounded_small 10240
+      (enter) Compute evaluations of A, B, C, H at t	[             ]	(4.9498s x1.00 from start)
+      (leave) Compute evaluations of A, B, C, H at t	[0.0050s x1.00]	(4.9548s x1.00 from start)
+    (leave) Call to r1cs_to_qap_instance_map_with_evaluation	[0.0052s x1.00]	(4.9548s x1.00 from start)
+    (enter) Call to r1cs_to_qap_instance_map_with_evaluation	[             ]	(4.9548s x1.00 from start)
+[MESSAGE] Step Radix 2 with big + rounded_small 10240
+      (enter) Compute evaluations of A, B, C, H at t	[             ]	(4.9552s x1.00 from start)
+      (leave) Compute evaluations of A, B, C, H at t	[0.0048s x1.00]	(4.9600s x1.00 from start)
+    (leave) Call to r1cs_to_qap_instance_map_with_evaluation	[0.0051s x1.00]	(4.9600s x1.00 from start)
+    (enter) Call to r1cs_to_qap_instance_map_with_evaluation	[             ]	(4.9600s x1.00 from start)
+[MESSAGE] Step Radix 2 with big + rounded_small 10240
+      (enter) Compute evaluations of A, B, C, H at t	[             ]	(4.9602s x1.00 from start)
+      (leave) Compute evaluations of A, B, C, H at t	[0.0045s x1.00]	(4.9647s x1.00 from start)
+    (leave) Call to r1cs_to_qap_instance_map_with_evaluation	[0.0047s x1.00]	(4.9647s x1.00 from start)
+    (enter) Call to r1cs_to_qap_instance_map_with_evaluation	[             ]	(4.9647s x1.00 from start)
+[MESSAGE] Step Radix 2 with big + rounded_small 10240
+      (enter) Compute evaluations of A, B, C, H at t	[             ]	(4.9649s x1.00 from start)
+      (leave) Compute evaluations of A, B, C, H at t	[0.0045s x1.00]	(4.9694s x1.00 from start)
+    (leave) Call to r1cs_to_qap_instance_map_with_evaluation	[0.0047s x1.00]	(4.9694s x1.00 from start)
+    (enter) Call to r1cs_to_qap_instance_map_with_evaluation	[             ]	(4.9694s x1.00 from start)
+[MESSAGE] Step Radix 2 with big + rounded_small 10240
+      (enter) Compute evaluations of A, B, C, H at t	[             ]	(4.9695s x1.00 from start)
+      (leave) Compute evaluations of A, B, C, H at t	[0.0047s x1.00]	(4.9743s x1.00 from start)
+    (leave) Call to r1cs_to_qap_instance_map_with_evaluation	[0.0049s x1.00]	(4.9743s x1.00 from start)
+  (leave) Generating QAP queries             	[0.0462s x1.00]	(4.9807s x1.00 from start)
+  (enter) Generating CRS and VK              	[             ]	(4.9807s x1.00 from start)
+  (leave) Generating CRS and VK              	[9.1132s x1.00]	(14.0939s x1.00 from start)
+
+  * Memory profiling not supported in NO_PROCPS mode
+
+================================================================================
+R1CS lattice SNARK Prover
+================================================================================
+
+  (enter) Call to r1cs lattice snark prover  	[             ]	(14.1021s x1.00 from start)
+    (enter) Compute H polynomial               	[             ]	(14.1021s x1.00 from start)
+      (enter) Call to r1cs_to_qap_witness_map    	[             ]	(14.1023s x1.00 from start)
+[MESSAGE] Step Radix 2 with big + rounded_small 10240
+        (enter) Compute evaluation of polynomials A, B on set S	[             ]	(14.1027s x1.00 from start)
+        (leave) Compute evaluation of polynomials A, B on set S	[0.0016s x1.00]	(14.1043s x1.00 from start)
+        (enter) Compute coefficients of polynomial A	[             ]	(14.1043s x1.00 from start)
+        (leave) Compute coefficients of polynomial A	[0.0036s x1.00]	(14.1079s x1.00 from start)
+        (enter) Compute coefficients of polynomial B	[             ]	(14.1080s x1.00 from start)
+        (leave) Compute coefficients of polynomial B	[0.0035s x1.00]	(14.1114s x1.00 from start)
+        (enter) Compute ZK-patch                   	[             ]	(14.1115s x1.00 from start)
+        (leave) Compute ZK-patch                   	[0.0004s x1.01]	(14.1119s x1.00 from start)
+        (enter) Compute evaluation of polynomial A on set T	[             ]	(14.1119s x1.00 from start)
+        (leave) Compute evaluation of polynomial A on set T	[0.0038s x1.00]	(14.1157s x1.00 from start)
+        (enter) Compute evaluation of polynomial B on set T	[             ]	(14.1157s x1.00 from start)
+        (leave) Compute evaluation of polynomial B on set T	[0.0038s x1.00]	(14.1195s x1.00 from start)
+        (enter) Compute evaluation of polynomial H on set T	[             ]	(14.1196s x1.00 from start)
+          (enter) Compute evaluation of polynomial C on set S	[             ]	(14.1198s x1.00 from start)
+          (leave) Compute evaluation of polynomial C on set S	[0.0005s x1.00]	(14.1203s x1.00 from start)
+          (enter) Compute coefficients of polynomial C	[             ]	(14.1204s x1.00 from start)
+          (leave) Compute coefficients of polynomial C	[0.0039s x1.00]	(14.1244s x1.00 from start)
+          (enter) Compute evaluation of polynomial C on set T	[             ]	(14.1244s x1.00 from start)
+          (leave) Compute evaluation of polynomial C on set T	[0.0036s x1.00]	(14.1280s x1.00 from start)
+          (enter) Divide by Z on set T               	[             ]	(14.1281s x1.00 from start)
+          (leave) Divide by Z on set T               	[0.0018s x1.00]	(14.1299s x1.00 from start)
+        (leave) Compute evaluation of polynomial H on set T	[0.0104s x1.00]	(14.1299s x1.00 from start)
+        (enter) Compute coefficients of polynomial H	[             ]	(14.1299s x1.00 from start)
+        (leave) Compute coefficients of polynomial H	[0.0039s x1.00]	(14.1338s x1.00 from start)
+        (enter) Compute sum of H and ZK-patch      	[             ]	(14.1338s x1.00 from start)
+        (leave) Compute sum of H and ZK-patch      	[0.0000s x1.01]	(14.1339s x1.00 from start)
+      (leave) Call to r1cs_to_qap_witness_map    	[0.0316s x1.00]	(14.1339s x1.00 from start)
+    (leave) Compute H polynomial               	[0.0318s x1.00]	(14.1339s x1.00 from start)
+    (enter) Prepare pi proof                   	[             ]	(14.1339s x1.00 from start)
+    (leave) Prepare pi proof                   	[0.0001s x1.03]	(14.1340s x1.00 from start)
+    (enter) Generating response                	[             ]	(14.1341s x1.00 from start)
+      (enter) Generating ct linear combination   	[             ]	(14.1341s x1.00 from start)
+      (leave) Generating ct linear combination   	[0.0071s x1.00]	(14.1412s x1.00 from start)
+      (enter) Generating a_vec linear combination	[             ]	(14.1413s x1.00 from start)
+      (leave) Generating a_vec linear combination	[0.5685s x1.00]	(14.7098s x1.00 from start)
+    (leave) Generating response                	[0.6020s x1.00]	(14.7362s x1.00 from start)
+  (leave) Call to r1cs lattice snark prover  	[0.6341s x1.00]	(14.7362s x1.00 from start)
+
+  * Randomize a_vec 0.242000s
+  * Linear comb on a_vec 0.324000s
+  * Linear comb size 20146
+
+  * Memory profiling not supported in NO_PROCPS mode
+
+================================================================================
+R1CS lattice SNARK Verifier
+================================================================================
+
+  (enter) Call to r1cs lattice snark verifier	[             ]	(14.7363s x1.00 from start)
+    (enter) Decrypting proof                   	[             ]	(14.7365s x1.00 from start)
+    (leave) Decrypting proof                   	[0.0012s x1.00]	(14.7377s x1.00 from start)
+    (enter) Checking QAP divisibility          	[             ]	(14.7377s x1.00 from start)
+    (leave) Checking QAP divisibility          	[0.0000s x1.10]	(14.7378s x1.00 from start)
+  (leave) Call to r1cs lattice snark verifier	[0.0014s x1.00]	(14.7378s x1.00 from start)
+
+  * Memory profiling not supported in NO_PROCPS mode
+* The verification result is: PASS
+(leave) Call to R1CS lattice SNARK         	[14.7327s x1.00]	(14.7378s x1.00 from start)
+
+================================================================================
+(leave) Test R1CS lattice SNARK
+================================================================================
+
+	Command being timed: "/tmp/lattice-zksnark/build/lwe/bin/r1cs_lattice_snark_prime19_test 10000 100"
+	User time (seconds): 14.29
+	System time (seconds): 0.44
+	Percent of CPU this job got: 99%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:14.75
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 429856
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 147013
+	Voluntary context switches: 1
+	Involuntary context switches: 16
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

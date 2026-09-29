@@ -45,12 +45,46 @@ func main() {
 
 func run() error {
 	verifyMode := flag.Bool("verify", false, "verify serialized probe artifacts instead of generating a proof")
-	proofPath := flag.String("proof-out", "", "write serialized proof JSON to this path")
-	relationPath := flag.String("relation-out", "", "write augmented public relation JSON to this path")
-	proofInputPath := flag.String("proof-in", "", "read serialized proof JSON from this path in verify mode")
-	relationInputPath := flag.String("relation-in", "", "read augmented public relation JSON from this path in verify mode")
+	fixedSetupMode := flag.Bool("fixed-setup", false, "create an experimental verifier-pinned relation and private witness")
+	fixedProveMode := flag.Bool("fixed-prove", false, "prove fixed relation for canonical context read from stdin")
+	fixedVerifyMode := flag.Bool("fixed-verify", false, "verify fixed proof for canonical context read from stdin")
+	fixedCompactProveMode := flag.Bool("fixed-compact-prove", false, "prove compact fixed relation for canonical context read from stdin")
+	fixedCompactVerifyMode := flag.Bool("fixed-compact-verify", false, "verify compact fixed proof for canonical context read from stdin")
+	proofPath := flag.String("proof-out", "", "write a serialized proof artifact (JSON legacy or LNPF fixed mode)")
+	relationPath := flag.String("relation-out", "", "write a public relation artifact for the selected mode")
+	proofInputPath := flag.String("proof-in", "", "read a serialized proof artifact in verify mode")
+	relationInputPath := flag.String("relation-in", "", "read a public relation artifact in verify mode")
+	witnessOutputPath := flag.String("witness-out", "", "write private witness JSON during fixed setup; keep secret")
+	witnessInputPath := flag.String("witness-in", "", "read private witness JSON during fixed proving")
 	trustedBaseRelation := flag.String("trusted-base-relation-sha256", "", "verifier-configured SHA-256 pin for the base relation")
 	flag.Parse()
+	selectedModes := 0
+	for _, enabled := range []bool{
+		*verifyMode, *fixedSetupMode, *fixedProveMode, *fixedVerifyMode,
+		*fixedCompactProveMode, *fixedCompactVerifyMode,
+	} {
+		if enabled {
+			selectedModes++
+		}
+	}
+	if selectedModes > 1 {
+		return errors.New("select exactly one CLI mode")
+	}
+	if *fixedSetupMode {
+		return runFixedSetup(*relationPath, *witnessOutputPath, os.Stdout)
+	}
+	if *fixedProveMode {
+		return runFixedProve(os.Stdin, *relationInputPath, *witnessInputPath, *proofPath, os.Stdout)
+	}
+	if *fixedVerifyMode {
+		return runFixedVerify(os.Stdin, *relationInputPath, *proofInputPath, *trustedBaseRelation, os.Stdout)
+	}
+	if *fixedCompactProveMode {
+		return runFixedCompactProve(os.Stdin, *relationInputPath, *witnessInputPath, *proofPath, os.Stdout)
+	}
+	if *fixedCompactVerifyMode {
+		return runFixedCompactVerify(os.Stdin, *relationInputPath, *proofInputPath, *trustedBaseRelation, os.Stdout)
+	}
 	if *verifyMode {
 		return runVerify(*proofInputPath, *relationInputPath, *trustedBaseRelation)
 	}
@@ -170,6 +204,222 @@ func run() error {
 		SecurityStatus:              "experimental; source implementation and application relation are not independently audited",
 	}
 	return json.NewEncoder(os.Stdout).Encode(result)
+}
+
+func runFixedSetup(relationPath, witnessPath string, output io.Writer) error {
+	if relationPath == "" || witnessPath == "" {
+		return errors.New("fixed setup requires -relation-out and -witness-out")
+	}
+	if output == nil {
+		return errors.New("fixed setup result writer is required")
+	}
+	if err := validateOutputPaths(witnessPath, relationPath); err != nil {
+		return err
+	}
+	relationBytes, witnessBytes, digest, err := createFixedRelation(rand.Reader)
+	if err != nil {
+		return fmt.Errorf("create fixed relation: %w", err)
+	}
+	if err := writeExclusive(relationPath, relationBytes); err != nil {
+		return fmt.Errorf("write fixed public relation: %w", err)
+	}
+	if err := writeExclusive(witnessPath, witnessBytes); err != nil {
+		removeErr := os.Remove(relationPath)
+		return errors.Join(fmt.Errorf("write private witness: %w", err), cleanupErrors(removeErr))
+	}
+	return json.NewEncoder(output).Encode(struct {
+		Mode           string `json:"mode"`
+		RelationSHA256 string `json:"relation_sha256"`
+		RelationBytes  int    `json:"relation_bytes"`
+		WitnessBytes   int    `json:"witness_bytes"`
+		SecurityStatus string `json:"security_status"`
+	}{
+		Mode:           "fixed-setup",
+		RelationSHA256: digest,
+		RelationBytes:  len(relationBytes),
+		WitnessBytes:   len(witnessBytes),
+		SecurityStatus: "experimental generated relation; not an application ZKP or audited setup",
+	})
+}
+
+func runFixedProve(contextReader io.Reader, relationPath, witnessPath, proofPath string, output io.Writer) error {
+	if relationPath == "" || witnessPath == "" || proofPath == "" {
+		return errors.New("fixed proving requires -relation-in, -witness-in, and -proof-out")
+	}
+	if output == nil {
+		return errors.New("fixed proving result writer is required")
+	}
+	contextBytes, err := readCanonicalContext(contextReader)
+	if err != nil {
+		return fmt.Errorf("read canonical statement from stdin: %w", err)
+	}
+	relationBytes, err := readArtifactFile(relationPath)
+	if err != nil {
+		return fmt.Errorf("read fixed public relation: %w", err)
+	}
+	witnessBytes, err := readArtifactFile(witnessPath)
+	if err != nil {
+		return fmt.Errorf("read private witness: %w", err)
+	}
+	proveStarted := time.Now()
+	proofBytes, err := proveFixed(contextBytes, relationBytes, witnessBytes, rand.Reader)
+	proveMilliseconds := float64(time.Since(proveStarted).Microseconds()) / 1000
+	if err != nil {
+		return fmt.Errorf("prove fixed relation: %w", err)
+	}
+	if err := writeExclusive(proofPath, proofBytes); err != nil {
+		return fmt.Errorf("write fixed proof: %w", err)
+	}
+	digest := sha256.Sum256(proofBytes)
+	return json.NewEncoder(output).Encode(struct {
+		Mode           string  `json:"mode"`
+		ProofBytes     int     `json:"proof_bytes"`
+		ProofSHA256    string  `json:"proof_sha256"`
+		ProveMS        float64 `json:"prove_ms"`
+		SecurityStatus string  `json:"security_status"`
+	}{
+		Mode:           "fixed-prove",
+		ProofBytes:     len(proofBytes),
+		ProofSHA256:    fmt.Sprintf("%x", digest),
+		ProveMS:        proveMilliseconds,
+		SecurityStatus: "experimental generated relation; context-bound proof, not an application ZKP",
+	})
+}
+
+func runFixedCompactProve(contextReader io.Reader, relationPath, witnessPath, proofPath string, output io.Writer) error {
+	if relationPath == "" || witnessPath == "" || proofPath == "" {
+		return errors.New("compact fixed proving requires -relation-in, -witness-in, and -proof-out")
+	}
+	if output == nil {
+		return errors.New("compact fixed proving result writer is required")
+	}
+	contextBytes, err := readCanonicalContext(contextReader)
+	if err != nil {
+		return fmt.Errorf("read canonical statement from stdin: %w", err)
+	}
+	relationBytes, err := readArtifactFile(relationPath)
+	if err != nil {
+		return fmt.Errorf("read fixed public relation: %w", err)
+	}
+	witnessBytes, err := readArtifactFile(witnessPath)
+	if err != nil {
+		return fmt.Errorf("read private witness: %w", err)
+	}
+	proveStarted := time.Now()
+	proofBytes, err := proveFixedCompact(contextBytes, relationBytes, witnessBytes, rand.Reader)
+	proveMilliseconds := float64(time.Since(proveStarted).Microseconds()) / 1000
+	if err != nil {
+		return fmt.Errorf("prove compact fixed relation: %w", err)
+	}
+	if err := writeExclusive(proofPath, proofBytes); err != nil {
+		return fmt.Errorf("write compact fixed proof: %w", err)
+	}
+	digest := sha256.Sum256(proofBytes)
+	return json.NewEncoder(output).Encode(struct {
+		Mode           string  `json:"mode"`
+		ProofBytes     int     `json:"proof_bytes"`
+		ProofSHA256    string  `json:"proof_sha256"`
+		ProveMS        float64 `json:"prove_ms"`
+		SecurityStatus string  `json:"security_status"`
+	}{
+		Mode:           "fixed-compact-prove",
+		ProofBytes:     len(proofBytes),
+		ProofSHA256:    fmt.Sprintf("%x", digest),
+		ProveMS:        proveMilliseconds,
+		SecurityStatus: "experimental compact context transform; not an application ZKP or audited protocol",
+	})
+}
+
+func runFixedVerify(contextReader io.Reader, relationPath, proofPath, trustedDigest string, output io.Writer) error {
+	if relationPath == "" || proofPath == "" || trustedDigest == "" {
+		return errors.New("fixed verification requires -relation-in, -proof-in, and -trusted-base-relation-sha256")
+	}
+	if output == nil {
+		return errors.New("fixed verification result writer is required")
+	}
+	contextBytes, err := readCanonicalContext(contextReader)
+	if err != nil {
+		return fmt.Errorf("read canonical statement from stdin: %w", err)
+	}
+	relationBytes, err := readArtifactFile(relationPath)
+	if err != nil {
+		return fmt.Errorf("read fixed public relation: %w", err)
+	}
+	proofBytes, err := readArtifactFile(proofPath)
+	if err != nil {
+		return fmt.Errorf("read fixed proof: %w", err)
+	}
+	verifyStarted := time.Now()
+	valid, err := verifyFixed(contextBytes, relationBytes, proofBytes, trustedDigest)
+	verifyMilliseconds := float64(time.Since(verifyStarted).Microseconds()) / 1000
+	if err != nil {
+		return fmt.Errorf("verify fixed proof: %w", err)
+	}
+	if err := json.NewEncoder(output).Encode(struct {
+		Mode                  string  `json:"mode"`
+		Valid                 bool    `json:"valid"`
+		TrustedRelationSHA256 string  `json:"trusted_relation_sha256"`
+		VerifyMS              float64 `json:"verify_ms"`
+		SecurityStatus        string  `json:"security_status"`
+	}{
+		Mode:                  "fixed-verify",
+		Valid:                 valid,
+		TrustedRelationSHA256: trustedDigest,
+		VerifyMS:              verifyMilliseconds,
+		SecurityStatus:        "experimental generated relation; not an application ZKP or audited protocol",
+	}); err != nil {
+		return fmt.Errorf("write fixed verification result: %w", err)
+	}
+	if !valid {
+		return errProofRejected
+	}
+	return nil
+}
+
+func runFixedCompactVerify(contextReader io.Reader, relationPath, proofPath, trustedDigest string, output io.Writer) error {
+	if relationPath == "" || proofPath == "" || trustedDigest == "" {
+		return errors.New("compact fixed verification requires -relation-in, -proof-in, and -trusted-base-relation-sha256")
+	}
+	if output == nil {
+		return errors.New("compact fixed verification result writer is required")
+	}
+	contextBytes, err := readCanonicalContext(contextReader)
+	if err != nil {
+		return fmt.Errorf("read canonical statement from stdin: %w", err)
+	}
+	relationBytes, err := readArtifactFile(relationPath)
+	if err != nil {
+		return fmt.Errorf("read fixed public relation: %w", err)
+	}
+	proofBytes, err := readArtifactFile(proofPath)
+	if err != nil {
+		return fmt.Errorf("read compact fixed proof: %w", err)
+	}
+	verifyStarted := time.Now()
+	valid, err := verifyFixedCompact(contextBytes, relationBytes, proofBytes, trustedDigest)
+	verifyMilliseconds := float64(time.Since(verifyStarted).Microseconds()) / 1000
+	if err != nil {
+		return fmt.Errorf("verify compact fixed proof: %w", err)
+	}
+	if err := json.NewEncoder(output).Encode(struct {
+		Mode                  string  `json:"mode"`
+		Valid                 bool    `json:"valid"`
+		TrustedRelationSHA256 string  `json:"trusted_relation_sha256"`
+		VerifyMS              float64 `json:"verify_ms"`
+		SecurityStatus        string  `json:"security_status"`
+	}{
+		Mode:                  "fixed-compact-verify",
+		Valid:                 valid,
+		TrustedRelationSHA256: trustedDigest,
+		VerifyMS:              verifyMilliseconds,
+		SecurityStatus:        "experimental compact context transform; not an application ZKP or audited protocol",
+	}); err != nil {
+		return fmt.Errorf("write compact fixed verification result: %w", err)
+	}
+	if !valid {
+		return errProofRejected
+	}
+	return nil
 }
 
 func runVerify(proofPath, relationPath, trustedBaseRelationSHA256 string) error {

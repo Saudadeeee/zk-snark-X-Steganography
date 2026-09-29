@@ -140,6 +140,7 @@ class BitstreamPatcher:
         patched_count = 0
         skipped_count = 0
         successful_block_keys: List[Tuple[int, int]] = []
+        skipped_block_reasons: Dict[Tuple[int, int], str] = {}
         
         for mb_idx, block_idx, new_coeffs in modifications:
             key = (mb_idx, block_idx)  # Already global from embedder!
@@ -147,6 +148,7 @@ class BitstreamPatcher:
             if key not in global_block_offsets:  # Use global offsets!
                 logger.warning(f"[PATCHER] Warning: Block {key} not in global offset map (skip MB or not coded)")
                 skipped_count += 1
+                skipped_block_reasons[key] = "missing_bit_offsets"
                 continue
             
             offset_info = global_block_offsets[key]  # Use global offsets!
@@ -165,6 +167,7 @@ class BitstreamPatcher:
                 if patched_count == 0:  # Show debug for first occurrence only
                     logger.debug(f"[PATCHER] SKIP {key}: Block not found in extracted coeffs (wasn't coded in NAL)")
                 skipped_count += 1
+                skipped_block_reasons[key] = "missing_decoded_coefficients"
                 continue
             
             # PARSER CONSISTENCY CHECK: Verify total_coeffs match between parser and embedder
@@ -196,7 +199,11 @@ class BitstreamPatcher:
             # forward check with nC=2 also passes (zero-padded gives the right bit count),
             # but FFmpeg computes nC=4 from context and reads 19 bits instead of 11,
             # causing cascade desync in the rest of the slice.
-            tracer_nC = offset_info.get('nC', None) if isinstance(offset_info, dict) else None
+            tracer_nC = (
+                offset_info.get("validated_nC", offset_info.get("nC"))
+                if isinstance(offset_info, dict)
+                else None
+            )
             if tracer_nC is not None:
                 nC_scan_order = [tracer_nC]  # ONLY use tracer_nC — fallbacks cause false positives
             else:
@@ -206,14 +213,14 @@ class BitstreamPatcher:
                 try:
                     reader = BitstreamReader(raw_nal_bytes)
                     dec = CAVLCDecoder(reader)
-                    block = dec.decode_block_cavlc(nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16))
+                    block = dec.decode_block_cavlc(nC_try, max_num_coeff=offset_info.get('max_num_coeff', 16))
                     consumed = reader.pos
                     if consumed != original_length:
                         continue  # Wrong nC: decoder consumed wrong number of bits
                     # Verify round-trip: encode(decode(bits)) == bits
                     nal_coeffs = list(block.levels)
                     # First try without T1 override (encoder chooses max T1)
-                    candidate = self._encode_coefficients_to_bits(nal_coeffs, nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16))
+                    candidate = self._encode_coefficients_to_bits(nal_coeffs, nC_try, max_num_coeff=offset_info.get('max_num_coeff', 16))
                     if len(candidate) == original_length and list(candidate) == actual_nal_bits:
                         matched_nC = nC_try
                         matched_nal_coeffs = nal_coeffs
@@ -224,7 +231,7 @@ class BitstreamPatcher:
                     # Some original encoders choose a smaller T1 than the maximum possible.
                     t1_decoded = block.trailing_ones
                     candidate_t1 = self._encode_coefficients_to_bits(
-                        nal_coeffs, nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16),
+                        nal_coeffs, nC_try, max_num_coeff=offset_info.get('max_num_coeff', 16),
                         override_trailing_ones=t1_decoded
                     )
                     if len(candidate_t1) == original_length and list(candidate_t1) == actual_nal_bits:
@@ -238,13 +245,13 @@ class BitstreamPatcher:
                     continue
 
             if matched_nC is None:
+                lens = {}
                 if patched_count < 5:
-                    lens = {}
                     for nC_try in [0, 2, 4, 6, 8]:
                         try:
                             reader = BitstreamReader(raw_nal_bytes)
                             dec = CAVLCDecoder(reader)
-                            dec.decode_block_cavlc(nC_try, max_num_coeff=offset_data.get('max_num_coeff', 16))
+                            dec.decode_block_cavlc(nC_try, max_num_coeff=offset_info.get('max_num_coeff', 16))
                             lens[nC_try] = reader.pos
                         except Exception as e:
                             logger.debug("nC probe %d failed for %s: %s", nC_try, key, e)
@@ -252,6 +259,10 @@ class BitstreamPatcher:
                     logger.debug("[PATCHER] SKIP %s: No nC round-trips exactly "
                                "(NAL=%db). nC->consumed=%s", key, original_length, lens)
                 skipped_count += 1
+                skipped_block_reasons[key] = (
+                    "original_cavlc_bits_failed_exact_round_trip; "
+                    f"nC={tracer_nC}; probe_consumed={lens}"
+                )
                 continue
 
             nC = matched_nC  # Confirmed correct nC via round-trip decode-encode
@@ -306,10 +317,12 @@ class BitstreamPatcher:
             # (these cannot be patched safely)
             if original_total_coeffs == 0 and modified_total_coeffs > 0:
                 skipped_count += 1
+                skipped_block_reasons[key] = "modification_would_create_nonzero_coefficients"
                 continue
             if original_total_coeffs != modified_total_coeffs:
                 # Safety filter should have prevented this — skip as a safeguard
                 skipped_count += 1
+                skipped_block_reasons[key] = "modification_changes_total_coefficients"
                 continue
 
             # NOTE: T1 Position Safety Check was previously here but was removed once
@@ -320,7 +333,7 @@ class BitstreamPatcher:
 
             # Re-encode modified coefficients with trailing_ones override only.
             new_bits = self._encode_coefficients_to_bits(
-                modified_nal_coeffs, nC, max_num_coeff=offset_data.get('max_num_coeff', 16),
+                modified_nal_coeffs, nC, max_num_coeff=offset_info.get('max_num_coeff', 16),
                 override_trailing_ones=matched_trailing_ones)
 
             # Bit-exact match already confirmed for original in nC scanning above.
@@ -332,6 +345,9 @@ class BitstreamPatcher:
                     logger.debug(f"  Original NAL: {original_length} bits")
                     logger.debug(f"  Re-encoded:   {len(new_bits)} bits")
                 skipped_count += 1
+                skipped_block_reasons[key] = (
+                    f"modified_cavlc_length_{len(new_bits)}_expected_{original_length}"
+                )
                 continue
 
             # Step 6a: Forward round-trip check — verify decode(new_bits, nC) consumes
@@ -343,15 +359,20 @@ class BitstreamPatcher:
                 fwd_raw = self._bits_to_bytes(new_bits + [0] * 64)
                 fwd_reader = BitstreamReader(fwd_raw)
                 fwd_dec = CAVLCDecoder(fwd_reader)
-                fwd_dec.decode_block_cavlc(nC, max_num_coeff=offset_data.get('max_num_coeff', 16))
+                fwd_dec.decode_block_cavlc(nC, max_num_coeff=offset_info.get('max_num_coeff', 16))
                 if fwd_reader.pos != original_length:
                     logger.debug("PATCHER SKIP %s: new_bits decode consumes %db != %db",
                                  key, fwd_reader.pos, original_length)
                     skipped_count += 1
+                    skipped_block_reasons[key] = (
+                        f"modified_forward_decode_consumes_{fwd_reader.pos}_"
+                        f"expected_{original_length}"
+                    )
                     continue
             except Exception as e:
                 logger.debug("PATCHER SKIP %s: forward decode failed: %s", key, e)
                 skipped_count += 1
+                skipped_block_reasons[key] = f"modified_forward_decode_failed_{type(e).__name__}"
                 continue
 
             # Step 6b: Retroactive boundary corruption check.
@@ -393,6 +414,7 @@ class BitstreamPatcher:
 
             if retro_skip:
                 skipped_count += 1
+                skipped_block_reasons[key] = "modified_bits_break_predecessor_decode_boundary"
                 continue
 
             # Step 6: Overwrite bits at specific position
@@ -403,6 +425,7 @@ class BitstreamPatcher:
             except Exception as e:
                 logger.error(f"[PATCHER] Error patching block {key}: {e}")
                 skipped_count += 1
+                skipped_block_reasons[key] = f"bit_overwrite_failed_{type(e).__name__}"
                 continue
         
         logger.info(f"[PATCHER] Successfully patched: {patched_count}/{len(modifications)}")
@@ -415,7 +438,7 @@ class BitstreamPatcher:
         # Step 8: Create new NAL unit with patched RBSP
         # Create a simple NAL-like object (match original structure)
         class PatchedNAL:
-            def __init__(self, original_nal, new_rbsp, applied_block_keys):
+            def __init__(self, original_nal, new_rbsp, applied_block_keys, skipped_reasons):
                 self.forbidden_zero_bit = original_nal.forbidden_zero_bit
                 self.nal_ref_idc = original_nal.nal_ref_idc
                 self.nal_unit_type = original_nal.nal_unit_type
@@ -424,8 +447,14 @@ class BitstreamPatcher:
                 self.size = len(new_rbsp) + 1  # +1 for NAL header
                 self.start_code_size = getattr(original_nal, 'start_code_size', 4)
                 self.applied_block_keys = list(applied_block_keys)
+                self.skipped_block_reasons = dict(skipped_reasons)
         
-        return PatchedNAL(original_nal, patched_rbsp, successful_block_keys)
+        return PatchedNAL(
+            original_nal,
+            patched_rbsp,
+            successful_block_keys,
+            skipped_block_reasons,
+        )
     
     def _bits_to_bytes(self, bits: List[int]) -> bytes:
         """Pack list of 0/1 ints into bytes (MSB first), padding to byte boundary."""
@@ -453,19 +482,31 @@ class BitstreamPatcher:
         Returns:
             None if block is not patchable, else (matched_nC, coefficients, t1_override)
         """
-        rbsp_bits = BitArray(rbsp_bytes)
-        rbsp_raw_bits = rbsp_bits.bits
-        retro_pad_bits = np.zeros(64, dtype=np.uint8)
-
         start_bit = offset_data.get('start_bit')
         end_bit = offset_data.get('end_bit')
         original_length = offset_data.get('bit_length')
         if start_bit is None or end_bit is None or original_length is None or original_length <= 0:
             return None
+        total_bits = len(rbsp_bytes) * 8
+        if start_bit < 0 or end_bit < start_bit or end_bit > total_bits:
+            return None
 
-        actual_nal_bits = rbsp_raw_bits[start_bit:end_bit]
-        lookahead_end = min(end_bit + 64, len(rbsp_bits))
-        raw_nal_bytes = self._bits_to_bytes(rbsp_raw_bits[start_bit:lookahead_end])
+        # Many blocks in a NAL are checked independently. Unpacking the entire
+        # RBSP for each candidate is quadratic in NAL size; this local window
+        # contains exactly the block and the existing 64-bit lookahead.
+        window_start_byte = start_bit // 8
+        lookahead_end = min(end_bit + 64, total_bits)
+        window_end_byte = (lookahead_end + 7) // 8
+        window_bits = np.unpackbits(
+            np.frombuffer(rbsp_bytes[window_start_byte:window_end_byte], dtype=np.uint8)
+        )
+        local_start_bit = start_bit - window_start_byte * 8
+        local_end_bit = end_bit - window_start_byte * 8
+        local_lookahead_end = lookahead_end - window_start_byte * 8
+        actual_nal_bits = window_bits[local_start_bit:local_end_bit]
+        raw_nal_bytes = self._bits_to_bytes(
+            window_bits[local_start_bit:local_lookahead_end]
+        )
 
         tracer_nC = offset_data.get('nC', None) if isinstance(offset_data, dict) else None
         if tracer_nC is not None:
@@ -504,11 +545,22 @@ class BitstreamPatcher:
         if matched is None:
             return None
 
-        if end_to_block_retro is None:
+        # A canonical round-trip has already established that this block's
+        # exact VLC codeword and bit length are unchanged. CAVLC is parsed
+        # forward: modifying a later codeword cannot alter how its valid
+        # predecessor decodes. The expensive predecessor-bit probes below are
+        # only retained for non-canonical trailing-ones encodings, where the
+        # explicit override is required to reproduce the source codeword.
+        if end_to_block_retro is None or matched[2] is None:
             return matched
 
         start_bit_b = start_bit
         bit_length_b = original_length
+        # Only non-canonical trailing-ones encodings need predecessor probes
+        # across the full slice. Keep that rare compatibility path intact
+        # without making the canonical fast path expand the complete RBSP.
+        rbsp_raw_bits = np.unpackbits(np.frombuffer(rbsp_bytes, dtype=np.uint8))
+        retro_pad_bits = np.zeros(64, dtype=np.uint8)
         b_orig_bits = rbsp_raw_bits[start_bit_b:end_bit].copy()
         chain_boundary = start_bit_b
         CHAIN_LOOKBACK = 8
@@ -717,7 +769,7 @@ class BitstreamPatcher:
             max_num_coeff: Maximum coefficients (16 for 4x4 blocks)
             override_total_coeffs: Optional override for total_coeffs (for re-encoding modified blocks)
             debug_key: Optional (mb_idx, block_idx) for debugging
-            override_trailing_ones: Optional T1 count override to match original encoder's choice
+            override_trailing_ones: Optional assertion of the canonical T1 count for this block
 
         Returns:
             List of bits [0, 1, 1, 0, ...]
@@ -959,6 +1011,7 @@ class BitstreamReconstructor:
         slices_with_modifications = 0
         global_mb_idx = 0
         applied_block_keys: set[Tuple[int, int]] = set()
+        skipped_block_reasons: Dict[Tuple[int, int], str] = {}
         
         logger.debug(f"    [MB_COUNT] Per-slice MB count from SPS: {mb_count_per_slice}")
         
@@ -995,6 +1048,10 @@ class BitstreamReconstructor:
                     )
                     for key in getattr(modified_nal, "applied_block_keys", []):
                         applied_block_keys.add((int(key[0]), int(key[1])))
+                    for key, reason in getattr(
+                        modified_nal, "skipped_block_reasons", {}
+                    ).items():
+                        skipped_block_reasons[(int(key[0]), int(key[1]))] = str(reason)
                     
                     # Use SPS count (not parsed actual) for consistency
                     if actual_mb_count is not None and actual_mb_count > 0 and actual_mb_count != mb_count:
@@ -1041,6 +1098,7 @@ class BitstreamReconstructor:
             'nal_units_written': len(reconstructed_nals),
             'blocks_modified': len(modified_coefficients),
             'applied_block_keys': sorted(applied_block_keys),
+            'skipped_block_reasons': skipped_block_reasons,
         }
     
     def _reconstruct_slice_with_cavlc(self,

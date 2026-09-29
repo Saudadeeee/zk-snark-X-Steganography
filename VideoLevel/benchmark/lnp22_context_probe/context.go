@@ -372,6 +372,13 @@ func validProofShape(proof nizk.LinearProof, rows, columns, degree int, modulus 
 // deriveUnits encodes a SHA3-256 digest of canonical statement bytes as
 // nonzero field elements. The encoding is injective for the returned length.
 func deriveUnits(statement []byte, modulus int64) ([]int64, [32]byte, error) {
+	return deriveUnitsWithDomain(statement, modulus, contextDomain)
+}
+
+// deriveUnitsWithDomain encodes a SHA3-256 digest of canonical statement
+// bytes under a protocol-specific domain as nonzero field elements. The
+// encoding is injective for the returned length.
+func deriveUnitsWithDomain(statement []byte, modulus int64, domain string) ([]int64, [32]byte, error) {
 	var zeroDigest [32]byte
 	if modulus < 3 || !big.NewInt(modulus).ProbablyPrime(64) {
 		return nil, zeroDigest, errors.New("context modulus must be an odd prime")
@@ -379,9 +386,12 @@ func deriveUnits(statement []byte, modulus int64) ([]int64, [32]byte, error) {
 	if statement == nil {
 		return nil, zeroDigest, errors.New("canonical statement must not be nil")
 	}
+	if domain == "" {
+		return nil, zeroDigest, errors.New("context domain must not be empty")
+	}
 
 	hash := sha3.New256()
-	_, _ = hash.Write([]byte(contextDomain))
+	_, _ = hash.Write([]byte(domain))
 	var length [8]byte
 	binary.BigEndian.PutUint64(length[:], uint64(len(statement)))
 	_, _ = hash.Write(length[:])

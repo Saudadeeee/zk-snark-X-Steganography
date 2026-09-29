@@ -53,7 +53,10 @@ def verify_near_blind(
     analysis_cache_dir: Optional[str] = None,
 ) -> VerifyResult:
     """
-    Verify ZK proof without the original cover video.
+    Verify the selected backend without the original cover video.
+
+    In lattice mode this authenticates the ML-DSA receipt referenced by the
+    video; it does not verify a lattice zero-knowledge proof.
 
     This mode requires sidecar metadata produced during embedding:
     - manifest.json
@@ -106,6 +109,10 @@ def verify_near_blind(
         raise RuntimeError("Signed embedding strategy is unsupported")
     if manifest.embedding.max_modifications_per_block != max_modifications_per_block:
         raise RuntimeError("Modification limit does not match the signed manifest")
+    if manifest.proof.proof_system == "sis-linear-fiat-shamir-v1":
+        raise RuntimeError(
+            "experimental lattice_zkp artifacts are disabled pending a reviewed lattice-ZK backend"
+        )
 
     parser = H264BitstreamParser(stego_video_path)
     parser.parse()
@@ -122,8 +129,6 @@ def verify_near_blind(
         parser=parser,
     )
 
-    if manifest.proof.proof_system == "sis-linear-fiat-shamir-v1":
-        raise RuntimeError("experimental lattice_zkp artifacts are disabled pending a reviewed lattice-ZK backend")
     is_lattice = manifest.proof.proof_system == "ml-dsa-65-attestation"
     if not is_lattice:
         if not os.path.isdir(circuits_dir):

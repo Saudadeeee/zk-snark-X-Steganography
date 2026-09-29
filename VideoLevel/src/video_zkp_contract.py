@@ -34,6 +34,13 @@ _POLICY_FIELDS = {
     "max_modifications_per_block",
     "proof_backend",
 }
+_OPTIONAL_POLICY_FIELDS = {"carrier_profile_hash"}
+CarrierPosition = tuple[int, int, int]
+_CARRIER_PROFILE_DOMAIN = b"zkstego/pq-video/carrier-profile/v1\x00"
+_CARRIER_SEED_DOMAIN = b"zkstego/pq-video/carrier-order-seed/v1\x00"
+_CARRIER_CIF_MB_COUNT = 396
+_CARRIER_CIF_MB_WIDTH = 22
+_CARRIER_BOTTOM_ROW_START = 14
 
 
 def _canonical_json_bytes(value: Any) -> bytes:
@@ -56,8 +63,13 @@ def payload_commitment(payload: bytes, opening: bytes) -> str:
 
 
 def _canonical_policy(policy: dict[str, Any]) -> str:
-    if not isinstance(policy, dict) or set(policy) != _POLICY_FIELDS:
-        raise ValueError(f"policy must contain exactly {sorted(_POLICY_FIELDS)}")
+    if (
+        not isinstance(policy, dict)
+        or not _POLICY_FIELDS.issubset(policy)
+        or set(policy) - (_POLICY_FIELDS | _OPTIONAL_POLICY_FIELDS)
+    ):
+        allowed = sorted(_POLICY_FIELDS | _OPTIONAL_POLICY_FIELDS)
+        raise ValueError(f"policy must contain the required fields and no fields outside {allowed}")
     if policy["codec"] != "h264-baseline-cavlc":
         raise ValueError("policy.codec must be h264-baseline-cavlc")
     if policy["embedding_strategy"] not in {"t1_sign_flip", "cost_guided_hamming_7_3"}:
@@ -67,6 +79,8 @@ def _canonical_policy(policy: dict[str, Any]) -> str:
         raise ValueError("policy.max_modifications_per_block must be an integer from 1 to 8")
     if policy["proof_backend"] not in {"lattice", "lazer"}:
         raise ValueError("policy.proof_backend must be lattice or lazer")
+    if "carrier_profile_hash" in policy:
+        _digest_hex(policy["carrier_profile_hash"], "policy.carrier_profile_hash")
     try:
         encoded = _canonical_json_bytes(policy)
     except (TypeError, ValueError, OverflowError) as error:
@@ -79,6 +93,88 @@ def policy_hash(policy: dict[str, Any]) -> str:
     return hashlib.sha256(
         b"zkstego/pq-video-policy/v1/" + _canonical_policy(policy).encode("ascii")
     ).hexdigest()
+
+
+def carrier_policy_hash(carrier_contract: object, required_bits: int) -> str:
+    """Hash every blind-carrier behavior knob plus count and seed derivation.
+
+    The resulting digest belongs in the signed/registered statement policy.
+    The verifier separately recomputes it from its local contract and expected
+    count before deriving any positions from a video.
+    """
+    from .blind_sync import BlindOperatingContract
+
+    if not isinstance(carrier_contract, BlindOperatingContract):
+        raise TypeError("carrier_contract must be a BlindOperatingContract")
+    if isinstance(required_bits, bool) or not isinstance(required_bits, int) or required_bits <= 0:
+        raise ValueError("required_bits must be a positive integer")
+    if not isinstance(carrier_contract.version, str) or not carrier_contract.version:
+        raise ValueError("carrier contract version must be non-empty text")
+    boolean_fields = (
+        "signbit_only",
+        "dedup_per_block",
+        "metadata_bound",
+        "require_bitstream_patchable",
+        "stable_carriers_only",
+    )
+    integer_fields = (
+        "bottom_rows",
+        "max_bits_per_idr",
+        "patchability_headroom",
+        "max_modifications_per_block",
+    )
+    if any(type(getattr(carrier_contract, field)) is not bool for field in boolean_fields):
+        raise ValueError("carrier contract boolean fields must be bool")
+    for field in integer_fields:
+        value = getattr(carrier_contract, field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"carrier contract {field} must be a non-negative integer")
+    descriptor = {
+        "contract_version": carrier_contract.version,
+        "signbit_only": carrier_contract.signbit_only,
+        "bottom_rows": carrier_contract.bottom_rows,
+        "dedup_per_block": carrier_contract.dedup_per_block,
+        "max_bits_per_idr": carrier_contract.max_bits_per_idr,
+        "metadata_bound": carrier_contract.metadata_bound,
+        "require_bitstream_patchable": carrier_contract.require_bitstream_patchable,
+        "patchability_headroom": carrier_contract.patchability_headroom,
+        "max_modifications_per_block": carrier_contract.max_modifications_per_block,
+        "stable_carriers_only": carrier_contract.stable_carriers_only,
+        "required_bits": required_bits,
+        "session_seed_derivation": "sha256(domain||expected-session-id-bytes)",
+        "candidate_derivation": (
+            "first luma AC coefficient with abs(level)>=4, nonzero, and outside CAVLC trailing-ones; "
+            "block must have positive patchable NAL length"
+        ),
+        "candidate_filtering": (
+            "intersect stable candidates with safe positions when stable_carriers_only; "
+            "then apply signbit_only and bottom_rows contract filters when enabled"
+        ),
+        "ordering_key_derivation": (
+            "metadata_bound ? HMAC-SHA256(session_seed, seed_base||b'|blind-order-v1') : session_seed"
+        ),
+        "seed_base_derivation": (
+            "sha256(canonical-json(version,codec,profile,idr_count,raw_safe_bits,"
+            "patchable_block_count,stable_candidate_count,candidate_fingerprint))"
+        ),
+        "position_shuffle": (
+            "ChaosTransformer-v1: logistic keys over candidate order; prioritize local rows >=14; "
+            "round-robin candidates over ascending IDR-frame indices"
+        ),
+        "chaos_key_derivation": (
+            "sha256(b'chaos:'||ordering_key); logistic_seed=0.1+uint32_be(digest[4:8])/2^32*0.8; r=3.9999"
+        ),
+        "cif_macroblock_count": _CARRIER_CIF_MB_COUNT,
+        "cif_macroblock_width": _CARRIER_CIF_MB_WIDTH,
+        "bottom_row_start": _CARRIER_BOTTOM_ROW_START,
+    }
+    return hashlib.sha256(
+        _CARRIER_PROFILE_DOMAIN + _canonical_json_bytes(descriptor)
+    ).hexdigest()
+
+
+def _derive_carrier_seed(session_id: bytes) -> bytes:
+    return hashlib.sha256(_CARRIER_SEED_DOMAIN + session_id).digest()
 
 
 @dataclass(frozen=True)
@@ -459,5 +555,161 @@ def verify_video_zkp_statement_binding(
         expected_policy_hash=expected_policy_hash,
         statement_registry_root=canonical_statement.registry_root,
         statement_registry_epoch=canonical_statement.registry_epoch,
+        minimum_epoch=minimum_epoch,
+    )
+
+
+def verify_video_zkp_context_binding(
+    statement: VideoZkpStatement | dict[str, Any],
+    registry: object,
+    issuer_public_key: bytes,
+    *,
+    video_path: str,
+    carrier_positions: Sequence[CarrierPosition],
+    expected_relation_id: str,
+    expected_policy_hash: str,
+    minimum_epoch: int = 0,
+) -> tuple[str, int]:
+    """Verify canonical statement, pinned registry, carriers, and video digest.
+
+    This is a context-integrity helper, **not** a ZK proof verifier. It does
+    not derive/authenticate the carrier list, verify ``cover_hash``, fetch or
+    hash registry artifacts, open the payload commitment, or verify the
+    application relation. Those checks must be performed by a future reviewed
+    proof backend and trusted extraction policy.
+
+    Raises ``ValueError`` on any mismatch and returns the validated registry
+    root and epoch on success.
+    """
+    from .manifest import hash_positions
+
+    if isinstance(statement, VideoZkpStatement):
+        canonical_statement = VideoZkpStatement.from_dict(statement.to_dict())
+    else:
+        canonical_statement = VideoZkpStatement.from_dict(statement)
+
+    if not isinstance(carrier_positions, Sequence) or isinstance(
+        carrier_positions, (str, bytes, bytearray)
+    ):
+        raise TypeError("carrier positions must be a finite sequence")
+    try:
+        normalized_positions = tuple(tuple(position) for position in carrier_positions)
+        actual_positions_hash = hash_positions(normalized_positions)
+    except (TypeError, ValueError) as error:
+        raise ValueError("carrier positions are malformed") from error
+    if actual_positions_hash != canonical_statement.positions_hash:
+        raise ValueError("carrier positions hash does not match the canonical statement")
+
+    registry_binding = verify_video_zkp_statement_binding(
+        canonical_statement,
+        registry,
+        issuer_public_key,
+        expected_relation_id=expected_relation_id,
+        expected_policy_hash=expected_policy_hash,
+        minimum_epoch=minimum_epoch,
+    )
+    if not verify_video_zkp_video_commitment(
+        canonical_statement, video_path, list(normalized_positions)
+    ):
+        raise ValueError("canonical video commitment does not match the statement")
+    return registry_binding
+
+
+def verify_video_zkp_context_binding_video_only(
+    statement: VideoZkpStatement | dict[str, Any],
+    registry: object,
+    issuer_public_key: bytes,
+    *,
+    video_path: str,
+    expected_session_id: bytes,
+    required_bits: int,
+    carrier_contract: object,
+    expected_relation_id: str,
+    expected_policy_hash: str,
+    minimum_epoch: int = 0,
+) -> tuple[str, int]:
+    """Derive carriers from the video, then verify its pinned context fields.
+
+    ``required_bits`` and ``carrier_contract`` are verifier configuration,
+    never values loaded from a prover sidecar. Their complete canonical profile
+    hash must be present in and pinned by the statement policy. The session id
+    must equal a verifier-issued challenge; it deterministically seeds carrier
+    ordering under a domain separator. The function re-derives positions from
+    ``video_path`` and passes them to the ordinary context checker, which
+    validates the statement's positions hash, registry pins, and
+    carrier-normalized video digest. It does **not** verify a ZK proof, payload
+    commitment opening, or application predicate.
+    """
+    from .blind_sync import (
+        BlindOperatingContract,
+        derive_blind_positions_operating_contract,
+    )
+
+    canonical_statement = (
+        VideoZkpStatement.from_dict(statement.to_dict())
+        if isinstance(statement, VideoZkpStatement)
+        else VideoZkpStatement.from_dict(statement)
+    )
+    if not isinstance(expected_session_id, bytes) or len(expected_session_id) != 32:
+        raise ValueError("expected_session_id must be a 32-byte verifier challenge")
+    if canonical_statement.session_id != expected_session_id.hex():
+        raise ValueError("statement session id does not match the verifier challenge")
+    if (
+        isinstance(required_bits, bool)
+        or not isinstance(required_bits, int)
+        or required_bits <= 0
+    ):
+        raise ValueError("required_bits must be a positive integer from verifier configuration")
+    if not isinstance(carrier_contract, BlindOperatingContract):
+        raise TypeError("carrier_contract must be a BlindOperatingContract")
+    if (
+        not carrier_contract.stable_carriers_only
+        or not carrier_contract.require_bitstream_patchable
+        or carrier_contract.max_modifications_per_block != 1
+    ):
+        raise ValueError(
+            "video-only context verification requires stable, patchability-checked "
+            "carriers with one modification per block"
+        )
+    policy = json.loads(canonical_statement.policy_canonical)
+    registered_profile_hash = policy.get("carrier_profile_hash")
+    if registered_profile_hash is None:
+        raise ValueError("statement policy does not pin a carrier profile")
+    if carrier_policy_hash(carrier_contract, required_bits) != registered_profile_hash:
+        raise ValueError("verifier carrier configuration does not match the registered profile hash")
+    if carrier_contract.max_modifications_per_block != policy["max_modifications_per_block"]:
+        raise ValueError("carrier contract modification limit differs from the statement policy")
+
+    # Reject untrusted statement/registry bindings before parsing/analyzing the
+    # caller-supplied video, which is the expensive and attacker-controlled step.
+    verify_video_zkp_statement_binding(
+        canonical_statement,
+        registry,
+        issuer_public_key,
+        expected_relation_id=expected_relation_id,
+        expected_policy_hash=expected_policy_hash,
+        minimum_epoch=minimum_epoch,
+    )
+
+    carrier_seed = _derive_carrier_seed(expected_session_id)
+    positions, _metadata = derive_blind_positions_operating_contract(
+        video_path,
+        carrier_seed,
+        required_bits,
+        carrier_contract,
+        cif_mb_count=_CARRIER_CIF_MB_COUNT,
+    )
+    if len(positions) != required_bits:
+        raise ValueError(
+            f"video-derived carrier capacity is insufficient: need {required_bits}, got {len(positions)}"
+        )
+    return verify_video_zkp_context_binding(
+        canonical_statement,
+        registry,
+        issuer_public_key,
+        video_path=video_path,
+        carrier_positions=positions,
+        expected_relation_id=expected_relation_id,
+        expected_policy_hash=expected_policy_hash,
         minimum_epoch=minimum_epoch,
     )

@@ -9,9 +9,9 @@ import json
 import math
 import os
 import pickle
-import hashlib
 import subprocess
 import sys
+import hashlib
 from pathlib import Path
 from typing import Optional
 
@@ -177,23 +177,38 @@ def _frame_cache_enabled() -> bool:
     return os.environ.get("BENCHMARK_DISABLE_FRAME_CACHE", "0") != "1"
 
 
-def _frame_cache_paths(h264_path: str | Path, max_frames: int) -> tuple[Path, Path]:
+def _frame_cache_paths(
+    h264_path: str | Path,
+    max_frames: int,
+    ffmpeg_command: str | Path | None = None,
+) -> tuple[Path, Path]:
     p = Path(h264_path)
     try:
         resolved = str(p.resolve()).encode("utf-8")
     except OSError:
         resolved = str(p).encode("utf-8")
-    key = hashlib.sha1(
-        resolved + b"|" + str(int(max_frames)).encode("ascii") + b"|" + f"{WIDTH}x{HEIGHT}".encode("ascii")
-    ).hexdigest()[:16]
+    key_material = (
+        resolved
+        + b"|"
+        + str(int(max_frames)).encode("ascii")
+        + b"|"
+        + f"{WIDTH}x{HEIGHT}".encode("ascii")
+    )
+    if ffmpeg_command is not None:
+        key_material += b"|ffmpeg=" + str(ffmpeg_command).encode("utf-8")
+    key = hashlib.sha1(key_material).hexdigest()[:16]
     stem = f"{p.stem}_{key}_{int(max_frames)}f"
     return BENCHMARK_CACHE_DIR / f"{stem}.npy", BENCHMARK_CACHE_DIR / f"{stem}.json"
 
 
-def _frame_cache_meta(h264_path: str | Path, max_frames: int) -> dict[str, object]:
+def _frame_cache_meta(
+    h264_path: str | Path,
+    max_frames: int,
+    ffmpeg_command: str | Path | None = None,
+) -> dict[str, object]:
     p = Path(h264_path)
     stat = p.stat()
-    return {
+    metadata: dict[str, object] = {
         "schema": FRAME_CACHE_SCHEMA_VERSION,
         "path": str(p.resolve()),
         "size": int(stat.st_size),
@@ -202,23 +217,34 @@ def _frame_cache_meta(h264_path: str | Path, max_frames: int) -> dict[str, objec
         "width": WIDTH,
         "height": HEIGHT,
     }
+    if ffmpeg_command is not None:
+        metadata["ffmpeg_command"] = str(ffmpeg_command)
+    return metadata
 
 
-def _decode_luma_frames_uncached(h264_path: str | Path, max_frames: int = 9999) -> np.ndarray:
+class QualityDecodeError(RuntimeError):
+    """Raised when FFmpeg cannot decode a benchmark quality input."""
+
+
+def _decode_luma_frames_uncached(
+    h264_path: str | Path,
+    max_frames: int = 9999,
+    ffmpeg_command: str | Path | None = None,
+) -> np.ndarray:
     """
     Decode H.264 -> array of Y (luma) frames, shape (N, H, W), dtype float32.
     Uses ffmpeg subprocess. float32 halves memory vs float64 (sufficient for PSNR/SSIM).
     """
     h264_path = str(h264_path)
     cmd = [
-        "ffmpeg", "-i", h264_path,
+        str(ffmpeg_command or "ffmpeg"), "-i", h264_path,
         "-f", "rawvideo", "-pix_fmt", "yuv420p",
         "-vf", f"scale={WIDTH}:{HEIGHT}",
         "pipe:1", "-loglevel", "quiet",
     ]
     result = subprocess.run(cmd, capture_output=True, check=False)
     if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed: {result.stderr.decode()}")
+        raise QualityDecodeError(f"ffmpeg failed: {result.stderr.decode()}")
     frame_size_420 = WIDTH * HEIGHT * 3 // 2
     raw = result.stdout
     n_frames = min(len(raw) // frame_size_420, max_frames)
@@ -229,7 +255,12 @@ def _decode_luma_frames_uncached(h264_path: str | Path, max_frames: int = 9999) 
     return out
 
 
-def decode_luma_frames(h264_path: str | Path, max_frames: int = 9999) -> np.ndarray:
+def decode_luma_frames(
+    h264_path: str | Path,
+    max_frames: int = 9999,
+    ffmpeg_command: str | Path | None = None,
+    use_cache: bool | None = None,
+) -> np.ndarray:
     """
     Decode H.264 -> array of Y (luma) frames, shape (N, H, W), dtype float32.
     Uses a disk-backed cache keyed by file fingerprint and max_frames to avoid
@@ -239,12 +270,15 @@ def decode_luma_frames(h264_path: str | Path, max_frames: int = 9999) -> np.ndar
         return np.empty((0, HEIGHT, WIDTH), dtype=np.float32)
 
     p = Path(h264_path)
-    if not _frame_cache_enabled():
-        return _decode_luma_frames_uncached(p, max_frames=max_frames)
+    cache_enabled = _frame_cache_enabled() if use_cache is None else use_cache
+    if not cache_enabled:
+        return _decode_luma_frames_uncached(
+            p, max_frames=max_frames, ffmpeg_command=ffmpeg_command
+        )
 
-    npy_path, meta_path = _frame_cache_paths(p, max_frames)
+    npy_path, meta_path = _frame_cache_paths(p, max_frames, ffmpeg_command)
     try:
-        expected_meta = _frame_cache_meta(p, max_frames)
+        expected_meta = _frame_cache_meta(p, max_frames, ffmpeg_command)
         if npy_path.exists() and meta_path.exists():
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             if meta == expected_meta:
@@ -252,7 +286,9 @@ def decode_luma_frames(h264_path: str | Path, max_frames: int = 9999) -> np.ndar
     except (OSError, ValueError, json.JSONDecodeError):
         pass
 
-    frames = _decode_luma_frames_uncached(p, max_frames=max_frames)
+    frames = _decode_luma_frames_uncached(
+        p, max_frames=max_frames, ffmpeg_command=ffmpeg_command
+    )
     try:
         np.save(npy_path, frames, allow_pickle=False)
         meta_path.write_text(json.dumps(expected_meta, ensure_ascii=True, indent=2), encoding="utf-8")
@@ -494,6 +530,9 @@ def compute_quality_streaming(
     orig_path: str | Path,
     stego_path: str | Path,
     max_frames: int = 9999,
+    *,
+    ffmpeg_command: str | Path | None = None,
+    use_cache: bool | None = None,
 ) -> dict:
     """
     Compute per-frame and full-video PSNR/SSIM without holding large frame arrays.
@@ -506,8 +545,17 @@ def compute_quality_streaming(
     """
     from skimage.metrics import structural_similarity
 
-    orig_frames = decode_luma_frames(orig_path, max_frames=max_frames)
-    stego_frames = decode_luma_frames(stego_path, max_frames=max_frames)
+    decoder_kwargs: dict[str, str | Path | bool] = {}
+    if ffmpeg_command is not None:
+        decoder_kwargs["ffmpeg_command"] = ffmpeg_command
+    if use_cache is not None:
+        decoder_kwargs["use_cache"] = use_cache
+    orig_frames = decode_luma_frames(
+        orig_path, max_frames=max_frames, **decoder_kwargs
+    )
+    stego_frames = decode_luma_frames(
+        stego_path, max_frames=max_frames, **decoder_kwargs
+    )
     n = min(len(orig_frames), len(stego_frames))
 
     psnr_list: list[float] = []

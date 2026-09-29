@@ -1,5 +1,5 @@
 """
-embedder.py — Public API: Embed a ZK proof into an H.264 video.
+embedder.py — Public API: Embed a lattice-attestation reference in H.264.
 
 Quick start:
     from src.embedder import embed, EmbedResult
@@ -20,6 +20,9 @@ import os
 import json
 import shutil
 import base64
+import subprocess
+import tempfile
+from bisect import bisect_right
 from collections import defaultdict
 from functools import lru_cache
 from dataclasses import dataclass
@@ -51,6 +54,41 @@ from .manifest             import (
     compute_file_hash,
     hash_positions,
 )
+
+
+def _strict_validate_h264_decode(video_path: str) -> None:
+    """Fail unless FFmpeg decodes the complete video without H.264 errors."""
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise RuntimeError("ffmpeg is required to validate reconstructed H.264 output")
+
+    result = subprocess.run(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-v", "error",
+            "-xerror",
+            "-err_detect", "explode",
+            "-i", video_path,
+            "-map", "0:v:0",
+            "-f", "null", "-",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or result.stderr.strip():
+        raise UnsupportedStreamError(
+            "Reconstructed stego video failed strict H.264 decode",
+            decode_exit_code=result.returncode,
+            decoder_diagnostics=result.stderr[-2000:],
+        )
+
+
+def _promote_strictly_decoded_candidate(candidate_path: str, output_path: str) -> None:
+    """Atomically publish a candidate only after strict decoder validation."""
+    _strict_validate_h264_decode(candidate_path)
+    os.replace(candidate_path, output_path)
 
 
 @lru_cache(maxsize=4)
@@ -90,20 +128,8 @@ def _prune_patchable_positions(
     have been retained for the payload.
     """
     patcher = BitstreamPatcher()
-    block_order: list[tuple[int, int]] = []
-    block_to_positions: dict[tuple[int, int], list[tuple[int, int, int]]] = defaultdict(list)
-    seen_blocks: set[tuple[int, int]] = set()
-
-    for pos in safe_positions:
-        key = (int(pos[0]), int(pos[1]))
-        block_to_positions[key].append((int(pos[0]), int(pos[1]), int(pos[2])))
-        if key not in seen_blocks:
-            seen_blocks.add(key)
-            block_order.append(key)
-
-    idr_desc = sorted(frame_verified_data.keys(), reverse=True)
+    idr_offsets = sorted(frame_verified_data)
     retained: list[tuple[int, int, int]] = []
-    retained_block_counts: dict[tuple[int, int], int] = {}
     idr_context: dict[int, tuple[dict, dict, bytes]] = {}
 
     for idr_off, (g_off, _g_blk, nal_rbsp) in frame_verified_data.items():
@@ -119,10 +145,11 @@ def _prune_patchable_positions(
         }
         idr_context[idr_off] = (local_offsets, end_to_block, nal_rbsp)
 
-    for mb, blk in block_order:
-        idr_off = next((off for off in idr_desc if off <= mb), None)
-        if idr_off is None:
-            continue
+    def block_is_patchable(mb: int, blk: int) -> bool:
+        idr_index = bisect_right(idr_offsets, mb) - 1
+        if idr_index < 0:
+            return False
+        idr_off = idr_offsets[idr_index]
         local_offsets, end_to_block, nal_rbsp = idr_context.get(idr_off, ({}, {}, b""))
         local_key = (mb - idr_off, blk)
         match = patcher.validate_block_patchability(
@@ -132,16 +159,53 @@ def _prune_patchable_positions(
             end_to_block,
         )
         if match is None:
-            continue
-        block_count = retained_block_counts.get((mb, blk), 0)
-        for pos in block_to_positions[(mb, blk)]:
-            if block_count >= max_modifications_per_block:
-                break
-            retained.append(pos)
-            block_count += 1
+            return False
+        # Validation may recover the only nC that reproduces the source codeword
+        # even when the trace parser's provisional neighbor estimate is wrong.
+        # The reconstruction patcher intentionally trusts this stored nC and
+        # does not scan alternatives, so propagate the validated value into the
+        # shared frame offset record before the carrier is accepted.
+        validated_offset = local_offsets.get(local_key)
+        if validated_offset is not None:
+            validated_offset["nC"] = match[0]
+            validated_offset["validated_nC"] = match[0]
+        return True
+
+    if max_modifications_per_block == 1:
+        seen_blocks: set[tuple[int, int]] = set()
+        for pos in safe_positions:
+            normalized = (int(pos[0]), int(pos[1]), int(pos[2]))
+            key = normalized[:2]
+            if key in seen_blocks:
+                continue
+            seen_blocks.add(key)
+            if not block_is_patchable(*key):
+                continue
+            retained.append(normalized)
             if len(retained) >= required_bits:
                 break
-        retained_block_counts[(mb, blk)] = block_count
+        return retained
+
+    block_order: list[tuple[int, int]] = []
+    block_to_positions: dict[tuple[int, int], list[tuple[int, int, int]]] = {}
+    for pos in safe_positions:
+        normalized = (int(pos[0]), int(pos[1]), int(pos[2]))
+        key = normalized[:2]
+        positions = block_to_positions.get(key)
+        if positions is None:
+            positions = []
+            block_to_positions[key] = positions
+            block_order.append(key)
+        if len(positions) < max_modifications_per_block:
+            positions.append(normalized)
+
+    for mb, blk in block_order:
+        if not block_is_patchable(mb, blk):
+            continue
+        for pos in block_to_positions[(mb, blk)]:
+            retained.append(pos)
+            if len(retained) >= required_bits:
+                break
         if len(retained) >= required_bits:
             break
 
@@ -170,6 +234,25 @@ def _limit_positions_per_block(
         limited.append((int(pos[0]), int(pos[1]), int(pos[2])))
         counts[key] = used + 1
     return limited
+
+
+def _assess_reconstruction_application(
+    used_positions: list[tuple[int, int, int]],
+    modified_blocks: set[tuple[int, int]],
+    applied_blocks: set[tuple[int, int]],
+    *,
+    required_positions: int,
+) -> tuple[list[tuple[int, int, int]] | None, set[tuple[int, int]]]:
+    """Only accept a carrier prefix if every changed block was actually patched.
+
+    Dropping a skipped block from the carrier list after embedding is unsafe:
+    later payload bits were assigned using the original ordered list. Re-embed
+    from the beginning without missing blocks instead.
+    """
+    missing_blocks = modified_blocks - applied_blocks
+    if missing_blocks:
+        return None, missing_blocks
+    return used_positions[:required_positions], set()
 
 
 def _candidate_validation_target(required_bits: int) -> int:
@@ -240,12 +323,17 @@ def embed(
     zkp_relation_registry: Optional[SignedZkpRelationRegistry] = None,
     zkp_registry_issuer_public_key: Optional[bytes] = None,
     zkp_payload_opening: Optional[bytes] = None,
+    zkp_session_id: Optional[bytes] = None,
 ) -> EmbedResult:
     """
-    Embed an ML-DSA-authenticated lattice proof binding for `message` into an H.264 video.
+    Embed `message` and an ML-DSA sidecar commitment into an H.264 video.
+
+    With the default ``proof_backend="lattice"``, this embeds a reference to a
+    signed attestation receipt stored beside the video. It does not embed a
+    zero-knowledge proof. The experimental ``lattice_zkp`` backend is disabled.
 
     Pipeline:
-        1. Generate an ML-DSA-65 authenticated lattice sidecar
+        1. Generate an ML-DSA-65 authenticated lattice receipt sidecar
         2. Pack payload blob  [LQ1][4B len][message][32B sidecar commitment]
        2b. [Chaos] Arnold Cat Map scrambles payload bits  (if chaos_key)
         3. Parse H.264 video  extract IDR coefficients + bit offsets
@@ -294,11 +382,16 @@ def embed(
         zkp_relation_id, zkp_relation_registry, zkp_registry_issuer_public_key:
             A relation and ML-DSA-65 issuer-signed registry that resolve it.
             The public key is the caller's out-of-band issuer trust anchor. These values
-            plus ``zkp_payload_opening`` are required before a *future proof
-            statement* is emitted. They do not enable a ZKP in this release.
+            plus ``zkp_payload_opening`` and ``zkp_session_id`` are required
+            before a *future proof statement* is emitted. They do not enable
+            a ZKP in this release.
         zkp_payload_opening: Private 32-byte random opening for the payload
             commitment. The caller must retain it for the future prover; it is
             never written to the video, manifest, or public statement.
+        zkp_session_id: 32-byte verifier-issued session challenge included in
+            the future proof statement. The verifier/caller must issue unique
+            challenges and track one-time use; this function does not provide a
+            replay store or consume the challenge.
 
     Returns:
         EmbedResult
@@ -336,13 +429,20 @@ def embed(
         zkp_relation_registry,
         zkp_registry_issuer_public_key,
         zkp_payload_opening,
+        zkp_session_id,
     )
     if any(value is not None for value in zkp_parameters) and any(value is None for value in zkp_parameters):
-        raise ValueError("all future-ZKP relation, registry, issuer-key, and opening inputs must be supplied together")
+        raise ValueError(
+            "all future-ZKP relation, registry, issuer-key, opening, and session challenge inputs must be supplied together"
+        )
     if zkp_payload_opening is not None and (
         not isinstance(zkp_payload_opening, bytes) or len(zkp_payload_opening) != 32
     ):
         raise ValueError("zkp_payload_opening must be exactly 32 random bytes")
+    if zkp_session_id is not None and (
+        not isinstance(zkp_session_id, bytes) or len(zkp_session_id) != 32
+    ):
+        raise ValueError("zkp_session_id must be exactly 32 bytes")
     if zkp_payload_opening is not None and proof_backend != "lattice":
         raise ValueError("future-ZKP statement emission requires the lattice attestation backend")
     zkp_registry_binding: Optional[tuple[str, int]] = None
@@ -356,10 +456,8 @@ def embed(
         zkp_registry_binding = _resolve_future_zkp_registration(
             zkp_relation_id, zkp_relation_registry, zkp_registry_issuer_public_key, policy_hash(zkp_policy)
         )
-    if ffmpeg_validate and shutil.which("ffmpeg") is None:
-        raise RuntimeError(
-            "ffmpeg_validate=True but 'ffmpeg' was not found on PATH."
-        )
+    if shutil.which("ffmpeg") is None:
+        raise RuntimeError("'ffmpeg' is required for strict stego-output decode validation.")
     stream_profile = analyze_stream_profile(video_path)
     if not stream_profile.supported:
         raise UnsupportedStreamError(
@@ -548,51 +646,85 @@ def embed(
             for mb, blk, _coeffs in modified
         }
 
-        rec2 = BitstreamReconstructor()
-        reconstruction_stats = rec2.reconstruct_video(
-            video_path, modified, output_path,
-            max_slices=None,
-            frame_verified_data=frame_verified_data,
-            reconstruction_context=reconstruction_context,
+        output_dir = os.path.dirname(os.path.abspath(output_path))
+        candidate_fd, candidate_output_path = tempfile.mkstemp(
+            prefix=".zkstego-candidate-",
+            suffix=".h264",
+            dir=output_dir,
         )
-
-        if trust_precomputed_positions and precomputed_positions is not None:
-            bits_embedded = len(used_positions)
-            applied_position_bits = len(used_positions)
-            break
+        os.close(candidate_fd)
+        rec2 = BitstreamReconstructor()
+        try:
+            reconstruction_stats = rec2.reconstruct_video(
+                video_path, modified, candidate_output_path,
+                max_slices=None,
+                frame_verified_data=frame_verified_data,
+                reconstruction_context=reconstruction_context,
+            )
+        except Exception:
+            if os.path.exists(candidate_output_path):
+                os.unlink(candidate_output_path)
+            raise
 
         applied_block_keys = {
             (int(mb), int(blk))
             for mb, blk in reconstruction_stats.get("applied_block_keys", [])
         }
-        filtered_positions = [
-            (mb, blk, cidx)
-            for mb, blk, cidx in used_positions
-            if (mb, blk) not in modified_block_keys or (mb, blk) in applied_block_keys
-        ]
-        missing_modified_blocks = modified_block_keys - applied_block_keys
-        if embedding_strategy == MATRIX_EMBEDDING_STRATEGY:
-            # Every changed syndrome carrier must be reconstructed.  Unchanged
-            # carriers intentionally remain cover bits and require no patch.
-            if not missing_modified_blocks:
-                applied_position_bits = len(used_positions)
-                break
+        required_carrier_positions = (
+            matrix_carrier_bit_count(required_bits)
+            if embedding_strategy == MATRIX_EMBEDDING_STRATEGY
+            else required_bits
+        )
+        accepted_positions, missing_modified_blocks = _assess_reconstruction_application(
+            used_positions,
+            modified_block_keys,
+            applied_block_keys,
+            required_positions=required_carrier_positions,
+        )
+        if missing_modified_blocks:
+            os.unlink(candidate_output_path)
             blocked_reconstruct_blocks.update(missing_modified_blocks)
             bits_embedded = 0
             used_positions = []
+            applied_position_bits = 0
             continue
-        if len(filtered_positions) >= required_bits:
-            used_positions = filtered_positions[:required_bits]
-            bits_embedded = len(used_positions)
-            applied_position_bits = len(used_positions)
+
+        if accepted_positions is None:
+            os.unlink(candidate_output_path)
+            raise RuntimeError("reconstruction assessment returned no carrier positions")
+        if len(accepted_positions) < required_carrier_positions:
+            os.unlink(candidate_output_path)
+            used_positions = accepted_positions
+            bits_embedded = (
+                len(accepted_positions)
+                if embedding_strategy != MATRIX_EMBEDDING_STRATEGY
+                else 0
+            )
+            applied_position_bits = len(accepted_positions)
             break
 
-        blocked_reconstruct_blocks.update(missing_modified_blocks)
-        used_positions = filtered_positions
-        bits_embedded = len(used_positions)
-        applied_position_bits = len(used_positions)
-        if not missing_modified_blocks:
-            break
+        try:
+            _promote_strictly_decoded_candidate(candidate_output_path, output_path)
+        except UnsupportedStreamError as exc:
+            os.unlink(candidate_output_path)
+            blocked_reconstruct_blocks.update(modified_block_keys)
+            bits_embedded = 0
+            used_positions = []
+            applied_position_bits = 0
+            logger.warning(
+                "[Embed] Strict decoder rejected candidate (%s); retrying without %d changed blocks",
+                exc,
+                len(modified_block_keys),
+            )
+            if not modified_block_keys:
+                raise
+            continue
+
+        used_positions = accepted_positions
+        if embedding_strategy != MATRIX_EMBEDDING_STRATEGY:
+            bits_embedded = len(accepted_positions)
+        applied_position_bits = len(accepted_positions)
+        break
 
     if bits_embedded < required_bits:
         raise InsufficientCapacityError(
@@ -646,8 +778,10 @@ def embed(
     if receipt is not None and zkp_payload_opening is not None:
         # This is a public statement contract for a future reviewed lattice
         # proof. It is not itself a proof and does not enable lattice_zkp.
+        # The active embed carrier order/envelope is not yet the stable
+        # video-only ZKP profile, so this sidecar is not acceptance evidence.
         zkp_statement = build_video_zkp_statement(
-            session_id=proof_bytes,
+            session_id=zkp_session_id,
             payload_commitment_hex=payload_commitment(message, zkp_payload_opening),
             cover_hash=cover_file_hash,
             stego_hash=canonical_video_sha256(output_path, used_positions),

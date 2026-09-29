@@ -109,6 +109,7 @@ def summarize_raw_capacity(
         if isinstance(capacity, bool) or not isinstance(capacity, int) or capacity < 0:
             raise ValueError(f"raw-safe bit count for segment {index} is invalid")
     raw_capacity = sum(raw_safe_bits_by_segment)
+    required_bits = (proof_bytes + framing_bytes) * 8
     assessment = assess_capacity(
         proof_bytes=proof_bytes,
         capacity_bits=raw_capacity,
@@ -137,6 +138,11 @@ def summarize_raw_capacity(
                 "patchability_result": "not_measured",
                 "patchability_confirmed_bits": 0,
                 "patchability_confirmed_bits_by_segment": None,
+                "patchability_target_bits": required_bits,
+                "patchability_target_met": False,
+                "patchability_capacity_upper_bound_bits": raw_capacity,
+                "patchability_total_capacity_measured": False,
+                "patchability_validation_scope": "not_measured",
                 "insufficient_patchable_candidates_proven": False,
             }
         )
@@ -154,21 +160,28 @@ def summarize_raw_capacity(
             raise ValueError(f"patchable bit count for segment {index} is invalid")
 
     patchable_total = sum(patchable_safe_bits_by_segment)
-    patchability_assessment = assess_capacity(
-        proof_bytes=proof_bytes,
-        capacity_bits=patchable_total,
-        framing_bytes=framing_bytes,
-    )
+    target_met = patchable_total >= required_bits
     report.update(
         {
             "patchability_policy": "BitstreamPatcher block validation; max one carrier per block",
             "patchability_confirmed_bits_by_segment": list(patchable_safe_bits_by_segment),
             "patchability_confirmed_bits": patchable_total,
-            "patchability_capacity_assessment": patchability_assessment.to_dict(),
-            "patchability_validated": patchability_assessment.fits,
+            "patchability_target_bits": required_bits,
+            "patchability_target_met": target_met,
+            "patchability_capacity_upper_bound_bits": raw_capacity,
+            "patchability_total_capacity_measured": False,
+            "patchability_validation_scope": "requested_target_only",
+            # Compatibility alias: this means the requested payload positions
+            # were confirmed, not that the video’s total capacity was measured.
+            "patchability_validated": target_met,
+            "patchability_target_assessment": {
+                "required_bits": required_bits,
+                "confirmed_bits": patchable_total,
+                "target_met": target_met,
+            },
             "patchability_result": (
                 "proof_payload_positions_confirmed"
-                if patchability_assessment.fits
+                if target_met
                 else "inconclusive_candidate_shortfall"
             ),
             "insufficient_patchable_candidates_proven": False,

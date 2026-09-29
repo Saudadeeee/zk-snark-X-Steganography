@@ -89,6 +89,7 @@ def t_raw_capacity_report_is_explicitly_not_quality_validated():
     assert report["raw_capacity_assessment"]["required_bits"] == 3264
     assert report["raw_capacity_assessment"]["fits"] is True
     assert report["patchability_validated"] is False
+    assert report["patchability_validation_scope"] == "not_measured"
     assert report["quality_validated"] is False
     assert report["raw_fit_is_sufficient_for_embedding"] is False
 
@@ -109,6 +110,12 @@ def t_patchability_report_confirms_exact_payload_only_when_enough_positions_pass
     )
     assert confirmed["patchability_confirmed_bits"] == 3264
     assert confirmed["patchability_validated"] is True
+    assert confirmed["patchability_target_bits"] == 3264
+    assert confirmed["patchability_target_met"] is True
+    assert confirmed["patchability_validation_scope"] == "requested_target_only"
+    assert confirmed["patchability_capacity_upper_bound_bits"] == 30000
+    assert confirmed["patchability_total_capacity_measured"] is False
+    assert "patchability_capacity_assessment" not in confirmed
     assert confirmed["patchability_result"] == "proof_payload_positions_confirmed"
     assert confirmed["quality_validated"] is False
 
@@ -117,6 +124,10 @@ def t_patchability_report_confirms_exact_payload_only_when_enough_positions_pass
         patchable_safe_bits_by_segment=[1000, 500, 500],
     )
     assert inconclusive["patchability_validated"] is False
+    assert inconclusive["patchability_target_bits"] == 3264
+    assert inconclusive["patchability_target_met"] is False
+    assert inconclusive["patchability_capacity_upper_bound_bits"] == 30000
+    assert inconclusive["patchability_total_capacity_measured"] is False
     assert inconclusive["patchability_result"] == "inconclusive_candidate_shortfall"
     assert inconclusive["insufficient_patchable_candidates_proven"] is False
 

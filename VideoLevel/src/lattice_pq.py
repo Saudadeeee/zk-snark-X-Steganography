@@ -269,7 +269,13 @@ class LatticeZkProof:
 
 @dataclass(frozen=True)
 class LatticeZkReceipt:
-    """ML-DSA authenticated sidecar containing the transparent lattice ZKP."""
+    """Research-only receipt wrapping an unreviewed SIS proof prototype.
+
+    The ML-DSA signature authenticates the serialized receipt; it does not
+    upgrade the experimental proof relation into a reviewed application ZKP.
+    Public ``embed()``/``verify()`` APIs do not enable this artifact as a
+    lattice-ZK backend.
+    """
 
     version: str
     protocol: str

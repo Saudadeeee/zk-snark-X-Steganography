@@ -13,10 +13,10 @@ Public API:
 import logging
 from typing import Dict, List, Optional, Set, Tuple
 
-from ..bitstream.cavlc import CAVLCEncoder, CAVLCDecoder
-from ..bitstream.bitstream_io import BitstreamWriter, BitstreamReader
+from ..bitstream.bitstream_io import BitstreamReader, BitstreamWriter
 from ..bitstream.bitstream_ops import BitstreamPatcher
-from ..exceptions import SafetyFilterError, EmbeddingError
+from ..bitstream.cavlc import CAVLCDecoder, CAVLCEncoder
+from ..exceptions import EmbeddingError, SafetyFilterError
 from .matrix_embedding import (
     MATRIX_EMBEDDING_STRATEGY,
     embed_hamming73,
@@ -112,6 +112,20 @@ def sort_blocks_interleaved(block_tuples, cif_mb_count=396):
                 interleaved.append(by_frame[frm][i])
                 
     return interleaved
+
+
+def stable_blind_candidate_index(
+    coeffs: List[int], trailing_positions: Set[int]
+) -> Optional[int]:
+    """Return the first AC carrier invariant to an LSB flip and not a T1 slot."""
+    for index in range(1, len(coeffs)):
+        if (
+            coeffs[index] != 0
+            and index not in trailing_positions
+            and abs(coeffs[index]) >= 4
+        ):
+            return index
+    return None
 
 
 class CAVLCSafetyFilter:
@@ -214,7 +228,8 @@ class CAVLCSafetyFilter:
         nC: int = 0,
         nal_bit_length: int = None,
         t1_override: int = None,
-        max_num_coeff: int = 16
+        max_num_coeff: int = 16,
+        known_original_bit_length: int = None,
     ) -> Tuple[bool, int, int]:
         """
         **CRITICAL FIX**: Verify block modification preserves bit length via ACTUAL CAVLC encoding
@@ -261,12 +276,22 @@ class CAVLCSafetyFilter:
                 # Cannot patch different TotalCoeffs without breaking bitstream!
                 return False, 0, 0
             
-            # Encode original block
-            writer_orig = BitstreamWriter()
-            encoder_orig = CAVLCEncoder(writer_orig)
-            encoder_orig.encode_block_cavlc(original_block, nC=nC, max_num_coeff=len(original_block),
-                                            override_trailing_ones=t1_override)
-            original_bits = writer_orig.get_bit_position()
+            # The caller may reuse the already measured source length when it
+            # tests several candidate coefficients in the same source block.
+            # The key is local to this get_safe_positions() call and includes
+            # the CAVLC context, so no result is reused across videos/contexts.
+            if known_original_bit_length is None:
+                writer_orig = BitstreamWriter()
+                encoder_orig = CAVLCEncoder(writer_orig)
+                encoder_orig.encode_block_cavlc(
+                    original_block,
+                    nC=nC,
+                    max_num_coeff=max_num_coeff,
+                    override_trailing_ones=t1_override,
+                )
+                original_bits = writer_orig.get_bit_position()
+            else:
+                original_bits = known_original_bit_length
 
             # CRITICAL: If actual NAL bit length is known, the encoder's output
             # must match it exactly.  If they differ the patcher will reject this
@@ -286,7 +311,7 @@ class CAVLCSafetyFilter:
             encoder_mod.encode_block_cavlc(
                 modified_block,
                 nC=nC,
-                max_num_coeff=len(original_block),
+                max_num_coeff=max_num_coeff,
                 override_total_coeffs=original_nonzeros,
                 override_trailing_ones=t1_override
             )
@@ -305,7 +330,7 @@ class CAVLCSafetyFilter:
                 fwd_bytes = writer_mod.get_bytes(align=False) + bytes(8)
                 fwd_reader = BitstreamReader(fwd_bytes)
                 fwd_dec = CAVLCDecoder(fwd_reader)
-                fwd_dec.decode_block_cavlc(nC, max_num_coeff=len(original_block))
+                fwd_dec.decode_block_cavlc(nC, max_num_coeff=max_num_coeff)
                 if fwd_reader.pos != modified_bits:
                     return False, original_bits, modified_bits
             except Exception:
@@ -328,6 +353,7 @@ class CAVLCSafetyFilter:
         t1_override_map: Dict[Tuple[int, int], int] = None,
         frame_verified_data: Dict[int, Tuple[Dict, Dict]] | None = None,
         cif_mb_count: int = 396,
+        stable_carriers_only: bool = False,
     ) -> List[Tuple[int, int, int]]:
         """
         Get list of safe embedding positions across all blocks
@@ -344,6 +370,8 @@ class CAVLCSafetyFilter:
                              override value required to bit-exactly reproduce the original
                              NAL encoding. Blocks in this map use override_trailing_ones
                              when verifying bit-length invariance (matching patcher behavior).
+            stable_carriers_only: Check only the deterministic stable blind carrier
+                                  per block; normal safety and patchability checks remain.
 
         Returns:
             List of (mb_idx, block_idx, coeff_idx) tuples that are safe to modify
@@ -368,11 +396,17 @@ class CAVLCSafetyFilter:
                     index=i, item_type=type(item)
                 )
         safe_positions = []
+        original_bit_lengths = {}
+        active_idr_off = None
+        active_end_to_block = None
+        active_nal_rbsp = None
+        patcher = BitstreamPatcher()
 
         def _validated_patch_context(mb_idx: int, block_idx: int):
+            nonlocal active_idr_off, active_end_to_block, active_nal_rbsp
             block_key = (mb_idx, block_idx)
             if not (nal_length_map and frame_verified_data is not None):
-                return nC_map.get(block_key, 0), t1_override_map.get(block_key)
+                return nC_map.get(block_key, 0), t1_override_map.get(block_key), 16
 
             if block_key not in self._lazy_patchability_cache:
                 idr_off = (mb_idx // cif_mb_count) * cif_mb_count
@@ -381,29 +415,57 @@ class CAVLCSafetyFilter:
                     self._lazy_patchability_cache[block_key] = None
                 else:
                     g_off, _g_blk, nal_rbsp = idr_data
-                    local_offsets = {
-                        (mb - idr_off, blk): od
-                        for (mb, blk), od in g_off.items()
-                        if blk < 16 and od.get("bit_length") not in (None, 0)
-                    }
-                    end_to_block = {
-                        od["end_bit"]: ((mb - idr_off, blk), od)
-                        for (mb, blk), od in g_off.items()
-                        if blk < 16 and "end_bit" in od
-                    }
+                    if active_idr_off != idr_off:
+                        active_idr_off = idr_off
+                        active_nal_rbsp = nal_rbsp
+                        active_end_to_block = {
+                            od["end_bit"]: ((mb - idr_off, blk), od)
+                            for (mb, blk), od in g_off.items()
+                            if blk < 16 and "end_bit" in od
+                        }
                     local_key = (mb_idx - idr_off, block_idx)
-                    patcher = BitstreamPatcher()
-                    self._lazy_patchability_cache[block_key] = patcher.validate_block_patchability(
-                        nal_rbsp,
+                    validated = patcher.validate_block_patchability(
+                        active_nal_rbsp,
                         local_key,
-                        local_offsets.get(local_key, {}),
-                        end_to_block,
+                        g_off.get(block_key, {}),
+                        active_end_to_block,
                     )
+                    self._lazy_patchability_cache[block_key] = validated
+                    if validated is not None:
+                        validated_offset = g_off.get(block_key, {})
+                        validated_offset["nC"] = validated[0]
+                        validated_offset["validated_nC"] = validated[0]
+                        original_bit_lengths[
+                            (block_key, validated[0], validated[2])
+                        ] = validated_offset.get("bit_length")
 
             cached_match = self._lazy_patchability_cache.get(block_key)
             if cached_match is None:
                 return None
-            return cached_match[0], cached_match[2]
+            idr_off = (mb_idx // cif_mb_count) * cif_mb_count
+            idr_data = frame_verified_data.get(idr_off)
+            block_offset = idr_data[0].get(block_key, {}) if idr_data is not None else {}
+            return (
+                cached_match[0],
+                cached_match[2],
+                int(block_offset.get("max_num_coeff", 16)),
+            )
+
+        def _original_bit_length(block_key, coeffs, n_c, t1_override, max_num_coeff):
+            cache_key = (block_key, n_c, t1_override, max_num_coeff)
+            if cache_key not in original_bit_lengths:
+                try:
+                    writer = BitstreamWriter()
+                    CAVLCEncoder(writer).encode_block_cavlc(
+                        coeffs,
+                        nC=n_c,
+                        max_num_coeff=max_num_coeff,
+                        override_trailing_ones=t1_override,
+                    )
+                    original_bit_lengths[cache_key] = writer.get_bit_position()
+                except Exception:
+                    original_bit_lengths[cache_key] = None
+            return original_bit_lengths[cache_key]
 
         for mb_idx, block_idx, coeffs in coefficients:
             total_coeffs = sum(1 for c in coeffs if c != 0)
@@ -448,10 +510,32 @@ class CAVLCSafetyFilter:
             if not candidate_indices:
                 continue
 
+            if stable_carriers_only:
+                stable_index = stable_blind_candidate_index(
+                    coeffs, trailing_positions
+                )
+                candidate_indices = (
+                    [stable_index]
+                    if stable_index is not None and stable_index in candidate_indices
+                    else []
+                )
+                if not candidate_indices:
+                    continue
+
             patch_context = _validated_patch_context(mb_idx, block_idx)
             if patch_context is None:
                 continue
-            actual_nC, t1_override = patch_context
+            actual_nC, t1_override, max_num_coeff = patch_context
+            original_bit_length = None
+            if self.enable_bit_length:
+                original_bit_length = _original_bit_length(
+                    block_key, coeffs, actual_nC, t1_override, max_num_coeff
+                )
+                if (
+                    nal_length_map
+                    and original_bit_length != nal_length_map.get(block_key)
+                ):
+                    continue
 
             # Check each coefficient position
             for coeff_idx in candidate_indices:
@@ -473,7 +557,9 @@ class CAVLCSafetyFilter:
                         modified_block,
                         nC=actual_nC,
                         nal_bit_length=nal_length_map.get(block_key),
-                        t1_override=t1_override
+                        t1_override=t1_override,
+                        max_num_coeff=max_num_coeff,
+                        known_original_bit_length=original_bit_length,
                     )
 
                     if not is_safe:
@@ -481,6 +567,9 @@ class CAVLCSafetyFilter:
 
                 # SAFE!
                 safe_positions.append((mb_idx, block_idx, coeff_idx))
+
+        if stable_carriers_only:
+            return safe_positions
 
         # Sign-bit positions for trailing ±1 coefficients.
         # Flipping the sign of a trailing one (±1 → ∓1) is bit-length invariant ONLY
@@ -496,7 +585,12 @@ class CAVLCSafetyFilter:
             patch_context = _validated_patch_context(mb_idx, block_idx)
             if patch_context is None:
                 continue
-            actual_nC, t1_override = patch_context
+            actual_nC, t1_override, max_num_coeff = patch_context
+            original_bit_length = _original_bit_length(
+                block_key, coeffs, actual_nC, t1_override, max_num_coeff
+            )
+            if original_bit_length != nal_len:
+                continue
             # Determine the TRUE T1 candidate positions (those actually encoded as
             # trailing_one_sign_flags in the bitstream, not as regular level codes).
             #
@@ -521,7 +615,9 @@ class CAVLCSafetyFilter:
                 is_safe, _, _ = self._verify_block_bit_length_invariance(
                     coeffs, modified_block, nC=actual_nC,
                     nal_bit_length=nal_len,
-                    t1_override=t1_override
+                    t1_override=t1_override,
+                    max_num_coeff=max_num_coeff,
+                    known_original_bit_length=original_bit_length,
                 )
                 if is_safe:
                     safe_positions.append((mb_idx, block_idx, ~coeff_idx))

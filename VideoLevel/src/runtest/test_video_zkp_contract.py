@@ -119,6 +119,47 @@ def t_payload_commitment_is_opening_bound_and_statement_parser_rejects_tampering
         raise AssertionError("tampered statement id accepted")
 
 
+def t_payload_commitment_matches_python_golden_vector_and_statement_omits_opening() -> None:
+    import base64
+
+    from src.video_zkp_contract import build_video_zkp_statement, payload_commitment
+
+    payload = b"payload-circuit-golden-v1"
+    opening = bytes(range(32))
+    commitment = payload_commitment(payload, opening)
+    # Python hashlib reference vector; no independent ZK-circuit fixture exists yet.
+    assert commitment == "92b61e5dffae4f59a1f08232d0f8e1baf7ea10dc749f007e14889209fa57bfca"
+
+    statement = build_video_zkp_statement(
+        session_id=bytes(range(32, 64)),
+        payload_commitment_hex=commitment,
+        cover_hash="01" * 32,
+        stego_hash="02" * 32,
+        positions_hash="03" * 32,
+        relation_id="04" * 32,
+        registry_root="05" * 32,
+        registry_epoch=7,
+        policy={
+            "codec": "h264-baseline-cavlc",
+            "embedding_strategy": "t1_sign_flip",
+            "max_modifications_per_block": 1,
+            "proof_backend": "lattice",
+        },
+    )
+    public_fields = statement.to_dict()
+    assert "payload" not in public_fields
+    assert "opening" not in public_fields
+    public_bytes = statement.to_public_bytes()
+    for secret_encoding in (
+        payload.decode("ascii"),
+        payload.hex(),
+        base64.b64encode(payload).decode("ascii"),
+        opening.hex(),
+        base64.b64encode(opening).decode("ascii"),
+    ):
+        assert secret_encoding not in public_bytes.decode("ascii")
+
+
 def t_manifest_preserves_a_future_zkp_statement_identifier() -> None:
     from src.manifest import ProofMetadata, StegoManifest
 
@@ -217,6 +258,271 @@ def t_statement_registry_binding_uses_verifier_pins_and_rejects_mutations() -> N
         raise AssertionError("statement binding accepted an unpinned relation, root, or policy")
 
 
+def t_context_binding_composes_pins_carrier_hash_and_video_commitment() -> None:
+    import hashlib
+    from dataclasses import replace
+    from unittest.mock import patch
+
+    from src.blind_sync import BlindOperatingContract
+    from src.lattice_pq import LatticeSigner
+    from src.manifest import hash_positions
+    from src.video_zkp_contract import (
+        build_video_zkp_statement,
+        carrier_policy_hash,
+        payload_commitment,
+        policy_hash,
+        verify_video_zkp_context_binding,
+        verify_video_zkp_context_binding_video_only,
+    )
+    from src.zkp_registry import SignedZkpRelationRegistry
+
+    positions = [(1, 2, -1), (5, 3, 0)]
+    carrier_contract = BlindOperatingContract(
+        version="stable-carriers-video-only-v1",
+        require_bitstream_patchable=True,
+        max_modifications_per_block=1,
+        stable_carriers_only=True,
+    )
+    policy = {
+        "codec": "h264-baseline-cavlc",
+        "embedding_strategy": "t1_sign_flip",
+        "max_modifications_per_block": 1,
+        "proof_backend": "lazer",
+        "carrier_profile_hash": carrier_policy_hash(carrier_contract, len(positions)),
+    }
+    descriptor = {
+        "zkp_suite": "lazer-v1",
+        "constraint_module_hash": "11" * 32,
+        "verifier_key_hash": "22" * 32,
+        "parameter_set_hash": "33" * 32,
+        "policy_hash": policy_hash(policy),
+    }
+    issuer_public_key, issuer_private_key = LatticeSigner.generate_keypair()
+    registry = SignedZkpRelationRegistry.create(epoch=12, relations=[descriptor]).sign(
+        issuer_private_key, signer_id="issuer-v1"
+    )
+    relation_id = registry.relations[0].relation_id
+    statement = build_video_zkp_statement(
+        session_id=bytes(range(32)),
+        payload_commitment_hex=payload_commitment(b"payload", b"o" * 32),
+        cover_hash="41" * 32,
+        stego_hash="42" * 32,
+        positions_hash=hash_positions(positions),
+        relation_id=relation_id,
+        registry_root=registry.root(),
+        registry_epoch=registry.epoch,
+        policy=policy,
+    )
+
+    with patch(
+        "src.video_canonicalization.canonical_video_sha256",
+        return_value=statement.stego_hash,
+    ) as video_hash:
+        assert verify_video_zkp_context_binding(
+            statement.to_dict(),
+            registry,
+            issuer_public_key,
+            video_path="fixture.h264",
+            carrier_positions=positions,
+            expected_relation_id=relation_id,
+            expected_policy_hash=descriptor["policy_hash"],
+            minimum_epoch=10,
+        ) == (registry.root(), registry.epoch)
+        video_hash.assert_called_once_with("fixture.h264", positions)
+
+        with patch(
+            "src.blind_sync.derive_blind_positions_operating_contract",
+            return_value=(positions, object()),
+        ) as derive_positions:
+            try:
+                verify_video_zkp_context_binding_video_only(
+                    statement.to_dict(),
+                    registry,
+                    issuer_public_key,
+                    video_path="fixture.h264",
+                    expected_session_id=bytes(range(32)),
+                    required_bits=len(positions),
+                    carrier_contract=carrier_contract,
+                    expected_relation_id=relation_id,
+                    expected_policy_hash="ff" * 32,
+                    minimum_epoch=10,
+                )
+            except ValueError as error:
+                assert "policy" in str(error)
+            else:
+                raise AssertionError("video analysis started for an untrusted policy")
+            derive_positions.assert_not_called()
+
+            assert verify_video_zkp_context_binding_video_only(
+                statement.to_dict(),
+                registry,
+                issuer_public_key,
+                video_path="fixture.h264",
+                expected_session_id=bytes(range(32)),
+                required_bits=len(positions),
+                carrier_contract=carrier_contract,
+                expected_relation_id=relation_id,
+                expected_policy_hash=descriptor["policy_hash"],
+                minimum_epoch=10,
+            ) == (registry.root(), registry.epoch)
+            derive_positions.assert_called_once_with(
+                "fixture.h264",
+                hashlib.sha256(
+                    b"zkstego/pq-video/carrier-order-seed/v1\x00"
+                    + bytes(range(32))
+                ).digest(),
+                len(positions),
+                carrier_contract,
+                cif_mb_count=396,
+            )
+
+            contract_mutations = (
+                {"version": "changed-profile-v2"},
+                {"signbit_only": True},
+                {"bottom_rows": 1},
+                {"dedup_per_block": False},
+                {"max_bits_per_idr": 1},
+                {"metadata_bound": True},
+                {"require_bitstream_patchable": False},
+                {"patchability_headroom": 65},
+                {"max_modifications_per_block": 2},
+                {"stable_carriers_only": False},
+            )
+            for mutation in contract_mutations:
+                derive_positions.reset_mock()
+                try:
+                    verify_video_zkp_context_binding_video_only(
+                        statement.to_dict(),
+                        registry,
+                        issuer_public_key,
+                        video_path="fixture.h264",
+                        expected_session_id=bytes(range(32)),
+                        required_bits=len(positions),
+                        carrier_contract=replace(carrier_contract, **mutation),
+                        expected_relation_id=relation_id,
+                        expected_policy_hash=descriptor["policy_hash"],
+                        minimum_epoch=10,
+                    )
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError(f"accepted mutated carrier contract: {mutation}")
+                derive_positions.assert_not_called()
+
+            derive_positions.reset_mock()
+            try:
+                verify_video_zkp_context_binding_video_only(
+                    statement.to_dict(),
+                    registry,
+                    issuer_public_key,
+                    video_path="fixture.h264",
+                    expected_session_id=b"x" * 32,
+                    required_bits=len(positions),
+                    carrier_contract=carrier_contract,
+                    expected_relation_id=relation_id,
+                    expected_policy_hash=descriptor["policy_hash"],
+                    minimum_epoch=10,
+                )
+            except ValueError as error:
+                assert "session id" in str(error)
+            else:
+                raise AssertionError("accepted a statement outside the verifier session")
+            derive_positions.assert_not_called()
+
+            derive_positions.reset_mock()
+            try:
+                verify_video_zkp_context_binding_video_only(
+                    statement.to_dict(),
+                    registry,
+                    issuer_public_key,
+                    video_path="fixture.h264",
+                    expected_session_id=bytes(range(32)),
+                    required_bits=len(positions) + 1,
+                    carrier_contract=carrier_contract,
+                    expected_relation_id=relation_id,
+                    expected_policy_hash=descriptor["policy_hash"],
+                    minimum_epoch=10,
+                )
+            except ValueError as error:
+                assert "profile hash" in str(error)
+            else:
+                raise AssertionError("accepted a carrier count outside the pinned profile")
+            derive_positions.assert_not_called()
+
+            video_hash.reset_mock()
+            derive_positions.reset_mock()
+            derive_positions.return_value = (positions[:-1], object())
+            try:
+                verify_video_zkp_context_binding_video_only(
+                    statement.to_dict(),
+                    registry,
+                    issuer_public_key,
+                    video_path="fixture.h264",
+                    expected_session_id=bytes(range(32)),
+                    required_bits=len(positions),
+                    carrier_contract=carrier_contract,
+                    expected_relation_id=relation_id,
+                    expected_policy_hash=descriptor["policy_hash"],
+                    minimum_epoch=10,
+                )
+            except ValueError as error:
+                assert "capacity is insufficient" in str(error)
+            else:
+                raise AssertionError("video-only context accepted insufficient carrier capacity")
+            video_hash.assert_not_called()
+
+        video_hash.reset_mock()
+        try:
+            verify_video_zkp_context_binding(
+                statement.to_dict(),
+                registry,
+                issuer_public_key,
+                video_path="fixture.h264",
+                carrier_positions=positions + [(9, 9, 1)],
+                expected_relation_id=relation_id,
+                expected_policy_hash=descriptor["policy_hash"],
+                minimum_epoch=10,
+            )
+        except ValueError as error:
+            assert "positions hash" in str(error)
+        else:
+            raise AssertionError("context binding accepted carrier positions outside the statement")
+        video_hash.assert_not_called()
+
+        video_hash.return_value = "ff" * 32
+        try:
+            verify_video_zkp_context_binding(
+                statement.to_dict(),
+                registry,
+                issuer_public_key,
+                video_path="fixture.h264",
+                carrier_positions=positions,
+                expected_relation_id=relation_id,
+                expected_policy_hash=descriptor["policy_hash"],
+                minimum_epoch=10,
+            )
+        except ValueError as error:
+            assert "video commitment" in str(error)
+        else:
+            raise AssertionError("context binding accepted a mismatching video digest")
+
+        try:
+            verify_video_zkp_context_binding(
+                statement.to_dict(),
+                registry,
+                issuer_public_key,
+                video_path="fixture.h264",
+                carrier_positions=iter(positions),
+                expected_relation_id=relation_id,
+                expected_policy_hash=descriptor["policy_hash"],
+                minimum_epoch=10,
+            )
+        except TypeError as error:
+            assert "finite sequence" in str(error)
+        else:
+            raise AssertionError("context binding accepted a one-shot carrier iterator")
+
+
 def main() -> None:
     section("PQ video ZKP statement contract")
     results = [
@@ -225,8 +531,13 @@ def main() -> None:
         run_test("statement_id_changes_for_payload_video_positions_or_policy", t_statement_id_changes_for_payload_video_positions_or_policy),
         run_test("statement_rejects_ambiguous_or_wrongly_sized_inputs", t_statement_rejects_ambiguous_or_wrongly_sized_inputs),
         run_test("payload_commitment_is_opening_bound_and_statement_parser_rejects_tampering", t_payload_commitment_is_opening_bound_and_statement_parser_rejects_tampering),
+        run_test(
+            "payload_commitment_matches_python_golden_vector_and_statement_omits_opening",
+            t_payload_commitment_matches_python_golden_vector_and_statement_omits_opening,
+        ),
         run_test("manifest_preserves_a_future_zkp_statement_identifier", t_manifest_preserves_a_future_zkp_statement_identifier),
         run_test("statement_registry_binding_uses_verifier_pins_and_rejects_mutations", t_statement_registry_binding_uses_verifier_pins_and_rejects_mutations),
+        run_test("context_binding_composes_pins_carrier_hash_and_video_commitment", t_context_binding_composes_pins_carrier_hash_and_video_commitment),
     ]
     raise SystemExit(summarise(results, "PQ video ZKP statement contract"))
 

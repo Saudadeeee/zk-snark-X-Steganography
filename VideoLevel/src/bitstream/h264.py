@@ -20,6 +20,18 @@ from .bitstream_io import BitstreamReader
 
 logger = logging.getLogger(__name__)
 
+
+def _predict_cavlc_nc(left_count: Optional[int], top_count: Optional[int]) -> int:
+    """Apply H.264 Table 9-4 using only available neighboring blocks."""
+    if left_count is not None and top_count is not None:
+        return (left_count + top_count + 1) >> 1
+    if left_count is not None:
+        return left_count
+    if top_count is not None:
+        return top_count
+    return 0
+
+
 class NALUnitType(IntEnum):
     """NAL unit types (H.264 Table 7-1)"""
     UNSPECIFIED = 0
@@ -598,19 +610,20 @@ class MacroblockParser:
         # I_16x16 MBs can have CBP up to 63 (bits[5:4] = 0b11 for DC+AC chroma)
         if not self._is_i16x16(mb.mb_type_enum):
             if mb.coded_block_pattern < 0 or mb.coded_block_pattern > 47:
-                logger.debug(f"[WARN] Suspicious CBP={mb.coded_block_pattern} (valid: 0-47)")
-                logger.debug(f"[FIX] Clamping CBP to valid range")
-                mb.coded_block_pattern = min(max(mb.coded_block_pattern, 0), 47)
+                self.reader.pos = pos_start
+                raise ValueError(
+                    f"cbp_desync: coded_block_pattern={mb.coded_block_pattern}"
+                )
         
         # 5. Parse QP delta
         if mb.coded_block_pattern > 0 or self._is_i16x16(mb.mb_type_enum):
             mb.mb_qp_delta = self.reader.read_se()
             
-            # CRITICAL FIX: Validate and clamp QP delta
+            # Reject impossible deltas instead of clamping and trusting offsets
+            # from a macroblock that may already be desynchronized.
             if mb.mb_qp_delta < -26 or mb.mb_qp_delta > 25:
-                logger.debug(f"[WARN] Suspicious QP_delta={mb.mb_qp_delta} (valid: -26 to +25) - bitstream misalignment likely!")
-                logger.debug(f"[FIX] Clamping QP_delta to valid range")
-                mb.mb_qp_delta = min(max(mb.mb_qp_delta, -26), 25)  # Clamp to [-26, 25]
+                self.reader.pos = pos_start
+                raise ValueError(f"qp_delta_desync: mb_qp_delta={mb.mb_qp_delta}")
             
             self.current_qp = (self.current_qp + mb.mb_qp_delta + 52) % 52
         
@@ -866,8 +879,9 @@ class MacroblockParser:
                     mb.luma_4x4_blocks[i * 4 + j] = True
         
         # Chroma
-        mb.chroma_dc_present = bool((cbp >> 4) & 1)
-        mb.chroma_ac_present = bool((cbp >> 5) & 1)
+        chroma_cbp = (cbp >> 4) & 0x03
+        mb.chroma_dc_present = chroma_cbp >= 1
+        mb.chroma_ac_present = chroma_cbp >= 2
     
     def get_luma_blocks_to_decode(self, mb: MacroblockData) -> List[int]:
         """
@@ -1035,16 +1049,7 @@ class MacroblockParser:
         # If both neighbors available: nC = (nA + nB + 1) >> 1
         # If only one available: use that one
         # If none available: nC = 0
-        if nA is not None and nB is not None:
-            nC = (nA + nB + 1) >> 1
-        elif nA is not None:
-            nC = nA
-        elif nB is not None:
-            nC = nB
-        else:
-            nC = 0
-
-        return nC
+        return _predict_cavlc_nc(nA, nB)
 
 
 # =============================================================================
@@ -1125,6 +1130,7 @@ class TraceableCAVLCParser:
         self.neighbor_coeffs = {}
         self.block_offsets = {}  # Track bit offsets
         self.track_coefficient_bit_ranges = track_coefficient_bit_ranges
+        self.parse_integrity_issues = []
     
     def extract_with_offsets(self, nal, sps: SPSData, pps: PPSData, global_mb_idx: int = 0) -> Dict:
         """
@@ -1146,6 +1152,7 @@ class TraceableCAVLCParser:
         # Reset tracking
         self.block_offsets = {}
         self.neighbor_coeffs = {}
+        self.parse_integrity_issues = []
         
         try:
             # CRITICAL: Check if video uses CABAC (not supported)
@@ -1157,7 +1164,9 @@ class TraceableCAVLCParser:
                     'blocks': {},
                     'offsets': {},
                     'mb_metadata': {},
-                    'error': 'CABAC_NOT_SUPPORTED'
+                    'error': 'CABAC_NOT_SUPPORTED',
+                    'parse_trusted': False,
+                    'parse_integrity_issues': ['CABAC_NOT_SUPPORTED'],
                 }
             
             # Create reader from NAL data
@@ -1234,9 +1243,15 @@ class TraceableCAVLCParser:
                             scan_from = reader.pos + 100
                             resync_pos = _scan_for_mb_start(reader, scan_from, max_scan=12000)
                             if resync_pos is not None:
+                                self.parse_integrity_issues.append(
+                                    f"heuristic_resync:mb={mb_idx}:bit={resync_pos}"
+                                )
                                 logger.debug(f"[TraceableParser] Resync: skipped MB {mb_idx}, next MB at bit {resync_pos}")
                                 reader.pos = resync_pos
                             else:
+                                self.parse_integrity_issues.append(
+                                    f"resync_failed:mb={mb_idx}"
+                                )
                                 if mbs_left <= 16 or bits_left <= 4096:
                                     logger.debug(
                                         "[TraceableParser] Tail resync not found at MB %d; treating as end-of-slice (mbs_left=%d, bits_left=%d)",
@@ -1253,12 +1268,18 @@ class TraceableCAVLCParser:
                             continue
                         if mb_idx < 10:
                             logger.debug(f"    [MB_HDR_ERR] MB={mb_idx}: {header_err}")
+                        self.parse_integrity_issues.append(
+                            f"macroblock_header_error:mb={mb_idx}:{header_err}"
+                        )
                         current_mb_addr += 1
                         slice_mb_idx_counter += 1
                         continue
                     except Exception as header_err:
                         if mb_idx < 10:
                             logger.debug(f"    [MB_HDR_ERR] MB={mb_idx}: {header_err}")
+                        self.parse_integrity_issues.append(
+                            f"macroblock_header_error:mb={mb_idx}:{header_err}"
+                        )
                         # Skip this MB and continue
                         current_mb_addr += 1
                         slice_mb_idx_counter += 1
@@ -1278,34 +1299,32 @@ class TraceableCAVLCParser:
                     
                     # CRITICAL FIX: Parse I_16x16 DC block first (H.264 spec 8.5.6)
                     if is_i16x16:
-                        # nC for I_16x16 luma DC: per H.264 spec Section 9.2.1, nC is
-                        # derived ONLY from adjacent I_16x16 DC neighbors (sentinel key -1).
-                        # If neighbor MB is NOT I_16x16, it does NOT contribute (nA/nB = 0).
-                        # Using nC=-1 is WRONG (chroma DC table); using regular 4x4 TCs is also
-                        # WRONG. x264 uses nC=0 when no I_16x16 DC neighbors are available.
+                        # H.264 9.2.1 Note 2: Intra16x16DCLevel uses the nC
+                        # prediction from adjacent luma 4x4 blocks, not DC-block
+                        # sentinel counts. Block index 0 identifies those neighbors.
                         mb_x_dc = mb_idx % mb_width
                         mb_y_dc = mb_idx // mb_width
-                        dc_left_tc = None
-                        dc_top_tc = None
-                        if mb_x_dc > 0:
-                            dc_left_tc = self.neighbor_coeffs.get((mb_idx - 1, -1))
-                        if mb_y_dc > 0:
-                            dc_top_tc = self.neighbor_coeffs.get((mb_idx - mb_width, -1))
-                        if dc_left_tc is not None and dc_top_tc is not None:
-                            nC_dc = (dc_left_tc + dc_top_tc + 1) >> 1
-                        elif dc_left_tc is not None:
-                            nC_dc = dc_left_tc
-                        elif dc_top_tc is not None:
-                            nC_dc = dc_top_tc
-                        else:
-                            nC_dc = 0  # No I_16x16 DC neighbors ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ encoder uses nC=0
+                        nC_dc = mb_parser.calculate_nC(
+                            mb_x_dc,
+                            mb_y_dc,
+                            0,
+                            self.neighbor_coeffs,
+                            mb_width=mb_width,
+                        )
+
                         # Parse Intra16x16DCLevel (4x4 DC coefficients, max_num_coeff=16)
                         try:
-                            luma_dc_block = cavlc_decoder.decode_block_cavlc(nC_dc, max_num_coeff=16)
-                            self.neighbor_coeffs[(mb_idx, -1)] = luma_dc_block.total_coeffs
+                            cavlc_decoder.decode_block_cavlc(nC_dc, max_num_coeff=16)
                         except Exception as e:
-                            self.neighbor_coeffs[(mb_idx, -1)] = 0
-                            pass  # Skip on error
+                            self.parse_integrity_issues.append(
+                                f"luma_dc_error:mb={mb_idx}:nC={nC_dc}:{e}"
+                            )
+                            logger.error(
+                                "Failed to decode Intra16x16 DC block at MB %d: %s",
+                                mb_idx,
+                                e,
+                            )
+                            break
                     
                     # Parse luma AC blocks (0-15) for all MB types
                     luma_parsed_count = 0
@@ -1378,6 +1397,9 @@ class TraceableCAVLCParser:
                             except Exception as decode_err:
                                 # Decoder failed - reader position is now unreliable
                                 # Stop decoding remaining blocks to prevent cascade desync
+                                self.parse_integrity_issues.append(
+                                    f"luma_residual_error:mb={mb_idx}:block={block_idx}:{decode_err}"
+                                )
                                 blocks[cache_key] = [0] * 16
                                 self.neighbor_coeffs[cache_key] = 0
 
@@ -1409,6 +1431,9 @@ class TraceableCAVLCParser:
                                 chroma_dc_block = cavlc_decoder.decode_block_cavlc(nC=-1, max_num_coeff=4)
                                 # Parse to advance bitstream
                             except Exception as e:
+                                self.parse_integrity_issues.append(
+                                    f"chroma_dc_error:mb={mb_idx}:plane={chroma_idx}:{e}"
+                                )
                                 logger.debug("ChromaDC decode skipped: %s", e)
 
                     # Parse 8 ChromaAC blocks (4 Cb + 4 Cr, each 4x4 minus DC)
@@ -1426,9 +1451,6 @@ class TraceableCAVLCParser:
                             abs_blk    = blk_offset + local_idx  # 16-23
 
                             # Left chroma neighbor (nA) - same component
-                            # x264 initializes non_zero_count to 2 for out-of-frame
-                            # neighbors (frame boundary), rather than 0 as per spec.
-                            # Use 2 for truly out-of-frame boundaries to match encoder.
                             if bx > 0:
                                 nA_c = self.neighbor_coeffs.get(
                                     (mb_idx, blk_offset + _CHROMA_BXY_INV[(bx-1, by)]))
@@ -1436,7 +1458,7 @@ class TraceableCAVLCParser:
                                 nA_c = self.neighbor_coeffs.get(
                                     (mb_idx - 1, blk_offset + _CHROMA_BXY_INV[(1, by)]))
                             else:
-                                nA_c = 2  # out-of-frame left boundary
+                                nA_c = None  # unavailable at picture boundary
 
                             # Top chroma neighbor (nB) - same component
                             if by > 0:
@@ -1446,17 +1468,10 @@ class TraceableCAVLCParser:
                                 nB_c = self.neighbor_coeffs.get(
                                     (mb_idx - mb_width, blk_offset + _CHROMA_BXY_INV[(bx, 1)]))
                             else:
-                                nB_c = 2  # out-of-frame top boundary
+                                nB_c = None  # unavailable at picture boundary
 
-                            # nC for chroma AC: derived from same-component neighbors
-                            if nA_c is not None and nB_c is not None:
-                                nC_chroma = (nA_c + nB_c + 1) >> 1
-                            elif nA_c is not None:
-                                nC_chroma = nA_c
-                            elif nB_c is not None:
-                                nC_chroma = nB_c
-                            else:
-                                nC_chroma = 0
+                            # nC for chroma AC uses available same-component neighbors.
+                            nC_chroma = _predict_cavlc_nc(nA_c, nB_c)
 
                             if not cavlc_block_failed and chroma_ac_present:
                                 try:
@@ -1466,6 +1481,9 @@ class TraceableCAVLCParser:
                                     self.neighbor_coeffs[(mb_idx, abs_blk)] = min(
                                         max(chroma_ac_block.total_coeffs, 0), 15)
                                 except Exception as cac_err:
+                                    self.parse_integrity_issues.append(
+                                        f"chroma_ac_error:mb={mb_idx}:block={abs_blk}:{cac_err}"
+                                    )
                                     reader.seek(pos_blk_start)  # reset on decode failure
                                     self.neighbor_coeffs[(mb_idx, abs_blk)] = 0
                             else:
@@ -1484,15 +1502,20 @@ class TraceableCAVLCParser:
                 'blocks': blocks,
                 'offsets': self.block_offsets,
                 'mb_metadata': mb_metadata,
-                'num_mbs': slice_mb_idx_counter  # CRITICAL: actual MB count including SKIP MBs
+                'num_mbs': slice_mb_idx_counter,  # actual count including SKIP MBs
+                'parse_trusted': not self.parse_integrity_issues,
+                'parse_integrity_issues': list(self.parse_integrity_issues),
             }
-            
+
         except Exception as e:
+            self.parse_integrity_issues.append(f"slice_parse_error:{e}")
             logger.error(f"[TraceableParser] Extraction error: {e}")
             import traceback
             traceback.print_exc()
             return {
                 'blocks': {},
                 'offsets': {},
-                'mb_metadata': {}
+                'mb_metadata': {},
+                'parse_trusted': False,
+                'parse_integrity_issues': list(self.parse_integrity_issues),
             }
