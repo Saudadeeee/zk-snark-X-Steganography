@@ -2449,3 +2449,58 @@ multi-modification blocks safe or establish ZK proof transport. See
 `benchmark/results/ringo_blind_stable_capacity_akiyo_300f_fallback_20260930.json`.
 The real-video blind integration suite passed 3/3 in 376.96 s; this is a
 single offline test-suite wall time, not a realtime benchmark or proof test.
+
+### Lattirust LaBRADOR source gate recheck (2026-09-30)
+
+Inspected the upstream `lattirust/labrador` repository at pinned commit
+`024c48e49025765ef3a7c08889b2d2fc61de0612`. The README still describes only
+the core protocol as implemented, with binary/ring R1CS reductions in
+progress. Source inspection found `TODO: add statement to merlin` in the
+binary-R1CS prover and `TODO: add crs and statement to transcript` in its
+verifier. The API therefore does not itself enforce transcript binding for
+this application's canonical statement/parameters; an external wrapper might
+pre-absorb values, but no such reviewed wrapper exists here, and source
+inspection did not demonstrate an exploit. The general ring-R1CS prover also
+contains `todo!()` placeholders and `src/r1cs/verifier.rs` is empty.
+
+Disposition: keep LaBRADOR as a research candidate, not an integrated or
+accepted backend. These are implementation-completeness and statement-binding
+gates, not a finding that the LaBRADOR paper's protocol is unsound. The source
+was then built in an isolated temporary Windows GNU toolchain after the
+unmodified build stopped because `lattice-estimator/build.rs` requires
+SageMath/Unix commands. With only that temporary build script neutralized
+(PyO3 is disabled in that dependency manifest), the crate compiled but its
+test suite had 1 pass and 3 failures. In particular,
+`binary_r1cs::test::test_completeness` failed because the reduction output
+witness did not satisfy many generated principal-relation constraints; the
+isolated completeness test reproduced the failure. Two other tests could not
+run their security-parameter estimation because SageMath is absent. No
+cryptographic source was changed by this build experiment; only the separate
+audit documentation was updated.
+Even fixing those test/build failures would not establish the missing
+application relation, reviewed transcript binding, independent review, or
+proof fit in H.264 carriers. Exact commands, limitations, and source links
+are recorded in `docs/lattirust_labrador_source_gate_20260930.md`.
+
+### RoKoko full-paper ZK gate recheck (2026-09-30)
+
+This supersedes the 2026-09-29 note that RoKoko was the highest-priority
+candidate while its paper was unavailable.
+
+The official IACR PDF for ePrint 2026/575 was retrievable with `curl` after
+the browser's PDF fetch returned 403. Full-text inspection found formal
+definitions for a reduction of knowledge and knowledge soundness, but no
+zero-knowledge definition, simulator, or theorem for RoKoko; the paper's
+abstract itself describes a succinct argument system. The implementation's
+`snark` feature is explicitly experimental, and its guide says the verifier
+eventually reads the final folded witness. These findings mean the current
+paper/code do not justify the witness-privacy claim required here. They do not
+prove that no separate hiding transformation is possible.
+
+Decision: reject RoKoko as-is as the target ZK backend. Its general structured
+claim API, roughly 112 KB published PCS proof point, and pure-Rust option do
+not supply the missing ZK theorem/composition, exact payload-opening/video
+relation, or evidence that the relation-specific proof fits H.264 carriers.
+The pinned paper/source review and caveats are in
+`benchmark/results/rokoko_candidate_assessment_20260929.md`; paper metadata is
+also available from the [KCL research record](https://kclpure.kcl.ac.uk/portal/en/publications/rokoko-lattice-based-succinct-arguments-a-committed-refinement/).

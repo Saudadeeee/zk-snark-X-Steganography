@@ -1,16 +1,22 @@
-# RoKoko candidate assessment (2026-09-29)
+# RoKoko candidate assessment and ZK gate recheck (2026-09-30)
 
 ## Decision
 
-**Prioritize for further paper/source review, but do not integrate yet.** RoKoko
-is a newer lattice-argument implementation with an experimental SNARK frontend
-and a composable sumcheck claim API. That makes it a more immediate integration
-lead than the earlier SALSAA demo. The checked evidence still does not establish
-zero knowledge for its concrete SNARK mode, the exact video/payload relation,
-or a proof that fits this repository's validated carrier.
+**Reject RoKoko as-is for the required zero-knowledge backend.** The complete
+paper is now available and was inspected. Its formal security development
+defines reductions of knowledge and knowledge soundness, but this review found
+no zero-knowledge definition, simulator, or theorem for the construction or
+the implementation's `snark` mode. This is an absence of a justified ZK claim,
+not a proof that no separate ZK transformation is possible. The code still
+labels the `snark` frontend highly experimental. It also lacks this project's
+video/payload relation and an application-specific proof that fits the blind
+H.264 carrier. Preserve only as a research lead if authors provide a
+theorem-backed privacy composition; do not integrate or advertise as ZK now.
 
-This is a primary-source/documentation review only. RoKoko was not cloned,
-built, run, or modified in this assessment.
+The 2026-09-29 assessment was source/documentation-only. On 2026-09-30 the
+official ePrint PDF was retrieved and text-extracted locally; no RoKoko code
+was cloned, built, run, or modified. The repository was source-inspected at
+pinned commit [`6298afe840e80c4d1e10e78e6ee6f93e4cc31531`](https://github.com/lattice-arguments/rokoko/tree/6298afe840e80c4d1e10e78e6ee6f93e4cc31531).
 
 ## Primary-source evidence
 
@@ -19,10 +25,11 @@ built, run, or modified in this assessment.
   the preprint to 2026-09-09. Its abstract describes a lattice-based succinct
   argument with a linear-time prover and polylogarithmic communication and
   verification. It supports tensor-structured relations, including polynomial
-  evaluation and sumcheck relations. The visible abstract's concrete proof-size
-  values are stripped by the repository mirror, so this report does not infer
-  or quote an exact RoKoko size.
-- The [official Rust implementation](https://github.com/lattice-arguments/rokoko)
+  evaluation and sumcheck relations. The full paper reports a 112 KB PCS proof
+  for 2^26 coefficients, with 3.38 s commit+prove and 8.12 ms verification on
+  its benchmark host. These are paper results for its PCS experiment, not for
+  this application's relation or hardware.
+- The [official Rust implementation](https://github.com/lattice-arguments/rokoko/tree/6298afe840e80c4d1e10e78e6ee6f93e4cc31531)
   calls itself a SNARK/PCS implementation and documents a pure-Rust arithmetic
   backend (`incomplete-rexl`) as well as Intel HEXL bindings. It says the pure
   Rust path runs on any Rust-supported platform with degraded performance;
@@ -35,12 +42,18 @@ built, run, or modified in this assessment.
   flow. It also warns that the application author must correctly state and
   bind all relation claims. No H.264 parser, payload-opening circuit, blind
   extraction logic, or video commitment relation is documented there.
-- The paper PDF was inaccessible in this review. The inspected abstract
-  and README do not establish a formal zero-knowledge theorem for the concrete
-  `snark` mode or its implementation; no theorem number, simulator, extraction
-  argument, Fiat-Shamir security model or soundness error could be checked.
-  This is an unresolved acceptance gate, not a claim that the protocol has no
-  ZK property.
+- The full [official ePrint paper PDF](https://eprint.iacr.org/2026/575.pdf)
+  was retrieved via the IACR URL after the browser fetch returned 403 and
+  inspected with local PDF text extraction. The paper formalizes a reduction
+  of knowledge and a knowledge-soundness property (Definition 3); the full-text
+  review found no zero-knowledge definition, simulator, or ZK theorem for
+  RoKoko. Its abstract describes a succinct argument system, not a ZK theorem.
+  The code's label `snark` is not evidence of witness privacy. This review did
+  not prove the protocol is non-ZK or rule out a separate transformation; it
+  establishes that the inspected paper/code do not justify the ZK claim needed
+  here. The paper discusses shrinking a witness until it can be sent in the
+  clear as a general design goal; the frontend guide also says the verifier
+  reads the final folded witness. No hiding theorem for that value was found.
 - The official [SNARK frontend guide](https://github.com/lattice-arguments/rokoko/blob/main/docs/snark.md)
   describes weighted-sum claims over pointwise products of a committed
   ring-element witness vector, with at most degree three per variable. It says
@@ -92,12 +105,11 @@ different carrier/codec strategy or a substantially smaller proof.
 
 ## Next review gates
 
-1. Obtain and inspect the full paper for theorem statements, ZK definition,
-   reduction assumptions, soundness error, Fiat-Shamir model and concrete
-   parameter/security estimates.
-2. Trace how the implementation's `snark` feature maps to the paper's complete
-   protocol and determine whether witness hiding is guaranteed or must be
-   added via commitments/randomization.
+1. Do not use current RoKoko as ZK. Any reconsideration first requires an
+   author-specified, theorem-backed ZK composition and an independent review
+   that accounts for the verifier-readable folded witness.
+2. Only after that gate, trace the implementation's `snark` feature to the
+   paper's full protocol and determine exactly how hiding is achieved.
 3. Derive the exact custom claim system for the repository's canonical
    video-bound opening relation and verifier-pinned statements.
 4. Collect proof-size diagnostics for the smallest sound parameters and compare
@@ -107,5 +119,5 @@ different carrier/codec strategy or a substantially smaller proof.
    then attempt H.264 embed, video-only extraction, standard-decoder checks and
    negative tests.
 
-RoKoko is a higher-priority lead to investigate, not an accepted backend. The
-overall system goal remains incomplete.
+RoKoko is rejected as-is for the active ZK requirement, not declared
+impossible to transform. The overall system goal remains incomplete.
