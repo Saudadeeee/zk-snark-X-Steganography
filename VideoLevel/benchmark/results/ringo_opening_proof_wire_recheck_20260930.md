@@ -270,6 +270,88 @@ The 0.682 frame/s scan rate is offline analysis throughput, not camera pipeline
 latency or a realtime claim. It is content/profile-specific and cannot be
 extrapolated to other resolutions or clips.
 
+A second 300-frame CIF QP22/GOP1 asset, `akiyo_cif_q22_g1.h264`, was measured
+with the same stable-carrier command and 100-frame segment size. It yielded
+**20,632 raw-safe blind-stable bits** (2,579 bytes) in **198.021 s**
+(1.515 frame/s), versus Coastguard's 76,550 bits in 439.958 s (0.682
+frame/s). The Akiyo count is 3.71x below Coastguard despite equal frame count,
+resolution, QP and GOP, demonstrating that this raw carrier estimate depends
+strongly on content. Akiyo's minimum-envelope target is short by 15,308,912
+bits; the 15,329,544-bit requirement is **743.0x** its raw-stable capacity.
+The machine-readable Akiyo result is
+`ringo_blind_stable_capacity_akiyo_300f_20260930.json`.
+
+Both rows are raw candidate scans only. Neither establishes patchability,
+blind extraction, final visual quality, or end-to-end latency/RAM. The scan
+rates are offline analysis throughput and are not realtime camera performance.
+
+### Rank-stable fallback selector recheck
+
+The stable carrier selector now falls back past an individually unsafe
+structural candidate only when all earlier candidates remain unsafe after
+hypothetically toggling the selected coefficient. This symmetric check
+prevents the verifier from selecting a different earlier position after
+embedding. An actual 10-frame Akiyo H.264 embed/extract run carried the
+ordinary 8-byte value `4c6174746963655a` using 176 framed carriers. Blind
+extraction recovered the exact value; cover and stego independently derived
+identical carrier lists and candidate fingerprints, and their
+carrier-normalized digests matched. The embed API's strict FFmpeg decode
+validation also completed successfully. This was not a ZK proof test, and the
+output was temporary; no wall-time or RAM measurement was retained.
+
+After this selector change, `py -3.12 -m pytest -q
+src/runtest/test_video_only_blind_sync_integration.py` completed with **3
+passed in 376.96 s**. This suite includes the Foreman 300-frame real-video
+embed/extract, independent position derivation, fast/direct extraction
+agreement, context-binding checks, and truncation rejection. The reported
+pytest wall time is a single integration-suite observation (not a per-frame
+latency or RAM benchmark), and the payload is ordinary test data rather than
+a lattice proof. It must not be interpreted as realtime performance.
+
+The selector was then scanned over the same 300-frame Akiyo CIF QP22/GOP1
+asset as the preceding result. Raw blind-stable candidates increased from
+20,632 to **29,847 bits** (+44.7%) in **225.634 s** (1.329 frame/s), compared
+with 198.021 s for the first-structural-candidate selector. The new report is
+`ringo_blind_stable_capacity_akiyo_300f_fallback_20260930.json`; its video
+hash matches the preceding Akiyo scan. This is still raw capacity only: no
+complete patchability target, proof embedding, blind proof extraction,
+image-quality measurement, or RAM measurement was performed. The Ringo
+envelope plus framing still needs 15,329,544 bits, **513.6x** this improved
+raw upper bound.
+
+### Multi-carrier-per-block screening (10-frame Akiyo excerpt)
+
+To assess whether the one-carrier-per-block stable profile is an avoidable
+capacity limit, a 10-frame Akiyo stream-copy excerpt was parsed and every
+structurally stable luma coefficient (non-DC, not a trailing one, magnitude at
+least four) was individually checked with the repository's CAVLC encoder
+against its source NAL block length. This found 1,732 individually invariant
+positions across 1,039 eligible blocks in 33,074 parsed luma blocks. The
+candidate-count histogram was: 611 blocks with one, 268 with two, 92 with
+three, 39 with four, 21 with five, and 8 with six eligible positions; the
+remaining 32,035 blocks had none.
+
+Individual invariance does not imply joint invariance. Applying the first `k`
+individually safe coefficient flips together and re-encoding each original
+block produced:
+
+| Prefix size `k` | Blocks tested | Jointly bit-length invariant | Rate |
+|---:|---:|---:|---:|
+| 1 | 1,039 | 1,039 | 100.0% |
+| 2 | 428 | 402 | 93.9% |
+| 3 | 160 | 157 | 98.1% |
+| 4 | 68 | 62 | 91.2% |
+| 5 | 29 | 25 | 86.2% |
+| 6 | 8 | 6 | 75.0% |
+
+These are screening counts, not additional carrier capacity claims: the run
+did not call the bitstream patcher, write a multi-carrier stego video, extract
+payload, decode the result with FFmpeg, or measure visual quality. In
+particular, an implementation must make the chosen group re-derivable from
+the stego coefficients and verify joint (not just per-coefficient)
+patchability. The 6.1% pair failure rate is direct evidence that simply
+removing the current one-modification-per-block guard would be unsafe.
+
 ## Interpretation and limits
 
 The earlier 550,249-byte figure was an estimate, not an encoded proof size.

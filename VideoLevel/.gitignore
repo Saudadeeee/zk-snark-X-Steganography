@@ -61,6 +61,8 @@ node_modules/
 !benchmark/results/sec*.json
 !benchmark/results/ringo_raw_capacity_coastguard_300f_20260930.json
 !benchmark/results/ringo_blind_stable_capacity_coastguard_300f_20260930.json
+!benchmark/results/ringo_blind_stable_capacity_akiyo_300f_20260930.json
+!benchmark/results/ringo_blind_stable_capacity_akiyo_300f_fallback_20260930.json
 !benchmark/results/trust_architecture_diagnostic.json
 !benchmark/results/trust_corpus_validation.json
 !benchmark/trust_corpus_manifest.json

@@ -185,7 +185,14 @@ def _metadata_from_analysis(
     analysis_profile: str = "full-v1",
 ) -> tuple[BlindPublicMetadata, list[tuple[int, int, int]]]:
     """Build blind synchronization metadata from an existing video analysis."""
-    stable_candidates = build_blind_stable_candidates(coefficients, nal_length_map)
+    if analysis_profile == "stable-blind-v1":
+        # The safety filter already chose the first rank-stable, individually
+        # patchable carrier in each block. Reuse that exact set for the blind
+        # fingerprint; re-deriving only the first structural candidate would
+        # discard safe fallbacks and could disagree with the validated choice.
+        stable_candidates = list(safe_positions)
+    else:
+        stable_candidates = build_blind_stable_candidates(coefficients, nal_length_map)
     serialized = [[int(mb), int(blk), int(cidx)] for mb, blk, cidx in stable_candidates]
     candidate_fingerprint = hashlib.sha256(
         json.dumps(serialized, separators=(",", ":"), ensure_ascii=True).encode("utf-8")

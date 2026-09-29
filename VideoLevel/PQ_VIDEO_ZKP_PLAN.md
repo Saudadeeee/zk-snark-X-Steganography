@@ -2410,3 +2410,30 @@ framing needs 15,329,544 bits (about 200.3x this blind-stable raw upper bound).
 The stable-profile scan rate is 0.682 frame/s, not realtime. No carrier has
 yet been patched with or blindly extracted as a Ringo proof. Full measurements
 and caveats are in the linked Ringo wire report.
+
+A second matching 300-frame CIF QP22/GOP1 asset (`akiyo_cif_q22_g1.h264`)
+yielded 20,632 raw blind-stable bits in 198.021 s (1.515 frame/s), 3.71x
+less capacity than Coastguard at the same frame count and settings. The
+1,916,177-byte minimum envelope plus framing is 743.0x this Akiyo raw upper
+bound. This confirms substantial content dependence while still leaving
+patchability, extraction, and quality unmeasured. See
+`benchmark/results/ringo_blind_stable_capacity_akiyo_300f_20260930.json`.
+
+A 10-frame Akiyo screening experiment found multiple independently
+CAVLC-length-invariant stable coefficients in some luma blocks, but testing
+their flips jointly rejected 26 of 428 tested pairs (6.1%). Therefore the
+current one-modification-per-block constraint cannot safely be removed based
+on per-position checks; any capacity expansion needs deterministic group
+selection plus joint patch/decode/extraction validation. Detailed counts are
+in the Ringo wire recheck report.
+
+The single-carrier selector now uses a rank-stable fallback: on Akiyo 10f, the
+8-byte ordinary payload passed real blind embed/extract with identical cover
+and stego carrier lists and strict FFmpeg decode. On the matching 300f Akiyo
+asset the raw blind-stable scan rose from 20,632 to 29,847 bits (+44.7%) in
+225.634 s (1.329 frame/s); the envelope is still 513.6x the raw upper bound.
+This improves deterministic one-carrier selection only; it does not make
+multi-modification blocks safe or establish ZK proof transport. See
+`benchmark/results/ringo_blind_stable_capacity_akiyo_300f_fallback_20260930.json`.
+The real-video blind integration suite passed 3/3 in 376.96 s; this is a
+single offline test-suite wall time, not a realtime benchmark or proof test.
