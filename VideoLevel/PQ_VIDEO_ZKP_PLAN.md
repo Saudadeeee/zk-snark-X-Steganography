@@ -2010,6 +2010,18 @@ sizes are a strong reason to require a measured relation-specific proof, not a
 proof that all SALSAA configurations are impossible. No candidate code was
 built or run. Overall acceptance remains unmet.
 
+### SALSAA zero-knowledge gate recheck (2026-09-30)
+
+The official 48-page ePrint PDF was retrieved and reviewed after the earlier
+PDF fetch failed. Theorem 5.1 states correctness and knowledge soundness, not
+zero knowledge. Section 5.3 explicitly has the prover send the final O(1)-height
+folded witness in the clear; no simulator or hiding transform for that value
+was identified in the paper/source reviewed. Thus SALSAA as currently
+specified/implemented is rejected as this system's ZK backend, not merely
+awaiting a local AVX2 build. A separate privacy transformation would define a
+new protocol and reopen all proof/security/size gates. See
+`benchmark/results/salsaa_zk_gate_recheck_20260930.md` for scope and evidence.
+
 ### Target relation and statement-contract audit (2026-09-29)
 
 Added `docs/LATTICE_VIDEO_ZKP_RELATION_v0.1.md` as an explicit, non-acceptance
