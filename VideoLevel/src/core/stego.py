@@ -354,6 +354,7 @@ class CAVLCSafetyFilter:
         frame_verified_data: Dict[int, Tuple[Dict, Dict]] | None = None,
         cif_mb_count: int = 396,
         stable_carriers_only: bool = False,
+        interleave_positions: bool = True,
     ) -> List[Tuple[int, int, int]]:
         """
         Get list of safe embedding positions across all blocks
@@ -372,6 +373,8 @@ class CAVLCSafetyFilter:
                              when verifying bit-length invariance (matching patcher behavior).
             stable_carriers_only: Check only the deterministic stable blind carrier
                                   per block; normal safety and patchability checks remain.
+            interleave_positions: Apply the established embedding order to candidates.
+                                  Disable only for order-independent analysis.
 
         Returns:
             List of (mb_idx, block_idx, coeff_idx) tuples that are safe to modify
@@ -436,7 +439,12 @@ class CAVLCSafetyFilter:
                         validated_offset["nC"] = validated[0]
                         validated_offset["validated_nC"] = validated[0]
                         original_bit_lengths[
-                            (block_key, validated[0], validated[2])
+                            (
+                                block_key,
+                                validated[0],
+                                validated[2],
+                                int(validated_offset.get("max_num_coeff", 16)),
+                            )
                         ] = validated_offset.get("bit_length")
 
             cached_match = self._lazy_patchability_cache.get(block_key)
@@ -626,7 +634,9 @@ class CAVLCSafetyFilter:
         # within each frame, late macroblocks first; across frames, chronological
         # round-robin. This keeps embed/extract ordering deterministic while
         # distributing payload across the full timeline.
-        return sort_blocks_interleaved(safe_positions, _CIF_MB_COUNT)
+        if interleave_positions:
+            return sort_blocks_interleaved(safe_positions, _CIF_MB_COUNT)
+        return safe_positions
 
 
 # =============================================================================

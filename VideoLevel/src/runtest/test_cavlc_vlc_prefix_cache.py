@@ -31,6 +31,8 @@ def test_mutating_custom_vlc_table_does_not_leave_a_stale_prefix_index():
 
 def test_builtin_vlc_table_prefix_index_is_reused(monkeypatch):
     table = cavlc.get_coeff_token_table(0)
+    cavlc._longer_vlc_prefixes(table)
+    cavlc._VLC_LONGER_PREFIX_CACHE.pop(id(table), None)
     original_builder = cavlc._build_longer_vlc_prefixes
     builds = 0
 

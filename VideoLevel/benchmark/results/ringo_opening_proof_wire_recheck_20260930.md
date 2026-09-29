@@ -225,6 +225,51 @@ This 30-minute non-completion is an offline scanner runtime observation, not a
 completed benchmark result and not proof that the 3,000-frame scan would never
 finish.
 
+### Capacity-scanner hotspot diagnostic (2026-09-30)
+
+A 10-frame stream-copy excerpt from the same CIF QP22/GOP1 input was scanned
+with the updated scanner. It yielded 126,628 raw-safe candidates in 39.013 s
+(0.256 frame/s). The supplied legacy LNP22 artifact was 131,694 bytes, so the
+scanner's raw-only comparison required 1,053,680 bits including its 16-byte
+framing and did not fit. Quality, patchability and blind extraction were not
+measured. This short excerpt is a smoke diagnostic, not a replacement for the
+300-frame scan or a representative throughput benchmark.
+
+An instrumented `cProfile` run of that same scan recorded 78,892,819 calls in
+104.434 s (the instrumentation materially increases elapsed time). The
+dominant cumulative paths were `CAVLCSafetyFilter.get_safe_positions`
+(79.924 s), `_verify_block_bit_length_invariance` (66.077 s), CAVLC forward
+decode (55.107 s) and CAVLC encode (31.989 s). These overlapping cumulative
+times are not additive. Extracting just the 10-frame block vectors found
+61,794 distinct coefficient/context keys among 62,592 blocks: 798 repeated
+blocks (1.27%). Therefore a cross-block verification cache was not added; on
+this sample it would have little reuse and would add memory/key-management
+complexity. The measured 0.256 frame/s is close to the prior 300-frame
+0.247 frame/s, so this diagnostic does not demonstrate a throughput gain from
+the scanner-order optimization or source-length cache correction.
+
+### Blind-stable capacity scan (2026-09-30)
+
+The scanner now has an explicit `--stable-blind-carriers` profile and accepts
+`--target-payload-bytes`, so capacity can be compared against the full Ringo
+envelope size without passing an unrelated file as if it were a proof. On the
+same 300-frame Coastguard CIF QP22/GOP1 input, scanning only deterministic
+blind-stable carriers yielded **76,550 raw-safe bits** (9,568 bytes) in
+**439.958 s** (0.682 frame/s). The report is
+`ringo_blind_stable_capacity_coastguard_300f_20260930.json` and targets the
+minimum 1,916,177-byte Ringo envelope plus 16-byte framing (**15,329,544
+bits**). That target is about **200.3x** this scan's raw blind-stable upper
+bound. On this identical clip, the all-safe-candidate scan reported
+3,827,207 bits, about 50.0x the blind-stable count; those extra positions
+cannot be assumed available to a verifier that re-derives one deterministic
+carrier per block.
+
+The blind-stable measurement is still not proof embedding: quality validation,
+actual patchability, and end-to-end blind extraction remain false/not measured.
+The 0.682 frame/s scan rate is offline analysis throughput, not camera pipeline
+latency or a realtime claim. It is content/profile-specific and cannot be
+extrapolated to other resolutions or clips.
+
 ## Interpretation and limits
 
 The earlier 550,249-byte figure was an estimate, not an encoded proof size.

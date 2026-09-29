@@ -12,7 +12,6 @@ import argparse
 import gc
 import hashlib
 import json
-import os
 import subprocess
 import tempfile
 import time
@@ -243,12 +242,12 @@ def _scan_segments(
     ffmpeg: str = "ffmpeg",
     ffprobe: str = "ffprobe",
     patchability_required_bits: int | None = None,
+    stable_blind_only: bool = False,
 ) -> tuple[list[int], list[int], list[int] | None]:
     """Segment at requested IDRs and analyze one chunk at a time."""
     video_path = Path(video_path).resolve(strict=True)
     cuts = frame_cut_points(total_frames, frames_per_segment)
 
-    os.environ["BENCHMARK_DISABLE_ANALYSIS_CACHE"] = "1"
     from benchmark._common import load_or_build_benchmark_analysis
     if patchability_required_bits is not None:
         if (
@@ -262,7 +261,12 @@ def _scan_segments(
         _prune_patchable_positions = None
 
     if not cuts:
-        analysis = load_or_build_benchmark_analysis(video_path, force=True)
+        analysis = load_or_build_benchmark_analysis(
+            video_path,
+            force=True,
+            interleave_positions=False,
+            stable_blind_only=stable_blind_only,
+        )
         raw_bits = len(analysis[-1])
         patchable_bits = None
         if patchability_required_bits is not None:
@@ -317,7 +321,12 @@ def _scan_segments(
         patchable_bits = [] if patchability_required_bits is not None else None
         confirmed_patchable_bits = 0
         for index, segment in enumerate(segments):
-            analysis = load_or_build_benchmark_analysis(segment, force=True)
+            analysis = load_or_build_benchmark_analysis(
+                segment,
+                force=True,
+                interleave_positions=False,
+                stable_blind_only=stable_blind_only,
+            )
             raw_capacity = len(analysis[-1])
             raw_bits.append(raw_capacity)
             if patchable_bits is not None and _prune_patchable_positions is not None:
@@ -347,20 +356,29 @@ def _scan_segments(
 def scan_video(
     *,
     video_path: Path,
-    proof_path: Path,
+    proof_path: Path | None = None,
+    payload_bytes: int | None = None,
     frames_per_segment: int = 100,
     framing_bytes: int = 16,
     ffmpeg: str = "ffmpeg",
     ffprobe: str = "ffprobe",
     validate_patchability: bool = False,
+    stable_blind_only: bool = False,
 ) -> dict[str, Any]:
-    """Measure raw candidates for a real Annex-B H.264 video and proof file."""
+    """Measure raw candidates against a proof file or explicit payload size."""
     video_path = video_path.resolve(strict=True)
-    proof_path = proof_path.resolve(strict=True)
+    if (proof_path is None) == (payload_bytes is None):
+        raise ValueError("provide exactly one of proof_path or payload_bytes")
+    if proof_path is not None:
+        proof_path = proof_path.resolve(strict=True)
+        payload_bytes = proof_path.stat().st_size
+    else:
+        _positive_integer("payload_bytes", payload_bytes)
     _positive_integer("frames_per_segment", frames_per_segment)
     if isinstance(framing_bytes, bool) or not isinstance(framing_bytes, int) or framing_bytes < 0:
         raise ValueError("framing_bytes must be a non-negative integer")
-    proof_bytes = proof_path.stat().st_size
+    assert payload_bytes is not None
+    proof_bytes = payload_bytes
     required_bits = (proof_bytes + framing_bytes) * 8
     started = time.perf_counter()
     frame_count = _probe_frame_count(video_path, ffprobe)
@@ -371,6 +389,7 @@ def scan_video(
         ffmpeg=ffmpeg,
         ffprobe=ffprobe,
         patchability_required_bits=required_bits if validate_patchability else None,
+        stable_blind_only=stable_blind_only,
     )
     report = summarize_raw_capacity(
         asset=str(video_path),
@@ -386,13 +405,24 @@ def scan_video(
         {
             "video_bytes": video_path.stat().st_size,
             "video_sha256": _sha256_file(video_path),
-            "proof_artifact": proof_path.name,
-            "proof_sha256": _sha256_file(proof_path),
+            "proof_artifact": proof_path.name if proof_path is not None else None,
+            "proof_sha256": _sha256_file(proof_path) if proof_path is not None else None,
+            "target_payload_bytes": proof_bytes,
+            "payload_size_source": (
+                "proof_artifact_file" if proof_path is not None else "explicit_target_bytes"
+            ),
             "ffmpeg_version": _ffmpeg_version(ffmpeg),
             "patchability_requested": validate_patchability,
+            "carrier_profile": (
+                "blind_stable_candidates" if stable_blind_only else "all_safe_candidates"
+            ),
             "elapsed_sec": round(time.perf_counter() - started, 3),
         }
     )
+    if proof_path is None:
+        report["proof_bytes"] = None
+        report["raw_capacity_assessment"]["proof_bytes"] = None
+        report["raw_capacity_assessment"]["target_payload_bytes"] = proof_bytes
     return report
 
 
@@ -404,7 +434,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     )
     parser.add_argument("--video", required=True, type=Path)
-    parser.add_argument("--proof-artifact", required=True, type=Path)
+    payload_source = parser.add_mutually_exclusive_group(required=True)
+    payload_source.add_argument("--proof-artifact", type=Path)
+    payload_source.add_argument("--target-payload-bytes", type=int)
     parser.add_argument("--frames-per-segment", type=int, default=100)
     parser.add_argument("--framing-bytes", type=int, default=16)
     parser.add_argument("--ffmpeg", default="ffmpeg")
@@ -414,6 +446,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="expensive targeted BitstreamPatcher validation for proof plus framing bits",
     )
+    parser.add_argument(
+        "--stable-blind-carriers",
+        action="store_true",
+        help="count only deterministic carriers re-derivable by a blind verifier",
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
 
@@ -421,11 +458,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         report = scan_video(
             video_path=args.video,
             proof_path=args.proof_artifact,
+            payload_bytes=args.target_payload_bytes,
             frames_per_segment=args.frames_per_segment,
             framing_bytes=args.framing_bytes,
             ffmpeg=args.ffmpeg,
             ffprobe=args.ffprobe,
             validate_patchability=args.validate_patchability,
+            stable_blind_only=args.stable_blind_carriers,
         )
         encoded = json.dumps(report, sort_keys=True, indent=2)
         if args.output is not None:

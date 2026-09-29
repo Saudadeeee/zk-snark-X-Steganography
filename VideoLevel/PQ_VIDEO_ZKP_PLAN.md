@@ -2400,3 +2400,13 @@ produced. The old 3,000-frame 4,332,560-bit scan remains historical and cannot
 be directly compared with the new 300-frame asset until the input/profile and
 scanner discrepancy are resolved. The 300-frame result and incomplete recheck
 are recorded in the linked Ringo wire report.
+
+The scanner now supports a separate blind-stable carrier profile and direct
+target payload sizes. On the same 300-frame Coastguard CIF clip, only 76,550
+raw-safe blind-stable bits were found in 439.958 seconds, versus 3,827,207
+all-candidate bits from the non-blind upper-bound scan. Even before
+patchability/quality losses, the 1,916,177-byte Ringo minimum envelope plus
+framing needs 15,329,544 bits (about 200.3x this blind-stable raw upper bound).
+The stable-profile scan rate is 0.682 frame/s, not realtime. No carrier has
+yet been patched with or blindly extracted as a Ringo proof. Full measurements
+and caveats are in the linked Ringo wire report.

@@ -306,6 +306,8 @@ def load_or_build_benchmark_analysis(
     video_path: str | Path,
     *,
     force: bool = False,
+    interleave_positions: bool = True,
+    stable_blind_only: bool = False,
 ):
     """
     Return cached cover-video analysis for benchmark sections.
@@ -314,13 +316,14 @@ def load_or_build_benchmark_analysis(
     expensive IDR extraction and safety-filter output across repeated runs.
     """
     vp = Path(video_path)
-    if benchmark_analysis_cache_enabled():
+    if benchmark_analysis_cache_enabled() and interleave_positions:
         from src.core.analysis_cache import load_or_build_video_analysis
 
         return load_or_build_video_analysis(
             vp,
             use_cache=True,
             force_refresh=force,
+            stable_blind_only=stable_blind_only,
         )
 
     from src.bitstream.bitstream_ops import BitstreamReconstructor
@@ -336,6 +339,8 @@ def load_or_build_benchmark_analysis(
         nC_map=nC_map,
         nal_length_map=nal_length_map,
         t1_override_map=t1_override_map,
+        stable_carriers_only=stable_blind_only,
+        interleave_positions=interleave_positions,
     )
     return (
         coefficients,
