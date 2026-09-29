@@ -2305,14 +2305,55 @@ videos. They are research codecs, not production wire formats, and do not
 address the unreviewed commitment/security parameters, CRS generation,
 video/session canonicalization, or the separate plain-race upstream failure.
 The retained 3,000-frame Coastguard raw-capacity scan found 4,332,560 raw-safe
-bits (541,570 bytes) before patchability and quality losses. The current binary
-proof plus 16-byte framing needs 1,653,743 bytes, 3.05x that raw upper bound;
-this exact 3,000-frame cover therefore cannot carry it. No in-video Ringo proof
-run was attempted. Full measurements and commands are recorded in
+bits (541,570 bytes) before patchability and quality losses. The proof-only
+binary size plus 16-byte framing is 1,653,743 bytes (3.05x that raw upper
+bound), but omitted the verifier's public commitment and statement. The
+complete minimum envelope is 1,916,177 bytes, and the fixed carrier profile is
+2,000,000 bytes (3.69x the raw bound); this exact cover cannot carry the full
+verifier input. No in-video Ringo proof run was attempted. Full measurements
+and commands are recorded in
 [`benchmark/results/ringo_opening_proof_wire_recheck_20260930.md`](benchmark/results/ringo_opening_proof_wire_recheck_20260930.md).
 
 The Ringo path still cannot be promoted: the probe is not integrated with
 H.264 embedding/extraction or the public APIs, has no independent cryptographic
-review, and has not demonstrated a compact proof that fits even the measured
-long-video carrier. The default shipped path remains the ML-DSA receipt
+review, and has not demonstrated a compact proof that fits the measured
+3,000-frame Coastguard carrier. The default shipped path remains the ML-DSA receipt
 reference with a sidecar; it does not satisfy the active lattice-ZK goal.
+
+Follow-up profiling logged the binary proof's 639,289-byte witness commitments
+(13 items) and 1,014,194-byte evaluation proof; `EvalProof.Encode` alone is
+557,295 bytes. BestCompression of that binary sample was 1,246,186 bytes, still
+2.30x the 541,570-byte raw-capacity upper bound. The actual Jindo CRT moduli
+were 42-bit (inner) and 38-bit (outer), but the experimental codec writes each
+residue as a 64-bit word. Even the optimistic estimate that reduces the entire
+proof by 42/64 remains about 1.09 MB before framing and carrier/quality losses.
+This is diagnostic evidence against expecting basic coefficient bit-packing
+or gzip alone to make the tested clip fit; no compressed-CRT codec or video
+embedding was implemented. The sample details are appended to the wire-format
+recheck report linked above.
+
+A one-run rank sweep also proved, serialized, decoded and verified at ranks
+256/512/1,024/2,048/4,096. Rank 256 exactly fits this 32-byte payload without
+zero-tail padding, yet its proof was 998,087 bytes binary and 706,510 bytes
+gzipped, still 1.84x/1.30x the raw-capacity bound; proving/verification took
+36.11/13.63 ms locally. Lower rank is not endorsed as a secure parameter: no
+independent analysis establishes its security, and reducing rank alone did not
+fit this carrier. The full table and commands are in the linked report.
+
+The probe now derives its public matrix from a canonical 282-byte `RGOS` v1
+statement containing the session challenge, normalized-video commitment,
+carrier-position hash, codec/carrier profile, relation/parameter/registry IDs,
+epoch, payload length and carrier count. Reusing a proof while changing each
+of those tested context fields is rejected with the public commitment fixed.
+The test digests remain fixtures: video hashing, blind position derivation,
+trusted registry resolution, spent-token tracking and challenge expiry are
+not implemented in this probe. This is relation plumbing, not production ZK.
+
+The probe's fixed-profile `RZV1` envelope now includes the complete 282-byte
+statement, rank-8192 262,152-byte canonical public commitment, and binary
+proof, with zero padding to the verifier-pinned carrier count. It round-trips a
+2,000,000-byte envelope and verifies the decoded proof; malformed lengths,
+truncation, bad magic and nonzero padding are rejected. This validates only a
+transport codec: the Ringo proof is still not embedded/extracted from H.264,
+and the measured 3,000-frame cover's raw-capacity upper bound is only 541,570
+bytes.

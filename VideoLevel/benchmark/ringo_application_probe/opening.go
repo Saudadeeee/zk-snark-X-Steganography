@@ -71,6 +71,7 @@ func (c *openingCircuit[E]) Define(ctx *buckler.Context[E]) {
 }
 
 type openingFixture struct {
+	rank             int
 	context          []byte
 	crs              []byte
 	ring             *bigpoly.CyclotomicOperator[*zp.Uint]
@@ -83,12 +84,20 @@ type openingFixture struct {
 }
 
 func newOpeningFixture(context []byte) (*openingFixture, error) {
+	return newOpeningFixtureWithRank(context, openingRank)
+}
+
+func newOpeningFixtureWithRank(context []byte, rank int) (*openingFixture, error) {
 	if len(context) == 0 {
 		return nil, errors.New("context required")
 	}
+	if rank < openingPayloadBytes*8 || rank&(rank-1) != 0 {
+		return nil, errors.New("opening rank must be a power of two at least as large as the payload bit length")
+	}
 	f := &openingFixture{
+		rank:    rank,
 		context: append([]byte(nil), context...),
-		ring:    bigpoly.NewCyclotomicOperator[*zp.Uint](openingRank),
+		ring:    bigpoly.NewCyclotomicOperator[*zp.Uint](rank),
 	}
 	crsDigest := sha256.Sum256([]byte("verifier-pinned-ringo-crs/probe/v1"))
 	f.crs = append([]byte(nil), crsDigest[:16]...)
@@ -128,7 +137,7 @@ func (f *openingFixture) rebuildAssignments() error {
 		f.ring.MulAddTo(commitment[row], message[row], f.bitNTT)
 	}
 	mask := f.ring.NewPoly(false)
-	for i := openingPayloadBytes * 8; i < openingRank; i++ {
+	for i := openingPayloadBytes * 8; i < f.rank; i++ {
 		mask.Coeffs[i].SetInt64(1)
 	}
 	var public openingCircuit[*zp.Uint]
@@ -199,6 +208,16 @@ func verifyOpening(
 	commitment [openingRows]buckler.PublicWitness[*zp.Uint],
 	proof *buckler.Proof[*zp.Uint],
 ) (valid bool, err error) {
+	return verifyOpeningAtRank(verifier, openingRank, context, commitment, proof)
+}
+
+func verifyOpeningAtRank(
+	verifier *buckler.Verifier[*zp.Uint],
+	rank int,
+	context []byte,
+	commitment [openingRows]buckler.PublicWitness[*zp.Uint],
+	proof *buckler.Proof[*zp.Uint],
+) (valid bool, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			valid = false
@@ -208,14 +227,17 @@ func verifyOpening(
 	if verifier == nil || proof == nil {
 		return false, errors.New("verifier and proof required")
 	}
-	ring := bigpoly.NewCyclotomicOperator[*zp.Uint](openingRank)
+	if rank < openingPayloadBytes*8 || rank&(rank-1) != 0 {
+		return false, errors.New("opening rank must be a power of two at least as large as the payload bit length")
+	}
+	ring := bigpoly.NewCyclotomicOperator[*zp.Uint](rank)
 	matrix, message, err := derivePublicMatrix(ring, context)
 	if err != nil {
 		return false, err
 	}
 	var public openingCircuit[*zp.Uint]
 	for row := range commitment {
-		if len(commitment[row]) != openingRank {
+		if len(commitment[row]) != rank {
 			return false, errors.New("invalid public commitment length")
 		}
 		for _, coefficient := range commitment[row] {
@@ -230,7 +252,7 @@ func verifyOpening(
 		}
 	}
 	mask := ring.NewPoly(false)
-	for i := openingPayloadBytes * 8; i < openingRank; i++ {
+	for i := openingPayloadBytes * 8; i < rank; i++ {
 		mask.Coeffs[i].SetInt64(1)
 	}
 	public.TailMask = mask.Coeffs

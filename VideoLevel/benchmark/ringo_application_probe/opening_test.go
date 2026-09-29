@@ -3,6 +3,11 @@ package openingprobe
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"fmt"
+	"math/bits"
+	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -11,7 +16,12 @@ import (
 )
 
 func TestOpeningRelationAndCapacityProbe(t *testing.T) {
-	fixture, err := newOpeningFixture([]byte("verifier-session-and-canonical-video-context-A"))
+	statement := validOpeningStatement()
+	context, err := marshalOpeningStatement(statement)
+	if err != nil {
+		t.Fatalf("marshal verifier-pinned public statement: %v", err)
+	}
+	fixture, err := newOpeningFixture(context)
 	if err != nil {
 		t.Fatalf("build opening fixture: %v", err)
 	}
@@ -73,6 +83,18 @@ func TestOpeningRelationAndCapacityProbe(t *testing.T) {
 	if err := gzipWriter.Close(); err != nil {
 		t.Fatalf("finish proof compression probe: %v", err)
 	}
+	var compressedBinary bytes.Buffer
+	binaryGzipWriter, err := gzip.NewWriterLevel(&compressedBinary, gzip.BestCompression)
+	if err != nil {
+		t.Fatalf("create binary proof compression probe: %v", err)
+	}
+	binaryGzipWriter.Header.ModTime = time.Time{}
+	if _, err := binaryGzipWriter.Write(binaryProof); err != nil {
+		t.Fatalf("compress binary proof: %v", err)
+	}
+	if err := binaryGzipWriter.Close(); err != nil {
+		t.Fatalf("finish binary proof compression probe: %v", err)
+	}
 	for name, malformed := range map[string][]byte{
 		"empty":               nil,
 		"truncated":           encodedProof[:len(encodedProof)/2],
@@ -95,43 +117,157 @@ func TestOpeningRelationAndCapacityProbe(t *testing.T) {
 			t.Errorf("binary codec accepted malformed input (%s)", name)
 		}
 	}
-	verifyStart := time.Now()
 	commitment := fixture.publicAssignment.CommitmentNTT
-	valid, err := verifyOpening(verifier, fixture.context, commitment, decodedBinaryProof)
+	commitmentBytes, err := encodeOpeningCommitment(commitment, openingRank)
 	if err != nil {
-		t.Fatalf("derive verifier public input: %v", err)
+		t.Fatalf("encode public commitment: %v", err)
+	}
+	decodedCommitment, err := decodeOpeningCommitment(commitmentBytes, openingRank)
+	if err != nil {
+		t.Fatalf("decode public commitment: %v", err)
+	}
+	transportEnvelope, err := encodeOpeningTransportEnvelope(fixture.context, decodedCommitment, proof, openingRank)
+	if err != nil {
+		t.Fatalf("encode complete in-band proof envelope: %v", err)
+	}
+	transportStart := time.Now()
+	decodedTransport, err := decodeOpeningTransportEnvelope(transportEnvelope, openingRank)
+	if err != nil {
+		t.Fatalf("decode complete in-band proof envelope: %v", err)
+	}
+	transportDecodeDuration := time.Since(transportStart)
+	verifyStart := time.Now()
+	valid, err := verifyOpeningAtRank(verifier, openingRank, decodedTransport.StatementBytes,
+		decodedTransport.Commitment, decodedTransport.Proof)
+	if err != nil {
+		t.Fatalf("verify decoded in-band envelope: %v", err)
 	}
 	if !valid {
-		t.Fatal("verifier rejected valid bounded payload opening")
+		t.Fatal("verifier rejected valid opening decoded from the in-band envelope")
 	}
 	verifyDuration := time.Since(verifyStart)
+	minimumEnvelopeBytes := openingTransportHeaderSize + len(fixture.context) + len(commitmentBytes) + len(binaryProof)
+	if minimumEnvelopeBytes > len(transportEnvelope) {
+		t.Fatalf("minimum transport fields (%d bytes) exceed fixed carrier profile (%d bytes)", minimumEnvelopeBytes, len(transportEnvelope))
+	}
+	badEnvelopeMagic := append([]byte(nil), transportEnvelope...)
+	badEnvelopeMagic[0] ^= 1
+	badEnvelopeLength := append([]byte(nil), transportEnvelope...)
+	badEnvelopeLength[len(openingTransportMagic)+4+3]-- // commitment length, big-endian
+	badEnvelopePadding := append([]byte(nil), transportEnvelope...)
+	badEnvelopePadding[len(badEnvelopePadding)-1] = 1
+	for name, malformed := range map[string][]byte{
+		"truncated":         transportEnvelope[:len(transportEnvelope)-1],
+		"bad magic":         badEnvelopeMagic,
+		"forged field size": badEnvelopeLength,
+		"nonzero padding":   badEnvelopePadding,
+	} {
+		if _, err := decodeOpeningTransportEnvelope(malformed, openingRank); err == nil {
+			t.Errorf("accepted malformed fixed-profile envelope (%s)", name)
+		}
+	}
+	changedSessionStatement := statement
+	changedSessionStatement.SessionChallenge[0] ^= 1
+	changedSessionContext, err := marshalOpeningStatement(changedSessionStatement)
+	if err != nil {
+		t.Fatalf("marshal changed-session statement: %v", err)
+	}
+	changedSessionEnvelope, err := encodeOpeningTransportEnvelope(changedSessionContext, decodedTransport.Commitment, decodedTransport.Proof, openingRank)
+	if err != nil {
+		t.Fatalf("encode changed-session envelope: %v", err)
+	}
+	changedSessionDecoded, err := decodeOpeningTransportEnvelope(changedSessionEnvelope, openingRank)
+	if err != nil {
+		t.Fatalf("decode changed-session envelope: %v", err)
+	}
+	valid, err = verifyOpeningAtRank(verifier, openingRank, changedSessionDecoded.StatementBytes,
+		changedSessionDecoded.Commitment, changedSessionDecoded.Proof)
+	if err != nil || valid {
+		t.Fatalf("in-band envelope accepted under a changed session: valid=%v err=%v", valid, err)
+	}
 	t.Logf("compile=%s prove=%s verify=%s (single test sample)", compileDuration, proveDuration, verifyDuration)
 	t.Logf("serialized complete Buckler proof: %d bytes", len(encodedProof))
 	t.Logf("gzip JSON size at BestCompression: %d bytes", compressed.Len())
+	t.Logf("gzip binary size at BestCompression: %d bytes", compressedBinary.Len())
 	t.Logf("canonical binary size: %d bytes", len(binaryProof))
+	proofValue := reflect.ValueOf(proof).Elem()
+	for i := 0; i < proofValue.NumField(); i++ {
+		field := proofValue.Type().Field(i)
+		var fieldBytes bytes.Buffer
+		if err := encodeProofValue(&fieldBytes, proofValue.Field(i)); err != nil {
+			t.Fatalf("measure proof field %s: %v", field.Name, err)
+		}
+		t.Logf("binary proof field %s: %d bytes", field.Name, fieldBytes.Len())
+		if field.Name == "EvalProof" {
+			evaluation := proofValue.Field(i).Elem()
+			for nested := 0; nested < evaluation.NumField(); nested++ {
+				var nestedBytes bytes.Buffer
+				if err := encodeProofValue(&nestedBytes, evaluation.Field(nested)); err != nil {
+					t.Fatalf("measure evaluation field %s: %v", evaluation.Type().Field(nested).Name, err)
+				}
+				t.Logf("binary EvalProof.%s: %d bytes", evaluation.Type().Field(nested).Name, nestedBytes.Len())
+			}
+		}
+		if field.Name == "Witness" {
+			t.Logf("proof witness commitments: %d", proofValue.Field(i).Len())
+		}
+	}
 	t.Logf("binary encode=%s decode=%s (single test sample)", binaryEncodeDuration, binaryDecodeDuration)
 	t.Logf("JSON encode=%s decode=%s (single test sample)", encodeDuration, decodeDuration)
+	t.Logf("canonical public commitment: %d bytes; minimum statement+commitment+proof envelope: %d bytes; fixed carrier envelope: %d bytes",
+		len(commitmentBytes), minimumEnvelopeBytes, len(transportEnvelope))
+	t.Logf("fixed in-band envelope decode=%s; decoded envelope proof verified (single test sample)", transportDecodeDuration)
 	t.Logf("Jindo commitment-plus-proof estimate: %.0f bytes (separate estimate)", prover.JindoParams.Size()/8)
+	for i, modulus := range prover.JindoParams.Operator().Modulus() {
+		t.Logf("inner CRT modulus[%d] width: %d bits", i, bits.Len64(modulus.Value()))
+	}
+	for i, modulus := range prover.JindoParams.OutOperator().Modulus() {
+		t.Logf("outer CRT modulus[%d] width: %d bits", i, bits.Len64(modulus.Value()))
+	}
 
-	changedCommitment := commitment
+	changedCommitment := decodedTransport.Commitment
 	changedCommitment[0] = cloneVector(commitment[0])
 	changedCommitment[0][0].Add(
 		changedCommitment[0][0], new(zp.Uint).New().SetInt64(1),
 	)
-	valid, err = verifyOpening(verifier, fixture.context, changedCommitment, proof)
+	changedCommitmentEnvelope, err := encodeOpeningTransportEnvelope(fixture.context, changedCommitment, proof, openingRank)
 	if err != nil {
-		t.Fatalf("derive changed commitment: %v", err)
+		t.Fatalf("encode changed public commitment envelope: %v", err)
+	}
+	changedTransport, err := decodeOpeningTransportEnvelope(changedCommitmentEnvelope, openingRank)
+	if err != nil {
+		t.Fatalf("decode changed public commitment envelope: %v", err)
+	}
+	valid, err = verifyOpeningAtRank(verifier, openingRank, changedTransport.StatementBytes,
+		changedTransport.Commitment, changedTransport.Proof)
+	if err != nil {
+		t.Fatalf("verify changed commitment envelope: %v", err)
 	}
 	if valid {
-		t.Fatal("accepted proof with changed public commitment")
+		t.Fatal("accepted in-band proof envelope with changed public commitment")
 	}
 
-	valid, err = verifyOpening(verifier, []byte("verifier-session-and-canonical-video-context-B"), commitment, proof)
-	if err != nil {
-		t.Fatalf("verify with changed context: %v", err)
-	}
-	if valid {
-		t.Fatal("accepted original proof under changed public context with fixed commitment")
+	for name, mutate := range map[string]func(*openingStatement){
+		"session challenge": func(s *openingStatement) { s.SessionChallenge[0] ^= 1 },
+		"video commitment":  func(s *openingStatement) { s.VideoCommitment[0] ^= 1 },
+		"carrier positions": func(s *openingStatement) { s.PositionsHash[0] ^= 1 },
+		"codec policy":      func(s *openingStatement) { s.CodecPolicyID[0] ^= 1 },
+		"registry epoch":    func(s *openingStatement) { s.RegistryEpoch++ },
+		"carrier count":     func(s *openingStatement) { s.CarrierCount += 8 },
+	} {
+		changedStatement := statement
+		mutate(&changedStatement)
+		changedContext, marshalErr := marshalOpeningStatement(changedStatement)
+		if marshalErr != nil {
+			t.Fatalf("marshal statement with changed %s: %v", name, marshalErr)
+		}
+		valid, err = verifyOpening(verifier, changedContext, commitment, proof)
+		if err != nil {
+			t.Fatalf("verify with changed %s: %v", name, err)
+		}
+		if valid {
+			t.Errorf("accepted original proof with changed %s and fixed commitment", name)
+		}
 	}
 
 	// Matrix, message and tail mask are never accepted from the prover by
@@ -220,5 +356,64 @@ func TestOpeningRelationAndCapacityProbe(t *testing.T) {
 		t.Logf("out-of-bound randomness rejected by prover: %v", err)
 	} else {
 		t.Log("out-of-bound randomness proof rejected by verifier")
+	}
+}
+
+func TestOpeningRankSizeSweep(t *testing.T) {
+	for _, rank := range []int{256, 512, 1024, 2048, 4096} {
+		t.Run(strconv.Itoa(rank), func(t *testing.T) {
+			statement := validOpeningStatement()
+			statement.ParameterID = sha256.Sum256([]byte(fmt.Sprintf("ringo-probe-parameter-rank-%d", rank)))
+			context, err := marshalOpeningStatement(statement)
+			if err != nil {
+				t.Fatalf("marshal rank-%d statement: %v", rank, err)
+			}
+			fixture, err := newOpeningFixtureWithRank(context, rank)
+			if err != nil {
+				t.Fatalf("build rank-%d fixture: %v", rank, err)
+			}
+			compileStart := time.Now()
+			prover, verifier, err := buckler.Compile(rank, &openingCircuit[*zp.Uint]{
+				NTTChecker: buckler.NewNTTChecker[*zp.Uint](rank),
+			}, fixture.crs)
+			if err != nil {
+				t.Fatalf("compile rank-%d relation: %v", rank, err)
+			}
+			compileDuration := time.Since(compileStart)
+			proveStart := time.Now()
+			proof, err := prover.Prove(&fixture.proverAssignment)
+			if err != nil {
+				t.Fatalf("prove rank-%d opening: %v", rank, err)
+			}
+			proveDuration := time.Since(proveStart)
+			encoded, err := encodeBinaryOpeningProof(proof)
+			if err != nil {
+				t.Fatalf("encode rank-%d proof: %v", rank, err)
+			}
+			var compressed bytes.Buffer
+			gzipWriter, err := gzip.NewWriterLevel(&compressed, gzip.BestCompression)
+			if err != nil {
+				t.Fatalf("create rank-%d proof compressor: %v", rank, err)
+			}
+			if _, err := gzipWriter.Write(encoded); err != nil {
+				t.Fatalf("compress rank-%d proof: %v", rank, err)
+			}
+			if err := gzipWriter.Close(); err != nil {
+				t.Fatalf("finish rank-%d proof compression: %v", rank, err)
+			}
+			decoded, err := decodeBinaryOpeningProof(encoded)
+			if err != nil {
+				t.Fatalf("decode rank-%d proof: %v", rank, err)
+			}
+			verifyStart := time.Now()
+			valid, err := verifyOpeningAtRank(verifier, rank, fixture.context,
+				fixture.publicAssignment.CommitmentNTT, decoded)
+			if err != nil || !valid {
+				t.Fatalf("verify rank-%d decoded proof: valid=%v err=%v", rank, valid, err)
+			}
+			verifyDuration := time.Since(verifyStart)
+			t.Logf("rank=%d compile=%s prove=%s verify=%s binary=%d bytes gzip=%d bytes Jindo-estimate=%.0f bytes",
+				rank, compileDuration, proveDuration, verifyDuration, len(encoded), compressed.Len(), prover.JindoParams.Size()/8)
+		})
 	}
 }
