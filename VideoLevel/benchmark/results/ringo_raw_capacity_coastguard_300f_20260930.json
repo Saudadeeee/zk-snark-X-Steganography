@@ -1,0 +1,50 @@
+{
+  "asset": "coastguard_cif_q22_g1.h264",
+  "blind_extraction_validated": false,
+  "elapsed_sec": 1212.161,
+  "ffmpeg_version": "ffmpeg version 8.0.1-essentials_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers",
+  "frame_count": 300,
+  "frames_per_segment": 100,
+  "framing_bytes": 16,
+  "insufficient_patchable_candidates_proven": false,
+  "measurement": "raw_safe_cavlc_candidates_only",
+  "patchability_capacity_upper_bound_bits": 3827207,
+  "patchability_confirmed_bits": 0,
+  "patchability_confirmed_bits_by_segment": null,
+  "patchability_requested": false,
+  "patchability_result": "not_measured",
+  "patchability_target_bits": 1053680,
+  "patchability_target_met": false,
+  "patchability_total_capacity_measured": false,
+  "patchability_validated": false,
+  "patchability_validation_scope": "not_measured",
+  "proof_artifact": "lattice_zkp_unreviewed_capacity_probe.json",
+  "proof_bytes": 131694,
+  "proof_sha256": "ff568dd27ae12ae0787325c9dc5ef4603442eaf576b45f3b6453b3c02978ad11",
+  "quality_validated": false,
+  "raw_capacity_assessment": {
+    "capacity_bits": 3827207,
+    "fits": true,
+    "framing_bytes": 16,
+    "proof_bytes": 131694,
+    "remaining_bits": 2773527,
+    "required_bits": 1053680,
+    "required_to_capacity_ratio": 0.275313,
+    "shortfall_bits": 0
+  },
+  "raw_fit_is_sufficient_for_embedding": false,
+  "raw_safe_bits_by_segment": [
+    1260923,
+    1276734,
+    1289550
+  ],
+  "raw_safe_carrier_bits": 3827207,
+  "segment_count": 3,
+  "segment_frame_counts": [
+    100,
+    100,
+    100
+  ],
+  "video_bytes": 9848478,
+  "video_sha256": "9745d20964bda7d938ce0f5ccd4adda5c08ebe57a5a6b89ad6ac17ffe7a1b2ec"
+}

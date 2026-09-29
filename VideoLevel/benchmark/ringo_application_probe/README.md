@@ -60,8 +60,17 @@ payload length/carrier count, carrier-position digest and normalized-video
 commitment. Tests verify a proof under that context, then reject it when the
 session, video digest, positions, codec policy, registry epoch or carrier
 count changes. These values are fixtures, not values independently derived
-from a real received video or trusted registry; replay-state and
-challenge-expiry services are not implemented.
+from a real received video or trusted registry; trusted registry resolution
+and production replay/expiry services are not implemented. The probe's
+process-local policy limitations are described below.
+
+`newOpeningFixtureWithRankAndPayload` now accepts an actual caller-provided
+32-byte payload and samples the private ternary opening randomness; the
+payload is encoded MSB-first into the witness bits. A real local proof test
+proved and verified two distinct caller payloads under the same context and
+observed distinct canonical public commitments. A non-32-byte payload is
+rejected. This makes the isolated relation testable with arbitrary payload
+values; it does not provide a production payload-commitment enrollment flow.
 
 The in-band `RZV1` envelope now includes that 282-byte statement, the complete
 canonical public commitment, and the binary proof, with zero padding to the
@@ -72,5 +81,21 @@ truncation, bad magic, forged field lengths, nonzero padding, changed session,
 and changed public commitment are rejected. This is a transport-codec probe,
 not actual H.264 embedding. Against the same cover's 541,570-byte raw-capacity
 upper bound, even the 2,000,000-byte fixed profile is 3.69x too large.
+
+The research verifier also has a process-local session gate in `policy.go`.
+`Register` pins the exact canonical public statement, expected canonical public
+commitment and a server-supplied expiry; `VerifyAndConsume` checks the
+registered statement/commitment before decoding the large proof, rejects
+expired/unknown/replayed challenges, and marks a session spent only after
+proof verification succeeds. A pending state prevents two
+concurrent submissions from both verifying successfully; malformed or
+cryptographically invalid proofs do not consume the session. Tests exercised
+concurrent replay, expiry, unknown sessions, changed video context, and a
+different but cryptographically valid proof/commitment under the same session;
+only the registered commitment was accepted. This is volatile in-memory
+state only: it does not survive process restart or coordinate multiple
+verifier instances, and there is no trusted session-issuance API. It is not a
+production replay/expiry service or evidence that a video pipeline meets the
+full objective.
 
 On this Windows/amd64 host, plain `go test -race` aborts at an upstream CRT assembly `checkptr` alignment check. `go test -race -gcflags=all=-d=checkptr=0 -count=1 ./...` passed with the complete current test, but disabling `checkptr` does **not** resolve or exonerate the dependency issue. See [the recorded assessment](../results/ringo_opening_probe_20260929.md).

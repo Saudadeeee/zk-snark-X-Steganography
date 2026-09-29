@@ -157,6 +157,74 @@ This validates only the probe's fixed-profile codec. No Ringo proof was
 embedded into or blindly extracted from H.264, and the fixture statement is
 not resolved against a live verifier policy or replay/expiry service.
 
+### Process-local session-policy probe
+
+The fixture constructor was generalized to accept a caller-supplied 32-byte
+payload and sample fresh private ternary opening randomness. A real test proved
+and verified two different payload values under the same public context, and
+observed different canonical commitment encodings; a wrong-length payload was
+rejected. This removes the probe's hard-coded-message limitation, but the
+commitment is still produced by this fixture, not enrolled by a trusted issuer
+or derived from a deployed session registry.
+
+`policy.go` adds a research-only verifier registry keyed by the 32-byte session
+challenge. Registration pins the exact canonical `RGOS` statement bytes, the
+expected canonical public commitment digest, and a server-supplied expiry in
+memory. This commitment pin is required: checking only a statement would allow
+a prover to supply a different commitment and a valid proof for another
+payload under that same session. Verification peeks the bounded header,
+statement and commitment first, rejects unknown/expired/mismatched sessions
+before decoding the large proof, marks the challenge pending to serialize
+concurrent attempts, then consumes it only if the decoded proof verifies and
+the session is still unexpired. Invalid or unregistered-commitment proofs
+release the pending state without spending the challenge.
+
+`TestOpeningVerifierPolicyExpiryReplayAndStatementPinning` generated and
+verified a real local Ringo proof: in a two-request concurrent replay, exactly
+one was accepted; the expired session, unregistered session and changed video
+statement were rejected. `TestOpeningVerifierPolicyDoesNotSpendSessionOnInvalidProof`
+generated and independently verified a second valid proof for a different
+private bit payload and commitment under the same statement. The session
+policy rejected that alternate valid proof because its commitment was not the
+verifier-registered target; the original valid proof could still use the
+session. Targeted tests and race-enabled policy tests passed. This is volatile
+single-process state, not persistent or distributed
+replay protection. Session issuance is not an authenticated API, and the policy
+is not connected to H.264 extraction or the application verifier.
+
+### Additional real-video raw-capacity diagnostic
+
+The existing 300-frame `data/encoded/coastguard_cif_q22_g1.h264` was scanned
+with the repository's `benchmark.streaming_capacity_scan` implementation and
+FFmpeg 8.0.1. The saved result is
+`benchmark/results/ringo_raw_capacity_coastguard_300f_20260930.json`:
+
+| Video | Frames | Raw-safe candidates | Scan time | Approx. scan rate | Quality validated | Blind extraction validated |
+|---|---:|---:|---:|---:|---|---|
+| Coastguard CIF QP22/GOP1 | 300 | 3,827,207 bits (478,401 B) | 1,212.161 s | 0.247 frame/s | No | No |
+
+This is only an upper bound on raw CAVLC-safe positions. It does not measure
+patchability, final image quality, extraction, or proof embedding. The current
+minimum Ringo verifier envelope (1,916,177 B) is about **4.01x** this clip's
+raw capacity; its 2,000,000-byte fixed profile is about **4.18x**. The measured
+raw capacity is notably content/profile-specific and must not be extrapolated
+from the earlier 3,000-frame Coastguard file.
+
+The scanner's JSON `proof_bytes`/`fits` fields refer to the older 131,694-byte
+LNP22 diagnostic file passed to the legacy scanner CLI; they do **not** assess
+the Ringo envelope. Use `raw_safe_carrier_bits` for the candidate count and the
+1,916,177-byte calculation above for the Ringo comparison. An explicit
+allowlist was added because benchmark JSON is ignored by default.
+
+A fresh raw scan of `coastguard_cif_q22_g1_3000f.h264` with the same current
+command was started to compare against its retained 2026-09-27 raw scan. It
+was stopped after 30 minutes because it remained CPU-active without producing
+the final report. Therefore there is no new comparable 3,000-frame result;
+the old 4,332,560-bit/541,570-byte artifact remains historical evidence only.
+This 30-minute non-completion is an offline scanner runtime observation, not a
+completed benchmark result and not proof that the 3,000-frame scan would never
+finish.
+
 ## Interpretation and limits
 
 The earlier 550,249-byte figure was an estimate, not an encoded proof size.

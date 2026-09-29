@@ -74,7 +74,13 @@ func encodeOpeningTransportEnvelope(
 
 // decodeOpeningTransportEnvelope accepts the fixed-size in-band object using
 // rank/size parameters chosen by the verifier, not values selected from data.
-func decodeOpeningTransportEnvelope(encoded []byte, expectedRank int) (*openingTransportEnvelope, error) {
+func decodeOpeningTransportEnvelope(encoded []byte, expectedRank int) (decoded *openingTransportEnvelope, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			decoded = nil
+			err = fmt.Errorf("malformed opening transport envelope caused decoder panic: %v", recovered)
+		}
+	}()
 	if err := validateOpeningCommitmentRank(expectedRank); err != nil {
 		return nil, err
 	}
@@ -134,4 +140,47 @@ func decodeOpeningTransportEnvelope(encoded []byte, expectedRank int) (*openingT
 		Proof:           proof,
 		ProofBytes:      append([]byte(nil), proofBytes...),
 	}, nil
+}
+
+// peekOpeningTransportStatement checks only the bounded fixed header and
+// canonical statement, allowing verifier policy to reject unknown/expired
+// sessions before allocating and decoding the potentially large proof.
+func peekOpeningTransportStatement(encoded []byte, expectedRank int) ([]byte, []byte, openingStatement, error) {
+	var zero openingStatement
+	if err := validateOpeningCommitmentRank(expectedRank); err != nil {
+		return nil, nil, zero, err
+	}
+	if len(encoded) < openingTransportHeaderSize || len(encoded) > maxOpeningTransportBytes {
+		return nil, nil, zero, errors.New("opening transport envelope size is out of range")
+	}
+	if !bytes.Equal(encoded[:len(openingTransportMagic)], []byte(openingTransportMagic)) {
+		return nil, nil, zero, errors.New("opening transport envelope magic is invalid")
+	}
+	offset := len(openingTransportMagic)
+	statementLength := uint64(binary.BigEndian.Uint32(encoded[offset:]))
+	offset += 4
+	commitmentLength := uint64(binary.BigEndian.Uint32(encoded[offset:]))
+	offset += 4
+	proofLength := uint64(binary.BigEndian.Uint32(encoded[offset:]))
+	offset += 4
+	expectedCommitmentLength := uint64(openingCommitmentHeaderBytes + openingRows*expectedRank*zp.Bytes)
+	if statementLength != openingStatementSize || commitmentLength != expectedCommitmentLength ||
+		proofLength == 0 || proofLength > maxOpeningProofBytes {
+		return nil, nil, zero, errors.New("opening transport envelope field lengths do not match verifier parameters")
+	}
+	bodyLength := uint64(openingTransportHeaderSize) + statementLength + commitmentLength + proofLength
+	if bodyLength > uint64(len(encoded)) {
+		return nil, nil, zero, errors.New("opening transport envelope is truncated")
+	}
+	statementEnd := offset + int(statementLength)
+	commitmentEnd := statementEnd + int(commitmentLength)
+	statementBytes := encoded[offset:statementEnd]
+	statement, err := parseOpeningStatement(statementBytes)
+	if err != nil {
+		return nil, nil, zero, fmt.Errorf("parse transport statement: %w", err)
+	}
+	if statement.CarrierCount/8 != uint64(len(encoded)) {
+		return nil, nil, zero, errors.New("opening transport length differs from the verifier-pinned carrier count")
+	}
+	return append([]byte(nil), statementBytes...), encoded[statementEnd:commitmentEnd], statement, nil
 }

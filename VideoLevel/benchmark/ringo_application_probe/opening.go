@@ -88,8 +88,15 @@ func newOpeningFixture(context []byte) (*openingFixture, error) {
 }
 
 func newOpeningFixtureWithRank(context []byte, rank int) (*openingFixture, error) {
+	return newOpeningFixtureWithRankAndPayload(context, rank, defaultOpeningPayload())
+}
+
+func newOpeningFixtureWithRankAndPayload(context []byte, rank int, payload []byte) (*openingFixture, error) {
 	if len(context) == 0 {
 		return nil, errors.New("context required")
+	}
+	if len(payload) != openingPayloadBytes {
+		return nil, fmt.Errorf("opening payload must be exactly %d bytes", openingPayloadBytes)
 	}
 	if rank < openingPayloadBytes*8 || rank&(rank-1) != 0 {
 		return nil, errors.New("opening rank must be a power of two at least as large as the payload bit length")
@@ -110,8 +117,7 @@ func newOpeningFixtureWithRank(context []byte, rank int) (*openingFixture, error
 		f.randomNTT[i] = f.ring.FwdNTT(coeffs)
 	}
 	f.bitCoeffs = f.ring.NewPoly(false)
-	for i := 0; i < openingPayloadBytes; i++ {
-		value := byte(i*7 + 3)
+	for i, value := range payload {
 		for bit := 0; bit < 8; bit++ {
 			f.bitCoeffs.Coeffs[i*8+bit].SetInt64(int64((value >> (7 - bit)) & 1))
 		}
@@ -121,6 +127,14 @@ func newOpeningFixtureWithRank(context []byte, rank int) (*openingFixture, error
 		return nil, err
 	}
 	return f, nil
+}
+
+func defaultOpeningPayload() []byte {
+	payload := make([]byte, openingPayloadBytes)
+	for i := range payload {
+		payload[i] = byte(i*7 + 3)
+	}
+	return payload
 }
 
 func (f *openingFixture) rebuildAssignments() error {

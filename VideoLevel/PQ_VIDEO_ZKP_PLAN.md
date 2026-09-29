@@ -2346,8 +2346,10 @@ carrier-position hash, codec/carrier profile, relation/parameter/registry IDs,
 epoch, payload length and carrier count. Reusing a proof while changing each
 of those tested context fields is rejected with the public commitment fixed.
 The test digests remain fixtures: video hashing, blind position derivation,
-trusted registry resolution, spent-token tracking and challenge expiry are
-not implemented in this probe. This is relation plumbing, not production ZK.
+and trusted registry resolution are not implemented in this probe. A
+process-local experimental session policy is described below; it is not
+durable/shared production replay protection. This is relation plumbing, not
+production ZK.
 
 The probe's fixed-profile `RZV1` envelope now includes the complete 282-byte
 statement, rank-8192 262,152-byte canonical public commitment, and binary
@@ -2357,3 +2359,44 @@ truncation, bad magic and nonzero padding are rejected. This validates only a
 transport codec: the Ringo proof is still not embedded/extracted from H.264,
 and the measured 3,000-frame cover's raw-capacity upper bound is only 541,570
 bytes.
+
+The prover-side test fixture now accepts a caller-supplied 32-byte payload and
+samples private ternary opening randomness instead of hard-coding its message
+bits. A real proof test accepted two distinct payloads under the same public
+context and observed distinct public commitments; invalid payload lengths are
+rejected. This closes a prototype usability gap only: commitment enrollment
+must still come from a trusted issuer/session service, which is not
+implemented, and the custom lattice commitment is not independently reviewed.
+
+The research-only `policy.go` gate now registers the exact public statement,
+expected public commitment digest, and verifier-supplied expiry by session
+challenge. Pinning the commitment is essential: otherwise a prover could
+present a different commitment and a valid proof for another payload under
+the same statement. It rejects unknown, expired, altered-context,
+unregistered-commitment and previously consumed sessions; one pending marker
+prevents concurrent replay, and only a successfully verified proof consumes
+the challenge. Tests generated a second, valid proof for another bit payload
+and confirmed the policy rejects its unregistered commitment without consuming
+the session. This state is volatile and process-local, has no trusted
+session-issuance API, and cannot protect across restarts or multiple verifier
+instances. Race
+testing of the policy tests passed with `-gcflags=all=-d=checkptr=0`; this
+workaround is required because the pinned upstream CRT assembly fails Go's
+default checkptr alignment check, which remains unresolved. No session policy
+is integrated into the application's video-only verifier.
+
+### Raw capacity scan runtime recheck (2026-09-30)
+
+Using the current `benchmark.streaming_capacity_scan`, the 300-frame
+`coastguard_cif_q22_g1.h264` produced 3,827,207 raw-safe bits (478,401 bytes)
+in 1,212.161 seconds, approximately 0.247 frame/s. The report explicitly marks
+quality validation, blind extraction and patchability as false/not measured.
+The complete minimum Ringo envelope (1,916,177 bytes) is 4.01x this raw upper
+bound. This is not a valid embedding or throughput benchmark.
+
+A same-command recheck of the retained 3,000-frame file remained CPU-active
+without output for 30 minutes and was interrupted; no result file was
+produced. The old 3,000-frame 4,332,560-bit scan remains historical and cannot
+be directly compared with the new 300-frame asset until the input/profile and
+scanner discrepancy are resolved. The 300-frame result and incomplete recheck
+are recorded in the linked Ringo wire report.
