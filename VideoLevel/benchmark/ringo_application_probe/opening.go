@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha3"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/sp301415/ringo-snark/buckler"
@@ -197,7 +198,13 @@ func verifyOpening(
 	context []byte,
 	commitment [openingRows]buckler.PublicWitness[*zp.Uint],
 	proof *buckler.Proof[*zp.Uint],
-) (bool, error) {
+) (valid bool, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			valid = false
+			err = fmt.Errorf("malformed proof caused verifier panic: %v", recovered)
+		}
+	}()
 	if verifier == nil || proof == nil {
 		return false, errors.New("verifier and proof required")
 	}

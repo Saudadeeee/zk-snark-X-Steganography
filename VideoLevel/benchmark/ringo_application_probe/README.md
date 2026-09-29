@@ -15,6 +15,23 @@ go vet ./...
 go test -count=1 -v ./...
 ```
 
-The test accepts one valid witness and rejects changed commitment, changed context with the same commitment, non-Boolean payload, nonzero payload tail, and out-of-bound randomness. Its timing log is one local run, not a production benchmark. `prover.JindoParams.Size()/8` is a **550,249-byte estimate of Jindo commitments plus proof**, not measured serialized Buckler proof bytes. This pinned Buckler revision has no complete canonical proof encoder/decoder. No H.264 embedding, blind extraction, video quality or real session-policy test is performed here.
+The test accepts one valid witness and rejects changed commitment, changed context with the same commitment, non-Boolean payload, nonzero payload tail, and out-of-bound randomness. Its timing log is one local run, not a production benchmark. `prover.JindoParams.Size()/8` is a **550,249-byte estimate of Jindo commitments plus proof**, not serialized Buckler proof bytes. `proof_codec.go` provides a strict JSON codec and a schema-pinned binary codec for this experiment; neither is an adopted production format. No H.264 embedding, blind extraction, video quality or real session-policy test is performed here.
+
+The complete-proof serialization rechecks on 2026-09-30 produced JSON proofs
+from **2,710,137 to 2,710,642 bytes** and one schema-pinned binary proof of
+**1,653,727 bytes**. These compare with the 550,249-byte estimate. Gzip at best
+compression reduced one JSON sample to **1,281,918 bytes**. Neither binary nor
+gzip fits the earlier measured carrier budget. A decoded proof verified;
+the test rejected non-canonical/trailing
+encodings, an empty proof structure, malformed proof shapes, changed context,
+changed public commitment, non-Boolean payload, nonzero tail and randomness
+outside the configured bound. The measured artifacts are far beyond the
+10,779-byte carrier budget reported for the earlier Coastguard transport, so
+these encodings do not fit that measured clip. This is a format-specific result,
+not a proof that every video lacks sufficient capacity. The retained raw
+capacity scan for the same 3,000-frame Coastguard asset measured 541,570 bytes
+before patchability/quality losses; even raw candidates are 3.05x too small for
+the binary proof plus framing. The full run details are in
+[`ringo_opening_proof_wire_recheck_20260930.md`](../results/ringo_opening_proof_wire_recheck_20260930.md).
 
 On this Windows/amd64 host, plain `go test -race` aborts at an upstream CRT assembly `checkptr` alignment check. `go test -race -gcflags=all=-d=checkptr=0 -count=1 ./...` passed with the complete current test, but disabling `checkptr` does **not** resolve or exonerate the dependency issue. See [the recorded assessment](../results/ringo_opening_probe_20260929.md).

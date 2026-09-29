@@ -2287,3 +2287,32 @@ codec. Jindo's **550,249-byte estimated** commitment-plus-proof size is about
 not measured serialized proof bytes or a universal capacity lower bound. Plain
 race testing also hits an upstream CRT assembly `checkptr` failure. Keep this
 module outside the production registry; no in-video lattice ZKP is claimed.
+
+### Ringo/Buckler proof-wire measurement (2026-09-30)
+
+Added bounded, canonical JSON and schema-pinned binary codecs for the complete
+`buckler.Proof` object, including shape rejection before verification and
+panic-to-rejection handling at the probe verifier boundary. A decoded binary
+proof verified successfully. In the recorded run JSON measured 2,710,137 bytes,
+the binary encoding 1,653,727 bytes, and `JindoParams.Size()/8` estimated
+550,249 bytes. Gzip BestCompression produced 1,281,918 bytes. JSON, binary and
+gzip therefore remain about 251x, 153x and 119x the measured 10,779-byte
+Coastguard envelope. One run measured 26.46 ms compile, 300.89 ms proving,
+126.79 ms verify, 65.21/145.78 ms JSON encode/decode and 46.21/100.02 ms binary
+encode/decode; these are single local samples, not a benchmark distribution.
+These formats do not fit that carrier; this says nothing universal about other
+videos. They are research codecs, not production wire formats, and do not
+address the unreviewed commitment/security parameters, CRS generation,
+video/session canonicalization, or the separate plain-race upstream failure.
+The retained 3,000-frame Coastguard raw-capacity scan found 4,332,560 raw-safe
+bits (541,570 bytes) before patchability and quality losses. The current binary
+proof plus 16-byte framing needs 1,653,743 bytes, 3.05x that raw upper bound;
+this exact 3,000-frame cover therefore cannot carry it. No in-video Ringo proof
+run was attempted. Full measurements and commands are recorded in
+[`benchmark/results/ringo_opening_proof_wire_recheck_20260930.md`](benchmark/results/ringo_opening_proof_wire_recheck_20260930.md).
+
+The Ringo path still cannot be promoted: the probe is not integrated with
+H.264 embedding/extraction or the public APIs, has no independent cryptographic
+review, and has not demonstrated a compact proof that fits even the measured
+long-video carrier. The default shipped path remains the ML-DSA receipt
+reference with a sidecar; it does not satisfy the active lattice-ZK goal.

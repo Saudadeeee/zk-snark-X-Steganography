@@ -1,6 +1,8 @@
 package openingprobe
 
 import (
+	"bytes"
+	"compress/gzip"
 	"testing"
 	"time"
 
@@ -27,9 +29,75 @@ func TestOpeningRelationAndCapacityProbe(t *testing.T) {
 		t.Fatalf("prove valid opening: %v", err)
 	}
 	proveDuration := time.Since(proveStart)
+	encodeStart := time.Now()
+	encodedProof, err := encodeOpeningProof(proof)
+	if err != nil {
+		t.Fatalf("encode complete opening proof: %v", err)
+	}
+	encodeDuration := time.Since(encodeStart)
+	decodeStart := time.Now()
+	decodedProof, err := decodeOpeningProof(encodedProof)
+	if err != nil {
+		t.Fatalf("decode complete opening proof: %v", err)
+	}
+	decodeDuration := time.Since(decodeStart)
+	canonicalProof, err := encodeOpeningProof(decodedProof)
+	if err != nil || !bytes.Equal(encodedProof, canonicalProof) {
+		t.Fatalf("proof codec failed canonical round trip: err=%v", err)
+	}
+	binaryEncodeStart := time.Now()
+	binaryProof, err := encodeBinaryOpeningProof(proof)
+	if err != nil {
+		t.Fatalf("encode compact binary proof: %v", err)
+	}
+	binaryEncodeDuration := time.Since(binaryEncodeStart)
+	binaryDecodeStart := time.Now()
+	decodedBinaryProof, err := decodeBinaryOpeningProof(binaryProof)
+	if err != nil {
+		t.Fatalf("decode compact binary proof: %v", err)
+	}
+	binaryDecodeDuration := time.Since(binaryDecodeStart)
+	canonicalBinary, err := encodeBinaryOpeningProof(decodedBinaryProof)
+	if err != nil || !bytes.Equal(binaryProof, canonicalBinary) {
+		t.Fatalf("binary proof codec failed canonical round trip: err=%v", err)
+	}
+	var compressed bytes.Buffer
+	gzipWriter, err := gzip.NewWriterLevel(&compressed, gzip.BestCompression)
+	if err != nil {
+		t.Fatalf("create proof compression probe: %v", err)
+	}
+	gzipWriter.Header.ModTime = time.Time{}
+	if _, err := gzipWriter.Write(encodedProof); err != nil {
+		t.Fatalf("compress proof JSON: %v", err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatalf("finish proof compression probe: %v", err)
+	}
+	for name, malformed := range map[string][]byte{
+		"empty":               nil,
+		"truncated":           encodedProof[:len(encodedProof)/2],
+		"trailing whitespace": append(append([]byte(nil), encodedProof...), ' '),
+		"second JSON value":   append(append([]byte(nil), encodedProof...), []byte(`{}`)...),
+		"empty proof object":  []byte(`{"protocol":"zkstego-ringo-opening-probe-v1","proof":{}}`),
+	} {
+		if _, err := decodeOpeningProof(malformed); err == nil {
+			t.Errorf("proof codec accepted malformed input (%s)", name)
+		}
+	}
+	for name, malformed := range map[string][]byte{
+		"empty":            nil,
+		"truncated":        binaryProof[:len(binaryProof)/2],
+		"trailing byte":    append(append([]byte(nil), binaryProof...), 0),
+		"wrong magic":      append([]byte("BAD1"), binaryProof[len(openingBinaryMagic):]...),
+		"empty proof body": append([]byte(openingBinaryMagic), 1, 0),
+	} {
+		if _, err := decodeBinaryOpeningProof(malformed); err == nil {
+			t.Errorf("binary codec accepted malformed input (%s)", name)
+		}
+	}
 	verifyStart := time.Now()
 	commitment := fixture.publicAssignment.CommitmentNTT
-	valid, err := verifyOpening(verifier, fixture.context, commitment, proof)
+	valid, err := verifyOpening(verifier, fixture.context, commitment, decodedBinaryProof)
 	if err != nil {
 		t.Fatalf("derive verifier public input: %v", err)
 	}
@@ -38,7 +106,12 @@ func TestOpeningRelationAndCapacityProbe(t *testing.T) {
 	}
 	verifyDuration := time.Since(verifyStart)
 	t.Logf("compile=%s prove=%s verify=%s (single test sample)", compileDuration, proveDuration, verifyDuration)
-	t.Logf("Jindo commitment-plus-proof estimate: %.0f bytes (not serialized proof)", prover.JindoParams.Size()/8)
+	t.Logf("serialized complete Buckler proof: %d bytes", len(encodedProof))
+	t.Logf("gzip JSON size at BestCompression: %d bytes", compressed.Len())
+	t.Logf("canonical binary size: %d bytes", len(binaryProof))
+	t.Logf("binary encode=%s decode=%s (single test sample)", binaryEncodeDuration, binaryDecodeDuration)
+	t.Logf("JSON encode=%s decode=%s (single test sample)", encodeDuration, decodeDuration)
+	t.Logf("Jindo commitment-plus-proof estimate: %.0f bytes (separate estimate)", prover.JindoParams.Size()/8)
 
 	changedCommitment := commitment
 	changedCommitment[0] = cloneVector(commitment[0])
@@ -71,6 +144,11 @@ func TestOpeningRelationAndCapacityProbe(t *testing.T) {
 	}
 	if _, err = verifyOpening(verifier, fixture.context, [openingRows]buckler.PublicWitness[*zp.Uint]{commitment[0]}, proof); err == nil {
 		t.Fatal("accepted malformed public commitment length")
+	}
+	malformedProof := *decodedProof
+	malformedProof.Witness = decodedProof.Witness[:1]
+	if valid, err = verifyOpening(verifier, fixture.context, commitment, &malformedProof); err == nil || valid {
+		t.Fatalf("malformed proof shape was not rejected safely: valid=%v err=%v", valid, err)
 	}
 
 	badBit := fixture.withBitCoefficient(0, 2)
