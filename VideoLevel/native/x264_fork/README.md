@@ -98,8 +98,11 @@ output without errors. x264 reported 11 I frames and 289 P frames: repeated
 IDRs were forced while the payload remained, which is a visible coding-cost
 tradeoff and needs broad bitrate/quality/performance measurement. These runs
 verify byte-payload transport only, not ZK proof E2E, and do not yet include
-PSNR/SSIM or RAM measurements. Assembly optimizations were disabled, so timing
-must not be generalized to normal x264 builds.
+RAM measurement. An aligned, frame-by-frame FFmpeg comparison against the
+source Y4M measured average PSNR 45.07 dB and SSIM 0.984705. These are whole
+encode results, not an isolated measurement of the embedding distortion versus
+the same encoder run without payload. Assembly optimizations were disabled, so
+timing must not be generalized to normal x264 builds.
 
 The original x264 fork changes were compiled against the pinned commit on the
 project Windows/UCRT64 toolchain. Full 8-/10-bit rebuild coverage and blind
