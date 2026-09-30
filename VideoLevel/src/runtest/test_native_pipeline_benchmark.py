@@ -1,4 +1,5 @@
 from benchmark.native_pipeline_matrix import (
+    escape_filter_path,
     parse_encoder_result,
     parse_metric_log,
 )
@@ -37,3 +38,7 @@ def test_parse_per_frame_psnr_and_ssim_logs():
         {"frame": 1, "psnr_db": 38.13, "ssim": 0.987},
         {"frame": 2, "psnr_db": 37.34, "ssim": 0.977},
     ]
+
+
+def test_escape_windows_drive_colon_for_ffmpeg_filtergraph():
+    assert escape_filter_path(r"D:\bench\frame metrics.log") == r"D\:/bench/frame metrics.log"
