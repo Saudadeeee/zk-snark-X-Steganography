@@ -41,6 +41,7 @@ int zks_x264_encoder_encode_i420(
     ZksEncodedNalCallback callback,
     void *opaque
 );
+uint64_t zks_x264_encoder_embedded_bits(const ZksX264Encoder *encoder);
 void zks_x264_encoder_close(ZksX264Encoder *encoder);
 
 #ifdef __cplusplus

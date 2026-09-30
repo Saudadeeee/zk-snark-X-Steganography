@@ -32,9 +32,35 @@ if(ZKS_WITH_X264)
   add_library(zkstego_x264 STATIC src/x264_encoder.c)
   target_include_directories(zkstego_x264 PUBLIC include PRIVATE ${X264_INCLUDE_DIR})
   target_link_libraries(zkstego_x264 PUBLIC ${X264_LIBRARY})
+
+  add_executable(zkstego_x264_smoke x264_fork/tests/zkstego_x264_smoke.c)
+  target_include_directories(zkstego_x264_smoke PRIVATE ${X264_INCLUDE_DIR})
+  target_link_libraries(zkstego_x264_smoke PRIVATE ${X264_LIBRARY})
+  set(ZKS_X264_SMOKE_VIDEO "${CMAKE_CURRENT_BINARY_DIR}/zkstego_x264_smoke.h264")
+  add_test(NAME zkstego_x264_smoke
+    COMMAND zkstego_x264_smoke "${ZKS_X264_SMOKE_VIDEO}")
+
+  add_executable(zkstego_x264_adapter_smoke x264_fork/tests/zkstego_adapter_smoke.c)
+  target_link_libraries(zkstego_x264_adapter_smoke PRIVATE zkstego_x264)
+  add_test(NAME zkstego_x264_adapter_smoke COMMAND zkstego_x264_adapter_smoke)
+
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME zkstego_blind_extract_smoke
+      COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/x264_fork/tests/blind_extract_smoke.py"
+        "${ZKS_X264_SMOKE_VIDEO}" a5)
+    set_tests_properties(zkstego_blind_extract_smoke
+      PROPERTIES DEPENDS zkstego_x264_smoke)
+  endif()
+
   if(MSVC)
     target_compile_options(zkstego_x264 PRIVATE /W4 /WX)
+    target_compile_options(zkstego_x264_smoke PRIVATE /W4 /WX)
+    target_compile_options(zkstego_x264_adapter_smoke PRIVATE /W4 /WX)
   else()
     target_compile_options(zkstego_x264 PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(zkstego_x264_smoke PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(zkstego_x264_adapter_smoke PRIVATE -Wall -Wextra -Wpedantic -Werror)
   endif()
 endif()

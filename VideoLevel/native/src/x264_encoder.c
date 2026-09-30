@@ -15,15 +15,18 @@ int zks_x264_encoder_open(const ZksX264Config *config, ZksX264Encoder **out_enco
     x264_param_t param;
     ZksX264Encoder *state;
     int keyint;
-    if (!config || !out_encoder || config->width <= 0 || config->height <= 0 ||
-        (config->width & 1) || (config->height & 1) || config->fps_num <= 0 || config->fps_den <= 0) {
-        return ZKS_ERR_ARGUMENT;
-    }
-    if (config->direct_payload_size > (size_t)INT_MAX ||
-        (config->direct_payload_size != 0u && !config->direct_payload)) {
+    if (!out_encoder) {
         return ZKS_ERR_ARGUMENT;
     }
     *out_encoder = NULL;
+    if (!config || config->width <= 0 || config->height <= 0 ||
+        (config->width & 1) || (config->height & 1) || config->fps_num <= 0 || config->fps_den <= 0) {
+        return ZKS_ERR_ARGUMENT;
+    }
+    if (config->direct_payload_size > (size_t)(INT_MAX / 8) ||
+        (config->direct_payload_size != 0u && !config->direct_payload)) {
+        return ZKS_ERR_ARGUMENT;
+    }
     if (x264_param_default_preset(&param, "ultrafast", "zerolatency") < 0) {
         return ZKS_ERR_FORMAT;
     }
@@ -116,6 +119,13 @@ int zks_x264_encoder_encode_i420(
         }
     }
     return ZKS_OK;
+}
+
+uint64_t zks_x264_encoder_embedded_bits(const ZksX264Encoder *encoder) {
+    if (!encoder || !encoder->encoder) {
+        return 0u;
+    }
+    return x264_encoder_zkstego_embedded_bits(encoder->encoder);
 }
 
 void zks_x264_encoder_close(ZksX264Encoder *encoder) {
