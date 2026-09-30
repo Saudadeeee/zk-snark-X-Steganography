@@ -44,6 +44,15 @@ if(ZKS_WITH_X264)
   target_link_libraries(zkstego_x264_adapter_smoke PRIVATE zkstego_x264)
   add_test(NAME zkstego_x264_adapter_smoke COMMAND zkstego_x264_adapter_smoke)
 
+  add_executable(zkstego_x264_y4m src/x264_y4m_embed.c)
+  target_link_libraries(zkstego_x264_y4m PRIVATE zkstego_x264)
+  set(ZKS_Y4M_SMOKE_VIDEO "${CMAKE_CURRENT_BINARY_DIR}/zkstego_y4m_smoke.h264")
+  add_test(NAME zkstego_x264_y4m_embed
+    COMMAND zkstego_x264_y4m
+      --input-y4m "${CMAKE_CURRENT_SOURCE_DIR}/../data/raw/akiyo_cif.y4m"
+      --output "${ZKS_Y4M_SMOKE_VIDEO}"
+      --payload-hex 5a4b5650010100000001112ebd16a5)
+
   find_package(Python3 COMPONENTS Interpreter QUIET)
   if(Python3_Interpreter_FOUND)
     add_test(NAME zkstego_blind_extract_smoke
@@ -52,15 +61,23 @@ if(ZKS_WITH_X264)
         "${ZKS_X264_SMOKE_VIDEO}" a5)
     set_tests_properties(zkstego_blind_extract_smoke
       PROPERTIES DEPENDS zkstego_x264_smoke)
+    add_test(NAME zkstego_y4m_blind_extract
+      COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/x264_fork/tests/blind_extract_smoke.py"
+        "${ZKS_Y4M_SMOKE_VIDEO}" a5)
+    set_tests_properties(zkstego_y4m_blind_extract
+      PROPERTIES DEPENDS zkstego_x264_y4m_embed)
   endif()
 
   if(MSVC)
     target_compile_options(zkstego_x264 PRIVATE /W4 /WX)
     target_compile_options(zkstego_x264_smoke PRIVATE /W4 /WX)
     target_compile_options(zkstego_x264_adapter_smoke PRIVATE /W4 /WX)
+    target_compile_options(zkstego_x264_y4m PRIVATE /W4 /WX)
   else()
     target_compile_options(zkstego_x264 PRIVATE -Wall -Wextra -Wpedantic -Werror)
     target_compile_options(zkstego_x264_smoke PRIVATE -Wall -Wextra -Wpedantic -Werror)
     target_compile_options(zkstego_x264_adapter_smoke PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(zkstego_x264_y4m PRIVATE -Wall -Wextra -Wpedantic -Werror)
   endif()
 endif()
