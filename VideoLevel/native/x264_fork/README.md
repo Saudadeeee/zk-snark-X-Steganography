@@ -19,6 +19,11 @@ by one, preserving the decoder's eligibility test. The API rejects CABAC,
 lossless, interlaced, 8x8-transform, multi-threaded, and non-I420 payload
 configurations. There is no payload update API; the supplied bytes must remain
 valid and unchanged until the encoder is closed.
+In direct-payload mode, the fork also suppresses x264's identification SEI in
+both `x264_encoder_headers()` and the ordinary encode path. The native adapter
+does not enable HRD or attach custom SEI; its emitted-stream smoke test rejects
+every NAL unit of type 6. This means the proof/payload transport has no SEI
+dependency and the tested adapter output has no SEI NALs at all.
 
 Apply and build with an x264 checkout:
 
@@ -37,7 +42,8 @@ enforces that bound.
 
 `tests/zkstego_x264_smoke.c` encodes a deterministic I420 frame, checks that
 unsupported modes and oversized payloads are rejected, and asserts that all
-120 framed bits were committed. A second fixture constrains x264 to I16x16
+120 framed bits were committed, and rejects every SEI NAL in the emitted
+stream. A second fixture constrains x264 to I16x16
 macroblocks and confirms those non-carrier blocks consume zero I4x4 payload
 bits. `tests/blind_extract_smoke.py` uses the repository CAVLC parser to
 rederive carrier coordinates from the emitted stream and recover the fixture

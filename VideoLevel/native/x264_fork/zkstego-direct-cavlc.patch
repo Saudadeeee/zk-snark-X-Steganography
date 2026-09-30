@@ -34,6 +34,21 @@ diff --git a/encoder/encoder.c b/encoder/encoder.c
 +    return h->zkstego.embedded_bits;
 +}
 +
+@@ -2117,6 +2122,9 @@ int x264_encoder_headers( x264_t *h, x264_nal_t **pp_nal, int *pi_nal )
+     /* identify ourselves */
+-    nal_start( h, NAL_SEI, NAL_PRIORITY_DISPOSABLE );
+-    if( x264_sei_version_write( h, &h->out.bs ) )
+-        return -1;
+-    if( nal_end( h ) )
+-        return -1;
++    if( !h->param.zkstego_payload_size )
++    {
++        nal_start( h, NAL_SEI, NAL_PRIORITY_DISPOSABLE );
++        if( x264_sei_version_write( h, &h->out.bs ) )
++            return -1;
++        if( nal_end( h ) )
++            return -1;
++    }
 @@ -2865,1 +2866,2 @@
  reencode:
 +        x264_zkstego_begin_macroblock( h );
@@ -46,7 +61,10 @@ diff --git a/encoder/encoder.c b/encoder/encoder.c
                      goto reencode;
                  }
 +                x264_zkstego_commit_macroblock( h );
-@@ -4205,1 +4209,2 @@
+@@ -3731,1 +3742,1 @@
+-        if( h->param.b_repeat_headers && h->fenc->i_frame == 0 && !h->param.i_avcintra_class )
++        if( h->param.b_repeat_headers && h->fenc->i_frame == 0 && !h->param.i_avcintra_class && !h->param.zkstego_payload_size )
+@@ -4205,1 +4216,2 @@
      x264_lookahead_delete( h );
 +    x264_zkstego_clear( h );
 diff --git a/encoder/macroblock.c b/encoder/macroblock.c
