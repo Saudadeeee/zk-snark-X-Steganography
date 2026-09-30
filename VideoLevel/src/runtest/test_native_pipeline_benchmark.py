@@ -8,6 +8,7 @@ from benchmark.native_pipeline_matrix import (
     frame_transport_payload,
     host_metadata,
     label_ffmpeg_ssim,
+    _markdown_report,
     parse_encoder_result,
     parse_metric_log,
     serialize_quality_rows,
@@ -118,3 +119,24 @@ def test_ffmpeg_ssim_value_is_preserved_before_optional_luma_metric():
     rows = label_ffmpeg_ssim([{"frame": 1, "psnr_db": 40.0, "ssim": 1.0}])
 
     assert rows[0]["ssim_ffmpeg_all"] == 1.0
+
+
+def test_report_exposes_extractor_cpu_and_peak_rss():
+    report = {
+        "generated_utc": "2026-09-30T00:00:00+00:00",
+        "host": {},
+        "cases": [{
+            "name": "fixture",
+            "input_video": {"width": 352, "height": 288, "frames": 1, "duration_seconds": 0.04},
+            "encode": {"wall_seconds": 0.1, "process_tree_cpu_seconds": 0.09, "process_tree_peak_rss_mb": 6.0, "status": "success", "embedded_bits": 120},
+            "blind_extract": {"passed": True, "wall_seconds": 0.2, "process_tree_cpu_seconds": 0.18, "process_tree_peak_rss_mb": 40.0},
+            "quality": {"mean_frame_psnr_db": 40.0, "mean_frame_ssim_ffmpeg_all_rounded": 0.98},
+        }],
+    }
+
+    markdown = _markdown_report(report)
+
+    assert "Extract CPU (s)" in markdown
+    assert "Extract peak RSS (MiB)" in markdown
+    assert "0.180" in markdown
+    assert "40.000" in markdown
