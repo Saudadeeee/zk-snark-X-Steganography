@@ -118,6 +118,30 @@ application security.
   from H.264 CAVLC without SEI or proof sidecar; then run the broader quality,
   resource, latency, and tamper benchmark gates.
 
+## Alternative repository recheck: lattice-complete/Lazarus
+
+The public `lattice-complete/Lazarus` repository was inspected as a possible
+Rust alternative that would not depend on LaZer's AVX-512 toolkit. Its own
+README explicitly warns that it is under active development and must not be
+used in production. It advertises lattice proofs, but gives no actionable
+getting-started dependency/example; its displayed benchmark table does not
+provide a pinned commit, relation definition, raw output, or reproduction
+command. These headline numbers are not accepted as evidence for this
+project's proof size or performance.
+
+The current LaBRADOR composite source also defines `CompositeProof` with a
+`final_witness` field, describes that value as an in-clear witness, and passes
+it to the reduced-statement verifier. This observation is not by itself a
+proof-system break: the recursive reduction may transform/randomize the
+witness. It is, however, a concrete privacy-review obligation before mapping
+the application payload-opening secret into this API. No Lazarus source was
+built or executed in this recheck; no security conclusion or integration claim
+is made.
+
+Sources inspected: [Lazarus repository README](https://github.com/lattice-complete/Lazarus#readme),
+[composite proof structure and prover](https://github.com/lattice-complete/Lazarus/blob/main/labrador/src/composite.rs#L378-L495),
+and [composite verifier](https://github.com/lattice-complete/Lazarus/blob/main/labrador/src/composite.rs#L499-L528).
+
 ## Sources
 
 - [Pinned Lattirust LaBRADOR repository](https://github.com/lattirust/labrador/tree/024c48e49025765ef3a7c08889b2d2fc61de0612)

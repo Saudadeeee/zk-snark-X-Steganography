@@ -233,3 +233,32 @@ short run, not a repeated quality/performance benchmark, and the luma changes
 are not negligible. Peak RAM was not captured. The result validates a larger
 diagnostic payload channel only; it does not generate, embed, or verify a
 lattice-ZK proof.
+
+## Native CAVLC transport matrix and proof-size stress gate (2026-09-30)
+
+The native x264-fork matrix ran 24 combinations: eight source sequences and
+three resolutions (176x144, 352x288, 704x576), with 260--1,374 frames per
+sequence. Every successful case carried only the 15-byte `ZKVP` envelope for
+one diagnostic byte (120 bits), then passed blind byte extraction. This is
+transport validation, not a proof run. Across the matrix, encode throughput
+was 31.666--611.533 fps, sampled encoder peak RSS was 5.578--11.203 MiB, and
+the Python batch extractor took 0.989--14.271 s with 37.445--64.273 MiB peak
+RSS. Per-frame PSNR versus the original Y4M ranged 35.287--52.373 dB and
+corrected FFmpeg all-plane SSIM ranged 0.919812--0.998721. These quality
+numbers include lossy CRF encoding; there was no matched no-payload encode to
+isolate distortion from embedding. The slowest 704x576 extraction was a
+whole-video operation, so native encoder throughput alone does not establish
+realtime verification.
+
+A native capacity stress run used a 33,803-byte experimental LNP22 artifact
+(SHA-256 and run details are in
+`benchmark/results/native_payload_capacity_probe_20260930.md`). It is not a
+valid proof of the target relation. On 300-frame 352x288 Akiyo, the encoder
+committed 10,420 of 270,424 requested bits (3.85%), forced all 300 frames to
+IDR/I pictures while trying, then rejected publication and removed the partial
+output. Wall time was 3.029 s; peak RAM was not measured reliably. This gives
+a real failure boundary for that artifact and encoder profile, not a universal
+capacity bound. It also exposes a coding-efficiency cost of the current
+IDR-only carrier strategy. The native multi-resolution transport matrix and
+this stress run still do not embed an accepted application proof; the public
+lattice-ZK API remains fail-closed.
