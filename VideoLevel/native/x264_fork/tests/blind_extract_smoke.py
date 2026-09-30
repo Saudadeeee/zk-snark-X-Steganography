@@ -27,31 +27,8 @@ def extract_blind_payload(video_path: Path) -> bytes:
         for nal in nal_units
         if int(nal.nal_unit_type) == 8
     )
-    idr = next(nal for nal in nal_units if int(nal.nal_unit_type) == 5)
-    parsed = TraceableCAVLCParser().extract_with_offsets(idr, sps, pps)
-    if parsed.get("parse_trusted") is not True or parsed.get("parse_integrity_issues"):
-        raise ValueError(f"CAVLC parse is not trusted: {parsed.get('parse_integrity_issues')}")
-
-    blocks = parsed["blocks"]
-    metadata = parsed["mb_metadata"]
     bits: list[int] = []
-    # The fork embeds in the first eligible luma block in ascending I4x4
-    # block order; trellis makes the encoder visit that same complete order.
-    for mb_index in sorted(metadata):
-        if metadata[mb_index].get("mb_type") != 0:
-            continue
-        found_carrier = False
-        for block_index in range(16):
-            coefficients = blocks.get((mb_index, block_index))
-            if coefficients is None:
-                continue
-            for coefficient_index in range(15, 0, -1):
-                if abs(coefficients[coefficient_index]) >= 5:
-                    bits.append(abs(coefficients[coefficient_index]) & 1)
-                    found_carrier = True
-                    break
-            if found_carrier:
-                break
+    payload_size: int | None = None
 
     def bits_to_bytes(count: int) -> bytes:
         if len(bits) < count * 8:
@@ -61,8 +38,48 @@ def extract_blind_payload(video_path: Path) -> bytes:
             payload[bit_index // 8] |= bit << (7 - (bit_index % 8))
         return bytes(payload)
 
+    # Direct payload mode carries only in I slices and requests IDR pictures
+    # until the full payload has been embedded. P slices after that point do
+    # not contain carrier bits and need not be decoded.
+    for nal in nal_units:
+        if int(nal.nal_unit_type) != 5:
+            continue
+        parsed = TraceableCAVLCParser().extract_with_offsets(nal, sps, pps)
+        if parsed.get("parse_trusted") is not True or parsed.get("parse_integrity_issues"):
+            raise ValueError(
+                f"CAVLC IDR parse is not trusted: {parsed.get('parse_integrity_issues')}"
+            )
+
+        blocks = parsed["blocks"]
+        metadata = parsed["mb_metadata"]
+        for mb_index in sorted(metadata):
+            if metadata[mb_index].get("mb_type") != 0:
+                continue
+            found_carrier = False
+            for block_index in range(16):
+                coefficients = blocks.get((mb_index, block_index))
+                if coefficients is None:
+                    continue
+                for coefficient_index in range(15, 0, -1):
+                    if abs(coefficients[coefficient_index]) >= 5:
+                        bits.append(abs(coefficients[coefficient_index]) & 1)
+                        found_carrier = True
+                        break
+                if found_carrier:
+                    break
+
+        if len(bits) >= 14 * 8:
+            payload_size = parse_blind_payload_header(bits_to_bytes(14))
+            if len(bits) >= (14 + payload_size) * 8:
+                break
+
     header = bits_to_bytes(14)
-    payload_size = parse_blind_payload_header(header)
+    if payload_size is None:
+        payload_size = parse_blind_payload_header(header)
+    if len(bits) < (14 + payload_size) * 8:
+        raise ValueError(
+            f"video has {len(bits)} readable bits; need {(14 + payload_size) * 8}"
+        )
     envelope = bits_to_bytes(14 + payload_size)
     return unpack_blind_payload(envelope)
 

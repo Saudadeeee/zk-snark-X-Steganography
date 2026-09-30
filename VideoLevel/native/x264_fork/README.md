@@ -11,14 +11,21 @@ Annex-B/SEI post-processing trick.
 The payload bytes assigned to `x264_param_t.zkstego_payload` must remain valid
 until `x264_encoder_close`. A non-empty direct payload is accepted only with
 I420, CAVLC, progressive 4x4 transform, one encoder thread, and no B frames.
-The initial carrier hook covers I_4x4 macroblocks only, so capacity is at most
-one bit per eligible I_4x4 macroblock, not one bit per every macroblock. The
-blind-stable carrier is the first eligible coefficient found by ascending luma
-4x4 block order, then descending AC scan positions 15 through 1, requiring
-absolute quantized level at least 5. Trellis is enabled in direct-payload mode
-so x264 quantizes every I4x4 block in the same order the blind parser derives
-from the coded macroblock. On a parity mismatch the fork increases magnitude
-by one, preserving eligibility. The API rejects CABAC,
+The carrier hook covers I_4x4 macroblocks in I slices only, so capacity is at
+most one bit per eligible I_4x4 macroblock, not one bit per every macroblock.
+The blind-stable carrier is the first eligible coefficient found by ascending
+luma 4x4 block order, then descending AC scan positions 15 through 1,
+requiring absolute quantized level at least 5. x264 stores its quantized 4x4
+coefficient buffer transposed; the fork maps scan positions through that
+layout before modifying a coefficient. Trellis is enabled in direct-payload
+mode so x264 quantizes every I4x4 block in the same order the blind parser
+derives from the coded macroblock. On a parity mismatch the fork changes the
+magnitude by one without crossing the eligibility threshold. The adapter
+forces IDR pictures while payload bits remain, then returns to automatic GOP
+selection after the envelope is complete. This lets extraction traverse only
+IDR CAVLC slices and avoids relying on parser support for inter-predicted
+macroblocks. It also increases bitrate while the payload is being embedded;
+the impact needs broader quality and performance benchmarks. The API rejects CABAC,
 lossless, interlaced, 8x8-transform, multi-threaded, and non-I420 payload
 configurations. There is no payload update API; the supplied bytes must remain
 valid and unchanged until the encoder is closed.
@@ -80,15 +87,19 @@ py -3.12 /path/to/VideoLevel/native/x264_fork/tests/blind_extract_smoke.py \
 ```
 
 On 2026-09-30, the exact patch applied to a clean checkout of the pinned x264
-commit, built as static 8-bit x264 with GCC 15.2/UCRT64, and passed all four
-native CTests in 1.50 s: the direct encoder smoke, adapter smoke, blind CAVLC
-extraction, and the existing native live tests. The synthetic 256x256 I420
-I-frame fixture emitted a 106,642-byte H.264 stream; the encoder reported 120
-committed bits (a 14-byte framing header plus one payload byte), and extraction
-derived the payload length from the video and recovered `a5`. This is a
-synthetic smoke test, not a real-camera/video benchmark or a ZK proof E2E
-result. It has no PSNR/SSIM or RAM measurement. Assembly optimizations were
-disabled, so its timing must not be generalized to normal x264 builds.
+commit and built as static 8-bit x264 with GCC 15.2/UCRT64. With assembly
+disabled, all six native CTests passed in 3.86 s, including both synthetic
+blind extraction and real-Y4M encode/extract tests. A separate run encoded
+`data/raw/akiyo_cif.y4m` (300 frames, 352x288) to a 718,868-byte constrained
+Baseline H.264 stream. The adapter reported 120 embedded bits (the 14-byte
+framing header plus one payload byte); blind extraction recovered `a5` from
+the stream itself, `ffprobe` counted all 300 frames, and FFmpeg decoded the
+output without errors. x264 reported 11 I frames and 289 P frames: repeated
+IDRs were forced while the payload remained, which is a visible coding-cost
+tradeoff and needs broad bitrate/quality/performance measurement. These runs
+verify byte-payload transport only, not ZK proof E2E, and do not yet include
+PSNR/SSIM or RAM measurements. Assembly optimizations were disabled, so timing
+must not be generalized to normal x264 builds.
 
 The original x264 fork changes were compiled against the pinned commit on the
 project Windows/UCRT64 toolchain. Full 8-/10-bit rebuild coverage and blind

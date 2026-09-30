@@ -121,7 +121,7 @@ diff --git a/encoder/zkstego.c b/encoder/zkstego.c
 new file mode 100644
 --- /dev/null
 +++ b/encoder/zkstego.c
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,69 @@
 +#include "zkstego.h"
 +
 +static unsigned int magnitude( dctcoef coefficient )
@@ -148,25 +148,28 @@ new file mode 100644
 +    int bit_index;
 +    int target_bit;
 +    int coefficient_index;
-+    static const uint8_t scan4x4_raster[16] =
-+        { 0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15 };
++    /* x264's quantized dct4x4 buffer is transposed: its zigzag scan uses
++     * dct[x*4+y], not the conventional row-major raster index y*4+x. */
++    static const uint8_t scan4x4_dct[16] =
++        { 0, 4, 1, 2, 5, 8, 12, 9, 6, 3, 7, 10, 13, 14, 11, 15 };
 +    if( !h->zkstego.armed || h->zkstego.staged )
 +        return;
-+    /* Trellis forces full ascending I4x4 traversal; mirror it blind. */
-+    if( h->mb.i_type != I_4x4 || block_index < 0 || block_index >= 16 )
++    /* Only IDR/I slices are carriers; the adapter holds IDR until complete. */
++    if( h->sh.i_type != SLICE_TYPE_I || h->mb.i_type != I_4x4 ||
++        block_index < 0 || block_index >= 16 )
 +        return;
 +    bit_index = h->zkstego.next_bit;
 +    target_bit = (h->param.zkstego_payload[bit_index >> 3] >> (7 - (bit_index & 7))) & 1;
 +    for( coefficient_index = 15; coefficient_index > 0; coefficient_index-- )
 +    {
-+        int raster_index = scan4x4_raster[coefficient_index];
-+        dctcoef coefficient = coefficients[raster_index];
++        int dct_index = scan4x4_dct[coefficient_index];
++        dctcoef coefficient = coefficients[dct_index];
 +        unsigned int absolute = magnitude( coefficient );
 +        if( absolute < 5 )
 +            continue;
 +        /* Preserve eligibility so blind scan order remains reproducible. */
 +        if( (absolute & 1) != target_bit )
-+            coefficients[raster_index] += coefficient < 0 ? -1 : 1;
++            coefficients[dct_index] += coefficient < 0 ? -1 : 1;
 +        h->zkstego.staged = 1;
 +        return;
 +    }

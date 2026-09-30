@@ -105,6 +105,11 @@ int zks_x264_encoder_encode_i420(
         return ZKS_ERR_ARGUMENT;
     }
     x264_picture_init(&input);
+    if (encoder->direct_payload_size != 0u &&
+        x264_encoder_zkstego_embedded_bits(encoder->encoder) <
+            (uint64_t)encoder->direct_payload_size * 8u) {
+        input.i_type = X264_TYPE_IDR;
+    }
     input.img.i_csp = X264_CSP_I420;
     input.img.i_plane = 3;
     input.img.plane[0] = (uint8_t *)y;
