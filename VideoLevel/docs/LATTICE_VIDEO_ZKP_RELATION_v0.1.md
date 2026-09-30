@@ -355,10 +355,17 @@ The existing `src/video_zkp_contract.py` is only a statement/context helper:
 
 - its payload commitment is a SHA3 hash and does not include the video/session
   context in the committed value;
-- `embed()` can now accept an explicit `zkp_session_id` challenge when emitting
-  its future-ZKP statement, and rejects missing or non-32-byte challenges. The
-  caller must issue unique challenges and maintain one-use/replay state; no
-  challenge service or spent-token store is implemented here;
+- `embed()` can accept an explicit `zkp_session_id` challenge when emitting
+  its future-ZKP statement, and rejects missing or non-32-byte challenges.
+  `src/zkp_sessions.py` now provides a durable SQLite challenge store with a
+  verifier-pinned 32-byte context binding, expiry checks before and after the
+  caller's proof-verification callback, and atomic one-use consumption. Its
+  eight unit tests cover restart-persistent replay rejection, expiry, wrong
+  binding, failed proof non-consumption, and concurrent consumes. It is not
+  yet wired to a session-issuance HTTP endpoint or the public video verifier;
+  one shared durable database is required across workers on the same host, and
+  a multi-host deployment still needs an equivalent shared transactional
+  store;
 - this future statement is still written to a `.pq-statement.json` sidecar,
   while the default video payload carries an ML-DSA receipt reference, not a
   ZK proof. `embed()` does not yet register/pin the carrier profile used by

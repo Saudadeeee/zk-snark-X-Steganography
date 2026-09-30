@@ -348,3 +348,31 @@ is not reviewed, and the proof is not serialized. Jindo reports **550,249
 bytes estimated** for commitment plus proof, not actual wire bytes. That is
 about 51.05 times the prior 10,779-byte Coastguard transported envelope and
 is a serious fit warning, not a proven lower bound. Keep Ringo research-only.
+
+## Upstream status recheck (2026-10-01)
+
+The official upstream READMEs were rechecked before choosing a backend for the
+target video relation:
+
+- [LaBRADOR](https://github.com/lattirust/labrador) still says only the core
+  protocol is implemented and reductions from binary/ring R1CS are in
+  progress. This does not invalidate the LaBRADOR paper; it means the public
+  implementation does not yet provide the target circuit interface.
+- [Ringo-SNARK](https://github.com/sp301415/ringo-snark) still labels itself
+  under construction. Its README lists the strong Fiat-Shamir transform and
+  automatic parameter selection as TODOs. Its sample APIs and proof-size
+  estimator are not evidence that the project's context-bound, bounded
+  payload-opening relation has a reviewed non-interactive proof.
+- [LatticeFold](https://github.com/NethermindEth/latticefold) still describes
+  the code as a proof-of-concept that has not received careful code review and
+  is not ready for production. Folding/R1CS code alone does not establish the
+  final zero-knowledge composition required here.
+
+No candidate currently passes the implementation gate: complete public
+relation encoding, reviewed knowledge-soundness and zero-knowledge arguments,
+canonical context-bound Fiat-Shamir, verifier-owned parameterization,
+serialized proof bytes, and an actual blind video round trip. Keep the public
+video-ZKP path fail-closed; do not select an upstream library solely because
+its README or paper describes a lattice proof system. This status check did
+not clone or execute upstream code and adds no local proof or benchmark
+result.
