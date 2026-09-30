@@ -35,15 +35,23 @@ def extract_blind_payload(video_path: Path) -> bytes:
     blocks = parsed["blocks"]
     metadata = parsed["mb_metadata"]
     bits: list[int] = []
-    # The fork reserves luma 4x4 block 15 / AC scan coefficient 15.
-    # I_4x4 mode and unchanged magnitude eligibility are visible from video.
+    # The fork embeds in the first eligible luma block in ascending I4x4
+    # block order; trellis makes the encoder visit that same complete order.
     for mb_index in sorted(metadata):
         if metadata[mb_index].get("mb_type") != 0:
             continue
-        coefficients = blocks.get((mb_index, 15))
-        if coefficients is None or abs(coefficients[15]) < 5:
-            continue
-        bits.append(abs(coefficients[15]) & 1)
+        found_carrier = False
+        for block_index in range(16):
+            coefficients = blocks.get((mb_index, block_index))
+            if coefficients is None:
+                continue
+            for coefficient_index in range(15, 0, -1):
+                if abs(coefficients[coefficient_index]) >= 5:
+                    bits.append(abs(coefficients[coefficient_index]) & 1)
+                    found_carrier = True
+                    break
+            if found_carrier:
+                break
 
     def bits_to_bytes(count: int) -> bytes:
         if len(bits) < count * 8:

@@ -75,6 +75,7 @@ int main(int argc, char **argv)
     param.i_threads = 1;
     param.i_bframe = 0;
     param.b_cabac = 0;
+    param.analyse.i_trellis = 1;
     param.analyse.intra = X264_ANALYSE_I4x4;
     param.analyse.b_transform_8x8 = 0;
     param.rc.i_rc_method = X264_RC_CRF;

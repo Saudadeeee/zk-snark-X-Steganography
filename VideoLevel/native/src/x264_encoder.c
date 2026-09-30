@@ -48,6 +48,9 @@ int zks_x264_encoder_open(const ZksX264Config *config, ZksX264Encoder **out_enco
     param.b_sliced_threads = 0;
     param.analyse.b_transform_8x8 = 0;
     param.analyse.intra = X264_ANALYSE_I4x4;
+    if (config->direct_payload_size != 0u) {
+        param.analyse.i_trellis = 1;
+    }
     param.i_keyint_max = keyint;
     param.i_keyint_min = keyint;
     param.i_bframe = 0;

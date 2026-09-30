@@ -121,7 +121,7 @@ diff --git a/encoder/zkstego.c b/encoder/zkstego.c
 new file mode 100644
 --- /dev/null
 +++ b/encoder/zkstego.c
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,66 @@
 +#include "zkstego.h"
 +
 +static unsigned int magnitude( dctcoef coefficient )
@@ -147,23 +147,29 @@ new file mode 100644
 +{
 +    int bit_index;
 +    int target_bit;
-+    dctcoef coefficient;
-+    unsigned int absolute;
++    int coefficient_index;
++    static const uint8_t scan4x4_raster[16] =
++        { 0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15 };
 +    if( !h->zkstego.armed || h->zkstego.staged )
 +        return;
-+    /* Fixed carrier coordinate lets a blind decoder reproduce selection. */
-+    if( block_index != 15 )
++    /* Trellis forces full ascending I4x4 traversal; mirror it blind. */
++    if( h->mb.i_type != I_4x4 || block_index < 0 || block_index >= 16 )
 +        return;
 +    bit_index = h->zkstego.next_bit;
 +    target_bit = (h->param.zkstego_payload[bit_index >> 3] >> (7 - (bit_index & 7))) & 1;
-+    coefficient = coefficients[15];
-+    absolute = magnitude( coefficient );
-+    if( absolute < 5 )
++    for( coefficient_index = 15; coefficient_index > 0; coefficient_index-- )
++    {
++        int raster_index = scan4x4_raster[coefficient_index];
++        dctcoef coefficient = coefficients[raster_index];
++        unsigned int absolute = magnitude( coefficient );
++        if( absolute < 5 )
++            continue;
++        /* Preserve eligibility so blind scan order remains reproducible. */
++        if( (absolute & 1) != target_bit )
++            coefficients[raster_index] += coefficient < 0 ? -1 : 1;
++        h->zkstego.staged = 1;
 +        return;
-+    /* Increase magnitude on mismatch so eligibility remains invariant. */
-+    if( (absolute & 1) != target_bit )
-+        coefficients[15] += coefficient < 0 ? -1 : 1;
-+    h->zkstego.staged = 1;
++    }
 +}
 +
 +void x264_zkstego_commit_macroblock( x264_t *h )

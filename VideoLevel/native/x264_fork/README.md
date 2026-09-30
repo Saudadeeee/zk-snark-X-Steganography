@@ -13,9 +13,12 @@ until `x264_encoder_close`. A non-empty direct payload is accepted only with
 I420, CAVLC, progressive 4x4 transform, one encoder thread, and no B frames.
 The initial carrier hook covers I_4x4 macroblocks only, so capacity is at most
 one bit per eligible I_4x4 macroblock, not one bit per every macroblock. The
-blind-stable coordinate is luma block 15, AC scan position 15, with absolute
-quantized level at least 5. On a parity mismatch the fork increases magnitude
-by one, preserving the decoder's eligibility test. The API rejects CABAC,
+blind-stable carrier is the first eligible coefficient found by ascending luma
+4x4 block order, then descending AC scan positions 15 through 1, requiring
+absolute quantized level at least 5. Trellis is enabled in direct-payload mode
+so x264 quantizes every I4x4 block in the same order the blind parser derives
+from the coded macroblock. On a parity mismatch the fork increases magnitude
+by one, preserving eligibility. The API rejects CABAC,
 lossless, interlaced, 8x8-transform, multi-threaded, and non-I420 payload
 configurations. There is no payload update API; the supplied bytes must remain
 valid and unchanged until the encoder is closed.
