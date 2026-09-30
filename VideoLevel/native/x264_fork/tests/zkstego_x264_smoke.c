@@ -12,6 +12,11 @@ static int write_nals(FILE *output, x264_nal_t *nals, int nal_count)
 
     for (index = 0; index < nal_count; ++index)
     {
+        if (nals[index].i_type == NAL_SEI)
+        {
+            fprintf(stderr, "SEI NAL is forbidden in the direct-CAVLC profile\n");
+            return -1;
+        }
         if (fwrite(nals[index].p_payload, 1u, (size_t)nals[index].i_payload, output) !=
             (size_t)nals[index].i_payload)
             return -1;
