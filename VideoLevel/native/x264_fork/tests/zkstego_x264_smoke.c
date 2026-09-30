@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +21,7 @@ static int write_nals(FILE *output, x264_nal_t *nals, int nal_count)
 
 int main(int argc, char **argv)
 {
-    enum { WIDTH = 256, HEIGHT = 256, Y_SIZE = WIDTH * HEIGHT,
+    enum { WIDTH = 64, HEIGHT = 64, Y_SIZE = WIDTH * HEIGHT,
            C_SIZE = (WIDTH / 2) * (HEIGHT / 2) };
     uint8_t payload[] = { 0xA5 };
     uint8_t *pixels = NULL;
@@ -66,6 +67,7 @@ int main(int argc, char **argv)
     param.i_threads = 1;
     param.i_bframe = 0;
     param.b_cabac = 0;
+    param.analyse.intra = X264_ANALYSE_I4x4;
     param.analyse.b_transform_8x8 = 0;
     param.rc.i_rc_method = X264_RC_CRF;
     param.rc.f_rf_constant = 18.0f;
@@ -73,6 +75,30 @@ int main(int argc, char **argv)
     param.zkstego_payload_size = (int)sizeof(payload);
     if (x264_param_apply_profile(&param, "baseline") < 0)
         goto cleanup;
+
+    param.b_cabac = 1;
+    if (x264_encoder_open(&param))
+    {
+        fprintf(stderr, "encoder accepted a stego payload with CABAC enabled\n");
+        goto cleanup;
+    }
+    param.b_cabac = 0;
+
+    param.analyse.b_transform_8x8 = 1;
+    if (x264_encoder_open(&param))
+    {
+        fprintf(stderr, "encoder accepted a stego payload with 8x8 transform enabled\n");
+        goto cleanup;
+    }
+    param.analyse.b_transform_8x8 = 0;
+
+    param.zkstego_payload_size = INT_MAX / 8 + 1;
+    if (x264_encoder_open(&param))
+    {
+        fprintf(stderr, "encoder accepted a payload size that overflows bit indexing\n");
+        goto cleanup;
+    }
+    param.zkstego_payload_size = (int)sizeof(payload);
 
     encoder = x264_encoder_open(&param);
     if (!encoder)
@@ -92,6 +118,7 @@ int main(int argc, char **argv)
     input.img.i_stride[2] = WIDTH / 2;
     input.i_pts = 0;
 
+    fprintf(stderr, "encoding one %dx%d I420 frame\n", WIDTH, HEIGHT);
     encoded = x264_encoder_encode(encoder, &nals, &nal_count, &input, &output_picture);
     if (encoded < 0 || write_nals(output, nals, nal_count) != 0)
     {
