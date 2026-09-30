@@ -1,9 +1,15 @@
+import math
+import sys
+
 from benchmark.native_pipeline_matrix import (
+    _run_measured,
+    compute_luma_ssim,
     host_metadata,
     build_metric_filtergraph,
     frame_transport_payload,
     parse_encoder_result,
     parse_metric_log,
+    serialize_quality_rows,
 )
 from src.blind_sync import unpack_blind_payload
 
@@ -66,3 +72,38 @@ def test_host_metadata_records_hardware_context():
     assert host["logical_processors"] >= host["physical_cores"]
     assert host["ram_total_bytes"] > 0
     assert host["cpu_identifier"]
+
+
+def test_measured_process_drains_large_stdout_and_stderr():
+    result = _run_measured([
+        sys.executable,
+        "-c",
+        "import sys; sys.stdout.write('o'*200000); sys.stderr.write('e'*200000)",
+    ])
+
+    assert result["returncode"] == 0
+    assert len(result["stdout"]) == 200000
+    assert len(result["stderr"]) == 200000
+
+
+def test_measured_process_reports_timeout():
+    result = _run_measured([sys.executable, "-c", "import time; time.sleep(5)"], timeout_seconds=0.05)
+
+    assert result["timed_out"] is True
+    assert result["returncode"] is not None
+
+
+def test_quality_json_represents_infinite_psnr_without_invalid_json():
+    rows = serialize_quality_rows([{"frame": 1, "psnr_db": math.inf, "ssim": 1.0}])
+
+    assert rows == [{"frame": 1, "psnr_db": None, "psnr_status": "positive_infinity", "ssim": 1.0}]
+
+
+def test_precise_luma_ssim_distinguishes_near_identical_frames():
+    reference = bytes([100] * (32 * 32))
+    changed = bytearray(reference)
+    changed[16 * 32 + 16] = 101
+
+    score = compute_luma_ssim(reference, bytes(changed), width=32, height=32)
+
+    assert 0.0 < score < 1.0
