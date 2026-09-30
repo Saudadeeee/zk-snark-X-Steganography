@@ -276,9 +276,10 @@ def t_context_binding_composes_pins_carrier_hash_and_video_commitment() -> None:
     )
     from src.zkp_registry import SignedZkpRelationRegistry
 
-    positions = [(1, 2, -1), (5, 3, 0)]
+    positions = [(1, 2, -1), (5, 3, -4)]
     carrier_contract = BlindOperatingContract(
         version="stable-carriers-video-only-v1",
+        signbit_only=True,
         require_bitstream_patchable=True,
         max_modifications_per_block=1,
         stable_carriers_only=True,
@@ -376,9 +377,58 @@ def t_context_binding_composes_pins_carrier_hash_and_video_commitment() -> None:
                 cif_mb_count=396,
             )
 
+            # A proof statement that claims t1_sign_flip must not be accepted
+            # under a verifier profile that derives magnitude-LSB carriers.
+            magnitude_contract = replace(carrier_contract, signbit_only=False)
+            magnitude_policy = {
+                **policy,
+                "carrier_profile_hash": carrier_policy_hash(
+                    magnitude_contract, len(positions)
+                ),
+            }
+            magnitude_descriptor = {
+                **descriptor,
+                "policy_hash": policy_hash(magnitude_policy),
+            }
+            magnitude_registry = SignedZkpRelationRegistry.create(
+                epoch=12, relations=[magnitude_descriptor]
+            ).sign(issuer_private_key, signer_id="issuer-v1")
+            magnitude_statement = build_video_zkp_statement(
+                session_id=bytes(range(32)),
+                payload_commitment_hex=payload_commitment(b"payload", b"o" * 32),
+                cover_hash="41" * 32,
+                stego_hash="42" * 32,
+                positions_hash=hash_positions(positions),
+                relation_id=magnitude_registry.relations[0].relation_id,
+                registry_root=magnitude_registry.root(),
+                registry_epoch=magnitude_registry.epoch,
+                policy=magnitude_policy,
+            )
+            derive_positions.reset_mock()
+            try:
+                verify_video_zkp_context_binding_video_only(
+                    magnitude_statement.to_dict(),
+                    magnitude_registry,
+                    issuer_public_key,
+                    video_path="fixture.h264",
+                    expected_session_id=bytes(range(32)),
+                    required_bits=len(positions),
+                    carrier_contract=magnitude_contract,
+                    expected_relation_id=magnitude_registry.relations[0].relation_id,
+                    expected_policy_hash=magnitude_descriptor["policy_hash"],
+                    minimum_epoch=10,
+                )
+            except ValueError as error:
+                assert "sign" in str(error).lower()
+            else:
+                raise AssertionError(
+                    "t1_sign_flip accepted a magnitude-LSB carrier profile"
+                )
+            derive_positions.assert_not_called()
+
             contract_mutations = (
                 {"version": "changed-profile-v2"},
-                {"signbit_only": True},
+                {"signbit_only": False},
                 {"bottom_rows": 1},
                 {"dedup_per_block": False},
                 {"max_bits_per_idr": 1},
