@@ -188,7 +188,7 @@ static void usage(const char *program)
 {
     fprintf(stderr,
             "usage: %s --input-y4m cover.y4m --output stego.h264 "
-            "(--payload-hex HEX | --payload-file PATH)\n"
+            "(--payload-hex HEX | --payload-file PATH) [--allow-inter-picture-carriers]\n"
             "Input must be progressive YUV4MPEG2 C420; payload is embedded in-band.\n",
             program);
 }
@@ -222,13 +222,24 @@ int main(int argc, char **argv)
     ZksX264Encoder *encoder = NULL;
     OutputState output_state = { 0 };
 
-    if (argc < 7 || !(argc & 1))
+    if (argc < 7)
     {
         usage(argv[0]);
         return EXIT_FAILURE;
     }
-    for (arg = 1; arg < argc; arg += 2)
+    for (arg = 1; arg < argc;)
     {
+        if (strcmp(argv[arg], "--allow-inter-picture-carriers") == 0)
+        {
+            config.allow_inter_picture_carriers = 1;
+            ++arg;
+            continue;
+        }
+        if (arg + 1 >= argc)
+        {
+            usage(argv[0]);
+            return EXIT_FAILURE;
+        }
         if (strcmp(argv[arg], "--input-y4m") == 0 && !input_path)
             input_path = argv[arg + 1];
         else if (strcmp(argv[arg], "--output") == 0 && !output_path)
@@ -242,6 +253,7 @@ int main(int argc, char **argv)
             usage(argv[0]);
             return EXIT_FAILURE;
         }
+        arg += 2;
     }
     if (!input_path || !output_path || (!!payload_hex == !!payload_file_path) ||
         !(payload_file_path ?

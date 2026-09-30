@@ -1,17 +1,17 @@
 diff --git a/Makefile b/Makefile
+index 2d95b38..6a7dab3 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -30 +30 @@
+@@ -30 +30 @@ SRCS_X = common/mc.c common/predict.c common/pixel.c common/macroblock.c \
 -         encoder/cavlc.c encoder/encoder.c encoder/lookahead.c
 +         encoder/cavlc.c encoder/encoder.c encoder/lookahead.c encoder/zkstego.c
 diff --git a/common/common.h b/common/common.h
+index a22e224..a17d375 100644
 --- a/common/common.h
 +++ b/common/common.h
-@@ -42,1 +42,2 @@
- #define x264_encoder_delayed_frames x264_template(encoder_delayed_frames)
+@@ -44,0 +45 @@
 +#define x264_encoder_zkstego_embedded_bits x264_template(encoder_zkstego_embedded_bits)
-@@ -273,1 +273,8 @@
-     x264_param_t    param;
+@@ -273,0 +275,7 @@ struct x264_t
 +    struct
 +    {
 +        int next_bit;
@@ -19,23 +19,61 @@ diff --git a/common/common.h b/common/common.h
 +        int staged;
 +        uint64_t embedded_bits;
 +    } zkstego;
+diff --git a/encoder/api.c b/encoder/api.c
+index da99106..ed80205 100644
+--- a/encoder/api.c
++++ b/encoder/api.c
+@@ -27,0 +28 @@
++#include <limits.h>
+@@ -41,0 +43 @@ int  x264_8_encoder_delayed_frames( x264_t * );
++uint64_t x264_8_encoder_zkstego_embedded_bits( x264_t * );
+@@ -53,0 +56 @@ int  x264_10_encoder_delayed_frames( x264_t * );
++uint64_t x264_10_encoder_zkstego_embedded_bits( x264_t * );
+@@ -70,0 +74 @@ typedef struct x264_api_t
++    uint64_t (*encoder_zkstego_embedded_bits)( x264_t * );
+@@ -77,0 +82,17 @@ REALIGN_STACK x264_t *x264_encoder_open( x264_param_t *param )
++    if( !param || param->zkstego_payload_size < 0 ||
++        param->zkstego_payload_size > INT_MAX / 8 ||
++        (param->zkstego_payload_size && !param->zkstego_payload) )
++        return NULL;
++
++    if( param->zkstego_payload_size &&
++        (param->b_cabac || param->b_interlaced || param->i_csp != X264_CSP_I420 ||
++         param->i_bframe != 0 || param->i_threads != 1 ||
++         param->analyse.b_transform_8x8 ||
++         (param->rc.i_rc_method == X264_RC_CQP && param->rc.i_qp_constant == 0) ||
++         (param->rc.i_rc_method == X264_RC_CRF && param->rc.f_rf_constant <= 0.0f)) )
++        return NULL;
++
++    if( param->zkstego_allow_inter_picture_carriers &&
++        (!param->zkstego_payload_size || param->i_bframe != 0 || param->b_cabac) )
++        return NULL;
++
+@@ -91,0 +113 @@ REALIGN_STACK x264_t *x264_encoder_open( x264_param_t *param )
++        api->encoder_zkstego_embedded_bits = x264_8_encoder_zkstego_embedded_bits;
+@@ -109,0 +132 @@ REALIGN_STACK x264_t *x264_encoder_open( x264_param_t *param )
++        api->encoder_zkstego_embedded_bits = x264_10_encoder_zkstego_embedded_bits;
+@@ -179,0 +203,7 @@ REALIGN_STACK int x264_encoder_delayed_frames( x264_t *h )
++
++REALIGN_STACK uint64_t x264_encoder_zkstego_embedded_bits( x264_t *h )
++{
++    x264_api_t *api = (x264_api_t *)h;
++
++    return api->encoder_zkstego_embedded_bits( api->x264 );
++}
 diff --git a/encoder/encoder.c b/encoder/encoder.c
+index 20e620a..5cf4f58 100644
 --- a/encoder/encoder.c
 +++ b/encoder/encoder.c
-@@ -29,1 +29,2 @@
- #include "common/common.h"
+@@ -28,0 +29 @@
 +#include "zkstego.h"
-@@ -2093,3 +2094,8 @@
- /****************************************************************************
-  * x264_encoder_headers:
-  ****************************************************************************/
+@@ -2095,0 +2097,5 @@ static int encoder_encapsulate_nals( x264_t *h, int start )
 +uint64_t x264_encoder_zkstego_embedded_bits( x264_t *h )
 +{
 +    return h->zkstego.embedded_bits;
 +}
 +
-@@ -2117,6 +2122,9 @@ int x264_encoder_headers( x264_t *h, x264_nal_t **pp_nal, int *pi_nal )
-     /* identify ourselves */
+@@ -2118,5 +2124,8 @@ int x264_encoder_headers( x264_t *h, x264_nal_t **pp_nal, int *pi_nal )
 -    nal_start( h, NAL_SEI, NAL_PRIORITY_DISPOSABLE );
 -    if( x264_sei_version_write( h, &h->out.bs ) )
 -        return -1;
@@ -49,79 +87,44 @@ diff --git a/encoder/encoder.c b/encoder/encoder.c
 +        if( nal_end( h ) )
 +            return -1;
 +    }
-@@ -2865,1 +2866,2 @@
- reencode:
+@@ -2864,0 +2874 @@ reencode:
 +        x264_zkstego_begin_macroblock( h );
-@@ -2896,2 +2898,3 @@
-                 if( h->mb.b_overflow )
-                 {
+@@ -2895,0 +2906 @@ reencode:
 +                    x264_zkstego_abort_macroblock( h );
-@@ -2902,3 +2905,4 @@
-                     bitstream_restore( h, &bs_bak[BS_BAK_CAVLC_OVERFLOW], &i_skip, 0 );
-                     goto reencode;
-                 }
+@@ -2902,0 +2914 @@ reencode:
 +                x264_zkstego_commit_macroblock( h );
-@@ -3731,1 +3742,1 @@
+@@ -3731 +3743 @@ int     x264_encoder_encode( x264_t *h,
 -        if( h->param.b_repeat_headers && h->fenc->i_frame == 0 && !h->param.i_avcintra_class )
 +        if( h->param.b_repeat_headers && h->fenc->i_frame == 0 && !h->param.i_avcintra_class && !h->param.zkstego_payload_size )
-@@ -4205,1 +4216,2 @@
-     x264_lookahead_delete( h );
+@@ -4205,0 +4218 @@ void    x264_encoder_close  ( x264_t *h )
 +    x264_zkstego_clear( h );
 diff --git a/encoder/macroblock.c b/encoder/macroblock.c
+index b1ff680..c16bb4f 100644
 --- a/encoder/macroblock.c
 +++ b/encoder/macroblock.c
-@@ -30,1 +30,2 @@
- #include "macroblock.h"
+@@ -30,0 +31 @@
 +#include "zkstego.h"
-@@ -889,1 +890,3 @@
-                             {
+@@ -872,0 +874,2 @@ static ALWAYS_INLINE void macroblock_encode_internal( x264_t *h, int plane_count
++                                if( p == 0 )
++                                    x264_zkstego_try_embed_4x4( h, dct4x4[idx], idx );
+@@ -888,0 +892,2 @@ static ALWAYS_INLINE void macroblock_encode_internal( x264_t *h, int plane_count
 +                                if( p == 0 )
 +                                    x264_zkstego_try_embed_4x4( h, dct4x4[idx], idx );
 diff --git a/encoder/macroblock.h b/encoder/macroblock.h
+index 64aed59..c051e73 100644
 --- a/encoder/macroblock.h
 +++ b/encoder/macroblock.h
-@@ -30,1 +30,2 @@
- #include "common/macroblock.h"
+@@ -30,0 +31 @@
 +#include "zkstego.h"
-@@ -158,1 +159,3 @@
-     nz = x264_quant_4x4( h, dct4x4, i_qp, ctx_cat_plane[DCT_LUMA_4x4][p], 1, p, idx );
+@@ -157,0 +159,2 @@ static ALWAYS_INLINE void x264_mb_encode_i4x4( x264_t *h, int p, int idx, int i_
 +    if( p == 0 )
 +        x264_zkstego_try_embed_4x4( h, dct4x4, idx );
-diff --git a/x264.h b/x264.h
---- a/x264.h
-+++ b/x264.h
-@@ -383,1 +383,5 @@
-     int         i_cabac_init_idc;
-+
-+    /* zkstego fork: payload consumed directly in quantized CAVLC residuals. */
-+    const uint8_t *zkstego_payload;
-+    int         zkstego_payload_size;
-@@ -981,1 +985,3 @@
- X264_API int x264_encoder_delayed_frames( x264_t * );
-+/* zkstego fork: number of payload bits committed to encoded residuals so far. */
-+X264_API uint64_t x264_encoder_zkstego_embedded_bits( x264_t * );
-diff --git a/encoder/zkstego.h b/encoder/zkstego.h
-new file mode 100644
---- /dev/null
-+++ b/encoder/zkstego.h
-@@ -0,0 +1,12 @@
-+#ifndef X264_ZKSTEGO_H
-+#define X264_ZKSTEGO_H
-+
-+#include "../common/common.h"
-+
-+void x264_zkstego_begin_macroblock( x264_t *h );
-+void x264_zkstego_try_embed_4x4( x264_t *h, dctcoef coefficients[16], int block_index );
-+void x264_zkstego_commit_macroblock( x264_t *h );
-+void x264_zkstego_abort_macroblock( x264_t *h );
-+void x264_zkstego_clear( x264_t *h );
-+
-+#endif
 diff --git a/encoder/zkstego.c b/encoder/zkstego.c
 new file mode 100644
+index 0000000..d3d4a5a
 --- /dev/null
 +++ b/encoder/zkstego.c
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,73 @@
 +#include "zkstego.h"
 +
 +static unsigned int magnitude( dctcoef coefficient )
@@ -154,8 +157,12 @@ new file mode 100644
 +        { 0, 4, 1, 2, 5, 8, 12, 9, 6, 3, 7, 10, 13, 14, 11, 15 };
 +    if( !h->zkstego.armed || h->zkstego.staged )
 +        return;
-+    /* Only IDR/I slices are carriers; the adapter holds IDR until complete. */
-+    if( h->sh.i_type != SLICE_TYPE_I || h->mb.i_type != I_4x4 ||
++    /* Intra I4x4 is eligible in IDR and P pictures; inter residual carriers
++     * are limited to explicitly enabled P pictures. */
++    if( ( h->sh.i_type == SLICE_TYPE_I && h->mb.i_type != I_4x4 ) ||
++        ( h->sh.i_type == SLICE_TYPE_P && !h->param.zkstego_allow_inter_picture_carriers ) ||
++        ( h->sh.i_type != SLICE_TYPE_I && h->sh.i_type != SLICE_TYPE_P ) ||
++        ( h->sh.i_type == SLICE_TYPE_P && IS_INTRA( h->mb.i_type ) && h->mb.i_type != I_4x4 ) ||
 +        block_index < 0 || block_index >= 16 )
 +        return;
 +    bit_index = h->zkstego.next_bit;
@@ -191,49 +198,34 @@ new file mode 100644
 +    h->zkstego.armed = 0;
 +    h->zkstego.staged = 0;
 +}
-diff --git a/encoder/api.c b/encoder/api.c
---- a/encoder/api.c
-+++ b/encoder/api.c
-@@ -25,1 +25,2 @@
- #include "common/base.h"
-+#include <limits.h>
-@@ -39,1 +39,2 @@
- int  x264_8_encoder_delayed_frames( x264_t * );
-+uint64_t x264_8_encoder_zkstego_embedded_bits( x264_t * );
-@@ -51,1 +52,2 @@
- int  x264_10_encoder_delayed_frames( x264_t * );
-+uint64_t x264_10_encoder_zkstego_embedded_bits( x264_t * );
-@@ -68,1 +70,2 @@
-     int  (*encoder_delayed_frames)( x264_t * );
-+    uint64_t (*encoder_zkstego_embedded_bits)( x264_t * );
-@@ -75,2 +78,15 @@
- REALIGN_STACK x264_t *x264_encoder_open( x264_param_t *param )
- {
-+    if( !param || param->zkstego_payload_size < 0 ||
-+        param->zkstego_payload_size > INT_MAX / 8 ||
-+        (param->zkstego_payload_size && !param->zkstego_payload) )
-+        return NULL;
+diff --git a/encoder/zkstego.h b/encoder/zkstego.h
+new file mode 100644
+index 0000000..8f439b3
+--- /dev/null
++++ b/encoder/zkstego.h
+@@ -0,0 +1,12 @@
++#ifndef X264_ZKSTEGO_H
++#define X264_ZKSTEGO_H
 +
-+    if( param->zkstego_payload_size &&
-+        (param->b_cabac || param->b_interlaced || param->i_csp != X264_CSP_I420 ||
-+         param->i_bframe != 0 || param->i_threads != 1 ||
-+         param->analyse.b_transform_8x8 ||
-+         (param->rc.i_rc_method == X264_RC_CQP && param->rc.i_qp_constant == 0) ||
-+         (param->rc.i_rc_method == X264_RC_CRF && param->rc.f_rf_constant <= 0.0f)) )
-+        return NULL;
++#include "../common/common.h"
 +
-@@ -89,1 +106,2 @@
-         api->encoder_delayed_frames = x264_8_encoder_delayed_frames;
-+        api->encoder_zkstego_embedded_bits = x264_8_encoder_zkstego_embedded_bits;
-@@ -107,1 +125,2 @@
-         api->encoder_delayed_frames = x264_10_encoder_delayed_frames;
-+        api->encoder_zkstego_embedded_bits = x264_10_encoder_zkstego_embedded_bits;
-@@ -180,1 +199,8 @@
++void x264_zkstego_begin_macroblock( x264_t *h );
++void x264_zkstego_try_embed_4x4( x264_t *h, dctcoef coefficients[16], int block_index );
++void x264_zkstego_commit_macroblock( x264_t *h );
++void x264_zkstego_abort_macroblock( x264_t *h );
++void x264_zkstego_clear( x264_t *h );
 +
-+REALIGN_STACK uint64_t x264_encoder_zkstego_embedded_bits( x264_t *h )
-+{
-+    x264_api_t *api = (x264_api_t *)h;
++#endif
+diff --git a/x264.h b/x264.h
+index b3223cd..3f2d849 100644
+--- a/x264.h
++++ b/x264.h
+@@ -383,0 +384,5 @@ typedef struct x264_param_t
++    /* zkstego fork: payload consumed directly in quantized CAVLC residuals. */
++    const uint8_t *zkstego_payload;
++    int         zkstego_payload_size;
++    int         zkstego_allow_inter_picture_carriers;
 +
-+    return api->encoder_zkstego_embedded_bits( api->x264 );
-+}
- REALIGN_STACK int x264_encoder_maximum_delayed_frames( x264_t *h )
+@@ -983,0 +989,2 @@ X264_API int x264_encoder_delayed_frames( x264_t * );
++/* zkstego fork: number of payload bits committed to encoded residuals so far. */
++X264_API uint64_t x264_encoder_zkstego_embedded_bits( x264_t * );

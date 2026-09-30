@@ -10,6 +10,7 @@ struct ZksX264Encoder {
     x264_t *encoder;
     uint8_t *direct_payload;
     size_t direct_payload_size;
+    int allow_inter_picture_carriers;
     int finished;
     int finish_status;
 };
@@ -47,7 +48,7 @@ int zks_x264_encoder_open(const ZksX264Config *config, ZksX264Encoder **out_enco
     param.i_threads = 1;
     param.b_sliced_threads = 0;
     param.analyse.b_transform_8x8 = 0;
-    param.analyse.intra = X264_ANALYSE_I4x4;
+    param.analyse.intra = config->allow_inter_picture_carriers ? 0 : X264_ANALYSE_I4x4;
     if (config->direct_payload_size != 0u) {
         param.analyse.i_trellis = 1;
     }
@@ -73,7 +74,9 @@ int zks_x264_encoder_open(const ZksX264Config *config, ZksX264Encoder **out_enco
         param.zkstego_payload = state->direct_payload;
         param.zkstego_payload_size = (int)config->direct_payload_size;
     }
+    param.zkstego_allow_inter_picture_carriers = config->allow_inter_picture_carriers != 0;
     state->direct_payload_size = config->direct_payload_size;
+    state->allow_inter_picture_carriers = config->allow_inter_picture_carriers != 0;
     state->encoder = x264_encoder_open(&param);
     if (!state->encoder) {
         free(state->direct_payload);
@@ -105,7 +108,7 @@ int zks_x264_encoder_encode_i420(
         return ZKS_ERR_ARGUMENT;
     }
     x264_picture_init(&input);
-    if (encoder->direct_payload_size != 0u &&
+    if (!encoder->allow_inter_picture_carriers && encoder->direct_payload_size != 0u &&
         x264_encoder_zkstego_embedded_bits(encoder->encoder) <
             (uint64_t)encoder->direct_payload_size * 8u) {
         input.i_type = X264_TYPE_IDR;

@@ -262,3 +262,28 @@ capacity bound. It also exposes a coding-efficiency cost of the current
 IDR-only carrier strategy. The native multi-resolution transport matrix and
 this stress run still do not embed an accepted application proof; the public
 lattice-ZK API remains fail-closed.
+
+An opt-in P-slice capacity probe was then run on the same 300-frame Akiyo
+sequence. A 33,803-byte artifact committed 4,870 of 270,424 bits before the
+adapter rejected publication; no partial video was kept. A 300-byte prefix
+payload completed with 2,400 payload bits embedded, produced a 705,370-byte
+Constrained Baseline stream, and FFprobe counted all 300 frames. FFmpeg decoded
+the output without errors. However, the blind extractor rejected the P-slice
+stream because its CAVLC parser reported a heuristic resynchronization error
+inside a P slice (`mb=121`, impossible `intra_chroma_pred_mode` after parsing
+earlier P macroblocks). As a control, a standard FFmpeg/libx264 Baseline
+CAVLC encode of the same source also failed the parser's strict P-slice
+integrity gate in 7 of its first 10 P slices (only 3/10 parsed without
+integrity issues). This isolates a pre-existing verifier/parser limitation,
+not evidence that the embedded video is malformed. P-slice byte embedding is
+therefore not yet end-to-end usable: the verifier must first parse and extract
+from general P-slice syntax reliably. These payload probes are not ZK proofs.
+
+A follow-up encoder run disabled intra analysis in the opt-in mode; x264 then
+reported only P16x16/skip macroblocks in P pictures (I pictures were I16x16).
+The same 300-byte payload encoded and decoded as a 300-frame Baseline stream,
+but blind parsing still desynchronized on the second P slice at macroblock 151
+(`mb_type=219`, outside the valid P-slice range). This narrows the remaining
+parser failure beyond P-intra syntax: P-inter prediction/residual parsing or
+coefficient-context tracking is still misaligned. The extractor correctly
+fails closed and does not return bytes from this stream.

@@ -709,7 +709,7 @@ class MacroblockParser:
             for _ in range(num_partitions):
                 # ref_idx_l0: te(v) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â only written when max > 0 (i.e. >1 reference frame)
                 if self.num_ref_idx_l0_active_minus1 > 0:
-                    self.reader.read_ue()  # te(v) approximated as ue(v)
+                    self._read_te(self.num_ref_idx_l0_active_minus1)
                 # Motion vector difference (horizontal, then vertical)
                 self.reader.read_se()   # mvd_l0 x
                 self.reader.read_se()   # mvd_l0 y
@@ -720,7 +720,7 @@ class MacroblockParser:
             # Step 2: ref_idx for each sub-MB (if >1 reference)
             if self.num_ref_idx_l0_active_minus1 > 0:
                 for _ in range(4):
-                    self.reader.read_ue()  # ref_idx_l0[s]
+                    self._read_te(self.num_ref_idx_l0_active_minus1)
             # Step 3: MVDs per sub-partition
             for smt in sub_mb_types:
                 # Number of sub-partitions per sub-MB type:
@@ -744,6 +744,16 @@ class MacroblockParser:
                     self.reader.read_se()  # mvd x
                     self.reader.read_se()  # mvd y
         # else: unknown P-type, skip gracefully (no motion data consumed)
+
+    def _read_te(self, max_value: int) -> int:
+        """Read H.264 truncated Exp-Golomb ``te(v)`` for a known maximum."""
+        if max_value < 0:
+            raise ValueError(f"te(v) max_value must be nonnegative, got {max_value}")
+        if max_value == 0:
+            return 0
+        if max_value == 1:
+            return 1 - self.reader.read_bits(1)
+        return self.reader.read_ue()
     
     def _parse_i_pcm(self, mb: MacroblockData):
         """Parse I_PCM macroblock (raw pixel data)"""
@@ -1228,6 +1238,15 @@ class TraceableCAVLCParser:
                             
                             current_mb_addr += mb_skip_run
                             mb_idx = current_mb_addr
+                            # A slice may end with mb_skip_run covering every
+                            # remaining macroblock. In that case there is no
+                            # following mb_header; the next bits are trailing
+                            # bits, so do not attempt to parse one at frame end.
+                            if (
+                                slice_mb_idx_counter >= max_mbs_in_frame
+                                or current_mb_addr >= max_mbs_in_frame
+                            ):
+                                break
                     
                     # Parse MB header
                     try:
@@ -1244,7 +1263,7 @@ class TraceableCAVLCParser:
                             resync_pos = _scan_for_mb_start(reader, scan_from, max_scan=12000)
                             if resync_pos is not None:
                                 self.parse_integrity_issues.append(
-                                    f"heuristic_resync:mb={mb_idx}:bit={resync_pos}"
+                                    f"heuristic_resync:mb={mb_idx}:reason={err_str}:bit={resync_pos}"
                                 )
                                 logger.debug(f"[TraceableParser] Resync: skipped MB {mb_idx}, next MB at bit {resync_pos}")
                                 reader.pos = resync_pos
@@ -1286,7 +1305,10 @@ class TraceableCAVLCParser:
                         continue
 
                     # Determine MB type and decoding order
-                    is_i16x16 = mb_data.mb_type >= 1 and mb_data.mb_type <= 24
+                    # P-slice raw mb_type values 1-4 describe inter
+                    # partitions; only the interpreted enum distinguishes
+                    # them from the I-slice I16x16 value range.
+                    is_i16x16 = mb_parser._is_i16x16(mb_data.mb_type_enum)
                     luma_blocks = mb_parser.get_luma_blocks_to_decode(mb_data)
 
                     # Store MB metadata

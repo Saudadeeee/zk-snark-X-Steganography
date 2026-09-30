@@ -73,6 +73,16 @@ can significantly increase bitrate and is not a realtime performance claim.
 This placement keeps encoder and decoder reference frames synchronized. Do not
 substitute the SEI relay for that fork.
 
+For a capacity experiment, the Y4M CLI has an opt-in
+`--allow-inter-picture-carriers` mode. It stops forcing IDRs and lets the fork
+place bits in eligible P-slice residuals, including the trellis quantization
+path. The CAVLC extractor has not yet demonstrated a trusted full P-slice parse
+or exact proof-sized round trip, so this mode is an encoder-side experiment,
+not a usable transport path. `--include-p-slices` is diagnostic only until the
+parser is validated against general P-slice macroblock syntax. This mode can
+change capacity, quality and extraction cost, and is not a realtime or security
+claim. The default remains IDR-only.
+
 For the optional Y4M-to-H.264 demonstration CLI, select exactly one binary
 payload source. `--payload-file` avoids shell argument limits for larger proof-
 sized artifacts; the CLI reads the file into memory, with a maximum length of
