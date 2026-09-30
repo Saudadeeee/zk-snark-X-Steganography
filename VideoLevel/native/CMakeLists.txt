@@ -67,6 +67,12 @@ if(ZKS_WITH_X264)
         "${ZKS_Y4M_SMOKE_VIDEO}" a5)
     set_tests_properties(zkstego_y4m_blind_extract
       PROPERTIES DEPENDS zkstego_x264_y4m_embed)
+    add_test(NAME zkstego_y4m_payload_file_smoke
+      COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/x264_fork/tests/y4m_payload_file_smoke.py"
+        "$<TARGET_FILE:zkstego_x264_y4m>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../data/raw/akiyo_cif.y4m"
+        "${CMAKE_CURRENT_SOURCE_DIR}/x264_fork/tests/blind_extract_smoke.py")
   endif()
 
   if(MSVC)
