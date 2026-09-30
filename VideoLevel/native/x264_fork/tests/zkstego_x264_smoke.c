@@ -171,6 +171,38 @@ int main(int argc, char **argv)
     }
 
     printf("PASS payload_bits=%zu output_bytes=%ld\n", sizeof(payload) * 8u, ftell(output));
+
+    x264_encoder_close(encoder);
+    encoder = NULL;
+    param.analyse.intra = 0;
+    encoder = x264_encoder_open(&param);
+    if (!encoder)
+    {
+        fprintf(stderr, "encoder failed to open for non-I4x4 carrier check\n");
+        goto cleanup;
+    }
+    input.i_pts = 1;
+    encoded = x264_encoder_encode(encoder, &nals, &nal_count, &input, &output_picture);
+    if (encoded < 0)
+    {
+        fprintf(stderr, "non-I4x4 carrier-check encode failed\n");
+        goto cleanup;
+    }
+    while (x264_encoder_delayed_frames(encoder) > 0)
+    {
+        encoded = x264_encoder_encode(encoder, &nals, &nal_count, NULL, &output_picture);
+        if (encoded < 0)
+        {
+            fprintf(stderr, "non-I4x4 carrier-check drain failed\n");
+            goto cleanup;
+        }
+    }
+    if (x264_encoder_zkstego_embedded_bits(encoder) != 0u)
+    {
+        fprintf(stderr, "I16x16 macroblocks consumed I4x4 blind-carrier payload bits\n");
+        goto cleanup;
+    }
+    printf("PASS forced_i16x16_embedded_bits=0\n");
     result = EXIT_SUCCESS;
 
 cleanup:

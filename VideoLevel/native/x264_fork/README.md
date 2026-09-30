@@ -37,7 +37,9 @@ enforces that bound.
 
 `tests/zkstego_x264_smoke.c` encodes a deterministic I420 frame, checks that
 unsupported modes and oversized payloads are rejected, and asserts that all
-120 framed bits were committed. `tests/blind_extract_smoke.py` uses the repository CAVLC parser to
+120 framed bits were committed. A second fixture constrains x264 to I16x16
+macroblocks and confirms those non-carrier blocks consume zero I4x4 payload
+bits. `tests/blind_extract_smoke.py` uses the repository CAVLC parser to
 rederive carrier coordinates from the emitted stream and recover the fixture
 byte. `tests/zkstego_adapter_smoke.c` exercises the project's native encoder
 adapter, including its count API, oversized-payload rejection, and a
