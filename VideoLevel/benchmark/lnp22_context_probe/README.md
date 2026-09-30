@@ -189,15 +189,28 @@ the v2 size reduction is not evidence of actual video capacity, quality, or
 runtime improvement.
 
 ```powershell
+# Run the loopback issuer in a separate terminal using the verifier's pinned
+# 32-byte policy digest and verifier-owned durable database.
+py -3.12 -m src.zkp_session_http --database ./.state/sessions.sqlite3 `
+  --context-binding-hex <64-hex-policy-digest>
+# Request a fresh challenge from that verifier process. Do not give the SQLite
+# database to the prover; pass only the returned public challenge to embed.
+$sessionGrant = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8765/api/v1/zkp/sessions
+
 py -3.12 benchmark/lnp22_context_probe/video_e2e.py embed `
   --video input.h264 --output compact-stego.h264 `
   --relation relation.json --witness witness.json `
   --trusted-relation-sha256 <pinned-relation-sha256> `
+  --session-challenge-hex $sessionGrant.challenge `
   --report-output compact-report.json --proof-mode compact
 
+# Run this on the verifier side with its session database and pinned binding.
+# This blind extraction/proof check atomically consumes the challenge.
 py -3.12 benchmark/lnp22_context_probe/video_e2e.py verify `
   --video compact-stego.h264 --relation relation.json `
-  --trusted-relation-sha256 <pinned-relation-sha256>
+  --trusted-relation-sha256 <pinned-relation-sha256> `
+  --session-database ./.state/sessions.sqlite3 `
+  --session-context-binding-hex <64-hex-policy-digest>
 ```
 
 ```powershell
@@ -303,18 +316,26 @@ $setup = go run . -fixed-setup -relation-out $publicRelation -witness-out $priva
 $trustedRelationPin = $setup.relation_sha256
 # The trusted verifier/operator must provision this pin independently; do not
 # accept a relation digest supplied by an untrusted prover.
+$sessionContextBindingHex = "<verifier-pinned-64-hex-policy-digest>"
+$sessionDatabase = ".state/sessions.sqlite3"
 $env:ZKSTEGOLNP22_SYNC_KEY_HEX = (py -3.12 -c "import secrets; print(secrets.token_hex(32))").Trim()
+# The loopback issuer must already be running with the same database and
+# independently pinned context binding.
+$sessionGrant = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8765/api/v1/zkp/sessions
 py -3.12 benchmark/lnp22_context_probe/video_e2e.py embed `
   --video data/encoded/coastguard_cif_q22_g1_3000f.h264 `
   --output benchmark/results/lnp22_video_e2e.h264 `
   --relation $publicRelation `
   --witness $privateWitness `
   --trusted-relation-sha256 $trustedRelationPin `
+  --session-challenge-hex $sessionGrant.challenge `
   --report-output benchmark/results/lnp22_video_e2e_report.json
 py -3.12 benchmark/lnp22_context_probe/video_e2e.py verify `
   --video benchmark/results/lnp22_video_e2e.h264 `
   --relation $publicRelation `
-  --trusted-relation-sha256 $trustedRelationPin
+  --trusted-relation-sha256 $trustedRelationPin `
+  --session-database $sessionDatabase `
+  --session-context-binding-hex $sessionContextBindingHex
 ```
 
 `$publicRelation`, `$privateWitness`, and `$trustedRelationPin` must come from
@@ -616,6 +637,7 @@ py -3.12 benchmark/lnp22_context_probe/video_e2e.py embed `
   --relation $publicRelation `
   --witness $privateWitness `
   --trusted-relation-sha256 $trustedRelationPin `
+  --session-challenge-hex $sessionGrant.challenge `
   --report-output benchmark/results/lnp22_video_e2e_report.json `
   1> benchmark/results/lnp22_video_e2e.stdout.log `
   2> benchmark/results/lnp22_video_e2e.progress.jsonl
@@ -686,6 +708,8 @@ $env:ZKSTEGOLNP22_RELATION_PATH = $publicRelation
 $env:ZKSTEGOLNP22_WITNESS_PATH = $privateWitness
 $env:ZKSTEGOLNP22_TRUSTED_RELATION_SHA256 = $trustedRelationPin
 $env:ZKSTEGOLNP22_API_TOKEN = (py -3.12 -c "import secrets; print(secrets.token_urlsafe(48))").Trim()
+$env:ZKSTEGOLNP22_SESSION_DATABASE = (Join-Path $stateDir 'sessions.sqlite3')
+$env:ZKSTEGOLNP22_SESSION_CONTEXT_BINDING_HEX = '<verifier-pinned-64-hex-policy-digest>'
 # ZKSTEGOLNP22_SYNC_KEY_HEX must also already be provisioned privately.
 py -3.12 benchmark/lnp22_context_probe/http_api.py --workspace $apiWorkspace
 ```
@@ -695,6 +719,7 @@ Every route requires `Authorization: Bearer <token>`. The API provides:
 | Method and path | Purpose |
 | --- | --- |
 | `GET /api/v1/health` | Authenticated liveness and experimental protocol label |
+| `POST /api/v1/zkp/sessions` | Issue a verifier-bound, expiring one-use challenge |
 | `PUT /api/v1/videos/{name}.h264` | Stream raw H.264 bytes into `inbox/` |
 | `POST /api/v1/jobs` | Queue `embed` or video-only `verify` work |
 | `GET /api/v1/jobs/{id}` | Read in-memory job status/result |
@@ -705,6 +730,8 @@ Example client flow (run in a second shell with the same token provisioned):
 
 ```powershell
 $headers = @{ Authorization = "Bearer $env:ZKSTEGOLNP22_API_TOKEN" }
+$session = Invoke-RestMethod -Method Post `
+  -Uri 'http://127.0.0.1:8765/api/v1/zkp/sessions' -Headers $headers
 Invoke-WebRequest -Method Put `
   -Uri 'http://127.0.0.1:8765/api/v1/videos/coastguard.h264' `
   -Headers $headers -ContentType 'video/h264' `
@@ -718,14 +745,22 @@ $jobId = $created.data.id
 $job = Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/v1/jobs/$jobId" -Headers $headers
 ```
 
-For embedding, submit `{"operation":"embed","video":"inbox/coastguard.h264","output":"output/stego.h264","report":"reports/stego.json","proof_mode":"compact"}` to opt into the experimental `LNPF` v2 proof representation. `proof_mode` may be `augmented` (default, v1) or `compact` (v2); the job response reports the selected mode and actual embedded proof format. Poll the returned job ID until `succeeded` or `failed`, then GET the output video/report paths. The default limits are 512 MiB per upload, 2 GiB total inbox storage, 120 authenticated requests/minute, 2 job submissions/minute, and one active job. Busy submissions return `429`; output paths must be new files directly under their respective workspace folders. Job state is memory-only and disappears on server restart, but published output artifacts remain on disk.
+For embedding, submit `{"operation":"embed","video":"inbox/coastguard.h264","output":"output/stego.h264","report":"reports/stego.json","proof_mode":"compact","session_challenge_hex":"<challenge from session.data.challenge>"}`. The API checks that the challenge is currently active before starting the embed job. `proof_mode` may be `augmented` (default, v1) or `compact` (v2); the job response reports the selected mode, the embedded proof format, and `session_replay_protected:false` because the prover-side round trip does not consume verifier state. Then submit a separate video-only `verify` job; it extracts the challenge from the in-band envelope, validates the proof and context, and atomically consumes the session only on success. Expired, unissued, mismatched, failed-proof, and replayed sessions reject. The default limits are 512 MiB per upload, 2 GiB total inbox storage, 120 authenticated requests/minute, 2 job submissions/minute, and one active job. Busy submissions return `429`; output paths must be new files directly under their respective workspace folders. Job state is memory-only and disappears on server restart, but published output artifacts and the durable session database remain on disk.
 
-The HTTP tests exercise actual loopback requests, streaming upload/download,
-path confinement, authentication, quotas, rate limits, status codes, and
-sanitized worker failures with a fake operation runner. They do **not** prove
-that the experimental LNP22 relation is a useful or audited video ZKP, and
-they do not substitute for the still-pending proof-in-video E2E run.
-The custom HTTP test runner passed 7/7 tests; the targeted prover-child
+The session store's policy-binding digest currently remains verifier-side
+state; it is not a field in the experimental LNP22 proof statement. The proof
+contains the issued session ID and video context, but this probe therefore
+does not cryptographically prove the full registered application policy or
+the target payload-opening relation. Do not treat successful session replay
+checks as production ZK security.
+
+The HTTP tests exercise actual loopback requests, session issuance, embed
+challenge enforcement, verifier-owned replay consumption, streaming
+upload/download, path confinement, authentication, quotas, rate limits,
+status codes, and sanitized worker failures. They do **not** prove that the
+experimental LNP22 relation is a useful or audited video ZKP, and synthetic
+extractor tests do not substitute for a real-video proof-in-video E2E run.
+The custom HTTP test runner passed 11/11 tests; the targeted prover-child
 environment isolation test passed, Ruff passed for the API/test/runner files,
 and Python compilation plus `git diff --check` passed on 2026-09-28. This
 validates the API contract and local plumbing only, not real proof generation

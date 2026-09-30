@@ -476,6 +476,7 @@ def test_embed_cli_requires_preprovisioned_relation_witness_and_trust_pin():
             "--relation", "relation.json",
             "--witness", "witness.json",
             "--trusted-relation-sha256", "44" * 32,
+            "--session-challenge-hex", "66" * 32,
         ]
     )
 
@@ -493,10 +494,33 @@ def test_embed_cli_requires_preprovisioned_relation_witness_and_trust_pin():
             "--relation", "relation.json",
             "--witness", "witness.json",
             "--trusted-relation-sha256", "44" * 32,
+            "--session-challenge-hex", "66" * 32,
             "--proof-mode", "compact",
         ]
     )
     assert compact_args.proof_mode == "compact"
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            [
+                "verify",
+                "--video", "out.h264",
+                "--relation", "relation.json",
+                "--trusted-relation-sha256", "44" * 32,
+            ]
+        )
+    verify_args = parser.parse_args(
+        [
+            "verify",
+            "--video", "out.h264",
+            "--relation", "relation.json",
+            "--trusted-relation-sha256", "44" * 32,
+            "--session-database", "sessions.sqlite3",
+            "--session-context-binding-hex", "55" * 32,
+        ]
+    )
+    assert verify_args.session_database == Path("sessions.sqlite3")
+    assert verify_args.session_context_binding_hex == "55" * 32
 
 
 def test_video_verifier_uses_only_extracted_chunk_context(tmp_path, monkeypatch):

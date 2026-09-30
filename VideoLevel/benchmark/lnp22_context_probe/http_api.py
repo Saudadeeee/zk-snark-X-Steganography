@@ -45,10 +45,14 @@ except ImportError:  # pragma: no cover - direct script execution
         embed_and_verify,
     )
 
+from src.zkp_sessions import SessionChallengeStore
+
 API_TOKEN_ENV = "ZKSTEGOLNP22_API_TOKEN"
 RELATION_PATH_ENV = "ZKSTEGOLNP22_RELATION_PATH"
 WITNESS_PATH_ENV = "ZKSTEGOLNP22_WITNESS_PATH"
 RELATION_PIN_ENV = "ZKSTEGOLNP22_TRUSTED_RELATION_SHA256"
+SESSION_DATABASE_ENV = "ZKSTEGOLNP22_SESSION_DATABASE"
+SESSION_CONTEXT_BINDING_ENV = "ZKSTEGOLNP22_SESSION_CONTEXT_BINDING_HEX"
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _UPLOAD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.h264$")
 _REPORT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.json$")
@@ -91,6 +95,10 @@ class ApiConfig:
     witness_path: Path = field(repr=False)
     trusted_relation_sha256: str
     api_token: str = field(repr=False)
+    session_database_path: Path = field(repr=False)
+    session_context_binding: bytes = field(repr=False)
+    session_ttl_seconds: int = 300
+    session_store: SessionChallengeStore = field(init=False, repr=False)
     max_upload_bytes: int = 512 * 1024 * 1024
     max_inbox_bytes: int = 2 * 1024 * 1024 * 1024
     max_active_jobs: int = 1
@@ -103,6 +111,30 @@ class ApiConfig:
         if not workspace.is_dir():
             raise ValueError("workspace must be a directory")
         object.__setattr__(self, "workspace", workspace)
+        session_database_path = Path(self.session_database_path).expanduser()
+        if session_database_path.is_symlink():
+            raise ValueError("session database must not be a symbolic link")
+        session_database_path = session_database_path.resolve()
+        if (
+            not isinstance(self.session_context_binding, bytes)
+            or len(self.session_context_binding) != 32
+        ):
+            raise ValueError("session context binding must be exactly 32 bytes")
+        if (
+            isinstance(self.session_ttl_seconds, bool)
+            or not isinstance(self.session_ttl_seconds, int)
+            or self.session_ttl_seconds <= 0
+        ):
+            raise ValueError("session TTL must be a positive integer")
+        object.__setattr__(self, "session_database_path", session_database_path)
+        object.__setattr__(
+            self,
+            "session_store",
+            SessionChallengeStore(
+                session_database_path,
+                ttl_seconds=self.session_ttl_seconds,
+            ),
+        )
         for directory_name in ("inbox", "output", "reports"):
             directory = workspace / directory_name
             if (
@@ -166,7 +198,7 @@ def _validate_job_request(workspace: Path, body: Any) -> tuple[str, dict[str, An
         raise ApiFault(422, "invalid_request", "operation must be 'embed' or 'verify'")
     allowed = {"operation", "video"}
     if operation == "embed":
-        allowed |= {"output", "report", "proof_mode"}
+        allowed |= {"output", "report", "proof_mode", "session_challenge_hex"}
     if set(body) - allowed:
         raise ApiFault(422, "invalid_request", "Request contains unsupported fields")
 
@@ -180,6 +212,16 @@ def _validate_job_request(workspace: Path, body: Any) -> tuple[str, dict[str, An
                 "invalid_request",
                 "proof_mode must be 'augmented' or 'compact'",
             )
+        session_challenge_hex = body.get("session_challenge_hex")
+        if (
+            not isinstance(session_challenge_hex, str)
+            or re.fullmatch(r"[0-9a-fA-F]{64}", session_challenge_hex) is None
+        ):
+            raise ApiFault(
+                422,
+                "invalid_request",
+                "session_challenge_hex must contain exactly 64 hexadecimal characters",
+            )
         output = _resolve_workspace_path(workspace, body.get("output"), must_exist=False)
         report = _resolve_workspace_path(workspace, body.get("report"), must_exist=False)
         output_directory = (workspace / "output").resolve(strict=True)
@@ -192,7 +234,12 @@ def _validate_job_request(workspace: Path, body: Any) -> tuple[str, dict[str, An
             raise ApiFault(422, "invalid_request", "Output and report names must use safe ASCII filenames")
         if video == output or video == report or output == report:
             raise ApiFault(422, "invalid_request", "Input, output, and report paths must be distinct")
-        arguments.update(output=output, report=report, proof_mode=proof_mode)
+        arguments.update(
+            output=output,
+            report=report,
+            proof_mode=proof_mode,
+            session_challenge=bytes.fromhex(session_challenge_hex),
+        )
     return operation, arguments
 
 
@@ -205,6 +252,8 @@ def _run_probe_operation(
             relation_path=config.relation_path,
             trusted_relation_sha256=config.trusted_relation_sha256,
             sync_key=_sync_key_from_environment(),
+            session_store=config.session_store,
+            session_context_binding=config.session_context_binding,
         )
     return embed_and_verify(
         arguments["video"],
@@ -214,6 +263,7 @@ def _run_probe_operation(
         witness_path=config.witness_path,
         trusted_relation_sha256=config.trusted_relation_sha256,
         proof_mode=arguments["proof_mode"],
+        session_challenge=arguments["session_challenge"],
     )
 
 
@@ -231,6 +281,7 @@ def _public_result(
             "canonical_video_sha256",
             "positions_hash",
             "verify_ms",
+            "session_replay_protected",
             "security_status",
         )
         return {key: result[key] for key in fields if key in result}
@@ -244,6 +295,7 @@ def _public_result(
         "strict_h264_decode",
         "blind_video_only_extraction",
         "proof_verification",
+        "session_replay_protected",
         "phase_ms",
         "peak_rss_mb",
         "security_status",
@@ -467,12 +519,38 @@ def create_handler(config: ApiConfig, manager: JobManager | None = None):
         def do_POST(self) -> None:
             if not self._authorize():
                 return
-            if urlsplit(self.path).path != "/api/v1/jobs":
+            route = urlsplit(self.path).path
+            if route == "/api/v1/zkp/sessions":
+                content_lengths = self.headers.get_all("Content-Length", [])
+                if (
+                    self.headers.get_all("Transfer-Encoding", [])
+                    or len(content_lengths) > 1
+                    or (content_lengths and content_lengths[0].strip() != "0")
+                ):
+                    self._error(
+                        ApiFault(400, "invalid_request", "Session issuance does not accept a request body")
+                    )
+                    return
+                grant = config.session_store.issue(
+                    context_binding=config.session_context_binding
+                )
+                self._write_json(201, {"data": grant.to_dict()})
+                return
+            if route != "/api/v1/jobs":
                 self._error(ApiFault(404, "not_found", "Resource not found"))
                 return
             try:
                 body = self._read_json()
                 operation, arguments = _validate_job_request(config.workspace, body)
+                if operation == "embed" and not config.session_store.is_active(
+                    arguments["session_challenge"],
+                    context_binding=config.session_context_binding,
+                ):
+                    raise ApiFault(
+                        409,
+                        "invalid_session",
+                        "Session challenge is unknown, expired, or already spent",
+                    )
                 if not job_limiter.allow(self.client_address[0]):
                     raise ApiFault(429, "job_rate_limit", "Job submission limit reached; retry later")
                 job = jobs.submit(operation, arguments)
@@ -600,17 +678,24 @@ def main(argv: list[str] | None = None) -> int:
             "witness": os.environ.get(WITNESS_PATH_ENV, ""),
             "trusted relation pin": os.environ.get(RELATION_PIN_ENV, ""),
             "API bearer token": os.environ.get(API_TOKEN_ENV, ""),
+            "session database": os.environ.get(SESSION_DATABASE_ENV, ""),
+            "session context binding": os.environ.get(SESSION_CONTEXT_BINDING_ENV, ""),
         }
         missing = [name for name, value in required.items() if not value]
         if missing:
             raise ValueError("missing server configuration: " + ", ".join(missing))
         _sync_key_from_environment()
+        session_binding_hex = required["session context binding"]
+        if re.fullmatch(r"[0-9a-fA-F]{64}", session_binding_hex) is None:
+            raise ValueError("session context binding must be exactly 64 hexadecimal characters")
         config = ApiConfig(
             workspace=args.workspace,
             relation_path=Path(required["relation"]),
             witness_path=Path(required["witness"]),
             trusted_relation_sha256=required["trusted relation pin"],
             api_token=required["API bearer token"],
+            session_database_path=Path(required["session database"]),
+            session_context_binding=bytes.fromhex(session_binding_hex),
         )
         serve(host=args.host, port=args.port, config=config)
     except (OSError, RuntimeError, ValueError) as error:

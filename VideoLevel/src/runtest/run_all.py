@@ -48,6 +48,10 @@ PYTEST_PHASES = [
     ("Phase 26", "Blind payload chunk framing", "test_blind_payload_chunks.py"),
     ("Phase 27", "Segmented blind video transport", "test_blind_sync_streaming.py"),
     ("Phase 29", "Stable blind carrier analysis", "test_blind_stable_analysis.py"),
+    ("Phase 30", "Durable verifier session lifecycle", "test_zkp_sessions.py"),
+    ("Phase 31", "Loopback session challenge HTTP CLI", "test_zkp_session_http.py"),
+    ("Phase 32", "LNP22 video session replay enforcement", "test_lnp22_video_session.py"),
+    ("Phase 33", "LNP22 video CLI regression", "test_lnp22_video_e2e.py"),
 ]
 
 SEP  = '-' * 58

@@ -44,6 +44,7 @@ from src.blind_sync_streaming import (
     embed_chunked_video_payload,
     extract_chunked_video_payload,
 )
+from src.zkp_sessions import SessionChallengeStore
 
 PROBE_MAGIC = b"ZVLP"
 PROBE_VERSION = 3
@@ -441,7 +442,11 @@ def _verify_from_video(
     go_command: str = "go",
     timeout_seconds: int = 1800,
     progress_callback: ProgressCallback | None = None,
+    session_store: SessionChallengeStore | None = None,
+    session_context_binding: bytes | None = None,
 ) -> dict[str, Any]:
+    if (session_store is None) != (session_context_binding is None):
+        raise ValueError("session_store and session_context_binding must be supplied together")
     extracted = extract_chunked_video_payload(
         str(video_path),
         sync_key,
@@ -461,22 +466,48 @@ def _verify_from_video(
         raise ValueError("carrier-normalized H.264 digest does not match proof context")
 
     proof_format, verify_flag = _proof_format_and_verify_flag(envelope.proof_bytes)
+    video_challenge = bytes.fromhex(context["session_id"])
 
-    with tempfile.TemporaryDirectory(prefix="lnp22-video-verify-") as temp_dir:
-        proof_path = Path(temp_dir) / "proof.lnpf"
-        proof_path.write_bytes(envelope.proof_bytes)
-        verified = _run_go(
-            [
-                verify_flag,
-                "-relation-in", str(relation_path),
-                "-proof-in", str(proof_path),
-                "-trusted-base-relation-sha256", trusted_relation_sha256,
-            ],
-            stdin=envelope.statement_bytes,
-            go_command=go_command,
-            timeout_seconds=timeout_seconds,
+    proof_result: dict[str, Any] = {}
+
+    def _verify_proof(challenge: bytes, context_binding: bytes) -> bool:
+        if session_store is not None and (
+            challenge != video_challenge
+            or context_binding != session_context_binding
+        ):
+            return False
+        with tempfile.TemporaryDirectory(prefix="lnp22-video-verify-") as temp_dir:
+            proof_path = Path(temp_dir) / "proof.lnpf"
+            proof_path.write_bytes(envelope.proof_bytes)
+            proof_result.update(
+                _run_go(
+                    [
+                        verify_flag,
+                        "-relation-in", str(relation_path),
+                        "-proof-in", str(proof_path),
+                        "-trusted-base-relation-sha256", trusted_relation_sha256,
+                    ],
+                    stdin=envelope.statement_bytes,
+                    go_command=go_command,
+                    timeout_seconds=timeout_seconds,
+                )
+            )
+        return proof_result.get("valid") is True
+
+    if session_store is None:
+        proof_valid = _verify_proof(b"", b"")
+    else:
+        proof_valid = session_store.verify_and_consume(
+            video_challenge,
+            context_binding=session_context_binding,
+            verify=_verify_proof,
         )
-    if verified.get("valid") is not True:
+        if not proof_valid:
+            raise ValueError(
+                "session challenge is unknown, expired, mismatched, replayed, "
+                "or the extracted proof was rejected"
+            )
+    if not proof_valid:
         raise ValueError("LNP22 verifier rejected the extracted proof")
     return {
         "valid": True,
@@ -487,7 +518,8 @@ def _verify_from_video(
         "statement_id": context["statement_id"],
         "canonical_video_sha256": actual_canonical_video_sha256,
         "positions_hash": extracted.positions_hash,
-        "verify_ms": verified.get("verify_ms"),
+        "verify_ms": proof_result.get("verify_ms"),
+        "session_replay_protected": session_store is not None,
         "security_status": "experimental LNP22 proof for a pre-provisioned pinned relation; not an accepted application ZKP",
     }
 
@@ -515,6 +547,9 @@ def embed_and_verify(
     proof_mode: str = "augmented",
     go_command: str = "go",
     timeout_seconds: int = 1800,
+    session_challenge: bytes | None = None,
+    session_store: SessionChallengeStore | None = None,
+    session_context_binding: bytes | None = None,
 ) -> dict[str, Any]:
     with ProcessTreeRSSSampler() as rss_sampler:
         return _embed_and_verify(
@@ -527,6 +562,9 @@ def embed_and_verify(
             proof_mode=proof_mode,
             go_command=go_command,
             timeout_seconds=timeout_seconds,
+            session_challenge=session_challenge,
+            session_store=session_store,
+            session_context_binding=session_context_binding,
             rss_sampler=rss_sampler,
         )
 
@@ -542,9 +580,24 @@ def _embed_and_verify(
     proof_mode: str,
     go_command: str,
     timeout_seconds: int,
+    session_challenge: bytes | None,
+    session_store: SessionChallengeStore | None,
+    session_context_binding: bytes | None,
     rss_sampler: ProcessTreeRSSSampler,
 ) -> dict[str, Any]:
     """Use pre-provisioned relation material; embed and verify from video only."""
+    if (session_store is None) != (session_context_binding is None):
+        raise ValueError("session_store and session_context_binding must be supplied together")
+    if session_challenge is not None:
+        if not isinstance(session_challenge, bytes) or len(session_challenge) != 32:
+            raise ValueError("session_challenge must be exactly 32 bytes")
+    elif session_store is not None:
+        raise ValueError("session_challenge is required when session replay protection is enabled")
+    if session_store is not None and not session_store.is_active(
+        session_challenge,
+        context_binding=session_context_binding,
+    ):
+        raise ValueError("verifier-issued session challenge is unknown, expired, or spent")
     prove_flags = {
         "augmented": "-fixed-prove",
         "compact": "-fixed-compact-prove",
@@ -585,7 +638,7 @@ def _embed_and_verify(
         raise ValueError("pre-provisioned relation does not match the verifier pin")
 
     sync_key = _sync_key_from_environment()
-    session_id = os.urandom(32)
+    session_id = session_challenge if session_challenge is not None else os.urandom(32)
     stage_ms: dict[str, float] = {}
     started = time.perf_counter()
     _emit_progress_event({"phase": "run", "event": "started"})
@@ -714,6 +767,8 @@ def _embed_and_verify(
             go_command=go_command,
             timeout_seconds=timeout_seconds,
             progress_callback=_emit_progress_event,
+            session_store=session_store,
+            session_context_binding=session_context_binding,
         )
         stage_ms["blind_extract_and_verify"] = (time.perf_counter() - phase_started) * 1000
         _emit_progress_event(
@@ -753,6 +808,7 @@ def _embed_and_verify(
             "strict_h264_decode": True,
             "blind_video_only_extraction": True,
             "proof_verification": True,
+            "session_replay_protected": session_store is not None,
             "segmented_transport": {
                 "protocol": "ZKBC-v1",
                 "frames_per_segment": DEFAULT_STREAM_SEGMENT_FRAMES,
@@ -777,7 +833,8 @@ def _embed_and_verify(
                 "relation and private witness must be provisioned by a separate trusted setup",
                 "proof establishes knowledge of the pinned short linear-relation witness only",
                 "proof does not establish the payload commitment opening or H.264 encoder correctness",
-                "demo payload is public; no payload privacy or replay-state service is provided",
+                "demo payload is public; the proof does not establish the target payload-opening relation",
+                "session replay protection is active only when using a verifier-issued challenge and shared durable store",
                 "sync key and relation pin are verifier configuration and are not embedded",
                 "one run is not a realtime or representative performance benchmark",
             ],
@@ -798,6 +855,7 @@ def _build_parser() -> argparse.ArgumentParser:
     embed_parser.add_argument("--relation", type=Path, required=True)
     embed_parser.add_argument("--witness", type=Path, required=True)
     embed_parser.add_argument("--trusted-relation-sha256", required=True)
+    embed_parser.add_argument("--session-challenge-hex", required=True)
     embed_parser.add_argument("--report-output", type=Path, required=True)
     embed_parser.add_argument(
         "--proof-mode",
@@ -815,6 +873,8 @@ def _build_parser() -> argparse.ArgumentParser:
     verify_parser.add_argument("--video", type=Path, required=True)
     verify_parser.add_argument("--relation", type=Path, required=True)
     verify_parser.add_argument("--trusted-relation-sha256", required=True)
+    verify_parser.add_argument("--session-database", type=Path, required=True)
+    verify_parser.add_argument("--session-context-binding-hex", required=True)
     verify_parser.add_argument("--go-command", default="go")
     verify_parser.add_argument("--timeout-seconds", type=int, default=1800)
     return parser
@@ -827,6 +887,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.timeout_seconds < 1:
             raise ValueError("timeout-seconds must be positive")
         if args.mode == "embed":
+            if re.fullmatch(r"[0-9a-fA-F]{64}", args.session_challenge_hex) is None:
+                raise ValueError("session-challenge-hex must be exactly 64 hexadecimal characters")
             result = embed_and_verify(
                 args.video,
                 args.output,
@@ -837,8 +899,13 @@ def main(argv: list[str] | None = None) -> int:
                 proof_mode=args.proof_mode,
                 go_command=args.go_command,
                 timeout_seconds=args.timeout_seconds,
+                session_challenge=bytes.fromhex(args.session_challenge_hex),
             )
         else:
+            if re.fullmatch(r"[0-9a-fA-F]{64}", args.session_context_binding_hex) is None:
+                raise ValueError("session-context-binding-hex must be exactly 64 hexadecimal characters")
+            session_context_binding = bytes.fromhex(args.session_context_binding_hex)
+            session_store = SessionChallengeStore(args.session_database)
             relation_path = args.relation.resolve(strict=True)
             _validate_sha256(args.trusted_relation_sha256, "trusted relation digest")
             result = _verify_from_video(
@@ -849,6 +916,8 @@ def main(argv: list[str] | None = None) -> int:
                 go_command=args.go_command,
                 timeout_seconds=args.timeout_seconds,
                 progress_callback=_emit_progress_event,
+                session_store=session_store,
+                session_context_binding=session_context_binding,
             )
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0

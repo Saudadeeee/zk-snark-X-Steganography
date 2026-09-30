@@ -10,13 +10,28 @@ import tempfile
 import threading
 from concurrent.futures import Future
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_DIR = ROOT / "benchmark" / "lnp22_context_probe"
 if str(MODULE_DIR) not in sys.path:
     sys.path.insert(0, str(MODULE_DIR))
 
-from http_api import ApiConfig, JobManager, _LoopbackHttpServer, create_handler, serve
+from http_api import (
+    ApiConfig,
+    JobManager,
+    _LoopbackHttpServer,
+    _run_probe_operation,
+    create_handler,
+    serve,
+)
+from video_e2e import (
+    DEMO_PAYLOAD,
+    encode_video_probe_payload,
+    make_video_probe_statement,
+)
 
 from src.runtest._helpers import run_test, section, summarise
 
@@ -27,7 +42,7 @@ class _InlineExecutor:
         future.set_running_or_notify_cancel()
         try:
             future.set_result(function(*args, **kwargs))
-        except RuntimeError as error:
+        except Exception as error:  # noqa: BLE001 - mirror Future exception capture
             future.set_exception(error)
         return future
 
@@ -65,6 +80,7 @@ def _server_context(
     *,
     max_inbox_bytes: int = 1024,
     max_requests_per_minute: int = 120,
+    max_jobs_per_minute: int = 1,
     request_timeout_seconds: float = 30.0,
 ):
     temp = tempfile.TemporaryDirectory(prefix="lnp22-api-test-")
@@ -82,9 +98,11 @@ def _server_context(
         witness_path=witness,
         trusted_relation_sha256="a" * 64,
         api_token="test-api-token-" + "x" * 32,
+        session_database_path=workspace / "sessions.sqlite3",
+        session_context_binding=b"s" * 32,
         max_upload_bytes=512,
         max_inbox_bytes=max_inbox_bytes,
-        max_jobs_per_minute=1,
+        max_jobs_per_minute=max_jobs_per_minute,
         max_requests_per_minute=max_requests_per_minute,
         request_timeout_seconds=request_timeout_seconds,
     )
@@ -188,12 +206,21 @@ def t_http_api_runs_embed_job_and_downloads_video_and_report() -> None:
             "strict_h264_decode": True,
             "blind_video_only_extraction": True,
             "proof_verification": True,
+            "session_replay_protected": False,
             "security_status": "experimental only",
         }
 
     temp, server, manager, config, thread = _server_context(runner)
     try:
         (Path(temp.name) / "inbox" / "sample.h264").write_bytes(b"cover")
+        status, _headers, grant_response = _request(
+            server,
+            "POST",
+            "/api/v1/zkp/sessions",
+            token=config.api_token,
+        )
+        assert status == 201
+        session_challenge = grant_response["data"]["challenge"]
         request = json.dumps(
             {
                 "operation": "embed",
@@ -201,6 +228,7 @@ def t_http_api_runs_embed_job_and_downloads_video_and_report() -> None:
                 "output": "output/stego.h264",
                 "report": "reports/stego.json",
                 "proof_mode": "compact",
+                "session_challenge_hex": session_challenge,
             }
         ).encode()
         status, _headers, created = _request(
@@ -212,6 +240,7 @@ def t_http_api_runs_embed_job_and_downloads_video_and_report() -> None:
         assert job["result"]["output"] == "output/stego.h264"
         assert job["result"]["proof_mode"] == "compact"
         assert job["result"]["proof_format"] == "LNPF-v2"
+        assert job["result"]["session_replay_protected"] is False
 
         invalid_request = json.dumps(
             {
@@ -220,6 +249,7 @@ def t_http_api_runs_embed_job_and_downloads_video_and_report() -> None:
                 "output": "output/other.h264",
                 "report": "reports/other.json",
                 "proof_mode": "unknown",
+                "session_challenge_hex": "c" * 64,
             }
         ).encode()
         status, _headers, invalid_body = _request(
@@ -291,6 +321,7 @@ def t_http_api_rejects_workspace_escape_and_hides_worker_errors() -> None:
                 "video": "inbox/sample.h264",
                 "output": "output/stego video.h264",
                 "report": "reports/stego.json",
+                "session_challenge_hex": "c" * 64,
             }
         ).encode()
         status, _headers, body = _request(
@@ -329,6 +360,219 @@ def t_http_api_contracts_are_in_the_full_test_runner() -> None:
     from src.runtest.run_all import PHASES
 
     assert any(filename == "test_lnp22_http_api.py" for _, _, filename in PHASES)
+
+
+def t_http_api_issues_sessions_and_requires_the_grant_for_embedding() -> None:
+    observed = []
+
+    def runner(operation, arguments, _config):
+        observed.append((operation, arguments))
+        return {
+            "session_replay_protected": False,
+            "security_status": "experimental only",
+        }
+
+    temp, server, manager, config, thread = _server_context(runner)
+    try:
+        status, _headers, grant_response = _request(
+            server,
+            "POST",
+            "/api/v1/zkp/sessions",
+            token=config.api_token,
+        )
+        assert status == 201
+        grant = grant_response["data"]
+        assert len(grant["challenge"]) == 64
+        assert grant["expires_at"] > grant["issued_at"]
+        assert config.session_store.is_active(
+            bytes.fromhex(grant["challenge"]),
+            context_binding=config.session_context_binding,
+        )
+
+        (Path(temp.name) / "inbox" / "cover.h264").write_bytes(b"cover")
+        missing_session = json.dumps(
+            {
+                "operation": "embed",
+                "video": "inbox/cover.h264",
+                "output": "output/stego.h264",
+                "report": "reports/stego.json",
+            }
+        ).encode()
+        status, _headers, error = _request(
+            server,
+            "POST",
+            "/api/v1/jobs",
+            token=config.api_token,
+            body=missing_session,
+        )
+        assert status == 422
+        assert error["error"]["code"] == "invalid_request"
+
+        unknown_session = json.dumps(
+            {
+                "operation": "embed",
+                "video": "inbox/cover.h264",
+                "output": "output/unknown-session.h264",
+                "report": "reports/unknown-session.json",
+                "session_challenge_hex": "f" * 64,
+            }
+        ).encode()
+        status, _headers, error = _request(
+            server,
+            "POST",
+            "/api/v1/jobs",
+            token=config.api_token,
+            body=unknown_session,
+        )
+        assert status == 409
+        assert error["error"]["code"] == "invalid_session"
+
+        with_session = json.dumps(
+            {
+                "operation": "embed",
+                "video": "inbox/cover.h264",
+                "output": "output/stego.h264",
+                "report": "reports/stego.json",
+                "session_challenge_hex": grant["challenge"],
+            }
+        ).encode()
+        status, _headers, created = _request(
+            server,
+            "POST",
+            "/api/v1/jobs",
+            token=config.api_token,
+            body=with_session,
+        )
+        assert status == 202
+        assert created["data"]["status"] == "succeeded"
+        operation, arguments = observed[0]
+        assert operation == "embed"
+        assert arguments["session_challenge"] == bytes.fromhex(grant["challenge"])
+    finally:
+        server.shutdown()
+        server.server_close()
+        manager.shutdown()
+        thread.join(timeout=5)
+        temp.cleanup()
+
+
+def t_http_api_verifier_operation_uses_its_pinned_session_store() -> None:
+    temp, _server, manager, config, _thread = _server_context(lambda *_args: {})
+    try:
+        observed = {}
+
+        def fake_verify(*args, **kwargs):
+            observed.update(args=args, kwargs=kwargs)
+            return {"valid": True, "session_replay_protected": True}
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr("http_api._verify_from_video", fake_verify)
+            monkeypatch.setattr(
+                "http_api._sync_key_from_environment", lambda: b"k" * 32
+            )
+            result = _run_probe_operation(
+                "verify",
+                {"video": Path(temp.name) / "inbox" / "received.h264"},
+                config,
+            )
+        assert result["session_replay_protected"] is True
+        assert observed["kwargs"]["session_store"] is config.session_store
+        assert (
+            observed["kwargs"]["session_context_binding"]
+            == config.session_context_binding
+        )
+    finally:
+        manager.shutdown()
+        temp.cleanup()
+
+
+def t_http_api_blind_verification_consumes_the_issued_video_session() -> None:
+    temp, server, manager, config, thread = _server_context(
+        _run_probe_operation,
+        max_jobs_per_minute=5,
+    )
+    relation_pin = config.trusted_relation_sha256
+    try:
+        status, _headers, grant_response = _request(
+            server,
+            "POST",
+            "/api/v1/zkp/sessions",
+            token=config.api_token,
+        )
+        assert status == 201
+        challenge = bytes.fromhex(grant_response["data"]["challenge"])
+        positions_hash = "21" * 32
+        canonical_video_hash = "32" * 32
+        statement = make_video_probe_statement(
+            session_id=challenge,
+            payload=DEMO_PAYLOAD,
+            canonical_video_sha256=canonical_video_hash,
+            positions_hash=positions_hash,
+            relation_sha256=relation_pin,
+        )
+        encoded = encode_video_probe_payload(
+            statement,
+            b"LNPF\x01" + b"\0" * 6,
+            DEMO_PAYLOAD,
+        )
+        video = Path(temp.name) / "inbox" / "session-bound.h264"
+        video.write_bytes(b"synthetic bytes; extractor is instrumented in this test")
+        go_calls = []
+
+        def fake_go(*_args, **_kwargs):
+            go_calls.append(True)
+            return {"valid": True, "verify_ms": 2.5}
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(
+                "http_api._sync_key_from_environment", lambda: b"k" * 32
+            )
+            monkeypatch.setattr(
+                "video_e2e.extract_chunked_video_payload",
+                lambda *_args, **_kwargs: SimpleNamespace(
+                    payload=encoded,
+                    positions_hash=positions_hash,
+                    canonical_video_sha256=canonical_video_hash,
+                    carriers_used=123,
+                ),
+            )
+            monkeypatch.setattr("video_e2e._run_go", fake_go)
+            request = json.dumps(
+                {"operation": "verify", "video": "inbox/session-bound.h264"}
+            ).encode()
+            status, _headers, created = _request(
+                server,
+                "POST",
+                "/api/v1/jobs",
+                token=config.api_token,
+                body=request,
+            )
+            replay_status, _replay_headers, replay_created = _request(
+                server,
+                "POST",
+                "/api/v1/jobs",
+                token=config.api_token,
+                body=request,
+            )
+
+        assert status == 202
+        assert created["data"]["status"] == "succeeded"
+        assert created["data"]["result"]["valid"] is True
+        assert created["data"]["result"]["session_replay_protected"] is True
+        assert replay_status == 202
+        assert replay_created["data"]["status"] == "failed"
+        assert replay_created["data"]["error"]["code"] == "job_failed"
+        assert len(go_calls) == 1
+        assert not config.session_store.is_active(
+            challenge,
+            context_binding=config.session_context_binding,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        manager.shutdown()
+        thread.join(timeout=5)
+        temp.cleanup()
 
 
 def t_http_api_bounds_total_upload_storage_and_job_rate() -> None:
@@ -492,6 +736,18 @@ def main() -> None:
         run_test(
             "http_api_contracts_are_in_the_full_test_runner",
             t_http_api_contracts_are_in_the_full_test_runner,
+        ),
+        run_test(
+            "http_api_issues_sessions_and_requires_the_grant_for_embedding",
+            t_http_api_issues_sessions_and_requires_the_grant_for_embedding,
+        ),
+        run_test(
+            "http_api_verifier_operation_uses_its_pinned_session_store",
+            t_http_api_verifier_operation_uses_its_pinned_session_store,
+        ),
+        run_test(
+            "http_api_blind_verification_consumes_the_issued_video_session",
+            t_http_api_blind_verification_consumes_the_issued_video_session,
         ),
         run_test(
             "http_api_bounds_total_upload_storage_and_job_rate",

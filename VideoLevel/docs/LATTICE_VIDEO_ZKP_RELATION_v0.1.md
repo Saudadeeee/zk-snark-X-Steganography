@@ -361,11 +361,26 @@ The existing `src/video_zkp_contract.py` is only a statement/context helper:
   verifier-pinned 32-byte context binding, expiry checks before and after the
   caller's proof-verification callback, and atomic one-use consumption. Its
   eight unit tests cover restart-persistent replay rejection, expiry, wrong
-  binding, failed proof non-consumption, and concurrent consumes. It is not
-  yet wired to a session-issuance HTTP endpoint or the public video verifier;
-  one shared durable database is required across workers on the same host, and
-  a multi-host deployment still needs an equivalent shared transactional
-  store;
+  binding, failed proof non-consumption, and concurrent consumes. The local
+  `src/zkp_session_http.py` service exposes `POST /api/v1/zkp/sessions` and
+  returns a challenge with issue/expiry timestamps. It binds only to a
+  loopback IP, accepts no request body, and has no proof-verification route;
+  it is a development issuer, not an authenticated or production verifier.
+  Start it with `python -m src.zkp_session_http --database
+  ./.state/sessions.sqlite3 --context-binding-hex <64-hex-policy-digest>`;
+  replace the placeholder with the verifier's pinned policy digest. The
+  challenge service is not yet wired to the public video verifier. One shared
+  durable database is required across workers on the same host, and a
+  multi-host deployment still needs an equivalent shared transactional store;
+- the separate experimental `benchmark/lnp22_context_probe/http_api.py` now
+  exposes authenticated session issuance and requires the issued challenge on
+  embed jobs. A video-only verify job extracts the session ID from the in-band
+  envelope, verifies the research proof, and atomically consumes the challenge;
+  tests cover unknown/expired challenges, failed proofs, and replay. This is
+  outer session-state enforcement around the LNP22 probe, not a proof of the
+  target payload-opening relation. The probe statement does not yet include
+  the session store's policy-binding digest, so that server-side binding is
+  not itself cryptographically asserted by this experimental proof;
 - this future statement is still written to a `.pq-statement.json` sidecar,
   while the default video payload carries an ML-DSA receipt reference, not a
   ZK proof. `embed()` does not yet register/pin the carrier profile used by
