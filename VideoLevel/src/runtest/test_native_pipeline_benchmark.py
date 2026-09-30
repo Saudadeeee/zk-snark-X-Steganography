@@ -1,8 +1,10 @@
 from benchmark.native_pipeline_matrix import (
     build_metric_filtergraph,
+    frame_transport_payload,
     parse_encoder_result,
     parse_metric_log,
 )
+from src.blind_sync import unpack_blind_payload
 
 
 def test_parse_encoder_capacity_failure():
@@ -46,3 +48,11 @@ def test_filtergraph_uses_relative_metric_logs_for_windows_compatibility():
     assert "stats_file=psnr_per_frame.log" in graph
     assert "stats_file=ssim_per_frame.log" in graph
     assert "D:" not in graph
+
+
+def test_transport_payload_is_the_real_blind_sync_envelope():
+    raw, framed = frame_transport_payload(bytes.fromhex("a5"))
+
+    assert raw == bytes.fromhex("a5")
+    assert len(framed) == len(raw) + 14
+    assert unpack_blind_payload(framed) == raw
