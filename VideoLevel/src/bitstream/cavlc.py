@@ -16,9 +16,9 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import List, Tuple
 
-logger = logging.getLogger(__name__)
-
 from .bitstream_io import BitstreamWriter
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -35,16 +35,16 @@ from .bitstream_io import BitstreamWriter
 COEFF_TOKEN_NC_0_1 = {
     # TotalCoeff=0 (all zeros) - special codes
     '1': (0, 0),  # nC=0,1
-    
+
     # TotalCoeff=1
     '000101': (1, 0),
     '01': (1, 1),
-    
+
     # TotalCoeff=2
     '00000111': (2, 0),
     '000100': (2, 1),
     '0011': (2, 2),
-    
+
     # TotalCoeff=3
     '000000111': (3, 0),
     '00000110': (3, 1),
@@ -835,7 +835,7 @@ def get_coeff_token_table(nC: int):
     
     Args:
         nC: Prediction value from neighboring blocks
-        
+
     Returns:
     """
     if nC == -1:
@@ -867,7 +867,7 @@ def get_total_zeros_table(total_coeff: int, is_chroma_dc: bool = False):
         if total_coeff in TOTAL_ZEROS_2x2:
             return TOTAL_ZEROS_2x2[total_coeff]
         return {}
-        
+
     if total_coeff in TOTAL_ZEROS_TABLES:
         return TOTAL_ZEROS_TABLES[total_coeff]
     else:
@@ -904,6 +904,9 @@ _VLC_LONGER_PREFIX_CACHE_MAX_ENTRIES = 64
 _VLC_LONGER_PREFIX_CACHE: OrderedDict[
     int, tuple[dict, frozenset[str]]
 ] = OrderedDict()
+_VLC_TRIE_CACHE_MAX_ENTRIES = 64
+_VLC_TRIE_CACHE: OrderedDict[int, tuple[object, dict]] = OrderedDict()
+_VLC_TRIE_VALUE_KEY = object()
 _VLC_BUILTIN_TABLES = {
     id(table): table
     for table in (
@@ -953,77 +956,136 @@ def _longer_vlc_prefixes(vlc_table: dict) -> frozenset[str]:
     return prefixes
 
 
-def decode_vlc(reader, vlc_table: dict, max_bits: int = 16, debug: bool = False) -> tuple:
-    """
-    Decode variable length code from bitstream using LONGEST-MATCH strategy
-    
-    CRITICAL: H.264 VLC tables are designed for longest-match decoding, NOT first-match!
-    Tables can have "prefix overlaps" where shorter codes are prefixes of longer codes.
-    Example: '0001' (4 bits) and '00011' (5 bits) are BOTH valid - length disambiguates.
-    
-    Strategy:
-    1. Read bits progressively up to max_bits
-    2. Track ALL valid matches found along the way
-    3. Return the LONGEST valid match
-    4. Rewind bitstream to position after longest match
-    
-    Args:
-        reader: BitstreamReader instance with tell() and seek() methods
-        vlc_table: VLC table dictionary mapping bit patterns to values
-        max_bits: Maximum code length to try
-        debug: Enable debug logging
-        
-    Returns:
-        Decoded value corresponding to longest matching code
-        
-    Raises:
-        ValueError: If no valid code found in bitstream
-    """
+def _build_vlc_trie(vlc_table: dict) -> dict:
+    trie = {}
+    for code, value in vlc_table.items():
+        node = trie
+        for character in code:
+            node = node.setdefault(ord(character) - ord("0"), {})
+        node[_VLC_TRIE_VALUE_KEY] = value
+    return trie
+
+
+def _vlc_trie(vlc_table: dict) -> dict | None:
+    """Return a cached decode trie for an immutable module-owned VLC table."""
+    if _VLC_BUILTIN_TABLES.get(id(vlc_table)) is not vlc_table:
+        return None
+
+    table_id = id(vlc_table)
+    cached = _VLC_TRIE_CACHE.get(table_id)
+    if cached is not None and cached[0] is vlc_table:
+        _VLC_TRIE_CACHE.move_to_end(table_id)
+        return cached[1]
+
+    trie = _build_vlc_trie(vlc_table)
+    if len(_VLC_TRIE_CACHE) >= _VLC_TRIE_CACHE_MAX_ENTRIES:
+        _VLC_TRIE_CACHE.popitem(last=False)
+    _VLC_TRIE_CACHE[table_id] = (vlc_table, trie)
+    return trie
+
+
+def _decode_vlc_slow(reader, vlc_table: dict, max_bits: int, debug: bool) -> tuple:
     start_pos = reader.tell()
     longer_prefixes = _longer_vlc_prefixes(vlc_table)
     code_str = ''
     longest_match = None
     longest_match_len = 0
-    
+
     if debug:
         logger.debug(f"      [decode_vlc] Starting at position {start_pos}")
-    
-    # Read bits progressively and track longest match
+
     for i in range(max_bits):
         try:
             bit = reader.read_bits(1)
             code_str += str(bit)
-            
-            # Check if current code_str is a valid code
+
             if code_str in vlc_table:
                 longest_match = vlc_table[code_str]
                 longest_match_len = len(code_str)
-                
+
                 if debug:
                     logger.debug(f"      [decode_vlc] Found match: '{code_str}' -> {longest_match}")
-                
-                # Stop once the matched code cannot be a prefix of a longer one.
+
                 if code_str not in longer_prefixes:
-                    # This is definitely the longest match, stop here
                     if debug:
                         logger.debug(f"      [decode_vlc] No longer codes, stopping at '{code_str}'")
                     break
-        except Exception:
-            # End of stream reached
+        except EOFError:
             break
-    
-    # If we found at least one match, rewind to end of longest match and return
+
     if longest_match is not None:
-        # Rewind to position right after the longest match
         end_pos = start_pos + longest_match_len
         reader.seek(end_pos)
         if debug:
             logger.debug(f"      [decode_vlc] Rewinding to position {end_pos} (consumed {longest_match_len} bits)")
         return longest_match
-    
-    # No valid code found - CRITICAL: rewind reader to start_pos to prevent desync
+
     reader.seek(start_pos)
     raise ValueError(f"Invalid VLC code: {code_str} (no match in table)")
+
+
+def _decode_vlc_trie(reader, vlc_table: dict, trie: dict, max_bits: int) -> tuple:
+    start_pos = reader.tell()
+    node = trie
+    longest_match = None
+    longest_match_len = 0
+
+    for code_len in range(1, max_bits + 1):
+        try:
+            bit = reader.read_bits(1)
+        except EOFError:
+            break
+
+        node = node.get(bit)
+        if node is None:
+            break
+
+        if _VLC_TRIE_VALUE_KEY in node:
+            longest_match = node[_VLC_TRIE_VALUE_KEY]
+            longest_match_len = code_len
+            if 0 not in node and 1 not in node:
+                break
+
+    if longest_match is not None:
+        reader.seek(start_pos + longest_match_len)
+        return longest_match
+
+    # Preserve the slow decoder's exact invalid-code cursor and error behavior.
+    reader.seek(start_pos)
+    return _decode_vlc_slow(reader, vlc_table, max_bits, False)
+
+
+def decode_vlc(reader, vlc_table: dict, max_bits: int = 16, debug: bool = False) -> tuple:
+    """
+    Decode variable length code from bitstream using LONGEST-MATCH strategy
+
+    CRITICAL: H.264 VLC tables are designed for longest-match decoding, NOT first-match!
+    Tables can have "prefix overlaps" where shorter codes are prefixes of longer codes.
+    Example: '0001' (4 bits) and '00011' (5 bits) are BOTH valid - length disambiguates.
+
+    Strategy:
+    1. Read bits progressively up to max_bits
+    2. Track ALL valid matches found along the way
+    3. Return the LONGEST valid match
+    4. Rewind bitstream to position after longest match
+
+    Args:
+        reader: BitstreamReader instance with tell() and seek() methods
+        vlc_table: VLC table dictionary mapping bit patterns to values
+        max_bits: Maximum code length to try
+        debug: Enable debug logging
+
+    Returns:
+        Decoded value corresponding to longest matching code
+
+    Raises:
+        ValueError: If no valid code found in bitstream
+    """
+    if not debug:
+        trie = _vlc_trie(vlc_table)
+        if trie is not None:
+            return _decode_vlc_trie(reader, vlc_table, trie, max_bits)
+    return _decode_vlc_slow(reader, vlc_table, max_bits, debug)
 
 
 # ============================================================================

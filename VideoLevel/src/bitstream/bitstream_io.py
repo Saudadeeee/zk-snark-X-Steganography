@@ -8,8 +8,6 @@ Contains:
 - BitstreamWriter: For constructing CAVLC-encoded bitstreams
 """
 
-from typing import List
-
 class BitstreamReader:
     """
     Bitstream reader with Exp-Golomb decoding
@@ -41,18 +39,35 @@ class BitstreamReader:
         
     def read_bits(self, n: int) -> int:
         """Read n bits from bitstream"""
-        result = 0
-        for _ in range(n):
-            byte_pos = self.pos // 8
-            bit_pos = 7 - (self.pos % 8)
-            
+        if n <= 0:
+            return 0
+
+        start = self.pos
+        if n == 1:
+            byte_pos = start >> 3
             if byte_pos >= len(self.data):
                 raise EOFError("End of bitstream")
-            
-            bit = (self.data[byte_pos] >> bit_pos) & 1
-            result = (result << 1) | bit
-            self.pos += 1
-        
+            self.pos = start + 1
+            return (self.data[byte_pos] >> (7 - (start & 7))) & 1
+
+        available = min(n, (len(self.data) << 3) - start)
+        result = 0
+
+        if available > 0:
+            byte_pos = start >> 3
+            bit_offset = start & 7
+            byte_count = (bit_offset + available + 7) >> 3
+            if byte_count == 1:
+                value = self.data[byte_pos] >> (8 - bit_offset - available)
+            else:
+                value = int.from_bytes(
+                    self.data[byte_pos : byte_pos + byte_count], "big"
+                ) >> (byte_count * 8 - bit_offset - available)
+            result = value & ((1 << available) - 1)
+            self.pos += available
+
+        if available < n:
+            raise EOFError("End of bitstream")
         return result
     
     def read_ue(self) -> int:
@@ -97,7 +112,7 @@ class BitstreamWriter:
     """
     
     def __init__(self):
-        self.buffer: List[int] = []  # Byte buffer
+        self.buffer: list[int] = []  # Byte buffer
         self.bit_buffer: int = 0      # Current byte being built
         self.bit_count: int = 0       # Number of bits in bit_buffer (0-7)
         self.total_bits: int = 0      # Total bits written

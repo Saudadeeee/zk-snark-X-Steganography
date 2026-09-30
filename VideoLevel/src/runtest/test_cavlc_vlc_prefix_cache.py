@@ -1,7 +1,7 @@
 import pytest
 
+from src.bitstream import cavlc
 from src.bitstream.bitstream_io import BitstreamReader
-import src.bitstream.cavlc as cavlc
 from src.bitstream.cavlc import decode_vlc
 
 
@@ -44,7 +44,7 @@ def test_builtin_vlc_table_prefix_index_is_reused(monkeypatch):
     monkeypatch.setattr(cavlc, "_build_longer_vlc_prefixes", counting_builder)
     for _ in range(2):
         reader = BitstreamReader(bytes([0b10000000]))
-        assert decode_vlc(reader, table, max_bits=16) == (0, 0)
+        assert decode_vlc(reader, table, max_bits=16, debug=True) == (0, 0)
         assert reader.tell() == 1
 
     assert builds == 1
@@ -56,3 +56,42 @@ def test_builtin_vlc_tables_cannot_be_mutated_after_prefix_cache(monkeypatch):
 
     with pytest.raises(TypeError, match="immutable"):
         table["0"] = (99, 0)
+
+
+def _reader_for_code(code):
+    padded = code + "0" * (-len(code) % 8)
+    return BitstreamReader(
+        bytes(int(padded[offset : offset + 8], 2) for offset in range(0, len(padded), 8))
+    )
+
+
+def test_trie_decoder_matches_every_builtin_vlc_entry():
+    seen_tables = set()
+    for table in cavlc._VLC_BUILTIN_TABLES.values():
+        if id(table) in seen_tables:
+            continue
+        seen_tables.add(id(table))
+        for code, expected in table.items():
+            reader = _reader_for_code(code)
+            assert decode_vlc(reader, table, max_bits=16) == expected
+            assert reader.tell() == len(code)
+
+
+def test_builtin_vlc_trie_is_built_once_and_reused(monkeypatch):
+    table = cavlc.get_coeff_token_table(0)
+    cavlc._VLC_TRIE_CACHE.pop(id(table), None)
+    original_builder = cavlc._build_vlc_trie
+    builds = 0
+
+    def counting_builder(vlc_table):
+        nonlocal builds
+        builds += 1
+        return original_builder(vlc_table)
+
+    monkeypatch.setattr(cavlc, "_build_vlc_trie", counting_builder)
+    for _ in range(2):
+        reader = BitstreamReader(bytes((0b10000000,)))
+        assert decode_vlc(reader, table, max_bits=16) == (0, 0)
+        assert reader.tell() == 1
+
+    assert builds == 1

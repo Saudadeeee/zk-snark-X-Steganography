@@ -65,7 +65,72 @@ real carrier count. Forcing every frame to I while the payload is outstanding
 also changes coding cost; this failed run is not a quality or realtime
 benchmark.
 
-The next carrier gate is to test longer/more-capable real clips and a validated
-blind-stable profile, then measure a full versioned proof/session envelope.
-P-slice capacity is not counted here because the current general P-slice blind
-parser path is not established as trusted.
+## Follow-up: longer clip and higher resolution
+
+To test whether the 300-frame Akiyo result was only a short-clip limitation, a
+fresh proof was generated with the same toy smoke circuit. Its response is
+still exactly 21,331 bytes, but is randomized and has a different SHA-256 from
+the earlier proof used above:
+
+```text
+response SHA-256: C2D336F678DC1F5803C536508DBA90EBAB1296093B89A0A66F5958819C346D10
+```
+
+The cover was `data/raw/deadline_cif.y4m`, 1,374 frames / 45.846 seconds at
+352x288 and 30000/1001 fps. The 704x576 cover was an existing Lanczos-scaled
+YUV420 derivative of that same clip. These are offline native-encoder runs,
+using the patched x264 build noted above, CRF 23 and the current IDR-only
+carrier policy (P frames are allowed only after the payload is complete).
+
+| Cover / payload | Result | Carrier and encoder observations |
+|---|---|---|
+| 352x288 / 21,331-byte raw response | Fail closed | 116,001 / 170,648 bits (67.95%); 1,374 I, 0 P; 18.017 s; no output published |
+| 704x576 / 21,331-byte raw response | Success | 1,164 I, 210 P; 41.924 s; output published |
+| 704x576 / 21,345-byte `ZKVP` envelope | Success | 14-byte version/kind/length/CRC32 header plus response; 1,164 I, 210 P; 41.680 s; output size 29,361,432 bytes |
+
+The successful framed run's x264 log reported average QP 29.94 for I frames,
+23.47 for P frames, and 5,123.51 kb/s. FFmpeg compared all 1,374 decoded
+frames with the scaled Y4M cover: aggregate PSNR average 39.192754 dB and SSIM
+All 0.966513. These include ordinary lossy H.264 coding as well as embedding;
+they do not isolate embedding-only distortion. Peak encoder RAM was not
+measured.
+
+The project blind extractor was then run on that H.264 file, with no proof
+sidecar. It validated the `ZKVP` header, exact length and CRC32, and returned
+the exact 21,331 response bytes:
+
+```text
+BLIND_ZKVP_RESPONSE_BYTES=21331
+BLIND_ZKVP_RESPONSE_ROUNDTRIP=PASS
+```
+
+The extraction process consumed at least 1,117.2 CPU seconds at the last live
+process sample and completed in the next 7.45-second polling interval; an exact
+wall stopwatch was not attached. Sampled working set peaked at 95.8 MiB. This
+is a successful blind transport round-trip, but decisively not a realtime
+measurement: verification-side extraction alone took many minutes for a
+45.846-second clip. The 14-byte envelope contains no public application
+statement, video/session binding, expiry data, or complete proof format. The
+only relation remains the deliberately insecure smoke relation described
+above.
+
+### Parser cost diagnostic
+
+A separate cProfile run on the existing 704x576 Deadline matrix output (the
+small-payload benchmark carrier, not the proof-sized output) parsed its NAL
+stream in 10.520 seconds, then parsed one trusted IDR's CAVLC in 4.361 seconds
+for 1,584 macroblocks. The profile recorded 3,528,124 calls; the largest
+cumulative costs were `TraceableCAVLCParser.extract_with_offsets` (4.355 s),
+`decode_block_cavlc` (3.414 s across 33,069 calls), and `decode_vlc` (1.536 s
+across 80,813 calls). This is a hotspot diagnostic from a different encoded
+stream, not a per-frame estimate for the proof video, but it points to Python
+CAVLC block/VLC decoding—not ZK verification—as the first extraction bottleneck
+to optimize.
+
+The 704x576 run demonstrates that a larger carrier can transport the response
+and the current 14-byte framing; it does not make the 352x288 profile
+sufficient or prove a general capacity bound. The next gates are a versioned
+statement/session envelope, secure application relation and key lifecycle,
+capacity/quality trials on the intended cover profile, and a faster trusted
+blind parser. P-slice carrier capacity is still not counted because the
+general P-slice blind parser path is not established as trusted.
