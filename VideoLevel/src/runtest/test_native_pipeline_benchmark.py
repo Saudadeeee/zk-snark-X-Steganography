@@ -2,13 +2,13 @@ import math
 import sys
 
 from benchmark.native_pipeline_matrix import (
+    _markdown_report,
     _run_measured,
     build_metric_filtergraph,
     compute_luma_ssim,
     frame_transport_payload,
     host_metadata,
     label_ffmpeg_ssim,
-    _markdown_report,
     parse_encoder_result,
     parse_metric_log,
     serialize_quality_rows,

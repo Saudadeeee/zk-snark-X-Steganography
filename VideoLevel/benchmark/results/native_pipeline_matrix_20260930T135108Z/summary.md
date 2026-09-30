@@ -1,5 +1,10 @@
 # Native in-band H.264 pipeline matrix
 
+> Superseded: this first matrix used an incorrectly shared FFmpeg filter pad,
+> which made SSIM falsely print `1.000000` throughout. The corrected graph
+> explicitly splits reference/stego streams per metric. Use the corrected
+> 2026-09-30 report generated after 14:28 UTC; do not cite these SSIM values.
+
 Generated: 2026-09-30T13:54:25.650498+00:00
 
 ## Measurement host
