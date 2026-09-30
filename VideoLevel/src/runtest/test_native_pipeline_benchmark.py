@@ -53,6 +53,10 @@ def test_parse_per_frame_psnr_and_ssim_logs():
 def test_filtergraph_uses_relative_metric_logs_for_windows_compatibility():
     graph = build_metric_filtergraph("psnr_per_frame.log", "ssim_per_frame.log")
 
+    assert "split=2[refp][refs]" in graph
+    assert "split=2[distp][dists]" in graph
+    assert "[refp][distp]psnr=" in graph
+    assert "[refs][dists]ssim=" in graph
     assert "stats_file=psnr_per_frame.log" in graph
     assert "stats_file=ssim_per_frame.log" in graph
     assert "D:" not in graph
