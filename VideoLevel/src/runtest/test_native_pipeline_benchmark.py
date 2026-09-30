@@ -3,10 +3,11 @@ import sys
 
 from benchmark.native_pipeline_matrix import (
     _run_measured,
-    compute_luma_ssim,
-    host_metadata,
     build_metric_filtergraph,
+    compute_luma_ssim,
     frame_transport_payload,
+    host_metadata,
+    label_ffmpeg_ssim,
     parse_encoder_result,
     parse_metric_log,
     serialize_quality_rows,
@@ -107,3 +108,9 @@ def test_precise_luma_ssim_distinguishes_near_identical_frames():
     score = compute_luma_ssim(reference, bytes(changed), width=32, height=32)
 
     assert 0.0 < score < 1.0
+
+
+def test_ffmpeg_ssim_value_is_preserved_before_optional_luma_metric():
+    rows = label_ffmpeg_ssim([{"frame": 1, "psnr_db": 40.0, "ssim": 1.0}])
+
+    assert rows[0]["ssim_ffmpeg_all"] == 1.0
