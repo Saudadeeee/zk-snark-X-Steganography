@@ -129,6 +129,13 @@ def carrier_policy_hash(carrier_contract: object, required_bits: int) -> str:
         value = getattr(carrier_contract, field)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ValueError(f"carrier contract {field} must be a non-negative integer")
+    candidate_derivation = (
+        "CAVLC trailing-one sign carriers (encoded as negative coefficient indexes) "
+        "from positive-length patchable luma blocks"
+        if carrier_contract.signbit_only
+        else "first luma AC coefficient with abs(level)>=4, nonzero, and outside "
+        "CAVLC trailing-ones from positive-length patchable luma blocks"
+    )
     descriptor = {
         "contract_version": carrier_contract.version,
         "signbit_only": carrier_contract.signbit_only,
@@ -142,10 +149,7 @@ def carrier_policy_hash(carrier_contract: object, required_bits: int) -> str:
         "stable_carriers_only": carrier_contract.stable_carriers_only,
         "required_bits": required_bits,
         "session_seed_derivation": "sha256(domain||expected-session-id-bytes)",
-        "candidate_derivation": (
-            "first luma AC coefficient with abs(level)>=4, nonzero, and outside CAVLC trailing-ones; "
-            "block must have positive patchable NAL length"
-        ),
+        "candidate_derivation": candidate_derivation,
         "candidate_filtering": (
             "intersect stable candidates with safe positions when stable_carriers_only; "
             "then apply signbit_only and bottom_rows contract filters when enabled"
@@ -672,6 +676,13 @@ def verify_video_zkp_context_binding_video_only(
             "carriers with one modification per block"
         )
     policy = json.loads(canonical_statement.policy_canonical)
+    if (
+        policy["embedding_strategy"] == "t1_sign_flip"
+        and not carrier_contract.signbit_only
+    ):
+        raise ValueError(
+            "t1_sign_flip requires a trailing-one sign-bit carrier profile"
+        )
     registered_profile_hash = policy.get("carrier_profile_hash")
     if registered_profile_hash is None:
         raise ValueError("statement policy does not pin a carrier profile")

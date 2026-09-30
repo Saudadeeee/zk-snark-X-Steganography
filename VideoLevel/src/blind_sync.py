@@ -183,9 +183,12 @@ def _metadata_from_analysis(
     safe_positions: list[tuple[int, int, int]],
     *,
     analysis_profile: str = "full-v1",
+    stable_candidates_override: list[tuple[int, int, int]] | None = None,
 ) -> tuple[BlindPublicMetadata, list[tuple[int, int, int]]]:
     """Build blind synchronization metadata from an existing video analysis."""
-    if analysis_profile == "stable-blind-v1":
+    if stable_candidates_override is not None:
+        stable_candidates = list(stable_candidates_override)
+    elif analysis_profile == "stable-blind-v1":
         # The safety filter already chose the first rank-stable, individually
         # patchable carrier in each block. Reuse that exact set for the blind
         # fingerprint; re-deriving only the first structural candidate would
@@ -514,12 +517,18 @@ def derive_blind_positions_operating_contract(
         ),
     )
     stable_profile = contract.stable_carriers_only and not contract.signbit_only
+    stable_candidates_override = (
+        _filter_signbit_positions(safe_positions) if contract.signbit_only else None
+    )
     metadata, _stable_candidates = _metadata_from_analysis(
         coefficients,
         frame_verified_data,
         nal_length_map,
         safe_positions,
-        analysis_profile="stable-blind-v1" if stable_profile else "full-v1",
+        analysis_profile=(
+            "stable-blind-v1" if contract.stable_carriers_only else "full-v1"
+        ),
+        stable_candidates_override=stable_candidates_override,
     )
     seed_base = derive_seed_base(metadata)
     ordering_secret = derive_ordering_key(sync_key, seed_base) if contract.metadata_bound else bytes(sync_key)
@@ -546,7 +555,11 @@ def derive_blind_positions_operating_contract(
             raise ValueError("patchability_headroom must be non-negative")
         if contract.max_modifications_per_block < 1:
             raise ValueError("max_modifications_per_block must be positive")
-    if contract.require_bitstream_patchable and not stable_profile:
+    if (
+        contract.require_bitstream_patchable
+        and not stable_profile
+        and not contract.signbit_only
+    ):
         from .embedder import _prune_patchable_positions
 
         patchable_target = max(
