@@ -129,6 +129,20 @@ int main(int argc, char **argv)
         fprintf(stderr, "forked x264 encoder failed to open\n");
         goto cleanup;
     }
+    encoded = x264_encoder_headers(encoder, &nals, &nal_count);
+    if (encoded < 0 || nal_count == 0)
+    {
+        fprintf(stderr, "direct-payload header generation failed\n");
+        goto cleanup;
+    }
+    for (index = 0; index < nal_count; ++index)
+    {
+        if (nals[index].i_type == NAL_SEI)
+        {
+            fprintf(stderr, "direct-payload header API emitted an SEI NAL\n");
+            goto cleanup;
+        }
+    }
 
     x264_picture_init(&input);
     input.img.i_csp = X264_CSP_I420;
