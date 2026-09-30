@@ -101,3 +101,30 @@ and the active embed carrier selection is not the stable session-derived
 carrier profile required by the video-only context helper. The caller must
 also provide challenge freshness and one-use replay tracking. No ZK backend or
 public verifier behavior changed.
+
+## Fresh status recheck (2026-09-30)
+
+Re-ran the current fail-closed and statement-contract test scripts:
+
+```text
+py -3.12 -u src/runtest/test_lattice_zkp.py        9/9 passed
+py -3.12 -u src/runtest/test_video_zkp_contract.py 9/9 passed
+py -3.12 -m src.lazer_backend
+{"blockers":["docker_daemon_unavailable"],"cpu_flags":[],"docker_available":false,"machine":"","ready":false,"system_name":""}
+```
+
+The passing SIS test suite intentionally includes
+`sis_prototype_accepts_a_prover_selected_statement`; that test characterizes a
+security limitation of the research prototype. It is not evidence that the
+prototype is an acceptable verifier. The same suite confirms the public video
+APIs reject the unreviewed proof backend before parsing video, and the
+separate statement-contract suite tests canonicalization and policy helpers
+only; neither suite generates/verifies an accepted application ZK proof.
+
+Independently queried this Windows host's CPU target using the installed
+native GCC with `g++ -march=native -Q --help=target`: AES and AVX2 are enabled,
+but AVX-512F is disabled. `docker info` also failed because the Docker Desktop
+Linux engine pipe is absent. Therefore bringing Docker back up would not clear
+the pinned LaZer CPU-feature gate on this host. This leaves the same concrete
+backend gap: the current API is fail-closed, LaZer cannot run here, and LUNA's
+available repository is only an HGSW primitive implementation.

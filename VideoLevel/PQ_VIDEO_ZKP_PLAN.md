@@ -2089,6 +2089,19 @@ default public path remains a signed ML-DSA receipt reference with sidecar,
 not a lattice ZKP. Evidence and exact source locations are recorded in
 `benchmark/results/current_zkp_path_revalidation_20260929.md`.
 
+### LatticeFold standalone-backend gate (2026-09-30)
+
+Reviewed the current Nethermind LatticeFold README and its documented
+`e2e.rs` sample. The paper describes a folding scheme and says a final SNARK
+composition can be made ZK; the source repository is explicitly a proof of
+concept, marks LatticeFold+ work-in-progress, and the sample proves/verifies
+one dummy NIFS fold, not the application's final payload-opening ZK proof.
+The current host also has no Rust toolchain, so no build or proof result was
+generated. Keep this as a possible ingredient, not a drop-in backend; the
+security/composition, application relation, serialization, and carrier gates
+remain. Details are in
+`benchmark/results/latticefold_candidate_assessment_20260930.md`.
+
 ### LaZer Toolkit candidate follow-up (2026-09-29)
 
 The official LaZer Toolkit source contains concrete ZK examples for
@@ -2504,3 +2517,31 @@ relation, or evidence that the relation-specific proof fits H.264 carriers.
 The pinned paper/source review and caveats are in
 `benchmark/results/rokoko_candidate_assessment_20260929.md`; paper metadata is
 also available from the [KCL research record](https://kclpure.kcl.ac.uk/portal/en/publications/rokoko-lattice-based-succinct-arguments-a-committed-refinement/).
+
+### LUNA paper and artifact gate (2026-09-30)
+
+Reviewed LUNA's full IACR ePrint paper and the official source repository.
+The paper supplies explicit conditional ZK-SNARG and ZK-SNARK theorems for a
+designated-verifier protocol, but the repository implements only the HGSW
+vector-encryption primitive, not the full protocol, prover/verifier, proof
+serialization, or this application's relation. Its reported 5.8 KB proof for
+a generic `Ng = 2^16` R1CS is a paper result, not a payload-opening proof
+measured in this project; the HGSW implementation section reports 6.93 KB
+under its different fixed parameters. The LUNA source also needs Linux/PALISADE
+and warns of around 20 GB RAM at that size. Keep it as a protocol research
+candidate, not an integration backend. Detailed theorem conditions, scope,
+and missing evidence are in
+`benchmark/results/luna_candidate_assessment_20260930.md`.
+
+### Current proof-path and host recheck (2026-09-30)
+
+Re-ran `src/runtest/test_lattice_zkp.py` (9/9) and
+`src/runtest/test_video_zkp_contract.py` (9/9). These validate fail-closed
+behavior and statement-helper contracts only; the SIS suite deliberately
+characterizes acceptance of a prover-selected statement, so it is not an
+accepted backend. The public APIs reject that backend. The LaZer preflight
+reports the Docker Desktop engine unavailable; independently, native GCC's
+`-march=native` target flags show AES/AVX2 enabled but AVX-512F disabled.
+Thus this host cannot run the pinned LaZer path even if the container engine is
+restored. Full command output and caveats are in
+`benchmark/results/current_zkp_path_revalidation_20260929.md`.
