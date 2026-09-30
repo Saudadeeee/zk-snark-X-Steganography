@@ -81,7 +81,7 @@ def test_stable_signbit_profile_derives_one_trailing_sign_per_block(monkeypatch)
         stable_carriers_only=True,
     )
 
-    positions, _metadata = derive_blind_positions_operating_contract(
+    positions, metadata = derive_blind_positions_operating_contract(
         "fixture.h264", b"session-seed", 2, contract, use_analysis_cache=False
     )
 
@@ -91,6 +91,8 @@ def test_stable_signbit_profile_derives_one_trailing_sign_per_block(monkeypatch)
         (0, 0),
         (1, 0),
     }
+    assert metadata.analysis_profile == "full-v1"
+    assert metadata.stable_candidate_count == 3
 
 
 def test_stego_video_alone_rederives_carriers_and_extracts_payload():
