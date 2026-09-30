@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import math
+import platform
 import re
 import subprocess
 import sys
@@ -204,6 +205,17 @@ def _finite_mean(values: list[float]) -> float | None:
     return sum(finite) / len(finite) if finite else None
 
 
+def host_metadata() -> dict[str, Any]:
+    """Describe the machine so timings are not detached from their hardware."""
+    return {
+        "platform": platform.platform(),
+        "cpu_identifier": platform.processor() or platform.machine() or "unknown",
+        "physical_cores": psutil.cpu_count(logical=False) or 0,
+        "logical_processors": psutil.cpu_count(logical=True) or 0,
+        "ram_total_bytes": psutil.virtual_memory().total,
+    }
+
+
 def _prepare_scaled(source: Path, target: Path, width: int, height: int, ffmpeg: str) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     result = _run_measured([
@@ -282,30 +294,43 @@ def run_case(
 
 
 def _markdown_report(report: dict[str, Any]) -> str:
+    host = report.get("host", {})
     lines = [
         "# Native in-band H.264 pipeline matrix",
         "",
         f"Generated: {report['generated_utc']}",
         "",
+        "## Measurement host",
+        "",
+        f"- OS/runtime: {host.get('platform', 'not recorded')} / Python {host.get('python', 'not recorded')}",
+        f"- CPU identifier: {host.get('cpu_identifier', 'not recorded')}",
+        f"- CPU cores: {host.get('physical_cores', 'not recorded')} physical / {host.get('logical_processors', 'not recorded')} logical",
+        f"- Installed RAM: {_fmt(host.get('ram_total_bytes', 0) / (1024 ** 3), precision=2) if host.get('ram_total_bytes') else 'not recorded'} GiB",
+        "",
         "> Transport benchmark only. A successful payload round-trip does not",
         "> prove that the payload is a valid lattice-ZK proof or that the target",
         "> application relation has been implemented.",
         "",
-        "| Case | Input | Frames | Encode (s) | CPU (s) | Peak RSS (MB) | Result | Embedded bits | Blind extract | Mean PSNR (dB) | Mean SSIM |",
-        "|---|---:|---:|---:|---:|---:|---|---:|---|---:|---:|",
+        "| Case | Input | Duration (s) | Frames | Encode (s) | Encode (fps) | CPU (s) | Peak RSS (MiB) | Result | Embedded bits | Blind extract (s) | PSNR (dB) | SSIM |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|",
     ]
     for case in report["cases"]:
         video = case.get("input_video", {})
         enc = case.get("encode", {})
         quality = case.get("quality", {})
         lines.append(
-            "| {name} | {w}×{h} | {frames} | {wall} | {cpu} | {rss} | {status} | {bits} | {blind} | {psnr} | {ssim} |".format(
+            "| {name} | {w}x{h} | {duration} | {frames} | {wall} | {encode_fps} | {cpu} | {rss} | {status} | {bits} | {blind_s} | {psnr} | {ssim} |".format(
                 name=case["name"], w=video.get("width", "-"), h=video.get("height", "-"),
-                frames=video.get("frames", "-"), wall=_fmt(enc.get("wall_seconds")),
+                frames=video.get("frames", "-"),
+                duration=_fmt(video.get("duration_seconds")),
+                wall=_fmt(enc.get("wall_seconds")),
+                encode_fps=_fmt(video.get("frames", 0) / enc["wall_seconds"] if enc.get("wall_seconds") else None),
                 cpu=_fmt(enc.get("process_tree_cpu_seconds")), rss=_fmt(enc.get("process_tree_peak_rss_mb")),
                 status=enc.get("status", "error"), bits=enc.get("embedded_bits", "-"),
                 blind=("PASS" if case.get("blind_extract", {}).get("passed") else "N/A/FAIL"),
-                psnr=_fmt(quality.get("mean_frame_psnr_db")), ssim=_fmt(quality.get("mean_frame_ssim")),
+                blind_s=_fmt(case.get("blind_extract", {}).get("wall_seconds")),
+                psnr=_fmt(quality.get("mean_frame_psnr_db")),
+                ssim=_fmt(quality.get("mean_frame_ssim"), precision=6),
             )
         )
     lines += [
@@ -314,19 +339,22 @@ def _markdown_report(report: dict[str, Any]) -> str:
         "logs; each case folder also retains `frame_quality.json` and raw metric",
         "logs. Capacity failures are reported as failures and have no quality",
         "score because the encoder does not publish a partial H.264 file.",
-        "Peak RSS and CPU are sampled over the child process tree. Native encode",
-        "and blind-extract stages are timed separately; no claim of real-time",
-        "performance follows from this offline corpus run.",
+        "PSNR is the per-frame arithmetic mean; SSIM is shown at FFmpeg's",
+        "six-decimal log precision, so `1.000000` is not evidence of exact",
+        "pixel equality (consult PSNR and per-frame logs). RSS and CPU are",
+        "sampled over the child process tree. Encode fps is frames / wall time.",
+        "These are offline desktop measurements, not end-to-end proof latency",
+        "or evidence of edge-device real-time operation.",
         "",
     ]
     return "\n".join(lines)
 
 
-def _fmt(value: Any) -> str:
+def _fmt(value: Any, precision: int = 3) -> str:
     if value is None:
         return "-"
     if isinstance(value, float):
-        return f"{value:.3f}"
+        return f"{value:.{precision}f}"
     return str(value)
 
 
@@ -378,7 +406,7 @@ def main() -> int:
     report = {
         "schema": "native-pipeline-matrix-v1",
         "generated_utc": datetime.now(timezone.utc).isoformat(),
-        "host": {"platform": sys.platform, "python": sys.version.split()[0]},
+        "host": {**host_metadata(), "python": sys.version.split()[0]},
         "encoder": str(Path(args.encoder).resolve()),
         "encoder_sha256": _sha256(Path(args.encoder)),
         "ffmpeg": args.ffmpeg,
