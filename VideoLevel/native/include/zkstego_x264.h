@@ -41,6 +41,13 @@ int zks_x264_encoder_encode_i420(
     ZksEncodedNalCallback callback,
     void *opaque
 );
+/* Drain delayed frames and reject if the full requested payload did not fit.
+ * Do not publish callback output until this returns ZKS_OK. */
+int zks_x264_encoder_finish(
+    ZksX264Encoder *encoder,
+    ZksEncodedNalCallback callback,
+    void *opaque
+);
 uint64_t zks_x264_encoder_embedded_bits(const ZksX264Encoder *encoder);
 void zks_x264_encoder_close(ZksX264Encoder *encoder);
 

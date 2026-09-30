@@ -9,6 +9,9 @@
 struct ZksX264Encoder {
     x264_t *encoder;
     uint8_t *direct_payload;
+    size_t direct_payload_size;
+    int finished;
+    int finish_status;
 };
 
 int zks_x264_encoder_open(const ZksX264Config *config, ZksX264Encoder **out_encoder) {
@@ -67,6 +70,7 @@ int zks_x264_encoder_open(const ZksX264Config *config, ZksX264Encoder **out_enco
         param.zkstego_payload = state->direct_payload;
         param.zkstego_payload_size = (int)config->direct_payload_size;
     }
+    state->direct_payload_size = config->direct_payload_size;
     state->encoder = x264_encoder_open(&param);
     if (!state->encoder) {
         free(state->direct_payload);
@@ -93,7 +97,8 @@ int zks_x264_encoder_encode_i420(
     int encoded;
     int index;
     int callback_status;
-    if (!encoder || !encoder->encoder || !y || !u || !v || y_stride <= 0 || u_stride <= 0 || v_stride <= 0) {
+    if (!encoder || !encoder->encoder || encoder->finished || !y || !u || !v ||
+        y_stride <= 0 || u_stride <= 0 || v_stride <= 0) {
         return ZKS_ERR_ARGUMENT;
     }
     x264_picture_init(&input);
@@ -119,6 +124,54 @@ int zks_x264_encoder_encode_i420(
         }
     }
     return ZKS_OK;
+}
+
+int zks_x264_encoder_finish(
+    ZksX264Encoder *encoder,
+    ZksEncodedNalCallback callback,
+    void *opaque
+) {
+    x264_picture_t output;
+    x264_nal_t *nals = NULL;
+    int nal_count = 0;
+    int encoded;
+    int index;
+    int callback_status;
+    if (!encoder || !encoder->encoder) {
+        return ZKS_ERR_ARGUMENT;
+    }
+    if (encoder->finished) {
+        return encoder->finish_status;
+    }
+    while (x264_encoder_delayed_frames(encoder->encoder) > 0) {
+        encoded = x264_encoder_encode(encoder->encoder, &nals, &nal_count, NULL, &output);
+        if (encoded < 0) {
+            encoder->finish_status = ZKS_ERR_FORMAT;
+            encoder->finished = 1;
+            return encoder->finish_status;
+        }
+        if (callback) {
+            for (index = 0; index < nal_count; ++index) {
+                callback_status = callback(
+                    nals[index].p_payload,
+                    (size_t)nals[index].i_payload,
+                    opaque
+                );
+                if (callback_status != ZKS_OK) {
+                    encoder->finish_status = ZKS_ERR_CALLBACK;
+                    encoder->finished = 1;
+                    return encoder->finish_status;
+                }
+            }
+        }
+    }
+    encoder->finished = 1;
+    encoder->finish_status =
+        x264_encoder_zkstego_embedded_bits(encoder->encoder) ==
+                (uint64_t)encoder->direct_payload_size * UINT64_C(8)
+            ? ZKS_OK
+            : ZKS_ERR_CAPACITY;
+    return encoder->finish_status;
 }
 
 uint64_t zks_x264_encoder_embedded_bits(const ZksX264Encoder *encoder) {

@@ -40,7 +40,12 @@ unsupported modes and oversized payloads are rejected, and asserts that all
 120 framed bits were committed. `tests/blind_extract_smoke.py` uses the repository CAVLC parser to
 rederive carrier coordinates from the emitted stream and recover the fixture
 byte. `tests/zkstego_adapter_smoke.c` exercises the project's native encoder
-adapter, including its count API and oversized-payload rejection. The expected
+adapter, including its count API, oversized-payload rejection, and a
+capacity-failure case. Adapter users must call `zks_x264_encoder_finish()`;
+it drains delayed frames and returns `ZKS_ERR_CAPACITY` unless every requested
+payload bit was committed. Treat callback output as provisional and buffer it
+to a temporary artifact until finish succeeds; discard it on any error. Finish
+is idempotent, and encoding more frames afterward is rejected. The expected
 payload is only a test assertion: the extractor recovers length from the
 in-video framing header and checks its CRC. This establishes byte-payload
 framing only; CRC-32 is not authentication, and the fixtures do not verify a

@@ -15,6 +15,7 @@ enum {
     ZKS_ERR_MEMORY = -2,
     ZKS_ERR_FORMAT = -3,
     ZKS_ERR_CALLBACK = -4,
+    ZKS_ERR_CAPACITY = -5,
 };
 
 #define ZKS_MAX_PAYLOAD_CHUNK 256u

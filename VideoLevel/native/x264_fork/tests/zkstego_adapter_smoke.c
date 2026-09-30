@@ -78,12 +78,27 @@ int main(void)
     );
     if (status != ZKS_OK ||
         zks_x264_encoder_finish(encoder, count_nal, &stats) != ZKS_OK ||
+        zks_x264_encoder_finish(encoder, count_nal, &stats) != ZKS_OK ||
         stats.nal_count == 0u || stats.output_bytes == 0u ||
         zks_x264_encoder_embedded_bits(encoder) != 8u)
     {
         fprintf(stderr, "adapter encode failed: status=%d nals=%zu bits=%llu\n",
                 status, stats.nal_count,
                 (unsigned long long)zks_x264_encoder_embedded_bits(encoder));
+        zks_x264_encoder_close(encoder);
+        free(pixels);
+        return EXIT_FAILURE;
+    }
+    if (zks_x264_encoder_encode_i420(
+            encoder,
+            pixels, WIDTH,
+            pixels + Y_SIZE, WIDTH / 2,
+            pixels + Y_SIZE + C_SIZE, WIDTH / 2,
+            1,
+            count_nal,
+            &stats) != ZKS_ERR_ARGUMENT)
+    {
+        fprintf(stderr, "adapter accepted a frame after finish\n");
         zks_x264_encoder_close(encoder);
         free(pixels);
         return EXIT_FAILURE;
