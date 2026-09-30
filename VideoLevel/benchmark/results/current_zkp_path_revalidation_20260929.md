@@ -287,3 +287,36 @@ but blind parsing still desynchronized on the second P slice at macroblock 151
 parser failure beyond P-intra syntax: P-inter prediction/residual parsing or
 coefficient-context tracking is still misaligned. The extractor correctly
 fails closed and does not return bytes from this stream.
+
+## P-slice parser repair and blind transport recheck (2026-10-01)
+
+The parser desynchronization above was traced to skipped macroblocks: the
+parser recorded their zero-valued blocks in the output map, but did not record
+their `TotalCoeff=0` values in the neighbor cache used for CAVLC `nC`
+prediction. A skipped macroblock is still an available neighbor. Omitting it
+made later blocks use a one-neighbor context instead of averaging both
+available neighbors, selecting the wrong `coeff_token` VLC and shifting the
+rest of the slice. The parser now records all 24 luma/chroma block counts as
+zero for each skipped macroblock. A regression test exercises a skipped left
+neighbor plus a nonzero top neighbor and asserts `nC=3`.
+
+Revalidation on real streams passed the strict parser integrity gate for all
+9/9 P-slices of a 10-frame 176x144 FFmpeg `testsrc2` Baseline/CAVLC stream and
+all 290/290 P-slices of both the earlier 300-frame native x264 P-carrier
+stream and the standard 300-frame FFmpeg/libx264 Baseline control stream.
+The latter reverses the previous 3/10 first-slice result after correcting
+the skipped-neighbor cache.
+For the latter, a 200-byte diagnostic payload was wrapped in the in-band
+`ZKVP` envelope (214 bytes / 1,712 bits), embedded in P-slice residuals, and
+blindly extracted byte-for-byte without a sidecar. The output was a 300-frame
+352x288 Constrained Baseline H.264 stream (512,117 bytes); FFprobe counted all
+frames and strict FFmpeg decode returned success. Stego SHA-256:
+`4bbd2fc4e9e56bfe7e9e0ad3c6599fa374dbc960158d992f5033b32642bc1d3b`.
+One blind extraction run took 21.337 s wall time; peak RAM was not measured.
+
+This is a diagnostic payload transport result, not a lattice proof or proof
+verification. Capacity remains content- and resolution-dependent: on the
+same 352x288 upscaled Akiyo input, a 314-byte envelope (300-byte payload)
+failed closed after the encoder found only 2,075 of 2,512 required carrier
+bits. At 176x144 it found 1,122 bits. The successful 200-byte sample does not
+establish a full-proof capacity bound, quality benchmark, or realtime claim.

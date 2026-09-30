@@ -291,8 +291,8 @@ class SliceHeaderParser:
         # CRITICAL FIX: Parse num_ref_idx_active_override - H.264 spec 7.3.3
         # This is MANDATORY for P and B slices!
         num_ref_idx_active_override_flag = False
-        num_ref_idx_l0_active_minus1 = 0
-        num_ref_idx_l1_active_minus1 = 0
+        num_ref_idx_l0_active_minus1 = self.pps.num_ref_idx_l0_default_active_minus1
+        num_ref_idx_l1_active_minus1 = self.pps.num_ref_idx_l1_default_active_minus1
         if slice_type % 5 in [0, 1]:  # P or B slice
             num_ref_idx_active_override_flag = self.reader.read_bits(1)
             if num_ref_idx_active_override_flag:
@@ -1141,6 +1141,20 @@ class TraceableCAVLCParser:
         self.block_offsets = {}  # Track bit offsets
         self.track_coefficient_bit_ranges = track_coefficient_bit_ranges
         self.parse_integrity_issues = []
+
+    def _record_skipped_macroblock(self, mb_idx: int, blocks: Dict, mb_metadata: Dict) -> None:
+        """Record zero residuals for a skipped MB in both result and nC caches."""
+        for block_idx in range(24):
+            blocks[(mb_idx, block_idx)] = [0] * 16
+            # A skipped MB is an available neighbor whose TotalCoeff is zero;
+            # omitting it would make nC use only the other neighbor instead
+            # of averaging both available contexts.
+            self.neighbor_coeffs[(mb_idx, block_idx)] = 0
+        mb_metadata[mb_idx] = {
+            'mb_type': None,
+            'cbp': 0,
+            'is_skip_mb': True,
+        }
     
     def extract_with_offsets(self, nal, sps: SPSData, pps: PPSData, global_mb_idx: int = 0) -> Dict:
         """
@@ -1189,7 +1203,11 @@ class TraceableCAVLCParser:
             # Calculate QP
             slice_qp = 26 + pps.pic_init_qp_minus26 + slice_header.slice_qp_delta
             
-            mb_parser = MacroblockParser(reader, slice_header.slice_type)
+            mb_parser = MacroblockParser(
+                reader,
+                slice_header.slice_type,
+                num_ref_idx_l0_active_minus1=slice_header.num_ref_idx_l0_active_minus1,
+            )
             cavlc_decoder = CAVLCDecoder(
                 reader,
                 track_coefficient_bit_ranges=self.track_coefficient_bit_ranges,
@@ -1224,16 +1242,12 @@ class TraceableCAVLCParser:
                             for skip_i in range(mb_skip_run):
                                 skip_mb_idx = current_mb_addr + skip_i
                                 
-                                # Record all blocks as zero with NO offset (not coded)
-                                for block_idx in range(24):
-                                    blocks[(skip_mb_idx, block_idx)] = [0] * 16
-                                    # Skip blocks don't have offsets (not in bitstream)
-                                
-                                mb_metadata[skip_mb_idx] = {
-                                    'mb_type': None,
-                                    'cbp': 0,
-                                    'is_skip_mb': True
-                                }
+                                # Skips have no coded block offsets, but they
+                                # are available zero-coefficient neighbors for
+                                # subsequent CAVLC nC prediction.
+                                self._record_skipped_macroblock(
+                                    skip_mb_idx, blocks, mb_metadata
+                                )
                                 slice_mb_idx_counter += 1
                             
                             current_mb_addr += mb_skip_run

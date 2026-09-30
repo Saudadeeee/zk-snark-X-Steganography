@@ -1,5 +1,32 @@
-from src.bitstream.bitstream_io import BitstreamReader
-from src.bitstream.h264 import MacroblockParser, MBType
+from src.bitstream.bitstream_io import BitstreamReader, BitstreamWriter
+from src.bitstream.h264 import (
+    MacroblockParser,
+    MBType,
+    NALUnit,
+    NALUnitType,
+    PPSData,
+    SliceHeaderParser,
+    SPSData,
+)
+
+
+def _p_slice_header(override: bool, override_count: int = 0) -> tuple[NALUnit, SPSData, PPSData]:
+    writer = BitstreamWriter()
+    writer.write_ue(0)  # first_mb_in_slice
+    writer.write_ue(0)  # P slice
+    writer.write_ue(0)  # pic_parameter_set_id
+    writer.write_bits(4, 0)  # frame_num
+    writer.write_bits(1, int(override))
+    if override:
+        writer.write_ue(override_count)
+    writer.write_bits(1, 0)  # ref_pic_list_modification_flag_l0
+    writer.write_bits(1, 0)  # adaptive_ref_pic_marking_mode_flag
+    writer.write_se(0)  # slice_qp_delta
+    writer.write_ue(1)  # disable_deblocking_filter_idc
+    nal = NALUnit(0, 3, NALUnitType.SLICE_NON_IDR, writer.get_bytes(), 0, 0)
+    sps = SPSData(pic_order_cnt_type=2)
+    pps = PPSData(num_ref_idx_l0_default_active_minus1=2)
+    return nal, sps, pps
 
 
 def test_truncated_exp_golomb_with_max_one_uses_inverted_single_bit() -> None:
@@ -35,3 +62,19 @@ def test_interpreted_i16x16_type_is_recognized() -> None:
     parser = MacroblockParser(BitstreamReader(b""), slice_type=2)
 
     assert parser._is_i16x16(MBType.I_16x16_0_0_0)
+
+
+def test_p_slice_uses_pps_reference_count_when_override_is_false() -> None:
+    nal, sps, pps = _p_slice_header(override=False)
+
+    header = SliceHeaderParser(BitstreamReader(nal.rbsp_byte), nal, sps, pps).parse()
+
+    assert header.num_ref_idx_l0_active_minus1 == 2
+
+
+def test_p_slice_uses_slice_reference_count_when_override_is_true() -> None:
+    nal, sps, pps = _p_slice_header(override=True, override_count=1)
+
+    header = SliceHeaderParser(BitstreamReader(nal.rbsp_byte), nal, sps, pps).parse()
+
+    assert header.num_ref_idx_l0_active_minus1 == 1
