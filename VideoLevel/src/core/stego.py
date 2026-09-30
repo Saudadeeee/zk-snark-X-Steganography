@@ -131,7 +131,7 @@ def stable_blind_candidate_index(
 
 def select_rederivable_stable_candidate(
     candidate_indices: List[int],
-    safe_in_current_block: Dict[int, bool],
+    safe_in_current_block: Dict[int, bool] | Callable[[int], bool],
     safe_after_selected_flip: Callable[[int, int], bool],
 ) -> Optional[int]:
     """Choose the first safe candidate whose choice survives its own LSB flip.
@@ -143,12 +143,17 @@ def select_rederivable_stable_candidate(
     The condition is symmetric between cover and stego because that toggle is
     its own inverse.
     """
+    if callable(safe_in_current_block):
+        is_safe_in_current_block = safe_in_current_block
+    else:
+        is_safe_in_current_block = lambda index: safe_in_current_block.get(index, False)
+
     for candidate_offset, selected in enumerate(candidate_indices):
-        if not safe_in_current_block.get(selected, False):
+        if not is_safe_in_current_block(selected):
             continue
         earlier_candidates = candidate_indices[:candidate_offset]
         if any(
-            safe_in_current_block.get(earlier, False)
+            is_safe_in_current_block(earlier)
             or safe_after_selected_flip(selected, earlier)
             for earlier in earlier_candidates
         ):
@@ -573,46 +578,71 @@ class CAVLCSafetyFilter:
                 ):
                     continue
 
-            # Check each coefficient position. In the stable blind profile we
-            # retain safety results first, then select a candidate whose rank
-            # remains the same after that candidate's LSB is toggled.
-            candidate_safety: Dict[int, bool] = {}
-            candidate_variants: Dict[int, List[int]] = {}
-            for coeff_idx in candidate_indices:
+            # Cache candidate results. Stable mode evaluates candidates lazily
+            # so it can stop at the first re-derivable carrier instead of
+            # validating every later coefficient in the block.
+            candidate_safety: dict[int, bool] = {}
+            candidate_variants: dict[int, list[int]] = {}
 
-                # Calculate LSB-flipped value
-                original = coeffs[coeff_idx]
+            def _candidate_variant(
+                coeff_idx: int,
+                *,
+                current_coeffs=coeffs,
+                variants=candidate_variants,
+            ) -> list[int]:
+                if coeff_idx in variants:
+                    return variants[coeff_idx]
+                original = current_coeffs[coeff_idx]
                 sign = 1 if original > 0 else -1
                 abs_val = abs(original)
                 new_abs = (abs_val & ~1) | ((abs_val & 1) ^ 1)  # Flip LSB
-                new_val = sign * new_abs
+                modified_block = current_coeffs[:]
+                modified_block[coeff_idx] = sign * new_abs
+                variants[coeff_idx] = modified_block
+                return modified_block
 
-                # Rule 3: Verify bit-length preservation via ACTUAL CAVLC encoding
-                modified_block = coeffs[:]
-                modified_block[coeff_idx] = new_val
+            def _candidate_is_safe(
+                coeff_idx: int,
+                *,
+                safety=candidate_safety,
+                enable_bit_length=self.enable_bit_length,
+                current_coeffs=coeffs,
+                current_nC=actual_nC,
+                current_block_key=block_key,
+                current_t1_override=t1_override,
+                current_max_num_coeff=max_num_coeff,
+                current_original_bit_length=original_bit_length,
+            ) -> bool:
+                if coeff_idx in safety:
+                    return safety[coeff_idx]
+
+                modified_block = _candidate_variant(coeff_idx)
                 is_safe = True
-                if self.enable_bit_length:
+                if enable_bit_length:
                     is_safe, _orig_bits, _mod_bits = self._verify_block_bit_length_invariance(
-                        coeffs,
+                        current_coeffs,
                         modified_block,
-                        nC=actual_nC,
-                        nal_bit_length=nal_length_map.get(block_key),
-                        t1_override=t1_override,
-                        max_num_coeff=max_num_coeff,
-                        known_original_bit_length=original_bit_length,
+                        nC=current_nC,
+                        nal_bit_length=nal_length_map.get(current_block_key),
+                        t1_override=current_t1_override,
+                        max_num_coeff=current_max_num_coeff,
+                        known_original_bit_length=current_original_bit_length,
                     )
-
-                candidate_safety[coeff_idx] = is_safe
-                candidate_variants[coeff_idx] = modified_block
-                if not stable_carriers_only and is_safe:
-                    safe_positions.append((mb_idx, block_idx, coeff_idx))
+                safety[coeff_idx] = is_safe
+                return is_safe
 
             if stable_carriers_only:
                 def _earlier_is_safe_after_selected_flip(
                     selected_index: int,
                     earlier_index: int,
+                    *,
+                    current_block_key=block_key,
+                    current_nC=actual_nC,
+                    current_t1_override=t1_override,
+                    current_max_num_coeff=max_num_coeff,
+                    current_original_bit_length=original_bit_length,
                 ) -> bool:
-                    selected_variant = candidate_variants[selected_index]
+                    selected_variant = _candidate_variant(selected_index)
                     earlier_variant = selected_variant[:]
                     earlier_value = earlier_variant[earlier_index]
                     earlier_abs = abs(earlier_value)
@@ -624,22 +654,26 @@ class CAVLCSafetyFilter:
                         self._verify_block_bit_length_invariance(
                             selected_variant,
                             earlier_variant,
-                            nC=actual_nC,
-                            nal_bit_length=nal_length_map.get(block_key),
-                            t1_override=t1_override,
-                            max_num_coeff=max_num_coeff,
-                            known_original_bit_length=original_bit_length,
+                            nC=current_nC,
+                            nal_bit_length=nal_length_map.get(current_block_key),
+                            t1_override=current_t1_override,
+                            max_num_coeff=current_max_num_coeff,
+                            known_original_bit_length=current_original_bit_length,
                         )
                     )
                     return is_safe_after_selected
 
                 selected_index = select_rederivable_stable_candidate(
                     stable_candidate_indices,
-                    candidate_safety,
+                    _candidate_is_safe,
                     _earlier_is_safe_after_selected_flip,
                 )
                 if selected_index is not None:
                     safe_positions.append((mb_idx, block_idx, selected_index))
+            else:
+                for coeff_idx in candidate_indices:
+                    if _candidate_is_safe(coeff_idx):
+                        safe_positions.append((mb_idx, block_idx, coeff_idx))
 
         if stable_carriers_only:
             return safe_positions
