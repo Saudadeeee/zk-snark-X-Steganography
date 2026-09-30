@@ -1,4 +1,5 @@
 from benchmark.native_pipeline_matrix import (
+    host_metadata,
     build_metric_filtergraph,
     frame_transport_payload,
     parse_encoder_result,
@@ -56,3 +57,12 @@ def test_transport_payload_is_the_real_blind_sync_envelope():
     assert raw == bytes.fromhex("a5")
     assert len(framed) == len(raw) + 14
     assert unpack_blind_payload(framed) == raw
+
+
+def test_host_metadata_records_hardware_context():
+    host = host_metadata()
+
+    assert host["physical_cores"] > 0
+    assert host["logical_processors"] >= host["physical_cores"]
+    assert host["ram_total_bytes"] > 0
+    assert host["cpu_identifier"]
