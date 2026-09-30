@@ -59,6 +59,40 @@ def test_sidecar_free_embed_refuses_to_overwrite_existing_output(tmp_path):
     assert output.read_bytes() == original_bytes
 
 
+def test_stable_signbit_profile_derives_one_trailing_sign_per_block(monkeypatch):
+    from src.blind_sync import derive_blind_positions_operating_contract
+
+    fake_analysis = (
+        [(0, 0, [0] * 16), (1, 0, [0] * 16)],
+        {},
+        {},
+        {(0, 0): 8, (1, 0): 8},
+        {},
+        [(0, 0, -15), (0, 0, -14), (1, 0, -15), (1, 0, 7)],
+    )
+    monkeypatch.setattr(
+        "src.blind_sync.load_or_build_video_analysis",
+        lambda *_args, **_kwargs: fake_analysis,
+    )
+    contract = BlindOperatingContract(
+        signbit_only=True,
+        require_bitstream_patchable=True,
+        max_modifications_per_block=1,
+        stable_carriers_only=True,
+    )
+
+    positions, _metadata = derive_blind_positions_operating_contract(
+        "fixture.h264", b"session-seed", 2, contract, use_analysis_cache=False
+    )
+
+    assert len(positions) == 2
+    assert all(coefficient_index < 0 for _, _, coefficient_index in positions)
+    assert {(macroblock, block) for macroblock, block, _ in positions} == {
+        (0, 0),
+        (1, 0),
+    }
+
+
 def test_stego_video_alone_rederives_carriers_and_extracts_payload():
     source = get_video("foreman_cif_g8_300f_b800k.h264")
     payload = bytes.fromhex("5a17c09e31b46d82")
@@ -70,6 +104,7 @@ def test_stego_video_alone_rederives_carriers_and_extracts_payload():
     ).digest()
     contract = BlindOperatingContract(
         version="stable-carriers-video-only-v1",
+        signbit_only=True,
         require_bitstream_patchable=True,
         patchability_headroom=64,
         max_modifications_per_block=1,
@@ -96,6 +131,7 @@ def test_stego_video_alone_rederives_carriers_and_extracts_payload():
             str(stego_path), sync_key, contract
         )
         assert extracted.payload == payload
+        assert all(position[2] < 0 for position in extracted.carrier_positions)
         assert extracted.metadata.candidate_fingerprint == embedded.metadata.candidate_fingerprint
         assert extracted.carriers_used == embedded.carriers_used
 
