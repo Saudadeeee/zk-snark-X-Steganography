@@ -103,6 +103,53 @@ static int decode_hex(const char *hex, uint8_t **bytes, size_t *length)
     return 1;
 }
 
+static int read_payload_file(const char *path, uint8_t **bytes, size_t *length)
+{
+    FILE *file;
+    long file_size;
+    uint8_t *data;
+    size_t data_size;
+    int extra_byte;
+    int read_failed;
+    int close_failed;
+    if (!path || !bytes || !length)
+        return 0;
+    file = fopen(path, "rb");
+    if (!file)
+        return 0;
+    if (fseek(file, 0, SEEK_END) != 0 || (file_size = ftell(file)) <= 0 ||
+        (unsigned long)file_size > (unsigned long)(INT_MAX / 8) ||
+        fseek(file, 0, SEEK_SET) != 0)
+    {
+        fclose(file);
+        return 0;
+    }
+    data_size = (size_t)file_size;
+    data = (uint8_t *)malloc(data_size);
+    if (!data)
+    {
+        fclose(file);
+        return 0;
+    }
+    if (fread(data, 1u, data_size, file) != data_size || ferror(file))
+    {
+        free(data);
+        fclose(file);
+        return 0;
+    }
+    extra_byte = fgetc(file);
+    read_failed = extra_byte != EOF || ferror(file);
+    close_failed = fclose(file) != 0;
+    if (read_failed || close_failed)
+    {
+        free(data);
+        return 0;
+    }
+    *bytes = data;
+    *length = data_size;
+    return 1;
+}
+
 static int contains_sei_nal(const uint8_t *annexb, size_t size)
 {
     size_t header_offset;
@@ -140,7 +187,8 @@ static int publish_output(const char *temporary_path, const char *output_path)
 static void usage(const char *program)
 {
     fprintf(stderr,
-            "usage: %s --input-y4m cover.y4m --output stego.h264 --payload-hex HEX\n"
+            "usage: %s --input-y4m cover.y4m --output stego.h264 "
+            "(--payload-hex HEX | --payload-file PATH)\n"
             "Input must be progressive YUV4MPEG2 C420; payload is embedded in-band.\n",
             program);
 }
@@ -150,6 +198,7 @@ int main(int argc, char **argv)
     const char *input_path = NULL;
     const char *output_path = NULL;
     const char *payload_hex = NULL;
+    const char *payload_file_path = NULL;
     char header[4096];
     char frame_header[4096];
     char *temporary_path = NULL;
@@ -173,27 +222,31 @@ int main(int argc, char **argv)
     ZksX264Encoder *encoder = NULL;
     OutputState output_state = { 0 };
 
-    if (argc != 7)
+    if (argc < 7 || !(argc & 1))
     {
         usage(argv[0]);
         return EXIT_FAILURE;
     }
     for (arg = 1; arg < argc; arg += 2)
     {
-        if (strcmp(argv[arg], "--input-y4m") == 0)
+        if (strcmp(argv[arg], "--input-y4m") == 0 && !input_path)
             input_path = argv[arg + 1];
-        else if (strcmp(argv[arg], "--output") == 0)
+        else if (strcmp(argv[arg], "--output") == 0 && !output_path)
             output_path = argv[arg + 1];
-        else if (strcmp(argv[arg], "--payload-hex") == 0)
+        else if (strcmp(argv[arg], "--payload-hex") == 0 && !payload_hex)
             payload_hex = argv[arg + 1];
+        else if (strcmp(argv[arg], "--payload-file") == 0 && !payload_file_path)
+            payload_file_path = argv[arg + 1];
         else
         {
             usage(argv[0]);
             return EXIT_FAILURE;
         }
     }
-    if (!input_path || !output_path || !payload_hex ||
-        !decode_hex(payload_hex, &payload, &payload_size))
+    if (!input_path || !output_path || (!!payload_hex == !!payload_file_path) ||
+        !(payload_file_path ?
+          read_payload_file(payload_file_path, &payload, &payload_size) :
+          decode_hex(payload_hex, &payload, &payload_size)))
     {
         usage(argv[0]);
         goto cleanup;

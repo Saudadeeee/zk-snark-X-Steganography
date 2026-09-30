@@ -66,8 +66,30 @@ The adapter is intentionally separate from the CAVLC mutator: stock libx264's
 public API does not expose a residual-coefficient hook. The direct backend
 therefore requires a reviewed x264 fork which applies the carrier after
 quantization and before inverse transform/reconstruction, then limits its rate
-to one edit per macroblock. This placement keeps encoder and decoder reference
-frames synchronized. Do not substitute the SEI relay for that fork.
+to one edit per eligible I4x4 macroblock. While a direct payload remains, the
+adapter forces IDR pictures; it resumes the configured GOP after the payload
+is complete. This keeps the current blind extractor on IDR/CAVLC slices, but
+can significantly increase bitrate and is not a realtime performance claim.
+This placement keeps encoder and decoder reference frames synchronized. Do not
+substitute the SEI relay for that fork.
+
+For the optional Y4M-to-H.264 demonstration CLI, select exactly one binary
+payload source. `--payload-file` avoids shell argument limits for larger proof-
+sized artifacts; the CLI reads the file into memory, with a maximum length of
+`INT_MAX / 8` bytes. `--payload-hex` remains convenient for small fixtures.
+These options transport opaque bytes only and do not assert that they form a
+valid ZK proof:
+
+```powershell
+native\build-x264\zkstego_x264_y4m.exe `
+  --input-y4m data\raw\akiyo_cif.y4m `
+  --output akiyo_stego.h264 `
+  --payload-file proof.bin
+```
+
+Capacity failure leaves no published output. The real 33,803-byte LNP22 probe
+artifact did not fit in a 300-frame Akiyo CIF run; see
+[`benchmark/results/native_payload_capacity_probe_20260930.md`](../benchmark/results/native_payload_capacity_probe_20260930.md).
 
 Because x264 is GPL-2.0-or-later (unless separately commercially licensed), a
 distributed binary linked with a modified x264 must meet the applicable x264
