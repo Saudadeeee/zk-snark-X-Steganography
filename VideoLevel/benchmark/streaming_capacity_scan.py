@@ -89,6 +89,23 @@ def next_patchability_target(
     return min(raw_capacity_bits, fair_share)
 
 
+def count_signbit_candidates(
+    safe_positions: Sequence[tuple[int, int, int]],
+) -> int:
+    """Count blind sign-bit carriers after one-per-block deduplication.
+
+    This mirrors the tested video-only profile with ``signbit_only=True``,
+    ``dedup_per_block=True``, ``bottom_rows=0``, and ``max_bits_per_idr=0``.
+    It does not model ``DEFAULT_BLIND_HEADER_CONTRACT``'s extra restrictions.
+    It remains a raw candidate upper bound; it does not patch a stream or
+    validate image quality.
+    """
+    from src.blind_sync import _dedup_per_block, _filter_signbit_positions
+
+    sign_positions = _filter_signbit_positions(list(safe_positions))
+    return len(_dedup_per_block(sign_positions))
+
+
 def summarize_raw_capacity(
     *,
     asset: str,
@@ -243,9 +260,16 @@ def _scan_segments(
     ffprobe: str = "ffprobe",
     patchability_required_bits: int | None = None,
     stable_blind_only: bool = False,
+    signbit_only: bool = False,
 ) -> tuple[list[int], list[int], list[int] | None]:
     """Segment at requested IDRs and analyze one chunk at a time."""
     video_path = Path(video_path).resolve(strict=True)
+    if stable_blind_only and signbit_only:
+        raise ValueError("stable-blind and signbit-only profiles are mutually exclusive")
+    if signbit_only and patchability_required_bits is not None:
+        raise ValueError(
+            "targeted patchability validation is not implemented for signbit carriers"
+        )
     cuts = frame_cut_points(total_frames, frames_per_segment)
 
     from benchmark._common import load_or_build_benchmark_analysis
@@ -267,7 +291,11 @@ def _scan_segments(
             interleave_positions=False,
             stable_blind_only=stable_blind_only,
         )
-        raw_bits = len(analysis[-1])
+        raw_bits = (
+            count_signbit_candidates(analysis[-1])
+            if signbit_only
+            else len(analysis[-1])
+        )
         patchable_bits = None
         if patchability_required_bits is not None:
             target = next_patchability_target(
@@ -327,7 +355,11 @@ def _scan_segments(
                 interleave_positions=False,
                 stable_blind_only=stable_blind_only,
             )
-            raw_capacity = len(analysis[-1])
+            raw_capacity = (
+                count_signbit_candidates(analysis[-1])
+                if signbit_only
+                else len(analysis[-1])
+            )
             raw_bits.append(raw_capacity)
             if patchable_bits is not None and _prune_patchable_positions is not None:
                 target = next_patchability_target(
@@ -364,6 +396,7 @@ def scan_video(
     ffprobe: str = "ffprobe",
     validate_patchability: bool = False,
     stable_blind_only: bool = False,
+    signbit_only: bool = False,
 ) -> dict[str, Any]:
     """Measure raw candidates against a proof file or explicit payload size."""
     video_path = video_path.resolve(strict=True)
@@ -377,6 +410,12 @@ def scan_video(
     _positive_integer("frames_per_segment", frames_per_segment)
     if isinstance(framing_bytes, bool) or not isinstance(framing_bytes, int) or framing_bytes < 0:
         raise ValueError("framing_bytes must be a non-negative integer")
+    if stable_blind_only and signbit_only:
+        raise ValueError("stable-blind and signbit-only profiles are mutually exclusive")
+    if signbit_only and validate_patchability:
+        raise ValueError(
+            "targeted patchability validation is not implemented for signbit carriers"
+        )
     assert payload_bytes is not None
     proof_bytes = payload_bytes
     required_bits = (proof_bytes + framing_bytes) * 8
@@ -390,6 +429,7 @@ def scan_video(
         ffprobe=ffprobe,
         patchability_required_bits=required_bits if validate_patchability else None,
         stable_blind_only=stable_blind_only,
+        signbit_only=signbit_only,
     )
     report = summarize_raw_capacity(
         asset=str(video_path),
@@ -403,6 +443,11 @@ def scan_video(
     )
     report.update(
         {
+            "measurement": (
+                "raw_t1_signbit_candidates_deduplicated_by_block"
+                if signbit_only
+                else report["measurement"]
+            ),
             "video_bytes": video_path.stat().st_size,
             "video_sha256": _sha256_file(video_path),
             "proof_artifact": proof_path.name if proof_path is not None else None,
@@ -414,7 +459,23 @@ def scan_video(
             "ffmpeg_version": _ffmpeg_version(ffmpeg),
             "patchability_requested": validate_patchability,
             "carrier_profile": (
-                "blind_stable_candidates" if stable_blind_only else "all_safe_candidates"
+                "t1_signbit_one_per_block_raw_candidates"
+                if signbit_only
+                else (
+                    "blind_stable_candidates"
+                    if stable_blind_only
+                    else "all_safe_candidates"
+                )
+            ),
+            "carrier_profile_assumptions": (
+                {
+                    "signbit_only": True,
+                    "dedup_per_block": True,
+                    "bottom_rows": 0,
+                    "max_bits_per_idr": 0,
+                }
+                if signbit_only
+                else None
             ),
             "elapsed_sec": round(time.perf_counter() - started, 3),
         }
@@ -451,6 +512,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="count only deterministic carriers re-derivable by a blind verifier",
     )
+    parser.add_argument(
+        "--signbit-carriers",
+        action="store_true",
+        help=(
+            "count one safe trailing-one sign carrier per block; reports a raw "
+            "upper bound only, without patchability/quality validation"
+        ),
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
 
@@ -465,6 +534,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ffprobe=args.ffprobe,
             validate_patchability=args.validate_patchability,
             stable_blind_only=args.stable_blind_carriers,
+            signbit_only=args.signbit_carriers,
         )
         encoded = json.dumps(report, sort_keys=True, indent=2)
         if args.output is not None:

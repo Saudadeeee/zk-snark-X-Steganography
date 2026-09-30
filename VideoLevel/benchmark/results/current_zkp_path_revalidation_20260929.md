@@ -147,6 +147,10 @@ these signs. The metadata schema remains `blind-sync-stable-v1` when an
 explicit stable candidate override is used, so changing only the descriptive
 analysis label does not silently change the metadata-bound ordering seed. A
 regression test covers this with `metadata_bound=True`.
+The carrier-policy descriptor now also includes the metadata schema version,
+so registries/policies minted before that binding change fail closed and must
+be registered again; old and new metadata-bound ordering cannot share one
+policy digest silently.
 
 The corrected real-video integration test passed on
 `data/encoded/foreman_cif_g8_300f_b800k.h264` (352x288, 20 fps, 300 frames;
@@ -164,3 +168,68 @@ does not measure isolated CPU/RAM, PSNR/SSIM, or a repeated-run distribution.
 It is clear evidence that the current Python video-only sign-bit channel is
 not realtime on this host, even for a 176-bit diagnostic payload. The active
 application ZK backend remains unavailable/fail-closed as stated above.
+
+## Proof-wire capacity gate from existing measurements
+
+The separate Ringo application-opening probe measured its smallest tested
+rank-256 proof at 998,087 bytes binary (706,510 bytes with gzip). The
+3,000-frame Coastguard diagnostic reported only 541,570 bytes of raw carrier
+capacity before framing, patchability, or visual-quality losses. Thus even
+the compressed rank-256 artifact is about 1.30x that optimistic upper bound;
+the binary artifact is about 1.84x. This cross-check is a feasibility
+comparison of existing measurements, not an embedding run, and rank 256 has
+no established security parameterization. It indicates that the tested Ringo
+opening-proof wire format does not fit that cover under the measured raw
+capacity, so it cannot presently satisfy the no-sidecar requirement there.
+
+The smaller 131,694-byte SIS artifact recorded elsewhere is not a substitute:
+it proves a prover-selected research statement, not the required application
+relation. The sign-bit-only profile has not yet had a full-capacity/patchability
+measurement, so no capacity claim for that profile is made here.
+
+## Sign-bit capacity and real payload-channel sample (2026-09-30)
+
+`benchmark/streaming_capacity_scan.py` now has an explicit
+`--signbit-carriers` mode that follows the verifier's negative-index trailing-
+one sign selection and counts at most one candidate per block. It deliberately
+reports only a raw CAVLC-safe upper bound: sign-bit targeted patchability and
+per-frame quality are not claimed by this scanner.
+
+Ten-frame GOP-1 samples from the existing 352x288 QP22 H.264 Constrained
+Baseline inputs (25 fps average) produced:
+
+| Clip | Raw sign-bit carriers | Scan time | Raw-fit ratio for 1,916,177-byte verifier envelope |
+|---|---:|---:|---:|
+| Coastguard | 55,420 bits | 41.746 s | 276.6x short |
+| Akiyo | 30,360 bits | 13.653 s | 504.9x short |
+| Foreman | 2,154 bits | 4.584 s | 7,116.8x short |
+
+The inputs were the first 10 frames copied from
+`coastguard_cif_q22_g1.h264`, `akiyo_cif_q22_g1.h264`, and
+`foreman_cif_q22_g1.h264` respectively. The resulting scan-clip SHA-256 values
+were `fc86406b8dab0ad54f720712d5ebc365009e285e72a140d07c0e5e39de32e084`,
+`3c13b406c8933f522b2903e4b01c9e90daa90cfe25cba94d82a8e8fd20b8c3fd`, and
+`83e8e402bedd21a5613bf0c4ff03e2e6be2c5784ddc962915300a55195cc5bb9`.
+These are per-clip ten-frame observations, not extrapolations to longer videos;
+the count varies sharply by content. They do not validate a full proof fit,
+because patchability, blind extraction at this capacity, and quality were not
+measured for every row.
+
+A separate actual embed/extract run used the Coastguard ten-frame clip and a
+4,096-byte deterministic diagnostic payload (not a proof). The envelope was
+4,110 bytes; the pipeline used 32,880 sign-bit carriers, modified 16,470
+coefficients, produced an H.264 file with the same 331,482-byte size, and
+blindly extracted the exact payload. Strict FFmpeg decoding passed inside the
+embed routine. Embed plus blind extraction took **192.952 s** for a 10-frame,
+25-fps clip (0.4 s duration), around **482x slower than the clip duration**.
+The stego file SHA-256 was
+`22a104b822cbb5b7cf604dd5e1cbb0e3e3921d8ff07dab2a3daab3f7a6baadc1`. This is
+not realtime.
+
+FFmpeg per-frame comparison of decoded cover/stego samples yielded luma PSNR
+mean **30.862 dB** (min 28.46, max 32.21) and SSIM-All mean **0.977978** (min
+0.976048, max 0.980206); Cb/Cr were unchanged in this sample. This is one
+short run, not a repeated quality/performance benchmark, and the luma changes
+are not negligible. Peak RAM was not captured. The result validates a larger
+diagnostic payload channel only; it does not generate, embed, or verify a
+lattice-ZK proof.

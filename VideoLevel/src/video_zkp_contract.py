@@ -136,6 +136,11 @@ def carrier_policy_hash(carrier_contract: object, required_bits: int) -> str:
         else "first luma AC coefficient with abs(level)>=4, nonzero, and outside "
         "CAVLC trailing-ones from positive-length patchable luma blocks"
     )
+    metadata_version = (
+        "blind-sync-stable-v1"
+        if carrier_contract.signbit_only or carrier_contract.stable_carriers_only
+        else "blind-sync-v1"
+    )
     descriptor = {
         "contract_version": carrier_contract.version,
         "signbit_only": carrier_contract.signbit_only,
@@ -148,6 +153,7 @@ def carrier_policy_hash(carrier_contract: object, required_bits: int) -> str:
         "max_modifications_per_block": carrier_contract.max_modifications_per_block,
         "stable_carriers_only": carrier_contract.stable_carriers_only,
         "required_bits": required_bits,
+        "metadata_version": metadata_version,
         "session_seed_derivation": "sha256(domain||expected-session-id-bytes)",
         "candidate_derivation": candidate_derivation,
         "candidate_filtering": (

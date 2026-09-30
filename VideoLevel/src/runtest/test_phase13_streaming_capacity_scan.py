@@ -13,9 +13,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from benchmark.streaming_capacity_scan import (
     _scan_segments,
+    count_signbit_candidates,
     frame_cut_points,
     main,
     next_patchability_target,
+    scan_video,
     summarize_raw_capacity,
     validate_segment_partition,
 )
@@ -88,6 +90,69 @@ def t_short_video_can_scan_only_blind_stable_carriers():
             interleave_positions=False,
             stable_blind_only=True,
         )
+
+
+def t_signbit_capacity_counts_only_one_carrier_per_block():
+    positions = [
+        (0, 0, -15),
+        (0, 0, -14),
+        (0, 1, 3),
+        (1, 0, -1),
+        (1, 0, -2),
+    ]
+
+    assert count_signbit_candidates(positions) == 2
+
+
+def t_short_video_scans_signbit_candidates_not_magnitude_candidates():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        video = Path(temp_dir) / "short.h264"
+        video.write_bytes(b"short-video")
+        fake_analysis = (
+            [],
+            {},
+            {},
+            {},
+            {},
+            [(0, 0, -15), (0, 0, -14), (1, 0, 5)],
+        )
+        with patch(
+            "benchmark._common.load_or_build_benchmark_analysis",
+            return_value=fake_analysis,
+        ) as analyze:
+            frame_counts, raw_bits, patchable_bits = _scan_segments(
+                video,
+                100,
+                10,
+                signbit_only=True,
+            )
+
+        assert frame_counts == [10]
+        assert raw_bits == [1]
+        assert patchable_bits is None
+        analyze.assert_called_once_with(
+            video.resolve(),
+            force=True,
+            interleave_positions=False,
+            stable_blind_only=False,
+        )
+
+
+def t_signbit_profile_refuses_unsupported_patchability_claim():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        video = Path(temp_dir) / "short.h264"
+        video.write_bytes(b"short-video")
+        try:
+            scan_video(
+                video_path=video,
+                payload_bytes=1,
+                signbit_only=True,
+                validate_patchability=True,
+            )
+        except ValueError as error:
+            assert "not implemented for signbit carriers" in str(error)
+        else:
+            raise AssertionError("signbit scan claimed unsupported patchability validation")
 
 
 def t_analysis_requests_stable_carriers_without_interleaving():
@@ -275,6 +340,36 @@ def t_cli_selects_blind_stable_profile():
         assert scan_segments.call_args.kwargs["stable_blind_only"] is True
 
 
+def t_cli_selects_signbit_raw_carrier_profile():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        video = Path(temp_dir) / "clip.h264"
+        proof = Path(temp_dir) / "proof.bin"
+        report_path = Path(temp_dir) / "report.json"
+        video.write_bytes(b"test-video")
+        proof.write_bytes(b"proof")
+
+        with patch("benchmark.streaming_capacity_scan._probe_frame_count", return_value=2), patch(
+            "benchmark.streaming_capacity_scan._scan_segments", return_value=([2], [3], None)
+        ) as scan_segments, patch(
+            "benchmark.streaming_capacity_scan._ffmpeg_version", return_value="ffmpeg test"
+        ):
+            result = main([
+                "--video", str(video),
+                "--proof-artifact", str(proof),
+                "--frames-per-segment", "2",
+                "--signbit-carriers",
+                "--output", str(report_path),
+            ])
+
+        assert result == 0
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        assert report["carrier_profile"] == "t1_signbit_one_per_block_raw_candidates"
+        assert report["measurement"] == "raw_t1_signbit_candidates_deduplicated_by_block"
+        assert report["patchability_validated"] is False
+        assert report["quality_validated"] is False
+        assert scan_segments.call_args.kwargs["signbit_only"] is True
+
+
 def t_cli_accepts_explicit_payload_size_without_proof_file():
     with tempfile.TemporaryDirectory() as temp_dir:
         video = Path(temp_dir) / "clip.h264"
@@ -310,6 +405,9 @@ def main_test():
         run_test("accepts_complete_full_and_partial_final_segment", t_accepts_complete_full_and_partial_final_segment),
         run_test("short_video_is_analyzed_as_one_segment_without_ffmpeg_split", t_short_video_is_analyzed_as_one_segment_without_ffmpeg_split),
         run_test("short_video_can_scan_only_blind_stable_carriers", t_short_video_can_scan_only_blind_stable_carriers),
+        run_test("signbit_capacity_counts_only_one_carrier_per_block", t_signbit_capacity_counts_only_one_carrier_per_block),
+        run_test("short_video_scans_signbit_candidates_not_magnitude_candidates", t_short_video_scans_signbit_candidates_not_magnitude_candidates),
+        run_test("signbit_profile_refuses_unsupported_patchability_claim", t_signbit_profile_refuses_unsupported_patchability_claim),
         run_test("analysis_requests_stable_carriers_without_interleaving", t_analysis_requests_stable_carriers_without_interleaving),
         run_test("patchability_target_balances_remaining_bits_over_chunks", t_patchability_target_balances_remaining_bits_over_chunks),
         run_test("patchability_target_is_bounded_by_raw_chunk_capacity", t_patchability_target_is_bounded_by_raw_chunk_capacity),
@@ -319,6 +417,7 @@ def main_test():
         run_test("report_rejects_mismatched_segment_arrays", t_report_rejects_mismatched_segment_arrays),
         run_test("cli_writes_report_for_a_valid_measured_partition", t_cli_writes_report_for_a_valid_measured_partition),
         run_test("cli_selects_blind_stable_profile", t_cli_selects_blind_stable_profile),
+        run_test("cli_selects_signbit_raw_carrier_profile", t_cli_selects_signbit_raw_carrier_profile),
         run_test("cli_accepts_explicit_payload_size_without_proof_file", t_cli_accepts_explicit_payload_size_without_proof_file),
     ]
     raise SystemExit(summarise(results, "Phase 13"))

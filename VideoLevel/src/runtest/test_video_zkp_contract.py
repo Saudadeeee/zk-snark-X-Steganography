@@ -171,6 +171,22 @@ def t_manifest_preserves_a_future_zkp_statement_identifier() -> None:
     assert restored.proof.statement_id == statement_id
 
 
+def t_carrier_policy_hash_versions_metadata_schema() -> None:
+    from src.blind_sync import BlindOperatingContract
+    from src.video_zkp_contract import carrier_policy_hash
+
+    contract = BlindOperatingContract(
+        version="stable-carriers-video-only-v1",
+        signbit_only=True,
+        require_bitstream_patchable=True,
+        max_modifications_per_block=1,
+        stable_carriers_only=True,
+    )
+    legacy_policy_hash = "9940ab80be24bfaacbc4d691ab11954a9a52fdf80215694eb86841d4c7b2d080"
+
+    assert carrier_policy_hash(contract, 2) != legacy_policy_hash
+
+
 def t_statement_registry_binding_uses_verifier_pins_and_rejects_mutations() -> None:
     from src.lattice_pq import LatticeSigner
     from src.video_zkp_contract import (
@@ -586,6 +602,7 @@ def main() -> None:
             t_payload_commitment_matches_python_golden_vector_and_statement_omits_opening,
         ),
         run_test("manifest_preserves_a_future_zkp_statement_identifier", t_manifest_preserves_a_future_zkp_statement_identifier),
+        run_test("carrier_policy_hash_versions_metadata_schema", t_carrier_policy_hash_versions_metadata_schema),
         run_test("statement_registry_binding_uses_verifier_pins_and_rejects_mutations", t_statement_registry_binding_uses_verifier_pins_and_rejects_mutations),
         run_test("context_binding_composes_pins_carrier_hash_and_video_commitment", t_context_binding_composes_pins_carrier_hash_and_video_commitment),
     ]
