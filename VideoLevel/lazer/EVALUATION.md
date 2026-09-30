@@ -251,3 +251,37 @@ README lists Linux x86-64, AVX-512 and AES as build/run requirements
 The upstream Labrador repository describes its code as research-only and not
 security-reviewed or production-validated
 ([upstream Labrador README](https://github.com/lazer-crypto/labrador)).
+
+## Current repository recheck (2026-09-30)
+
+The current Windows checkout was rechecked after the 2026-09-28 host snapshot:
+
+| Command | Result | What it establishes |
+|---|---:|---|
+| `py -3.12 -u src/runtest/test_lattice_zkp.py` | 9/9 passed | Research-prototype/helper tests and fail-closed public API behavior only. One passing test deliberately records that the SIS prototype accepts a prover-selected statement; this is a known limitation, not a security pass. |
+| `py -3.12 -u src/runtest/test_video_zkp_contract.py` | 9/9 passed | Canonical statement and policy/helper contracts; it does not generate or verify an application ZK proof. |
+| `py -3.12 -u src/runtest/test_lattice_pq_stack.py` | 6/6 passed | ML-DSA receipt, ML-KEM, and signed-attestation reference behavior; these are not a zero-knowledge proof. |
+| `py -3.12 -u src/runtest/test_zkp_registry.py` | 4/4 passed | Signed future-relation registry/pinning behavior; not the relation proof itself. |
+| `cmake --build native/edge-build --config Release --target zkstego_live_tests` followed by CTest | 1/1 passed (0.08 s) | Rebuilt from tracked native sources. It tests Annex-B/AUD parsing, the in-memory direct-CAVLC primitive, and an SEI diagnostic round trip; it does not embed or blindly extract a proof from a real encoded video. |
+| `py -3.12 -m src.lazer_backend` | `ready=false`, `docker_daemon_unavailable` | The Docker Desktop Linux engine pipe is absent; the pinned LaZer proof was not built or run. |
+
+An additional `ctest --test-dir native/cavlc-build -C Release` invocation
+reported 1/1 passed in 154.75 s, but that directory is an untracked generated
+build tree. The executable's project metadata points to
+`native/tests/cavlc_stream_tests.cpp`, which is absent from this checkout and
+not a tracked source file. The process reached approximately 1.25 GB working
+set. Treat that run as a stale-binary observation only: it is not reproducible
+evidence that the current tracked source implements or passes a CAVLC stream
+test, and its RAM figure must not be attributed to the current source pipeline.
+
+No API-level lattice ZK proof generation, application relation verification,
+video-only proof extraction, proof-size/carrier fit, or realtime benchmark was
+produced by these commands. Existing passing tests must not be presented as
+closing those goal gates.
+
+The tracked [`native/README.md`](../native/README.md) also states that the
+direct CAVLC primitive is not wired into the generic relay: correct mutation
+must occur inside an encoder after quantization and before reference-frame
+reconstruction. The stock libx264 adapter exposes no residual-coefficient
+hook. Therefore the passing native unit test does not demonstrate an
+end-to-end pixel-level H.264 embed path.

@@ -2545,3 +2545,21 @@ reports the Docker Desktop engine unavailable; independently, native GCC's
 Thus this host cannot run the pinned LaZer path even if the container engine is
 restored. Full command output and caveats are in
 `benchmark/results/current_zkp_path_revalidation_20260929.md`.
+
+### Symphony primary-source gate (2026-09-30)
+
+Audited the latest IACR paper and the author's research page. Symphony is a
+promising lattice-folding-to-SNARK architecture, but the paper explicitly
+leaves concrete implementation as future work. Its stated SNARK definition
+establishes completeness, succinctness, and knowledge soundness, not by itself
+zero knowledge for this payload-opening relation; the commit-and-prove and
+SNARK components still need an explicit ZK-preserving instantiation and
+composition audit. The paper estimates a candidate proof below 200 KB at
+117-bit MSIS parameters; this is not measured output. Current 300-frame
+blind-stable raw capacity ceilings are 9,568 bytes for Coastguard and 3,731
+bytes for Akiyo, and are not confirmed patchable positions, so the estimate
+already fails the carrier-size gate by at least about 20.9x / 53.7x before
+framing. Keep public APIs fail-closed and treat Symphony as research input
+until a pinned full implementation, ZK audit, build/proof measurements, and
+in-band carrier E2E satisfy the gates. Full assessment:
+`benchmark/results/symphony_candidate_assessment_20260930.md`.
