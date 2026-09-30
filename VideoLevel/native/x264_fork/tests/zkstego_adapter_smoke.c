@@ -76,7 +76,9 @@ int main(void)
         count_nal,
         &stats
     );
-    if (status != ZKS_OK || stats.nal_count == 0u || stats.output_bytes == 0u ||
+    if (status != ZKS_OK ||
+        zks_x264_encoder_finish(encoder, count_nal, &stats) != ZKS_OK ||
+        stats.nal_count == 0u || stats.output_bytes == 0u ||
         zks_x264_encoder_embedded_bits(encoder) != 8u)
     {
         fprintf(stderr, "adapter encode failed: status=%d nals=%zu bits=%llu\n",
@@ -89,6 +91,36 @@ int main(void)
 
     printf("PASS adapter_nals=%zu output_bytes=%zu embedded_bits=8\n",
            stats.nal_count, stats.output_bytes);
+    zks_x264_encoder_close(encoder);
+    encoder = NULL;
+
+    config.direct_payload_size = 3u;
+    if (zks_x264_encoder_open(&config, &encoder) != ZKS_OK || !encoder)
+    {
+        fprintf(stderr, "capacity-test encoder open failed\n");
+        free(pixels);
+        return EXIT_FAILURE;
+    }
+    status = zks_x264_encoder_encode_i420(
+        encoder,
+        pixels, WIDTH,
+        pixels + Y_SIZE, WIDTH / 2,
+        pixels + Y_SIZE + C_SIZE, WIDTH / 2,
+        0,
+        count_nal,
+        &stats
+    );
+    if (status != ZKS_OK ||
+        zks_x264_encoder_finish(encoder, count_nal, &stats) != ZKS_ERR_CAPACITY ||
+        zks_x264_encoder_embedded_bits(encoder) >= 24u)
+    {
+        fprintf(stderr, "adapter did not reject a payload exceeding frame capacity\n");
+        zks_x264_encoder_close(encoder);
+        free(pixels);
+        return EXIT_FAILURE;
+    }
+    printf("PASS adapter_capacity_rejected embedded_bits=%llu requested_bits=24\n",
+           (unsigned long long)zks_x264_encoder_embedded_bits(encoder));
     zks_x264_encoder_close(encoder);
     free(pixels);
     return EXIT_SUCCESS;
