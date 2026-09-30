@@ -6,8 +6,12 @@
 
 #include <array>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -15,8 +19,20 @@ using namespace libsnark;
 using ParameterSet = LWE::B19C20;
 using ProofField = libff::Fr<Fp2_b19_pp>;
 using RingParameters = Ring2_common_pp<ParameterSet::q_int>;
+using Proof = r1cs_lattice_snark_proof<
+    Fp2_b19_pp, RingParameters, ParameterSet>;
 
 constexpr std::uint64_t kCommitmentModulus = (1u << 19) - 1;
+constexpr auto kCoefficientBoundExclusive =
+    ParameterSet::rescale_q + ParameterSet::p_int + 1;
+static_assert(kCoefficientBoundExclusive <= (__uint128_t(1) << 41),
+              "B19C20 response coefficient bound must fit in 41 bits");
+constexpr std::size_t kResponseCoefficientBits = 41;
+constexpr std::size_t kResponseCoefficientCount =
+    (ParameterSet::n + ParameterSet::pt_dim + ParameterSet::tau) * 2;
+constexpr std::size_t kResponseBitCount =
+    kResponseCoefficientBits * kResponseCoefficientCount;
+constexpr std::size_t kResponseByteCount = (kResponseBitCount + 7) / 8;
 constexpr std::size_t kContextBytes = 32;
 constexpr std::size_t kPayloadBits = 8;
 constexpr std::size_t kOpeningBits = 16;
@@ -41,6 +57,84 @@ std::uint64_t opening_coefficient(std::size_t index) {
 std::uint64_t context_coefficient(std::size_t index) {
     return (7919u * static_cast<std::uint64_t>(index + 1) + 17u) %
            kCommitmentModulus;
+}
+
+std::vector<std::uint8_t> serialize_response(const Proof &proof) {
+    std::vector<std::uint8_t> bytes(kResponseByteCount, 0);
+    std::size_t bit_position = 0;
+    const auto append = [&](const auto &coefficient) {
+        const auto value = coefficient.value;
+        if (value >= kCoefficientBoundExclusive) {
+            return false;
+        }
+        for (std::size_t bit = 0; bit < kResponseCoefficientBits; ++bit) {
+            if (((value >> bit) & 1u) != 0) {
+                bytes[bit_position / 8] |= static_cast<std::uint8_t>(
+                    1u << (bit_position % 8));
+            }
+            ++bit_position;
+        }
+        return true;
+    };
+    for (const auto &element : proof.response.a_vec.vec) {
+        if (!append(element.c0) || !append(element.c1)) {
+            return {};
+        }
+    }
+    for (const auto &element : proof.response.c_vec.vec) {
+        if (!append(element.c0) || !append(element.c1)) {
+            return {};
+        }
+    }
+    if (bit_position != kResponseBitCount) {
+        return {};
+    }
+    return bytes;
+}
+
+bool deserialize_response(const std::vector<std::uint8_t> &bytes, Proof &proof) {
+    if (bytes.size() != kResponseByteCount) {
+        return false;
+    }
+    const auto used_bits_in_last_byte = kResponseBitCount % 8;
+    if (used_bits_in_last_byte != 0 &&
+        (bytes.back() >> used_bits_in_last_byte) != 0) {
+        return false;
+    }
+
+    Proof decoded;
+    std::size_t bit_position = 0;
+    const auto read = [&](auto &coefficient) {
+        __uint128_t value = 0;
+        for (std::size_t bit = 0; bit < kResponseCoefficientBits; ++bit) {
+            const auto set =
+                (bytes[bit_position / 8] >> (bit_position % 8)) & 1u;
+            if (set != 0) {
+                value |= (__uint128_t(1) << bit);
+            }
+            ++bit_position;
+        }
+        if (value >= kCoefficientBoundExclusive) {
+            return false;
+        }
+        coefficient.value = value;
+        return true;
+    };
+    for (auto &element : decoded.response.a_vec.vec) {
+        if (!read(element.c0) || !read(element.c1)) {
+            return false;
+        }
+    }
+    for (auto &element : decoded.response.c_vec.vec) {
+        if (!read(element.c0) || !read(element.c1)) {
+            return false;
+        }
+    }
+    if (bit_position != kResponseBitCount) {
+        return false;
+    }
+    proof = decoded;
+    return true;
 }
 
 std::uint64_t commitment_for(
@@ -172,7 +266,15 @@ Circuit make_circuit(
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    std::string response_output_path;
+    if (argc == 3 && std::string(argv[1]) == "--response-output") {
+        response_output_path = argv[2];
+    } else if (argc != 1) {
+        std::cerr << "usage: isw21_r1cs_opening_smoke [--response-output FILE]\n";
+        return 19;
+    }
+
     const std::array<std::uint8_t, kContextBytes> context = {
         0x91, 0x3a, 0xe1, 0x20, 0x77, 0x58, 0x02, 0xb4,
         0x6c, 0xa9, 0x11, 0x08, 0xd2, 0x33, 0x4f, 0x80,
@@ -247,17 +349,141 @@ int main() {
     const auto proof = r1cs_lattice_snark_prove<
         Fp2_b19_pp, RingParameters, ParameterSet>(
             crs, example.primary_input, example.auxiliary_input);
-
-    if (!r1cs_lattice_snark_verify<Fp2_b19_pp, RingParameters>(
-            verification_key, example.primary_input, proof)) {
+    const auto verify = [&](const auto &public_input, const auto &candidate) {
+        try {
+            return r1cs_lattice_snark_verify<Fp2_b19_pp, RingParameters>(
+                verification_key, public_input, candidate);
+        } catch (const std::runtime_error &) {
+            // The upstream verifier reports some malformed ciphertexts by
+            // throwing instead of returning false. Treat that as rejection.
+            return false;
+        }
+    };
+    if (!verify(example.primary_input, proof)) {
         std::cerr << "ISW21 verifier rejected the honest application-shaped statement\n";
         return 5;
     }
 
+    std::uint64_t coefficient_count = 0;
+    std::uint64_t maximum_coefficient_bits = 0;
+    bool coefficients_within_41_bit_bound = true;
+    const auto observe_coefficient = [&](const auto &coefficient) {
+        ++coefficient_count;
+        auto value = coefficient.value;
+        if (value >= kCoefficientBoundExclusive) {
+            coefficients_within_41_bit_bound = false;
+        }
+        std::uint64_t bits = 0;
+        while (value != 0) {
+            ++bits;
+            value >>= 1;
+        }
+        if (bits > maximum_coefficient_bits) {
+            maximum_coefficient_bits = bits;
+        }
+    };
+    for (const auto &element : proof.response.a_vec.vec) {
+        observe_coefficient(element.c0);
+        observe_coefficient(element.c1);
+    }
+    for (const auto &element : proof.response.c_vec.vec) {
+        observe_coefficient(element.c0);
+        observe_coefficient(element.c1);
+    }
+    constexpr std::uint64_t expected_coefficient_count =
+        (ParameterSet::n + ParameterSet::pt_dim + ParameterSet::tau) * 2;
+    if (coefficient_count != expected_coefficient_count) {
+        std::cerr << "unexpected proof response coefficient count\n";
+        return 10;
+    }
+    if (!coefficients_within_41_bit_bound) {
+        std::cerr << "proof response coefficient exceeded derived bound\n";
+        return 9;
+    }
+    std::uint64_t fixed_coefficient_width = 0;
+    auto maximum_coefficient = kCoefficientBoundExclusive - 1;
+    while (maximum_coefficient != 0) {
+        ++fixed_coefficient_width;
+        maximum_coefficient >>= 1;
+    }
+    const auto fixed_width_bits = coefficient_count * fixed_coefficient_width;
+    const auto fixed_width_bytes = (fixed_width_bits + 7) / 8;
+
+    const auto encoded_response = serialize_response(proof);
+    if (encoded_response.size() != fixed_width_bytes ||
+        encoded_response.size() != kResponseByteCount) {
+        std::cerr << "response codec produced an unexpected byte length\n";
+        return 11;
+    }
+    Proof decoded_proof;
+    if (!deserialize_response(encoded_response, decoded_proof) ||
+        serialize_response(decoded_proof) != encoded_response ||
+        !verify(example.primary_input, decoded_proof)) {
+        std::cerr << "canonical response round-trip failed\n";
+        return 12;
+    }
+
+    auto truncated_response = encoded_response;
+    truncated_response.pop_back();
+    if (deserialize_response(truncated_response, decoded_proof)) {
+        std::cerr << "response codec accepted a truncated encoding\n";
+        return 13;
+    }
+    auto nonzero_padding_response = encoded_response;
+    nonzero_padding_response.back() |= 0x80;
+    if (deserialize_response(nonzero_padding_response, decoded_proof)) {
+        std::cerr << "response codec accepted nonzero trailing padding\n";
+        return 14;
+    }
+    auto out_of_range_response = encoded_response;
+    for (std::size_t byte = 0; byte < 5; ++byte) {
+        out_of_range_response[byte] = 0xff;
+    }
+    out_of_range_response[5] |= 0x01;
+    if (deserialize_response(out_of_range_response, decoded_proof)) {
+        std::cerr << "response codec accepted an out-of-range coefficient\n";
+        return 15;
+    }
+
+    std::size_t tamper_coefficient_index = 0;
+    bool tamper_coefficient_found = false;
+    const auto find_tamper_coefficient = [&](const auto &coefficient) {
+        if (!tamper_coefficient_found && coefficient.value > 0 &&
+            coefficient.value + 1 < kCoefficientBoundExclusive) {
+            tamper_coefficient_found = true;
+        } else if (!tamper_coefficient_found) {
+            ++tamper_coefficient_index;
+        }
+    };
+    for (const auto &element : proof.response.a_vec.vec) {
+        find_tamper_coefficient(element.c0);
+        find_tamper_coefficient(element.c1);
+    }
+    for (const auto &element : proof.response.c_vec.vec) {
+        find_tamper_coefficient(element.c0);
+        find_tamper_coefficient(element.c1);
+    }
+    if (!tamper_coefficient_found) {
+        std::cerr << "could not find a response coefficient safe to tamper\n";
+        return 16;
+    }
+    auto tampered_response = encoded_response;
+    const auto tamper_bit_position =
+        tamper_coefficient_index * kResponseCoefficientBits;
+    tampered_response[tamper_bit_position / 8] ^= static_cast<std::uint8_t>(
+        1u << (tamper_bit_position % 8));
+    if (!deserialize_response(tampered_response, decoded_proof)) {
+        std::cerr << "modified in-range response did not decode canonically\n";
+        return 17;
+    }
+    if (verify(example.primary_input, decoded_proof)) {
+        std::cerr << "ISW21 verifier accepted a modified serialized response\n";
+        return 18;
+    }
+
     auto wrong_context = example.primary_input;
     wrong_context[0] += ProofField(1);
-    if (r1cs_lattice_snark_verify<Fp2_b19_pp, RingParameters>(
-            verification_key, wrong_context, proof)) {
+    if (verify(wrong_context, proof)) {
         std::cerr << "ISW21 verifier accepted the proof under a changed context\n";
         return 6;
     }
@@ -266,18 +492,33 @@ int main() {
     // modified equation. The old proof must nevertheless fail because the
     // verifier checks the full primary input, not only C - H*context.
     const auto recentered_statement = recentered_circuit.board.primary_input();
-    if (r1cs_lattice_snark_verify<Fp2_b19_pp, RingParameters>(
-            verification_key, recentered_statement, proof)) {
+    if (verify(recentered_statement, proof)) {
         std::cerr << "ISW21 verifier accepted a recentered context/commitment pair\n";
         return 7;
     }
 
     auto wrong_commitment = example.primary_input;
     wrong_commitment.back() += ProofField(1);
-    if (r1cs_lattice_snark_verify<Fp2_b19_pp, RingParameters>(
-            verification_key, wrong_commitment, proof)) {
+    if (verify(wrong_commitment, proof)) {
         std::cerr << "ISW21 verifier accepted the proof under a changed commitment\n";
         return 8;
+    }
+
+    if (!response_output_path.empty()) {
+        std::ofstream response_file(
+            response_output_path, std::ios::binary | std::ios::trunc);
+        if (!response_file ||
+            !response_file.write(
+                reinterpret_cast<const char *>(encoded_response.data()),
+                static_cast<std::streamsize>(encoded_response.size()))) {
+            std::cerr << "failed to write serialized proof response\n";
+            return 20;
+        }
+        response_file.flush();
+        if (!response_file) {
+            std::cerr << "failed to flush serialized proof response\n";
+            return 21;
+        }
     }
 
     std::cout << "HONEST_R1CS=PASS\n"
@@ -287,6 +528,27 @@ int main() {
               << "CHANGED_CONTEXT_PROOF=REJECTED\n"
               << "RECENTERED_CONTEXT_STATEMENT_PROOF=REJECTED\n"
               << "CHANGED_COMMITMENT_PROOF=REJECTED\n"
+              << "PROOF_RESPONSE_ROUNDTRIP=PASS\n"
+              << "TAMPERED_SERIALIZED_RESPONSE=REJECTED\n"
+              << "MALFORMED_RESPONSE_ENCODINGS=REJECTED\n"
+              << "SERIALIZED_RESPONSE_BYTES=" << encoded_response.size()
+              << " (response only; no statement/envelope)\n"
+              << (response_output_path.empty()
+                      ? std::string{}
+                      : "RESPONSE_FILE_WRITTEN_BYTES=" +
+                            std::to_string(encoded_response.size()) + "\n")
+              << "RESPONSE_COEFFICIENTS=" << coefficient_count << '\n'
+              << "MAX_OBSERVED_COEFFICIENT_BITS="
+              << maximum_coefficient_bits << '\n'
+              << "DERIVED_COEFFICIENT_BOUND_EXCLUSIVE="
+              << static_cast<std::uint64_t>(kCoefficientBoundExclusive)
+              << '\n'
+              << "FIXED_WIDTH_BOUND_BITS_PER_COEFFICIENT="
+              << fixed_coefficient_width << '\n'
+              << "FIXED_WIDTH_RESPONSE_UPPER_BOUND_BITS="
+              << fixed_width_bits << '\n'
+              << "FIXED_WIDTH_RESPONSE_UPPER_BOUND_BYTES="
+              << fixed_width_bytes << " (response only)\n"
               << "constraints=" << example.constraint_system.num_constraints()
               << " public_inputs=" << example.primary_input.size() << '\n'
               << "WARNING=toy q=2^19-1 commitment, 16-bit binary opening; not secure parameters\n";

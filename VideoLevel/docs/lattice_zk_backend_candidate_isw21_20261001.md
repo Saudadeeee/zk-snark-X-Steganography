@@ -36,27 +36,56 @@ must not describe its proofs as publicly verifiable.
 - Upstream printed `Linear comb size 20146`. This is an internal number of
   linear-combination elements, **not** a serialized proof byte count.
 
-## First in-video size feasibility estimate
+## Corrected response-size feasibility bound
 
 For upstream parameter class `B19C20`, the source fixes `n=2045`,
 `query_num=8`, `query_size=4`, `pt_dim=32`, `tau=4`, and the message modulus
-`p=2^19-1`. Its proof object contains an `a_vec` of 2,045 quadratic-extension
-ring values and a `c_vec` of 36 such values. Each value has two coefficients
-in the message field. If a future canonical serializer packs each coefficient
-in exactly 19 bits after verifying it is in `[0,p)`, the arithmetic payload
-would be:
+`p=2^19-1`. The ring modulus is instead `q=2^108`. The proof object contains
+an `a_vec` of 2,045 quadratic-extension ring values and a `c_vec` of 36 such
+values; each extension has two ring coefficients. `ciphertext::rescale()`
+rescales these coefficients into a bounded interval; they are not 19-bit
+message-field elements. The previous 19-bit estimate of 9,885 bytes was
+incorrect and is withdrawn.
+
+At the pinned upstream revision, `Ring::rescale()` first rounds a value below
+`q` by `floor(q/rescale_q)`, then chooses a nearby representative congruent
+modulo `p`. From that source operation, a conservative exclusive coefficient
+bound is `rescale_q + p + 1 = 1,684,330,715,837`, which is below `2^41`.
+Therefore a simple fixed-width packing needs 41 bits per coefficient. There
+are `(2045 + 36) * 2 = 4,162` coefficients, giving:
 
 ```text
-(2045 + 36) * 2 * 19 = 79,078 bits = 9,885 bytes after byte rounding
+(2045 + 36) * 2 * 41 = 170,642 bits = 21,331 bytes after byte rounding
 ```
 
-This is a **derived lower-bound estimate**, not an observed wire size: the
-upstream proof type has no application-envelope serializer, and canonical
-packing, parameter IDs, commitment fields, and framing still need to be
-implemented and tested. The estimate is close enough to the measured 10,779
-byte carrier budget reported for one 3,000-frame Coastguard stream that an
-actual serialized proof/statement capacity test is mandatory before selecting
-this backend. It does not prove all videos have enough capacity.
+The smoke-test binary measured 4,162 response coefficients and a maximum
+observed width of 41 bits in one real proof run, consistent with this source-
+derived bound. The smoke test now implements a parameter-specific canonical
+fixed-width response codec and successfully verifies a proof after
+serialization and deserialization. Its exact output is 21,331 bytes. This is
+an actual response encoding, **not a complete proof or application envelope**:
+the format has no version/parameter ID, public statement, session metadata,
+framing, or video integration. It is about 1.98x the
+10,779-byte payload transported in one 3,000-frame Coastguard experiment and
+2.23x the 9,568-byte raw-safe blind-stable capacity measured on a separate
+300-frame Coastguard QP22/GOP1 input. The clips and capacity definitions differ;
+neither comparison proves universal infeasibility, but both show a substantial
+measured-video capacity risk that must be resolved with an application
+envelope and quality-validated embed/extract test.
+
+The closest native-path capacity evidence is a separate 300-frame Akiyo CIF
+run with the project's patched x264 direct-CAVLC encoder: it committed 10,420
+bits (1,302.5-byte equivalent) and failed closed on a 33,803-byte payload.
+The response encoding here is 170,648 physical bits after byte rounding, about
+16.4x that observed committed capacity before adding the native 14-byte
+framing header. This is not an ISW-proof embedding trial and cannot establish a
+universal limit, but it shows the current 300-frame IDR-only native operating
+point is far too small for this response encoding. A simple linear projection
+would require roughly 164 seconds of similar video; that is only a planning
+estimate, since carrier availability and quality are content-dependent. See
+the [ISW21 response capacity probe](../benchmark/results/isw21_response_native_capacity_probe_20261001.md)
+for the exact run; the earlier [native payload capacity probe](../benchmark/results/native_payload_capacity_probe_20260930.md)
+is the separate 33,803-byte comparison.
 
 ## Relation mapping required before integration
 
@@ -83,8 +112,8 @@ proves none of those properties.
   estimates for this exact circuit and designated-verifier setup;
 - implement and review the bounded payload-opening relation and setup/key
   lifecycle, including verifier-key confidentiality;
-- implement a canonical compact proof serializer/deserializer and reject
-  non-canonical field encodings;
+- extend the response-only codec into a versioned proof/statement envelope,
+  including parameter identifiers, session fields, and canonical rejection;
 - produce a real proof for the application relation, measure its exact bytes,
   and embed/extract it blindly from H.264 Baseline/CAVLC with no proof sidecar;
 - run wrong-payload, changed-context, malformed-proof, tamper, replay, expiry,
