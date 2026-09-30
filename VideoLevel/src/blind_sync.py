@@ -525,9 +525,7 @@ def derive_blind_positions_operating_contract(
         frame_verified_data,
         nal_length_map,
         safe_positions,
-        analysis_profile=(
-            "stable-blind-v1" if contract.stable_carriers_only else "full-v1"
-        ),
+        analysis_profile="stable-blind-v1" if stable_profile else "full-v1",
         stable_candidates_override=stable_candidates_override,
     )
     seed_base = derive_seed_base(metadata)
