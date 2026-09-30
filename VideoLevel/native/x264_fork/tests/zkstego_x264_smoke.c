@@ -21,9 +21,12 @@ static int write_nals(FILE *output, x264_nal_t *nals, int nal_count)
 
 int main(int argc, char **argv)
 {
-    enum { WIDTH = 64, HEIGHT = 64, Y_SIZE = WIDTH * HEIGHT,
+    enum { WIDTH = 256, HEIGHT = 256, Y_SIZE = WIDTH * HEIGHT,
            C_SIZE = (WIDTH / 2) * (HEIGHT / 2) };
-    uint8_t payload[] = { 0xA5 };
+    uint8_t payload[] = {
+        0x5A, 0x4B, 0x56, 0x50, 0x01, 0x01, 0x00, 0x00,
+        0x00, 0x01, 0x11, 0x2E, 0xBD, 0x16, 0xA5
+    };
     uint8_t *pixels = NULL;
     uint32_t state = UINT32_C(0x13579BDF);
     x264_param_t param;
@@ -92,6 +95,21 @@ int main(int argc, char **argv)
     }
     param.analyse.b_transform_8x8 = 0;
 
+    param.rc.i_rc_method = X264_RC_CQP;
+    param.rc.i_qp_constant = 0;
+    {
+        x264_t *lossless_encoder = x264_encoder_open(&param);
+        if (lossless_encoder)
+        {
+            x264_encoder_close(lossless_encoder);
+            fprintf(stderr, "encoder accepted a stego payload in lossless mode\n");
+            goto cleanup;
+        }
+    }
+    param.rc.i_rc_method = X264_RC_CRF;
+    param.rc.i_qp_constant = -1;
+    param.rc.f_rf_constant = 18.0f;
+
     param.zkstego_payload_size = INT_MAX / 8 + 1;
     if (x264_encoder_open(&param))
     {
@@ -139,9 +157,9 @@ int main(int argc, char **argv)
     if (fflush(output) != 0)
         goto cleanup;
 
-    if (x264_encoder_zkstego_embedded_bits(encoder) != 8u)
+    if (x264_encoder_zkstego_embedded_bits(encoder) != sizeof(payload) * 8u)
     {
-        fprintf(stderr, "expected 8 embedded bits, got %llu\n",
+        fprintf(stderr, "expected %zu embedded bits, got %llu\n", sizeof(payload) * 8u,
                 (unsigned long long)x264_encoder_zkstego_embedded_bits(encoder));
         goto cleanup;
     }
@@ -152,7 +170,7 @@ int main(int argc, char **argv)
         goto cleanup;
     }
 
-    printf("PASS payload_bits=8 output_bytes=%ld\n", ftell(output));
+    printf("PASS payload_bits=%zu output_bytes=%ld\n", sizeof(payload) * 8u, ftell(output));
     result = EXIT_SUCCESS;
 
 cleanup:
