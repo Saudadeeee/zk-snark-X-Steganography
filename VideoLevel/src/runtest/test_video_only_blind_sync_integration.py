@@ -76,6 +76,7 @@ def test_stable_signbit_profile_derives_one_trailing_sign_per_block(monkeypatch)
     )
     contract = BlindOperatingContract(
         signbit_only=True,
+        metadata_bound=True,
         require_bitstream_patchable=True,
         max_modifications_per_block=1,
         stable_carriers_only=True,
@@ -92,6 +93,7 @@ def test_stable_signbit_profile_derives_one_trailing_sign_per_block(monkeypatch)
         (1, 0),
     }
     assert metadata.analysis_profile == "full-v1"
+    assert metadata.version == "blind-sync-stable-v1"
     assert metadata.stable_candidate_count == 3
 
 

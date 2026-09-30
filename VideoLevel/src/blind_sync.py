@@ -203,7 +203,10 @@ def _metadata_from_analysis(
     metadata = BlindPublicMetadata(
         version=(
             "blind-sync-stable-v1"
-            if analysis_profile == "stable-blind-v1"
+            if (
+                analysis_profile == "stable-blind-v1"
+                or stable_candidates_override is not None
+            )
             else "blind-sync-v1"
         ),
         codec="h264",

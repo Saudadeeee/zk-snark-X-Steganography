@@ -128,3 +128,39 @@ Linux engine pipe is absent. Therefore bringing Docker back up would not clear
 the pinned LaZer CPU-feature gate on this host. This leaves the same concrete
 backend gap: the current API is fail-closed, LaZer cannot run here, and LUNA's
 available repository is only an HGSW primitive implementation.
+
+## Trailing-one carrier/policy consistency recheck (2026-09-30)
+
+The video-only statement path labels its carrier strategy `t1_sign_flip`, but
+its prior integration fixture used the magnitude-LSB stable profile. The
+verifier did not reject that mismatch, and the sign-bit-only carrier branch
+selected zero positions because it intersected trailing-one sign positions
+with the separate magnitude-LSB candidate set. A RED test reproduced both
+problems; the first real-video attempt failed with `need 176 carriers, got 0`.
+
+The current branch now requires `signbit_only=True` for a video-only statement
+whose pinned policy is `t1_sign_flip`. Sign-bit candidate derivation and its
+fingerprint use the negative-index trailing-one carriers returned by the
+CAVLC safety analysis; magnitude-LSB candidates are no longer substituted.
+Metadata reports `full-v1` for the full safety-analysis mode used to derive
+these signs. The metadata schema remains `blind-sync-stable-v1` when an
+explicit stable candidate override is used, so changing only the descriptive
+analysis label does not silently change the metadata-bound ordering seed. A
+regression test covers this with `metadata_bound=True`.
+
+The corrected real-video integration test passed on
+`data/encoded/foreman_cif_g8_300f_b800k.h264` (352x288, 20 fps, 300 frames;
+SHA-256 `db25d6ce01f31f840466f88a2a864b0c27402616298b7105b0dce28ad3c58e9e`).
+It carried an ordinary 8-byte test payload in a 14-byte envelope header plus
+payload (22 bytes / 176 bits). The test verified exact blind extraction,
+matching cover/stego carrier positions and fingerprints, canonical normalized
+video digest equality, and strict FFmpeg decode validation. It completed in
+**497.94 seconds**. At the input's nominal 20 fps, 300 frames represent about
+15 seconds, so this whole test duration is roughly **33.2x the clip duration**.
+
+This is a single payload-channel integration test, not a proof test or formal
+performance benchmark. It does not generate or verify a lattice-ZK proof and
+does not measure isolated CPU/RAM, PSNR/SSIM, or a repeated-run distribution.
+It is clear evidence that the current Python video-only sign-bit channel is
+not realtime on this host, even for a 176-bit diagnostic payload. The active
+application ZK backend remains unavailable/fail-closed as stated above.
