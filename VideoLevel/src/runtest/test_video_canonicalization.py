@@ -44,6 +44,27 @@ def t_lsb_carriers_normalize_magnitude_and_handle_unit_value() -> None:
     assert normalized == [(1, 4, [2, -4, 2] + [0] * 13)]
 
 
+def t_native_odd_anchor_pairs_are_invariant_and_threshold_checked() -> None:
+    carrier = [(1, 4, 0), (1, 4, 1)]
+    odd_levels = [(1, 4, [5, -7] + [0] * 14)]
+    even_levels = [(1, 4, [6, -8] + [0] * 14)]
+    assert canonicalize_carrier_coefficients(
+        odd_levels, carrier, magnitude_pair="native_odd_anchor_v1"
+    ) == []
+    assert canonicalize_carrier_coefficients(
+        even_levels, carrier, magnitude_pair="native_odd_anchor_v1"
+    ) == [(1, 4, [5, -7] + [0] * 14)]
+    try:
+        canonicalize_carrier_coefficients(
+            [(1, 4, [4] + [0] * 15)], [(1, 4, 0)],
+            magnitude_pair="native_odd_anchor_v1",
+        )
+    except ValueError as error:
+        assert "below magnitude five" in str(error)
+    else:
+        raise AssertionError("native carrier below threshold must be rejected")
+
+
 def t_empty_carrier_set_returns_no_modifications() -> None:
     assert canonicalize_carrier_coefficients([(1, 0, [1] + [0] * 15)], []) == []
 
@@ -76,6 +97,19 @@ def t_duplicate_carrier_is_rejected() -> None:
         assert "duplicate carrier" in str(error)
     else:
         raise AssertionError("duplicate carrier must be rejected")
+
+
+def t_overlapping_global_idr_ranges_are_rejected() -> None:
+    frames = {
+        0: ({}, {(5, 0): [5] + [0] * 15}, b"\x80"),
+        5: ({}, {(5, 0): [5] + [0] * 15}, b"\x80"),
+    }
+    try:
+        canonical_h264_digest([], frames, [(5, 0, 0)])
+    except ValueError as error:
+        assert "overlaps another frame" in str(error)
+    else:
+        raise AssertionError("ambiguous global IDR frame ranges must be rejected")
 
 
 def t_empty_carrier_list_hashes_original_without_parsing() -> None:
@@ -174,10 +208,12 @@ def main() -> None:
     results = [
         run_test("sign_carriers_normalize_to_positive_trailing_one", t_sign_carriers_normalize_to_positive_trailing_one),
         run_test("lsb_carriers_normalize_magnitude_and_handle_unit_value", t_lsb_carriers_normalize_magnitude_and_handle_unit_value),
+        run_test("native_odd_anchor_pairs_are_invariant_and_threshold_checked", t_native_odd_anchor_pairs_are_invariant_and_threshold_checked),
         run_test("empty_carrier_set_returns_no_modifications", t_empty_carrier_set_returns_no_modifications),
         run_test("missing_block_is_rejected", t_missing_block_is_rejected),
         run_test("invalid_carrier_index_or_non_trailing_sign_is_rejected", t_invalid_carrier_index_or_non_trailing_sign_is_rejected),
         run_test("duplicate_carrier_is_rejected", t_duplicate_carrier_is_rejected),
+        run_test("overlapping_global_idr_ranges_are_rejected", t_overlapping_global_idr_ranges_are_rejected),
         run_test("empty_carrier_list_hashes_original_without_parsing", t_empty_carrier_list_hashes_original_without_parsing),
         run_test("canonical_digest_masks_variable_length_carrier_codewords", t_canonical_digest_masks_variable_length_carrier_codewords),
         run_test("canonical_digest_still_binds_noncarrier_bits", t_canonical_digest_still_binds_noncarrier_bits),

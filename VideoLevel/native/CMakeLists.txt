@@ -36,6 +36,11 @@ if(ZKS_WITH_X264)
   add_executable(zkstego_x264_smoke x264_fork/tests/zkstego_x264_smoke.c)
   target_include_directories(zkstego_x264_smoke PRIVATE ${X264_INCLUDE_DIR})
   target_link_libraries(zkstego_x264_smoke PRIVATE ${X264_LIBRARY})
+  if(UNIX)
+    # The static x264 archive uses libm; downstream executables need it last.
+    target_link_libraries(zkstego_x264 PUBLIC m)
+    target_link_libraries(zkstego_x264_smoke PRIVATE m)
+  endif()
   set(ZKS_X264_SMOKE_VIDEO "${CMAKE_CURRENT_BINARY_DIR}/zkstego_x264_smoke.h264")
   add_test(NAME zkstego_x264_smoke
     COMMAND zkstego_x264_smoke "${ZKS_X264_SMOKE_VIDEO}")

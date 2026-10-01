@@ -5,12 +5,15 @@
 #include <libsnark/gadgetlib1/protoboard.hpp>
 
 #include <array>
+#include <algorithm>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -149,6 +152,349 @@ bool deserialize_response(const std::vector<std::uint8_t> &bytes, Proof &proof) 
         return false;
     }
     proof = decoded;
+    return true;
+}
+
+template <typename UInt>
+bool write_little_endian(std::ostream &output, UInt value, std::size_t width) {
+    for (std::size_t i = 0; i < width; ++i) {
+        const auto byte = static_cast<std::uint8_t>(value & 0xffu);
+        output.put(static_cast<char>(byte));
+        if (!output) {
+            return false;
+        }
+        value >>= 8;
+    }
+    return value == 0;
+}
+
+template <typename UInt>
+bool read_little_endian(std::istream &input, UInt &value, std::size_t width) {
+    value = 0;
+    for (std::size_t i = 0; i < width; ++i) {
+        const auto next = input.get();
+        if (next == std::char_traits<char>::eof()) {
+            return false;
+        }
+        value |= static_cast<UInt>(static_cast<std::uint8_t>(next)) << (8 * i);
+    }
+    return true;
+}
+
+bool write_proof_field(std::ostream &output, const ProofField &value) {
+    return write_little_endian(
+               output, value.c0.value % ParameterSet::p_int, sizeof(std::uint64_t)) &&
+           write_little_endian(
+               output, value.c1.value % ParameterSet::p_int, sizeof(std::uint64_t));
+}
+
+bool read_proof_field(std::istream &input, ProofField &value) {
+    std::uint64_t c0 = 0;
+    std::uint64_t c1 = 0;
+    if (!read_little_endian(input, c0, sizeof(c0)) ||
+        !read_little_endian(input, c1, sizeof(c1)) ||
+        c0 >= ParameterSet::p_int || c1 >= ParameterSet::p_int) {
+        return false;
+    }
+    value.c0.value = c0;
+    value.c1.value = c1;
+    return true;
+}
+
+constexpr std::size_t kVerificationPrefixSize =
+    kContextBytes + kCommitmentRows + 1;
+constexpr std::size_t kVerifierKeySRows = ParameterSet::pt_dim + ParameterSet::tau;
+constexpr std::size_t kVerifierKeyTRows = ParameterSet::tau;
+
+bool write_verifier_key(
+    const std::string &path,
+    const r1cs_lattice_snark_verification_key<
+        Fp2_b19_pp, RingParameters, ParameterSet> &key) {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    constexpr char magic[] = "ISWVK001";
+    if (!output) {
+        return false;
+    }
+    std::error_code initial_permission_error;
+    std::filesystem::permissions(
+        path,
+        std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::replace,
+        initial_permission_error);
+    if (initial_permission_error || !output.write(magic, sizeof(magic) - 1) ||
+        !write_little_endian(output, static_cast<std::uint32_t>(ParameterSet::n), 4) ||
+        !write_little_endian(output, static_cast<std::uint32_t>(kVerifierKeySRows), 4) ||
+        !write_little_endian(output, static_cast<std::uint32_t>(kVerifierKeyTRows), 4) ||
+        !write_little_endian(output, static_cast<std::uint32_t>(ParameterSet::pt_dim), 4) ||
+        !write_little_endian(output, static_cast<std::uint32_t>(ParameterSet::query_num), 4) ||
+        !write_little_endian(output, static_cast<std::uint32_t>(kVerificationPrefixSize), 4)) {
+        return false;
+    }
+
+    for (const auto &row : key.sk.S_T.mat) {
+        for (const auto &element : row) {
+            const auto write_ring = [&](const auto &component) {
+                // Preserve the upstream uint128 storage exactly: its Gaussian
+                // samples may use two's-complement encodings and Ring operators
+                // do not normalize after every intermediate operation.
+                return write_little_endian(output, component.value, 16);
+            };
+            if (!write_ring(element.c0) || !write_ring(element.c1)) {
+                return false;
+            }
+        }
+    }
+    for (const auto &row : key.sk.T_mat.mat) {
+        for (const auto &element : row) {
+            if (!write_proof_field(output, element)) {
+                return false;
+            }
+        }
+    }
+
+    const auto write_prefixes = [&output](
+        const std::vector<libff::Fr_vector<Fp2_b19_pp>> &prefixes) {
+        if (prefixes.size() != ParameterSet::query_num) {
+            std::cerr << "unexpected verifier-key prefix count=" << prefixes.size()
+                      << '\n';
+            return false;
+        }
+        for (const auto &prefix : prefixes) {
+            if (prefix.size() != kVerificationPrefixSize) {
+                std::cerr << "unexpected verifier-key prefix length="
+                          << prefix.size() << " expected="
+                          << kVerificationPrefixSize << '\n';
+                return false;
+            }
+            for (const auto &element : prefix) {
+                if (!write_proof_field(output, element)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
+    if (!write_prefixes(key.A_prefix) || !write_prefixes(key.B_prefix) ||
+        !write_prefixes(key.C_prefix) || key.Z_s.size() != ParameterSet::query_num) {
+        return false;
+    }
+    for (const auto &element : key.Z_s) {
+        if (!write_proof_field(output, element)) {
+            return false;
+        }
+    }
+    output.flush();
+    if (!output) {
+        return false;
+    }
+    output.close();
+    std::error_code permission_error;
+    std::filesystem::permissions(
+        path,
+        std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::replace,
+        permission_error);
+    return !permission_error;
+}
+
+bool read_verifier_key(
+    const std::string &path,
+    r1cs_lattice_snark_verification_key<
+        Fp2_b19_pp, RingParameters, ParameterSet> &key) {
+    std::ifstream input(path, std::ios::binary);
+    constexpr char expected_magic[] = "ISWVK001";
+    char magic[sizeof(expected_magic) - 1]{};
+    std::array<std::uint32_t, 6> dimensions{};
+    if (!input || !input.read(magic, sizeof(magic)) ||
+        !std::equal(std::begin(magic), std::end(magic), std::begin(expected_magic))) {
+        return false;
+    }
+    for (auto &dimension : dimensions) {
+        if (!read_little_endian(input, dimension, sizeof(dimension))) {
+            return false;
+        }
+    }
+    const std::array<std::uint32_t, 6> expected_dimensions = {
+        static_cast<std::uint32_t>(ParameterSet::n),
+        static_cast<std::uint32_t>(kVerifierKeySRows),
+        static_cast<std::uint32_t>(kVerifierKeyTRows),
+        static_cast<std::uint32_t>(ParameterSet::pt_dim),
+        static_cast<std::uint32_t>(ParameterSet::query_num),
+        static_cast<std::uint32_t>(kVerificationPrefixSize)};
+    if (dimensions != expected_dimensions) {
+        return false;
+    }
+
+    for (auto &row : key.sk.S_T.mat) {
+        for (auto &element : row) {
+            const auto read_ring = [&input](auto &component) {
+                __uint128_t value = 0;
+                if (!read_little_endian(input, value, 16)) {
+                    return false;
+                }
+                component.value = value;
+                return true;
+            };
+            if (!read_ring(element.c0) || !read_ring(element.c1)) {
+                return false;
+            }
+        }
+    }
+    for (auto &row : key.sk.T_mat.mat) {
+        for (auto &element : row) {
+            if (!read_proof_field(input, element)) {
+                return false;
+            }
+        }
+    }
+
+    const auto read_prefixes = [&input](
+        std::vector<libff::Fr_vector<Fp2_b19_pp>> &prefixes) {
+        prefixes.resize(ParameterSet::query_num);
+        for (auto &prefix : prefixes) {
+            prefix.resize(kVerificationPrefixSize);
+            for (auto &element : prefix) {
+                if (!read_proof_field(input, element)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
+    if (!read_prefixes(key.A_prefix) || !read_prefixes(key.B_prefix) ||
+        !read_prefixes(key.C_prefix)) {
+        return false;
+    }
+    key.Z_s.resize(ParameterSet::query_num);
+    for (auto &element : key.Z_s) {
+        if (!read_proof_field(input, element)) {
+            return false;
+        }
+    }
+    return input.peek() == std::char_traits<char>::eof();
+}
+
+bool write_extracted_proof(
+    const std::string &path,
+    const libff::Fr_vector<Fp2_b19_pp> &statement,
+    const std::vector<std::uint8_t> &response) {
+    if (statement.size() != kContextBytes + kCommitmentRows ||
+        response.size() != kResponseByteCount) {
+        return false;
+    }
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    constexpr char magic[] = "ISWPF001";
+    if (!output || !output.write(magic, sizeof(magic) - 1) ||
+        !write_little_endian(output, static_cast<std::uint32_t>(statement.size()), 4)) {
+        return false;
+    }
+    for (const auto &element : statement) {
+        if (!write_proof_field(output, element)) {
+            return false;
+        }
+    }
+    if (!write_little_endian(output, static_cast<std::uint32_t>(response.size()), 4) ||
+        !output.write(reinterpret_cast<const char *>(response.data()),
+                      static_cast<std::streamsize>(response.size()))) {
+        return false;
+    }
+    output.flush();
+    return static_cast<bool>(output);
+}
+
+bool parse_context_hex(
+    const std::string &hex,
+    std::array<std::uint8_t, kContextBytes> &context) {
+    if (hex.size() != 2 * context.size()) {
+        return false;
+    }
+    const auto hex_digit = [](char character) -> int {
+        if (character >= '0' && character <= '9') {
+            return character - '0';
+        }
+        if (character >= 'a' && character <= 'f') {
+            return character - 'a' + 10;
+        }
+        if (character >= 'A' && character <= 'F') {
+            return character - 'A' + 10;
+        }
+        return -1;
+    };
+    for (std::size_t i = 0; i < context.size(); ++i) {
+        const int high = hex_digit(hex[2 * i]);
+        const int low = hex_digit(hex[2 * i + 1]);
+        if (high < 0 || low < 0) {
+            return false;
+        }
+        context[i] = static_cast<std::uint8_t>((high << 4) | low);
+    }
+    return true;
+}
+
+bool verify_extracted_proof(
+    const std::string &proof_path,
+    const std::string &key_path,
+    const std::array<std::uint8_t, kContextBytes> &expected_context) {
+    r1cs_lattice_snark_verification_key<
+        Fp2_b19_pp, RingParameters, ParameterSet> verification_key;
+    if (!read_verifier_key(key_path, verification_key)) {
+        std::cerr << "invalid, truncated, or incompatible verifier-key file\n";
+        return false;
+    }
+    std::ifstream input(proof_path, std::ios::binary);
+    constexpr char expected_magic[] = "ISWPF001";
+    char magic[sizeof(expected_magic) - 1]{};
+    std::uint32_t statement_size = 0;
+    if (!input || !input.read(magic, sizeof(magic)) ||
+        !std::equal(std::begin(magic), std::end(magic), std::begin(expected_magic)) ||
+        !read_little_endian(input, statement_size, sizeof(statement_size)) ||
+        statement_size != kContextBytes + kCommitmentRows) {
+        std::cerr << "invalid or incompatible proof envelope\n";
+        return false;
+    }
+    libff::Fr_vector<Fp2_b19_pp> statement(statement_size);
+    for (auto &element : statement) {
+        if (!read_proof_field(input, element)) {
+            std::cerr << "invalid public-input encoding\n";
+            return false;
+        }
+    }
+    for (std::size_t i = 0; i < expected_context.size(); ++i) {
+        if (statement[i] != ProofField(expected_context[i])) {
+            std::cerr << "proof context does not match verifier session\n";
+            return false;
+        }
+    }
+    std::uint32_t response_size = 0;
+    if (!read_little_endian(input, response_size, sizeof(response_size)) ||
+        response_size != kResponseByteCount) {
+        std::cerr << "invalid response length\n";
+        return false;
+    }
+    std::vector<std::uint8_t> encoded_response(response_size);
+    if (!input.read(reinterpret_cast<char *>(encoded_response.data()),
+                    static_cast<std::streamsize>(encoded_response.size())) ||
+        input.peek() != std::char_traits<char>::eof()) {
+        std::cerr << "truncated proof envelope or trailing data\n";
+        return false;
+    }
+    Proof proof;
+    if (!deserialize_response(encoded_response, proof)) {
+        std::cerr << "invalid proof response encoding\n";
+        return false;
+    }
+    try {
+        if (!r1cs_lattice_snark_verify<Fp2_b19_pp, RingParameters>(
+                verification_key, statement, proof)) {
+            std::cerr << "proof verification rejected\n";
+            return false;
+        }
+    } catch (const std::exception &error) {
+        std::cerr << "proof verification rejected malformed input: "
+                  << error.what() << '\n';
+        return false;
+    }
+    std::cout << "SEPARATE_PROCESS_LATTICE_VERIFY=PASS\n";
     return true;
 }
 
@@ -292,18 +638,79 @@ Circuit make_circuit(
 
 int main(int argc, char **argv) {
     std::string response_output_path;
-    if (argc == 3 && std::string(argv[1]) == "--response-output") {
-        response_output_path = argv[2];
-    } else if (argc != 1) {
-        std::cerr << "usage: isw21_r1cs_opening_smoke [--response-output FILE]\n";
+    std::string verifier_key_output_path;
+    std::string extracted_proof_output_path;
+    std::string verify_proof_path;
+    std::string verifier_key_input_path;
+    std::string expected_context_hex;
+    std::string prover_context_hex;
+    for (int i = 1; i < argc; ++i) {
+        const std::string option(argv[i]);
+        if (i + 1 >= argc) {
+            std::cerr << "missing value for " << option << '\n';
+            return 19;
+        }
+        const std::string value(argv[++i]);
+        if (option == "--response-output") {
+            response_output_path = value;
+        } else if (option == "--export-verifier-key") {
+            verifier_key_output_path = value;
+        } else if (option == "--export-extracted-proof") {
+            extracted_proof_output_path = value;
+        } else if (option == "--verify-extracted-proof") {
+            verify_proof_path = value;
+        } else if (option == "--verifier-key") {
+            verifier_key_input_path = value;
+        } else if (option == "--expected-context-hex") {
+            expected_context_hex = value;
+        } else if (option == "--prover-context-hex") {
+            prover_context_hex = value;
+        } else {
+            std::cerr << "unknown option: " << option << '\n';
+            return 19;
+        }
+    }
+    const bool exporting_split_process_files =
+        !verifier_key_output_path.empty() || !extracted_proof_output_path.empty();
+    const bool verifying_split_process_files = !verify_proof_path.empty();
+    std::array<std::uint8_t, kContextBytes> expected_context{};
+    if ((exporting_split_process_files &&
+         (verifier_key_output_path.empty() || extracted_proof_output_path.empty())) ||
+        (verifying_split_process_files &&
+         (verifier_key_input_path.empty() || exporting_split_process_files ||
+          !response_output_path.empty() ||
+          !parse_context_hex(expected_context_hex, expected_context))) ||
+        (!verifying_split_process_files &&
+         (!verifier_key_input_path.empty() || !expected_context_hex.empty())) ||
+        (verifying_split_process_files && !prover_context_hex.empty())) {
+        std::cerr << "usage: isw21_r1cs_opening_smoke "
+                     "[--response-output FILE] [--prover-context-hex 64_HEX_DIGITS] "
+                     "[--export-verifier-key FILE --export-extracted-proof FILE] | "
+                     "[--verify-extracted-proof FILE --verifier-key FILE "
+                     "--expected-context-hex 64_HEX_DIGITS]\n";
         return 19;
     }
+    if (verifying_split_process_files) {
+        auto prg = std::make_unique<LWERandomness::PseudoRandomGenerator>();
+        auto dg = std::make_unique<LWERandomness::DiscreteGaussian>(
+            ParameterSet::width, LWE::expand, *prg);
+        public_params_init<Fp2_b19_pp, RingParameters>(prg.get(), dg.get());
+        return verify_extracted_proof(
+                   verify_proof_path, verifier_key_input_path, expected_context)
+                   ? 0
+                   : 22;
+    }
 
-    const std::array<std::uint8_t, kContextBytes> context = {
+    std::array<std::uint8_t, kContextBytes> context = {
         0x91, 0x3a, 0xe1, 0x20, 0x77, 0x58, 0x02, 0xb4,
         0x6c, 0xa9, 0x11, 0x08, 0xd2, 0x33, 0x4f, 0x80,
         0x29, 0xf1, 0x63, 0x05, 0x9a, 0x44, 0x18, 0xce,
         0x7d, 0x26, 0xb0, 0x52, 0x0f, 0x8b, 0xd7, 0x31};
+    if (!prover_context_hex.empty() &&
+        !parse_context_hex(prover_context_hex, context)) {
+        std::cerr << "invalid prover context; expected exactly 64 hex digits\n";
+        return 19;
+    }
     std::array<std::uint8_t, kPayloadBytes> payload{};
     std::array<std::uint8_t, kOpeningBytes> opening{};
     LWERandomness::PseudoRandomGenerator commitment_prg;
@@ -561,6 +968,19 @@ int main(int argc, char **argv) {
             return 21;
         }
     }
+    if (exporting_split_process_files) {
+        if (!write_verifier_key(verifier_key_output_path, verification_key)) {
+            std::cerr << "failed to write canonical verifier-key file\n";
+            return 23;
+        }
+        if (!write_extracted_proof(
+                extracted_proof_output_path,
+                example.primary_input,
+                encoded_response)) {
+            std::cerr << "failed to write canonical extracted-proof file\n";
+            return 24;
+        }
+    }
 
     std::cout << "HONEST_R1CS=PASS\n"
               << "ALTERED_PAYLOAD_WITNESS=REJECTED\n"
@@ -578,6 +998,9 @@ int main(int argc, char **argv) {
                       ? std::string{}
                       : "RESPONSE_FILE_WRITTEN_BYTES=" +
                             std::to_string(encoded_response.size()) + "\n")
+              << (exporting_split_process_files
+                      ? "SPLIT_PROCESS_EXPORT=PASS\n"
+                      : std::string{})
               << "RESPONSE_COEFFICIENTS=" << coefficient_count << '\n'
               << "MAX_OBSERVED_COEFFICIENT_BITS="
               << maximum_coefficient_bits << '\n'

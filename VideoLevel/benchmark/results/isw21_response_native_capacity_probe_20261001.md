@@ -27,7 +27,8 @@ session context, framing, or verifier key).
 The proof smoke test passed its honest verification and response
 serialize/decode/verify checks before writing the blob. It also rejected a
 modified response and malformed encodings. Its warning remains applicable:
-the commitment modulus is only 19 bits and the opening only 16 bits; this is
+the commitment modulus is only 19 bits and the opening is 2,816 bits, without
+a concrete SIS parameter estimate; this is
 not a secure production proof.
 
 ## Result

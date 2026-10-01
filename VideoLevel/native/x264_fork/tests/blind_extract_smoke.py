@@ -34,6 +34,14 @@ def carrier_block_order(nal_unit_type: int, mb_type: int | None) -> tuple[int, .
 
 
 def extract_payload(video_path: Path, *, include_p_slices: bool) -> bytes:
+    payload, _ = extract_payload_with_positions(video_path, include_p_slices=include_p_slices)
+    return payload
+
+
+def extract_payload_with_positions(
+    video_path: Path, *, include_p_slices: bool
+) -> tuple[bytes, tuple[tuple[int, int, int], ...]]:
+    """Return in-band bytes and their ordered global CAVLC carrier positions."""
     nal_units = H264BitstreamParser(str(video_path)).parse()
     reconstructor = BitstreamReconstructor()
     sps = next(
@@ -47,7 +55,13 @@ def extract_payload(video_path: Path, *, include_p_slices: bool) -> bytes:
         if int(nal.nal_unit_type) == 8
     )
     bits: list[int] = []
+    positions: list[tuple[int, int, int]] = []
     payload_size: int | None = None
+    mb_count = (
+        (sps.pic_width_in_mbs_minus1 + 1)
+        * (sps.pic_height_in_map_units_minus1 + 1)
+    )
+    global_mb_offset = 0
 
     def bits_to_bytes(count: int) -> bytes:
         if len(bits) < count * 8:
@@ -61,6 +75,9 @@ def extract_payload(video_path: Path, *, include_p_slices: bool) -> bytes:
     # P-slice inter residuals in the exact block traversal used by x264.
     for nal in nal_units:
         nal_unit_type = int(nal.nal_unit_type)
+        slice_mb_offset = global_mb_offset
+        if nal_unit_type in (1, 5):
+            global_mb_offset += mb_count
         if nal_unit_type != 5 and not (include_p_slices and nal_unit_type == 1):
             continue
         parsed = TraceableCAVLCParser().extract_with_offsets(nal, sps, pps)
@@ -84,6 +101,9 @@ def extract_payload(video_path: Path, *, include_p_slices: bool) -> bytes:
                 for coefficient_index in range(15, 0, -1):
                     if abs(coefficients[coefficient_index]) >= 5:
                         bits.append(abs(coefficients[coefficient_index]) & 1)
+                        positions.append(
+                            (slice_mb_offset + mb_index, block_index, coefficient_index)
+                        )
                         found_carrier = True
                         break
                 if found_carrier:
@@ -102,7 +122,8 @@ def extract_payload(video_path: Path, *, include_p_slices: bool) -> bytes:
             f"video has {len(bits)} readable bits; need {(14 + payload_size) * 8}"
         )
     envelope = bits_to_bytes(14 + payload_size)
-    return unpack_blind_payload(envelope)
+    required_bits = len(envelope) * 8
+    return unpack_blind_payload(envelope), tuple(positions[:required_bits])
 
 
 def main() -> int:

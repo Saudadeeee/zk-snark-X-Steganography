@@ -283,17 +283,48 @@ RSS). These are two smoke runs, not a benchmark distribution. The detailed
 fixture definition and reproduction steps are in
 [`research/isw21_r1cs_opening_smoke/README.md`](../research/isw21_r1cs_opening_smoke/README.md).
 
-This is still a one-process proof exercise, not independent prover/verifier
-operation. The smoke regenerates its commitment key, R1CS, CRS, and verifier
-key every run, uses the in-memory verifier key (which contains the LWE secret
-key), and optionally exports only response bytes. Upstream provides no
-portable setup-key serialization for these objects: its LWE `Vector` and
-`Matrix` types have no stream operators, and libff labels its own generic
-serialization fragile and binary output non-portable across word sizes.
-Accordingly, the actual-video verifier cannot consume this response in a
-separate process yet. A dedicated, versioned setup format and confidential
-designated-verifier key provisioning are integration gates, not incidental
-plumbing.
+The smoke now has an experimental two-process path. The prover/setup process
+exports a parameter-tagged fixed-width verifier-key file and an envelope with
+the public primary input plus response; a second process loads only those
+objects and verifies. The verification routine does not need the prover CRS
+or KTX matrices. The key codec stores the LWE secret-key matrices, QAP
+public-input prefixes and `Z_s`; it preserves the upstream ring components'
+128-bit stored representation and uses canonical field-element bytes. The
+key file is restricted to owner read/write permissions on POSIX (`0600`).
+One real test generated a 2,419,872-byte verifier key and 23,907-byte
+statement/response envelope, and a separate verifier process accepted it.
+CTest passed honest verification, response tampering rejection, changed
+context rejection, truncated proof/key rejection, and the key permission
+check in two consecutive runs (`1/1` in 12.32 s, then `1/1` in 10.59 s).
+The verifier interface now also requires its own expected 32-byte context;
+it rejects absent context and replay under another expected context. The
+prover can take a supplied 32-byte context, and a later CTest run generated
+proofs for two different contexts, verified each in its own process, and
+rejected cross-session reuse (`1/1` in 20.54 s). This checks interface
+binding for the toy context bytes; it does not implement the target session
+policy, same-session replay prevention, expiry, or normalized H.264 context
+derivation. A follow-up run also rejected a proof under a verifier key from
+another setup (`1/1` in 22.20 s).
+
+This test also exposed an upstream undefined-behavior bug: QAP A/B/C prefix
+vectors were `reserve()`d and then written through `begin()` without being
+resized. The local research reproduction now applies both the tracked RNG
+stream fix and [`upstream_qap_prefix_resize_fix.patch`](../research/isw21_r1cs_opening_smoke/upstream_qap_prefix_resize_fix.patch).
+Neither patch is an upstream release or independent cryptographic audit.
+The key/proof file codec has only been tested in separate processes in this
+Linux container; cross-platform compatibility, setup authenticity, encrypted
+key provisioning, and production use remain unverified.
+
+The complete 23,907-byte experimental envelope was then carried through the
+native H.264 Baseline/CAVLC path on one 704x576 Deadline-derived clip. The
+blind extractor recovered all bytes from the video alone, and a separate
+ISW21 verifier accepted the recovered bytes under the expected toy context.
+There were 1,304 IDR and 70 P slices, zero SEI NALs, and 191,368 of 191,368
+framed bits committed. Native encoding took 43.90 s; Python blind extraction
+took 1,819.342 s for a 45.846 s clip. Full measurements and hashes are in
+[`isw21_full_envelope_video_only_probe_20261001.md`](../benchmark/results/isw21_full_envelope_video_only_probe_20261001.md).
+This is video-only transport plus toy-proof verification, not proof binding to
+the received video's normalized context or a secure application relation.
 
 ## Rejected as a zero-knowledge backend: RoKoko (ePrint 2026/575)
 
@@ -342,6 +373,41 @@ a standard-SIS instantiation, but says that variant is not in the repository's
 main code; it neither resolves the privacy gap nor counts as an available
 backend.
 
+## Screened alternatives: LaBRADOR and Practical Sublinear R1CS
+
+LaBRADOR is a credible lattice-based R1CS *argument-of-knowledge* direction,
+but the published implementation is not a drop-in ZK backend. Its paper
+explicitly disables zero knowledge in its proof-size comparisons and leaves
+the ZK property out of scope; it only observes that a linear-sized masking
+shim could be composed later. The paper reports 49.02--53.84 KB for binary
+R1CS instances from 2^20 through 2^25 constraints, before any such shim. Its
+security analysis is based on Module-SIS with paper-estimated 128-bit
+parameters, not an estimate for this application's circuit or commitment.
+The authors' C implementation requires AVX-512 and its published test runs a
+large polynomial-evaluation front end followed by recursive LaBRADOR, not
+this application's proof relation. A separate Rust port currently documents
+that only the core protocol is implemented and the binary/ring R1CS reductions
+are still in progress. Thus LaBRADOR is useful as a size/performance
+comparison, but neither candidate artifact currently demonstrates a
+zero-knowledge proof of our application statement on the i7-12700H host.
+
+The CRYPTO'22 paper *Practical Sublinear Proofs for R1CS from Lattices*
+(ePrint 2022/1048) is explicitly zero knowledge and describes a
+Fiat--Shamir non-interactive variant, but the paper's 128-bit-field example is
+10.79 MB at 2^24 constraints. Its authors leave an implementation to future
+work, and the interactive protocol/large-statement design does not provide a
+ready implementation for this small application relation. It is therefore
+not a practical short-term integration candidate either.
+
+**Decision:** do not replace ISW21 with either candidate. The search so far
+has not found a complete, locally runnable lattice implementation that
+simultaneously supports the target relation, knowledge soundness under an
+acceptable reviewed assumption, zero knowledge, independently provisioned
+prover/verifier operation, and a proof size shown to fit the measured H.264
+carrier. The next backend step remains a deliberately small application
+relation plus an independently reviewable protocol/key lifecycle; do not
+claim that choosing another published R1CS proof system closes these gaps.
+
 ## Remaining gates
 
 - independently check the ISW21 security theorem and concrete parameter
@@ -353,8 +419,15 @@ backend.
   implement and independently review its bounded payload-opening relation,
   canonical context encoding and setup/key lifecycle, including verifier-key
   confidentiality;
-- extend the response-only codec into a versioned proof/statement envelope,
-  including parameter identifiers, session fields, and canonical rejection;
+- harden the experimental verifier-key/proof codecs, authenticate and protect
+  designated-verifier key provisioning, and extend the toy statement envelope
+  with the target session, registry, and normalized-video fields;
+- reconcile the proof statement's sign-only trailing-one carrier profile with
+  the native encoder's current magnitude-parity carrier (`abs(level) >= 5`),
+  then test that both sides derive identical carrier positions and the same
+  normalized-video digest; the encoder currently embeds during x264 encoding,
+  so a digest computed from a preliminary encode is not yet shown invariant
+  when the proof bits change;
 - produce a real proof for the application relation, measure its exact bytes,
   and embed/extract it blindly from H.264 Baseline/CAVLC with no proof sidecar;
 - run wrong-payload, changed-context, malformed-proof, tamper, replay, expiry,
@@ -407,3 +480,16 @@ backend.
   x86-64 with AVX-512 and AES. The local i7-12700H's Intel product
   specification lists AVX2, not AVX-512, so LaZer is not a local runtime
   candidate without different hardware.
+- [LaBRADOR paper, ePrint 2022/1341](https://eprint.iacr.org/2022/1341):
+  Module-SIS R1CS argument; the paper explicitly leaves ZK out of scope and
+  reports 49--54 KB for binary R1CS at 2^20--2^25 constraints.
+- [LaBRADOR C implementation](https://github.com/lattice-dogs/labrador):
+  research implementation requiring AVX-512; its README describes a
+  polynomial-evaluation test rather than this application's R1CS.
+- [LaBRADOR Rust port](https://github.com/lattirust/labrador): README states
+  that binary/ring R1CS reductions are in progress.
+- [Nguyen and Seiler, *Practical Sublinear Proofs for R1CS from Lattices*,
+  ePrint 2022/1048](https://eprint.iacr.org/2022/1048): zero-knowledge R1CS
+  protocol with a Fiat--Shamir variant; paper reports 10.79 MB at 2^24
+  constraints for its 128-bit-field example and leaves implementation as
+  future work.

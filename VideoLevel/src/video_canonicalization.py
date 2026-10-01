@@ -9,25 +9,30 @@ from __future__ import annotations
 
 import hashlib
 import struct
+from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 
 CoefficientBlock = tuple[int, int, Sequence[int]]
 CarrierPosition = tuple[int, int, int]
 ModifiedBlock = tuple[int, int, list[int]]
+MagnitudePair = Literal["even_down", "native_odd_anchor_v1"]
 
 
 def canonicalize_carrier_coefficients(
     coefficients: Sequence[CoefficientBlock],
     carrier_positions: Sequence[CarrierPosition],
+    *,
+    magnitude_pair: MagnitudePair = "even_down",
 ) -> list[ModifiedBlock]:
     """Return only coefficient blocks changed by canonicalizing carriers.
 
-    Non-negative carrier indexes identify magnitude-LSB carriers. Their
-    magnitude is rounded down to the nearest even value while preserving its
-    sign; a unit coefficient therefore canonicalizes to zero. Negative
+    Non-negative carrier indexes identify magnitude-LSB carriers. The legacy
+    ``even_down`` profile rounds magnitude down to even (with unit magnitude
+    mapped to two). ``native_odd_anchor_v1`` maps the disjoint eligible pairs
+    (5, 6), (7, 8), ... to their odd member, preserving sign. Negative
     indexes encode trailing-one sign carriers using ``~index`` and normalize
     to positive one. The supplied coefficient structures are never mutated.
 
@@ -36,6 +41,8 @@ def canonicalize_carrier_coefficients(
     original frame/parser context to produce a canonicalized bitstream.
     """
     coefficient_lookup: dict[tuple[int, int], Sequence[int]] = {}
+    if magnitude_pair not in ("even_down", "native_odd_anchor_v1"):
+        raise ValueError("unknown magnitude pair profile")
     for item in coefficients:
         if not isinstance(item, (tuple, list)) or len(item) != 3:
             raise ValueError("coefficient entries must be (macroblock, block, levels)")
@@ -89,9 +96,15 @@ def canonicalize_carrier_coefficients(
                 raise ValueError(f"sign carrier must be a trailing one: {position}")
             canonical_value = 1
         else:
-            magnitude = abs(value) & ~1
-            if magnitude == 0:
-                magnitude = 2
+            magnitude = abs(value)
+            if magnitude_pair == "native_odd_anchor_v1":
+                if magnitude < 5:
+                    raise ValueError(f"native pair carrier is below magnitude five: {position}")
+                magnitude = magnitude if magnitude & 1 else magnitude - 1
+            else:
+                magnitude &= ~1
+                if magnitude == 0:
+                    magnitude = 2
             canonical_value = magnitude if value > 0 else -magnitude
 
         if canonical_value == value:
@@ -114,6 +127,7 @@ def canonical_video_sha256(
     *,
     parser: Any | None = None,
     frame_verified_data: Mapping[int, tuple[dict, dict, bytes]] | None = None,
+    magnitude_pair: MagnitudePair = "even_down",
 ) -> str:
     """Hash the carrier-normalized H.264 syntax without re-encoding slices.
 
@@ -136,6 +150,8 @@ def canonical_video_sha256(
 
     if (parser is None) != (frame_verified_data is None):
         raise ValueError("parser and frame_verified_data must be provided together")
+    if magnitude_pair not in ("even_down", "native_odd_anchor_v1"):
+        raise ValueError("unknown magnitude pair profile")
 
     if not carrier_positions:
         return digest_file(source)
@@ -152,13 +168,20 @@ def canonical_video_sha256(
         )
     else:
         frame_data = frame_verified_data
-    return canonical_h264_digest(parser.nal_units, frame_data, carrier_positions)
+    if magnitude_pair == "even_down":
+        return canonical_h264_digest(parser.nal_units, frame_data, carrier_positions)
+    return canonical_h264_digest(
+        parser.nal_units, frame_data, carrier_positions,
+        magnitude_pair=magnitude_pair,
+    )
 
 
 def canonical_h264_digest(
     nal_units: Sequence[Any],
     frame_verified_data: Mapping[int, tuple[dict, dict, bytes]],
     carrier_positions: Sequence[CarrierPosition],
+    *,
+    magnitude_pair: MagnitudePair = "even_down",
 ) -> str:
     """Hash parsed NALs while replacing carrier-containing residual blocks.
 
@@ -176,21 +199,39 @@ def canonical_h264_digest(
 
     frame_offsets = sorted(frame_verified_data)
     frame_positions: dict[int, list[CarrierPosition]] = {offset: [] for offset in frame_offsets}
-    position_frames: dict[CarrierPosition, int] = {}
-    for offset in frame_offsets:
+    # Parsed global macroblock ranges must be disjoint. Once checked, binary
+    # search maps each carrier to one IDR instead of scanning every carrier in
+    # every frame (which is prohibitive for a proof-sized payload).
+    for index, offset in enumerate(frame_offsets):
+        next_offset = frame_offsets[index + 1] if index + 1 < len(frame_offsets) else None
         _, frame_blocks, _ = frame_verified_data[offset]
-        for position in positions:
-            key = (position[0], position[1])
-            if key in frame_blocks:
-                if position in position_frames:
-                    raise ValueError(f"carrier maps to multiple IDR frames: {position}")
-                position_frames[position] = offset
-                frame_positions[offset].append(position)
-    missing_positions = set(positions) - set(position_frames)
+        if any(
+            macroblock < offset or (next_offset is not None and macroblock >= next_offset)
+            for macroblock, _ in frame_blocks
+        ):
+            raise ValueError(f"IDR block range overlaps another frame: {offset}")
+    missing_positions: set[CarrierPosition] = set()
+    for position in positions:
+        index = bisect_right(frame_offsets, position[0]) - 1
+        if index < 0:
+            missing_positions.add(position)
+            continue
+        offset = frame_offsets[index]
+        _, frame_blocks, _ = frame_verified_data[offset]
+        if (position[0], position[1]) not in frame_blocks:
+            missing_positions.add(position)
+            continue
+        frame_positions[offset].append(position)
     if missing_positions:
         raise ValueError(f"carrier position is absent from parsed IDR blocks: {sorted(missing_positions)}")
 
-    digest = hashlib.sha256(b"zkstego/canonical-h264-carrier-normalization/v1\x00")
+    if magnitude_pair == "native_odd_anchor_v1":
+        domain = b"zkstego/canonical-h264-carrier-normalization/native-odd-anchor-v1\x00"
+    elif magnitude_pair == "even_down":
+        domain = b"zkstego/canonical-h264-carrier-normalization/v1\x00"
+    else:
+        raise ValueError("unknown magnitude pair profile")
+    digest = hashlib.sha256(domain)
     nal_index = 0
     idr_index = 0
     for nal in nal_units:
@@ -228,6 +269,7 @@ def canonical_h264_digest(
         normalization = canonicalize_carrier_coefficients(
             [(mb, block, levels) for (mb, block), levels in frame_blocks.items()],
             current_positions,
+            magnitude_pair=magnitude_pair,
         )
         normalized_blocks = {
             (mb, block): levels for mb, block, levels in normalization

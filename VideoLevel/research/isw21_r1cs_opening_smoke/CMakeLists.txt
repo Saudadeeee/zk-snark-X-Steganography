@@ -12,6 +12,16 @@ target_include_directories(isw21_r1cs_opening_smoke PRIVATE "${ISW21_SOURCE_DIR}
 target_link_libraries(isw21_r1cs_opening_smoke PRIVATE lwe_interface)
 target_compile_features(isw21_r1cs_opening_smoke PRIVATE cxx_std_17)
 
+find_program(BASH_EXECUTABLE bash)
+if(BASH_EXECUTABLE)
+    enable_testing()
+    add_test(
+        NAME isw21_split_process_verifier
+        COMMAND "${BASH_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/test_split_process.sh"
+                "$<TARGET_FILE:isw21_r1cs_opening_smoke>")
+endif()
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(isw21_r1cs_opening_smoke PRIVATE
         -Wall -Wextra -Wpedantic -maes -msse2 -msse3 -mpopcnt)

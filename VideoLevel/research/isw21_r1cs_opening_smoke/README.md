@@ -34,18 +34,41 @@ SNARK on a full-length payload/opening relation. It provides no established
 SIS security, production parameter estimate, full proof envelope, or H.264
 integration. A passing result does not satisfy the target relation.
 
-**Not an independent prover/verifier interface:** the program creates the
-commitment matrices, R1CS, CRS, and verification key on each run, then proves
-and verifies in that same process. `--response-output` writes only the 21,331
-response bytes; it does not serialize the public statement, commitment
-matrices, CRS, or verifier key. The verification key contains the LWE secret
-key and must remain with the designated verifier. The pinned source defines
-no serialization for its LWE `Vector`/`Matrix` setup members; libff's generic
-serialization comments call its format fragile and warn binary output is not
-portable across word sizes. Therefore this smoke cannot yet verify a response
-in a separate process or on another machine. A production path needs a
-versioned, parameter-specific, portable setup format and a confidential
-designated-verifier key lifecycle, independently reviewed before use.
+**Experimental separate-process verifier path:**
+`--export-verifier-key FILE --export-extracted-proof FILE` writes a
+parameter-tagged, fixed-width little-endian verifier key and an envelope with
+the public primary input plus the canonical proof response. A second process
+can run `--verify-extracted-proof FILE --verifier-key FILE
+--expected-context-hex 64_HEX_DIGITS`. The expected context is supplied by
+the verifier's own session state; the verifier compares it with the public
+context in the proof before checking the lattice proof. The prover may set the
+32-byte public context with `--prover-context-hex 64_HEX_DIGITS`; omitting it
+uses the fixed fixture shown below. The verifier rejects a missing context
+and replay into a different expected context. A replay within the same
+expected context can still pass: there is no consumed-session registry,
+canonical session/video digest, or expiry policy. The verifier key
+contains the LWE secret key; the writer sets its file mode to `0600` on POSIX,
+but this unencrypted file must remain private to the designated verifier. The
+format stores the exact 128-bit ring-component representation used by this
+upstream arithmetic, rather than relying on libff's generic serializer. It
+checks magic/version, fixed dimensions, field ranges, exact response size,
+trailing bytes, and file truncation. The verifier still does not need the
+prover CRS or KTX matrices. CTest now runs the producer and verifier as
+separate processes and checks honest acceptance, changed context, modified
+response, truncation, wrong expected session context in both directions,
+missing expected context, a separately generated second-context proof, and
+wrong setup key rejection, and verifier-key file permissions. This establishes
+only a smoke-level file/process boundary: the codec has not been audited for
+production use, setup/key authenticity and confidentiality must be
+provisioned out of band, and the proof is not bound to an H.264 context.
+
+The first attempt to export the key exposed an upstream QAP-prefix bug:
+`gen_q_mat()` called `reserve()` and copied through `begin()` without resizing
+the three prefix vectors, so the verifier read outside their logical vector
+sizes. The reproducible smoke therefore also applies the tracked
+[`upstream_qap_prefix_resize_fix.patch`](upstream_qap_prefix_resize_fix.patch)
+to resize A/B/C prefixes before copying. This is an additional local research
+patch, not a fix merged upstream.
 
 **Cryptographic run caveat:** source review found that the pinned upstream
 revision closes a function-static `/dev/urandom` stream after its first read
@@ -111,11 +134,46 @@ git clone --recurse-submodules https://github.com/lattice-based-zkSNARKs/lattice
 git -C /tmp/lattice-zksnark checkout --detach 48cb4cd4635f5b6e7e9354b7d4b12e9647c4331e
 git -C /tmp/lattice-zksnark submodule update --init --recursive
 patch --no-backup-if-mismatch -d /tmp/lattice-zksnark -p1 < research/isw21_r1cs_opening_smoke/upstream_rng_fix.patch
+patch --no-backup-if-mismatch -d /tmp/lattice-zksnark -p1 < research/isw21_r1cs_opening_smoke/upstream_qap_prefix_resize_fix.patch
 cmake -S research/isw21_r1cs_opening_smoke -B /tmp/isw21-opening-build \
   -DISW21_SOURCE_DIR=/tmp/lattice-zksnark -DWITH_PROCPS=OFF
 cmake --build /tmp/isw21-opening-build --target isw21_r1cs_opening_smoke -j2
+ctest --test-dir /tmp/isw21-opening-build --output-on-failure
 /tmp/isw21-opening-build/isw21_r1cs_opening_smoke
 ```
+
+The CTest integration writes a verifier-only key file and an
+extracted-proof-envelope fixture to a temporary directory, then starts a
+second process to verify it. For manual inspection, export and verify using
+separate commands (the key file is secret and must not be distributed):
+
+```sh
+/tmp/isw21-opening-build/isw21_r1cs_opening_smoke \
+  --export-verifier-key /tmp/isw21-verifier.key \
+  --export-extracted-proof /tmp/isw21-extracted-proof.bin
+/tmp/isw21-opening-build/isw21_r1cs_opening_smoke \
+  --verify-extracted-proof /tmp/isw21-extracted-proof.bin \
+  --verifier-key /tmp/isw21-verifier.key \
+  --expected-context-hex 913ae120775802b46ca91108d2334f8029f163059a4418ce7d26b0520f8bd731
+```
+
+The `.bin` file is an experimental extracted statement/response envelope, not
+a video and not a production sidecar protocol. The measured smoke envelope is
+23,907 bytes (160 public field elements plus the 21,331-byte response and
+framing); the designated verifier key is 2,419,872 bytes and stays outside the
+video.
+
+A separate native video probe carried that entire 23,907-byte envelope, plus
+the 14-byte `ZKVP` transport header, in a real 704x576 H.264 clip. Blind
+extraction recovered the exact proof bytes from video alone, and an independent
+verifier process accepted them with the expected context and rejected a wrong
+expected context. The measured blind extraction took 1,819.342 seconds for
+a 45.846-second clip, so this path is not realtime. See
+[`isw21_full_envelope_video_only_probe_20261001.md`](../../benchmark/results/isw21_full_envelope_video_only_probe_20261001.md)
+for input hashes, NAL counts, visual quality, CPU/RAM limits, and the remaining
+security gaps. This does not make the toy relation the target application
+relation: its context is still a fixture rather than a verifier-pinned
+session/video digest.
 
 Expected terminal markers include `HONEST_R1CS=PASS`,
 `ALTERED_PAYLOAD_WITNESS=REJECTED`, `COMMITMENT_EQUATION_MISMATCH=REJECTED`,
