@@ -86,6 +86,15 @@ more video/bit-pattern cases, target relation integration, and proof-sized
 capacity/time measurements. The final verifier must pin the new carrier
 profile; a `ZKVP` CRC32 header alone does not identify or authenticate it.
 
+A follow-up run moved variable-length RBSP replacement into the validated
+`src.bitstream.rbsp_patch.replace_codewords` helper. The helper's 11 unit
+tests passed with 92% line coverage. Re-running the Akiyo `a5` to `5a`
+probe produced the same output SHA-256
+`eb0983e229fa25ae9cca5f2823ef8f95a353b3ef3d5fc98f49674c9930cf05b5`;
+blind extraction, all 120 positions, and the normalized digest matched.
+That run took 112.04 s on a contended host, which is not a stable latency
+estimate or evidence of realtime operation.
+
 The generated videos were kept in the system temporary directory
 `zkstego-native-normalization-20261001`, outside Git. This probe is a
 diagnostic, not a security or realtime benchmark.

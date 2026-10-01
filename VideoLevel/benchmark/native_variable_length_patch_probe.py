@@ -16,8 +16,6 @@ from pathlib import Path
 from time import perf_counter
 from types import SimpleNamespace
 
-import numpy as np
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -26,22 +24,13 @@ from src.bitstream.bitstream_io import BitstreamReader
 from src.bitstream.bitstream_ops import BitstreamPatcher, BitstreamReconstructor
 from src.bitstream.cavlc import CAVLCDecoder
 from src.bitstream.h264 import H264BitstreamParser
+from src.bitstream.rbsp_patch import replace_codewords
 from src.blind_sync import pack_blind_payload
 from src.core.pipeline import extract_all_idr_blocks
 from src.video_canonicalization import canonical_video_sha256
 
 
-def syntax_bit_length(rbsp: bytes) -> int:
-    """Return the bit length through rbsp_stop_one_bit, excluding pad zeros."""
-    for byte_index in range(len(rbsp) - 1, -1, -1):
-        value = rbsp[byte_index]
-        if value:
-            trailing_zeros = (value & -value).bit_length() - 1
-            return byte_index * 8 + 8 - trailing_zeros
-    raise ValueError("RBSP has no stop bit")
-
-
-def replace_codewords(
+def replace_video_codewords(
     source: Path,
     output: Path,
     framed_target: bytes,
@@ -115,19 +104,12 @@ def replace_codewords(
                 raise ValueError(f"CAVLC replacement did not round-trip: {(macroblock, block)}")
             start = info["start_bit"]
             end = info["end_bit"]
-            if not 0 <= start < end <= syntax_bit_length(original_rbsp):
-                raise ValueError("invalid CAVLC codeword bit range")
             replacements.append((start, end, new_bits))
             new_bit_lengths.append(len(new_bits) - (end - start))
         if not replacements:
             new_nals.append(nal)
             continue
-        bits = np.unpackbits(np.frombuffer(bytes(nal.rbsp_byte), dtype=np.uint8)).tolist()
-        bits = bits[: syntax_bit_length(bytes(nal.rbsp_byte))]
-        for start, end, new_bits in sorted(replacements, reverse=True):
-            bits[start:end] = new_bits
-        bits.extend([0] * ((-len(bits)) % 8))
-        new_rbsp = np.packbits(np.asarray(bits, dtype=np.uint8)).tobytes()
+        new_rbsp = replace_codewords(bytes(nal.rbsp_byte), replacements)
         new_nals.append(
             SimpleNamespace(
                 forbidden_zero_bit=nal.forbidden_zero_bit,
@@ -169,7 +151,7 @@ def main() -> int:
     if len(positions) != len(framed) * 8:
         raise ValueError("carrier prefix length does not match target envelope")
     started = perf_counter()
-    patch_stats = replace_codewords(source, output, framed, positions)
+    patch_stats = replace_video_codewords(source, output, framed, positions)
     patched, patched_positions = extract_payload_with_positions(
         output, include_p_slices=False
     )
@@ -193,7 +175,10 @@ def main() -> int:
         report["canonical_digest_before"] == report["canonical_digest_after"]
     )
     print(json.dumps(report, indent=2))
-    return 0 if report["blind_target_match"] else 1
+    return 0 if all(
+        report[gate]
+        for gate in ("blind_target_match", "same_carrier_positions", "same_canonical_digest")
+    ) else 1
 
 
 if __name__ == "__main__":
