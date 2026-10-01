@@ -7,6 +7,89 @@ opening research circuit. The isolated `proof_codec.go` probe provides strict
 JSON and schema-pinned binary codecs; neither is the application ZKP backend or
 a production proof format.
 
+## Revalidation (2026-10-01)
+
+The focused proof and session-policy tests were rerun on commit `cbd934c`
+using Go 1.26.2 (`windows/amd64`) on Windows 11 Pro, with a 12th Gen Intel
+Core i7-12700H (14 cores / 20 logical processors) and 23.63 GiB visible RAM.
+Command, from `benchmark/ringo_application_probe`:
+
+```powershell
+go test -run 'TestOpeningVerifierPolicy(ExpiryReplayAndStatementPinning|DoesNotSpendSessionOnInvalidProof)|TestOpeningRelationAndCapacityProbe' -count=1 -v
+```
+
+All three selected tests passed; Go reported 15.395 s package time. The
+relation/capacity test took 9.53 s and measured compile 30.98 ms, prove
+326.34 ms, and verify 143.97 ms in this single sample. The freshly serialized
+proof measured 2,710,131-byte JSON, 1,653,727-byte binary, 1,281,714-byte
+gzip JSON, and 1,246,230-byte gzip binary. The public commitment was 262,152
+bytes; statement + commitment + proof + framing totaled 1,916,177 bytes
+minimum, and the encoded fixed profile was 2,000,000 bytes. The process-local
+policy tests passed for concurrent one-time use, expiration, unknown and
+changed sessions, commitment pinning, and preserving the session after a
+rejected proof.
+
+After adding the statement-binding diagnostic below, `go vet ./...` and the
+full `go test -count=1 ./...` both exited successfully; the full suite
+reported 16.818 s. The default `go test -race -count=1 ./...` did not
+complete: Go's checkptr aborted in
+`github.com/sp301415/ringo-snark/math/crt.fwdNTTInPlacePow2Unroll` at
+`math/crt/asm_ntt_amd64.go:112` with “converted pointer straddles multiple
+allocations”. With `-gcflags=all=-d=checkptr=0`, the race-enabled suite passed
+in 210.662 s without a race report. This workaround disables a memory-safety
+check that found a dependency assembly issue; it is useful only as partial
+race-detector evidence and does not make the default race/checkptr test pass
+or clear the upstream finding.
+Trying the dependency's `purego` build tag alone did not avoid the failure:
+its scalar fallback also uses `unsafe` wide-array pointer casts and hit
+checkptr in `math/crt/asm_ntt.go:92`.
+
+### Confirmed Fiat-Shamir public-statement substitution
+
+Source inspection of the pinned `ringo-snark` dependency found that Buckler's
+prover and verifier bind proof commitments into the Fiat-Shamir transcript,
+but do not bind the `PublicWitness` values. Those public values are only
+evaluated later when the verifier checks arithmetic constraints. A dedicated
+diagnostic circuit made this concrete: it enforces `Secret = 0` and
+`Public = Secret`, so the all-zero public instance is true and every nonzero
+public vector is false. The diagnostic test generated a valid all-zero proof,
+recomputed its public `evalPoint` from the transcript, then replaced the public vector
+with the cyclic NTT encoding of `X - evalPoint`. This polynomial is nonzero
+coefficient-wise but evaluates to zero at that already-fixed point. Buckler's
+low-level verifier accepted the false instance. The exploit diagnostic
+reproduced in **10/10** randomized runs:
+
+```powershell
+go test -run '^TestDiagnosticStatementSubstitutionAfterFiatShamir$' -count=10 -v
+```
+
+This proves an adaptive public-statement substitution flaw for this generic
+Buckler proof path. It is not, by itself, evidence that a deployed video API
+has been remotely exploited. `openingVerifierPolicy.VerifyAndConsume` checks
+the exact registered statement bytes and commitment digest before invoking
+the low-level proof verifier, which blocks this substitution when those
+values were independently and trustworthily pinned before proof construction.
+The probe has no trusted enrollment/session-issuance API; its `Register`
+method is an in-process policy primitive. Therefore the required trust
+precondition is not established for the intended system, and this backend
+must not be treated as a secure application ZK verifier. A fix requires a
+formally reviewed binding of the canonical public instance and protocol
+context into the Fiat-Shamir transcript (or another equivalently proven
+construction), followed by rerunning this adaptive false-statement test and
+the existing positive/negative cases.
+
+Primary-source references for this gate are the [pinned Buckler prover](https://github.com/sp301415/ringo-snark/blob/306742714785/buckler/prover.go),
+[pinned verifier](https://github.com/sp301415/ringo-snark/blob/306742714785/buckler/verifier.go),
+[Buckler PIOP paper, ePrint 2024/1879](https://eprint.iacr.org/2024/1879), and
+[Jindo PCS paper, ePrint 2026/044](https://eprint.iacr.org/2026/044). The
+papers' security analyses do not remove the need for the implementation's
+Fiat-Shamir transcript to bind the public instance used by this application.
+
+This was a targeted correctness revalidation, not a full-module test suite or
+a repeated performance benchmark. The earlier capacity comparison is still
+only a raw upper-bound estimate and no embedding/extraction was attempted.
+The actual session registry remains in-memory and is not a deployed API.
+
 Command, from `benchmark/ringo_application_probe`:
 
 ```powershell
