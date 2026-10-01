@@ -261,18 +261,24 @@ production proof, or an H.264 integration.
 Built against the pinned upstream revision
 `48cb4cd4635f5b6e7e9354b7d4b12e9647c4331e` in the Ubuntu 24.04 research
 container, one observed run had 3,520 constraints, QAP degree 4,096, 160
-public inputs, a 21,331-byte serialized response, 4.9513 s LWE secret-key
-setup, 3.8365 s CRS/VK setup, 0.2656 s proving, 0.0006 s honest
-verification, 9.47 s whole-process wall time, and 480,892 KiB peak RSS. This
-was a single smoke measurement, not a benchmark distribution. More
-importantly, source review found the pinned upstream revision closes a
-function-static `/dev/urandom` stream after the first seed read and reuses it
-in later calls; subsequent seed bytes may be uninitialized. Thus this run is
-not valid cryptographic or trustworthy proof-performance evidence until that
-RNG defect is patched and the run repeated. The response length is fixed by
-the selected ISW21 proof parameters and remains 21,331 bytes; its exact
-in-band capacity gap is severe for the measured 300-frame CIF profiles. The
-detailed fixture definition and reproduction steps are in
+public inputs, a 21,331-byte serialized response, 5.1720 s LWE secret-key
+setup, 3.8536 s CRS/VK setup, 0.3281 s proving, 0.0006 s honest
+verification, 9.82 s whole-process wall time, and 481,052 KiB peak RSS. This
+was a single smoke measurement, not a benchmark distribution. Source review
+found the pinned upstream revision closes a function-static `/dev/urandom`
+stream after its first seed read and reuses it in later calls; subsequent seed
+bytes may be uninitialized. This run was repeated after applying the tracked
+[`upstream_rng_fix.patch`](../research/isw21_r1cs_opening_smoke/upstream_rng_fix.patch)
+to the temporary upstream checkout. The patch opens a fresh stream for every
+seed and rejects failed/short reads; it does not change the upstream source
+repository. The result is now usable as limited smoke evidence, but is not an
+independent cryptographic audit or secure-parameter validation. The response
+length is fixed by the selected ISW21 proof parameters and remains 21,331
+bytes; its exact in-band capacity gap is severe for the measured 300-frame CIF
+profiles. A second fresh process after the same patch exited 0 with the same
+honest-proof and negative-case markers (9.12 s wall time, 481,076 KiB peak
+RSS). These are two smoke runs, not a benchmark distribution. The detailed
+fixture definition and reproduction steps are in
 [`research/isw21_r1cs_opening_smoke/README.md`](../research/isw21_r1cs_opening_smoke/README.md).
 
 ## Rejected as a zero-knowledge backend: RoKoko (ePrint 2026/575)

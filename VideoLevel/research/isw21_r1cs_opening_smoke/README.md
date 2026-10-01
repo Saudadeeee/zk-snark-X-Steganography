@@ -37,11 +37,12 @@ integration. A passing result does not satisfy the target relation.
 **Cryptographic run caveat:** source review found that the pinned upstream
 revision closes a function-static `/dev/urandom` stream after its first read
 and reuses that closed stream in later seed-generation calls. Later calls can
-therefore expand uninitialized seed bytes. Until that upstream RNG issue is
-patched and the run is repeated, proof-generation output and cryptographic
-timings below are not valid evidence of secure randomness or a trustworthy
-proof execution. The source pin is not modified by this repository's smoke
-test.
+therefore expand uninitialized seed bytes. The reproducible procedure below
+applies [`upstream_rng_fix.patch`](upstream_rng_fix.patch) to the temporary
+checkout: each seed read now opens a fresh stream and throws on open/read
+failure. The upstream repository itself remains unchanged. The measured run
+below was rerun after applying this patch, but remains only a smoke run and
+has not had an independent cryptographic implementation audit.
 
 ## Response coefficient size diagnostic
 
@@ -96,6 +97,7 @@ sudo apt-get install -y build-essential cmake git pkg-config libgmp-dev libssl-d
 git clone --recurse-submodules https://github.com/lattice-based-zkSNARKs/lattice-zksnark.git /tmp/lattice-zksnark
 git -C /tmp/lattice-zksnark checkout --detach 48cb4cd4635f5b6e7e9354b7d4b12e9647c4331e
 git -C /tmp/lattice-zksnark submodule update --init --recursive
+patch --no-backup-if-mismatch -d /tmp/lattice-zksnark -p1 < research/isw21_r1cs_opening_smoke/upstream_rng_fix.patch
 cmake -S research/isw21_r1cs_opening_smoke -B /tmp/isw21-opening-build \
   -DISW21_SOURCE_DIR=/tmp/lattice-zksnark -DWITH_PROCPS=OFF
 cmake --build /tmp/isw21-opening-build --target isw21_r1cs_opening_smoke -j2
@@ -124,19 +126,24 @@ host, GCC 13.3, Release build, pinned upstream revision above. One run produced:
 | R1CS constraints | 3,520 |
 | QAP degree | 4,096 |
 | Public inputs | 160 |
-| LWE secret-key setup | 4.9513 s |
-| CRS and verification-key setup | 3.8365 s |
-| Prove | 0.2656 s |
+| LWE secret-key setup | 5.1720 s |
+| CRS and verification-key setup | 3.8536 s |
+| Prove | 0.3281 s |
 | Verify (one accepted proof) | 0.0006 s |
-| Process wall time, including negative checks | 9.47 s |
-| Peak RSS | 480,892 KiB |
+| Process wall time, including negative checks | 9.82 s |
+| Peak RSS | 481,052 KiB |
 | Canonically encoded response bytes | 21,331 bytes |
 
-This is one observed run, not a stable benchmark statistic, and is marked
-cryptographically invalid pending the upstream RNG correction described
-above. The reported timings are workload observations only, not reliable ZK
-performance evidence. Upstream's `Linear comb size 1866` is an internal
-element count, not bytes. The response encoding does not include the statement
-or an application/video envelope. The tiny-modulus relation says nothing about
-production security, complete proof capacity, visual quality, realtime
-behavior, or peak memory for the video relation.
+The table records the first observed post-patch run, not a stable benchmark
+statistic. A second fresh process also exited 0 with the same honest-proof
+and negative-case markers; its wall time was 9.12 s and peak RSS 481,076 KiB.
+The first smoke process reported `HONEST_R1CS=PASS`,
+`LATTICE_SNARK_HONEST_VERIFY=PASS`, and rejected altered payload, opening,
+context, commitment, and proof-response encodings. The upstream source
+reported `QAP degree: 4096`. Upstream's
+`Linear comb size 7460` is an internal element count, not bytes. The response
+encoding does not include the statement or an application/video envelope.
+The patch fixes only the observed seed-stream lifetime bug; it is not an
+independent security audit of the upstream cryptography. The tiny-modulus
+relation says nothing about production security, complete proof capacity,
+visual quality, realtime behavior, or peak memory for the video relation.

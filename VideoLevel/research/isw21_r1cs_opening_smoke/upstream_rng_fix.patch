@@ -1,0 +1,39 @@
+diff --git a/lwe/randomness/prg.hpp b/lwe/randomness/prg.hpp
+--- a/lwe/randomness/prg.hpp
++++ b/lwe/randomness/prg.hpp
+@@ -13,2 +13,3 @@
+ #include <iostream>
+ #include <map>
++#include <stdexcept>
+@@ -33,4 +34,6 @@
+-            static std::ifstream urandom("/dev/urandom", std::ios::binary);
+-            byte buffer[AES_KEY_BYTES];
+-            urandom.read(reinterpret_cast<char *>(buffer), AES_KEY_BYTES);
+-            urandom.close();
++            std::ifstream urandom("/dev/urandom", std::ios::binary);
++            byte buffer[AES_KEY_BYTES]{};
++            if (!urandom.read(reinterpret_cast<char *>(buffer), AES_KEY_BYTES)) {
++                throw std::runtime_error(
++                    "failed to read PRG seed from /dev/urandom");
++            }
+diff --git a/lwe/snark/r1cs_lattice_snark_common.hpp b/lwe/snark/r1cs_lattice_snark_common.hpp
+--- a/lwe/snark/r1cs_lattice_snark_common.hpp
++++ b/lwe/snark/r1cs_lattice_snark_common.hpp
+@@ -10,2 +10,4 @@
+ #include <chrono>
++#include <fstream>
++#include <stdexcept>
+ #include <libff/algebra/curves/public_params.hpp>
+@@ -62,5 +64,7 @@
+-        static std::ifstream urandom("/dev/urandom", std::ios::binary);
+-        LWERandomness::byte buffer[LWERandomness::AES_KEY_BYTES];
+-        urandom.read(reinterpret_cast<char *>(buffer),
+-                     LWERandomness::AES_KEY_BYTES);
+-        urandom.close();
++        std::ifstream urandom("/dev/urandom", std::ios::binary);
++        LWERandomness::byte buffer[LWERandomness::AES_KEY_BYTES]{};
++        if (!urandom.read(reinterpret_cast<char *>(buffer),
++                          LWERandomness::AES_KEY_BYTES)) {
++            throw std::runtime_error(
++                "failed to read CRS seed from /dev/urandom");
++        }
