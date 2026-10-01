@@ -25,9 +25,8 @@ func (c *diagnosticStatementCircuit) Define(ctx *buckler.Context[*zp.Uint]) {
 	ctx.AddArithmeticConstraint(equation)
 }
 
-// This diagnostic reproduces a post-challenge public-statement substitution.
-// It is deliberately named as an audit, not a security regression test.
-func TestDiagnosticStatementSubstitutionAfterFiatShamir(t *testing.T) {
+// This regression test prevents post-challenge public-statement substitution.
+func TestRejectStatementSubstitutionAfterFiatShamir(t *testing.T) {
 	const rank = 256
 	var crs [16]byte
 	if _, err := rand.Read(crs[:]); err != nil {
@@ -63,6 +62,8 @@ func TestDiagnosticStatementSubstitutionAfterFiatShamir(t *testing.T) {
 		"projConst", "arithBatchConst", "linCheckBatchConst",
 		"linCheckConst", "sumCheckBatchConst", "evalPoint",
 	)
+	// Reconstruct the vulnerable pre-patch transcript, which omitted public
+	// witnesses, so the mutation targets the challenge the old verifier used.
 	var encoded bytes.Buffer
 	proof.Witness[0].WriteToBuf(&encoded)
 	transcript.Bind("projConst", encoded.Bytes())
@@ -103,10 +104,10 @@ func TestDiagnosticStatementSubstitutionAfterFiatShamir(t *testing.T) {
 		Public: publicZero,
 		Secret: makeZeroWitness(rank),
 	}, proof)
-	if !accepted {
-		t.Fatal("statement-substitution diagnostic did not reproduce")
+	if accepted {
+		t.Fatal("verifier accepted a false public statement substituted after proof generation")
 	}
-	t.Logf("reproduced acceptance of false coefficient-level statement at challenge %x", evalBytes)
+	t.Logf("rejected false coefficient-level statement substituted after challenge %x", evalBytes)
 }
 
 func makeZeroWitness(rank int) buckler.Witness[*zp.Uint] {

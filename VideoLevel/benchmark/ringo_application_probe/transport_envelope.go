@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	openingTransportMagic      = "RZV1"
+	openingTransportMagic      = "RZV2"
 	openingTransportHeaderSize = len(openingTransportMagic) + 3*4
 	maxOpeningTransportBytes   = 16 << 20
 )

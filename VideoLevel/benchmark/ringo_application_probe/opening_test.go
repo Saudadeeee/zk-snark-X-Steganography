@@ -100,6 +100,7 @@ func TestOpeningRelationAndCapacityProbe(t *testing.T) {
 		"truncated":           encodedProof[:len(encodedProof)/2],
 		"trailing whitespace": append(append([]byte(nil), encodedProof...), ' '),
 		"second JSON value":   append(append([]byte(nil), encodedProof...), []byte(`{}`)...),
+		"legacy v1 protocol":  bytes.Replace(encodedProof, []byte(openingProofProtocol), []byte("zkstego-ringo-opening-probe-v1"), 1),
 		"empty proof object":  []byte(`{"protocol":"zkstego-ringo-opening-probe-v1","proof":{}}`),
 	} {
 		if _, err := decodeOpeningProof(malformed); err == nil {
@@ -152,15 +153,18 @@ func TestOpeningRelationAndCapacityProbe(t *testing.T) {
 	}
 	badEnvelopeMagic := append([]byte(nil), transportEnvelope...)
 	badEnvelopeMagic[0] ^= 1
+	legacyEnvelope := append([]byte(nil), transportEnvelope...)
+	copy(legacyEnvelope, []byte("RZV1"))
 	badEnvelopeLength := append([]byte(nil), transportEnvelope...)
 	badEnvelopeLength[len(openingTransportMagic)+4+3]-- // commitment length, big-endian
 	badEnvelopePadding := append([]byte(nil), transportEnvelope...)
 	badEnvelopePadding[len(badEnvelopePadding)-1] = 1
 	for name, malformed := range map[string][]byte{
-		"truncated":         transportEnvelope[:len(transportEnvelope)-1],
-		"bad magic":         badEnvelopeMagic,
-		"forged field size": badEnvelopeLength,
-		"nonzero padding":   badEnvelopePadding,
+		"truncated":          transportEnvelope[:len(transportEnvelope)-1],
+		"bad magic":          badEnvelopeMagic,
+		"legacy v1 envelope": legacyEnvelope,
+		"forged field size":  badEnvelopeLength,
+		"nonzero padding":    badEnvelopePadding,
 	} {
 		if _, err := decodeOpeningTransportEnvelope(malformed, openingRank); err == nil {
 			t.Errorf("accepted malformed fixed-profile envelope (%s)", name)

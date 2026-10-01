@@ -1,0 +1,26 @@
+# github.com/bits-and-blooms/bitset v1.20.0
+## explicit; go 1.16
+github.com/bits-and-blooms/bitset
+# github.com/consensys/gnark-crypto v0.19.2
+## explicit; go 1.23.0
+github.com/consensys/gnark-crypto/fiat-shamir
+github.com/consensys/gnark-crypto/field/hash
+github.com/consensys/gnark-crypto/field/pool
+# github.com/sp301415/ringo-snark v0.0.0-20260924001507-306742714785
+## explicit; go 1.25
+github.com/sp301415/ringo-snark/buckler
+github.com/sp301415/ringo-snark/examples/mult/zp
+github.com/sp301415/ringo-snark/jindo
+github.com/sp301415/ringo-snark/math/bignum
+github.com/sp301415/ringo-snark/math/bigpoly
+github.com/sp301415/ringo-snark/math/crt
+github.com/sp301415/ringo-snark/math/csprng
+github.com/sp301415/ringo-snark/math/internal/modops
+github.com/sp301415/ringo-snark/math/num
+github.com/sp301415/ringo-snark/math/vec
+# golang.org/x/crypto v0.45.0
+## explicit; go 1.24.0
+golang.org/x/crypto/sha3
+# golang.org/x/sys v0.38.0
+## explicit; go 1.24.0
+golang.org/x/sys/cpu

@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	openingProofProtocol = "zkstego-ringo-opening-probe-v1"
+	openingProofProtocol = "zkstego-ringo-opening-probe-v2"
 	maxOpeningProofBytes = 16 << 20
 	maxProofSliceEntries = 1 << 20
-	openingBinaryMagic   = "RZK1"
+	openingBinaryMagic   = "RZK2"
 )
 
 type openingProofEnvelope struct {

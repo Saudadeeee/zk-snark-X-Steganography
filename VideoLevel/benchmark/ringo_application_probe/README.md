@@ -98,44 +98,55 @@ verifier instances, and there is no trusted session-issuance API. It is not a
 production replay/expiry service or evidence that a video pipeline meets the
 full objective.
 
-## Security gate: public-statement binding is not established
+## Fiat-Shamir public-statement binding: patched, review pending
 
-`statement_substitution_diagnostic_test.go` is an intentional security audit,
-not a positive-security test. It generates a proof for the true instance
-`Public = Secret = 0`, derives the already fixed Fiat-Shamir evaluation
-challenge from that proof, then changes the public vector so its encoded
-polynomial is `X - challenge`. This vector is nonzero coefficient-wise, and
-the only allowed secret remains zero, so the resulting relation is false; it
-nevertheless passes the low-level Buckler verifier at the transcript's single
-evaluation point. The attack reproduced in 10/10 randomized test runs:
+The pinned upstream Buckler implementation originally bound proof
+commitments into Fiat-Shamir but omitted the `PublicWitness` values. Two
+diagnostics reproduced the resulting substitution behavior: a minimal circuit
+accepted a mathematically false statement, and the application opening circuit
+accepted a changed commitment with the original proof. Historical results are
+recorded in the [wire recheck report](../results/ringo_opening_proof_wire_recheck_20260930.md).
 
 ```powershell
-go test -run '^TestDiagnosticStatementSubstitutionAfterFiatShamir$' -count=10 -v
+go test -run 'TestRejectStatementSubstitutionAfterFiatShamir|TestOpeningRejectsStatementSubstitutionAfterFiatShamir' -count=10 -v
 ```
 
-Inspection of the pinned dependency (`github.com/sp301415/ringo-snark` at
-`306742714785`) shows its prover/verifier transcript binds proof commitments
-under Fiat-Shamir challenge labels, while the supplied `PublicWitness` values
-are only used later to evaluate the circuit. The public instance is not itself
-bound into that transcript. This is a statement-substitution failure for
-adaptive public instances and disqualifies this low-level proof path as a
-standalone application ZK verifier until transcript/statement binding is
-fixed and independently reviewed. Although the [pinned README](https://github.com/sp301415/ringo-snark/blob/306742714785/README.md)
-marks the Strong Fiat-Shamir Transform item complete, this concrete test shows
-that public-statement binding required by this application is not achieved by
-the current integration. See also the [pinned prover](https://github.com/sp301415/ringo-snark/blob/306742714785/buckler/prover.go),
-[pinned verifier](https://github.com/sp301415/ringo-snark/blob/306742714785/buckler/verifier.go),
-[Buckler paper (ePrint 2024/1879)](https://eprint.iacr.org/2024/1879), and
-[Jindo PCS paper (ePrint 2026/044)](https://eprint.iacr.org/2026/044).
+The probe now vendors the pinned dependency and applies a local transcript
+patch in `vendor/github.com/sp301415/ringo-snark/buckler`: prover and verifier
+absorb a domain tag, public-witness count, and every canonical encoded public
+polynomial (framed by index, rank, and byte length) under the first
+`projConst` challenge, before any proof commitment is absorbed. Wire identifiers
+are now `v2` (`RZV2`/`RZK2`); tests reject legacy `v1` proofs/envelopes. Fiat-Shamir
+challenges therefore depend on the exact public instance. Both diagnostics
+now assert rejection of the substitution while checking that the original
+valid proofs still verify.
 
-The wrapper's `VerifyAndConsume` does compare incoming statement bytes and
-commitment digest to values previously pinned by `Register`, so it blocks
-this particular substitution if those expected values come from an
-independent trusted enrollment before proof construction. That prerequisite
-is not currently implemented: the registry is process-local and there is no
-authenticated issuance/enrollment API. Do not infer that the wrapper fixes
-the protocol for arbitrary video-supplied statements. The complete finding
-and test result are in
+The regression also targets the application's actual `openingCircuit`, whose
+public input includes the two-row opening commitment. It reconstructs the
+legacy challenge that omitted public witnesses, then changes one commitment
+row by the cyclic-NTT encoding of `X - evalPoint`. The pre-patch verifier
+accepted that mutation; the patched verifier absorbs the changed commitment
+before deriving challenges and rejects the old proof in **10/10** runs:
+
+```powershell
+go test -run '^TestOpeningRejectsStatementSubstitutionAfterFiatShamir$' -count=10
+```
+
+The pre-patch reproduction demonstrated proof-to-statement substitution; it
+did not independently prove that the modified commitment has no other valid
+opening under this research commitment relation.
+`openingVerifierPolicy.VerifyAndConsume` rejects this specific substitution
+when the original statement and commitment digest were pinned independently
+before verification. This is defense in depth, not a substitute for the
+transcript patch. The policy remains a research-only, process-local `Register`
+call; there is no authenticated session issuance or deployed API.
+
+The transcript patch specifically repairs the observed public-instance
+omission; it is not independent cryptographic certification of Buckler/Jindo
+or of the opening relation, and needs external review plus further
+soundness/ZK analysis. The registry still has no authenticated issuance API
+or durable replay state, and there is no H.264 extraction path; those remain
+blockers for the full system goal. Historical findings and run details are in
 [`ringo_opening_proof_wire_recheck_20260930.md`](../results/ringo_opening_proof_wire_recheck_20260930.md).
 
 On this Windows/amd64 host, plain `go test -race` aborts at an upstream CRT assembly `checkptr` alignment check. `go test -race -gcflags=all=-d=checkptr=0 -count=1 ./...` passed with the complete current test, but disabling `checkptr` does **not** resolve or exonerate the dependency issue. See [the recorded assessment](../results/ringo_opening_probe_20260929.md).

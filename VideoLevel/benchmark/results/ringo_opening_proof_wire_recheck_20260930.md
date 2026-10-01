@@ -44,7 +44,7 @@ Trying the dependency's `purego` build tag alone did not avoid the failure:
 its scalar fallback also uses `unsafe` wide-array pointer casts and hit
 checkptr in `math/crt/asm_ntt.go:92`.
 
-### Confirmed Fiat-Shamir public-statement substitution
+### Confirmed Fiat-Shamir public-statement substitution (before local patch)
 
 Source inspection of the pinned `ringo-snark` dependency found that Buckler's
 prover and verifier bind proof commitments into the Fiat-Shamir transcript,
@@ -76,7 +76,79 @@ must not be treated as a secure application ZK verifier. A fix requires a
 formally reviewed binding of the canonical public instance and protocol
 context into the Fiat-Shamir transcript (or another equivalently proven
 construction), followed by rerunning this adaptive false-statement test and
-the existing positive/negative cases.
+the existing positive/negative cases. The working-tree remediation and its
+post-patch evidence are recorded below; the original reproduction above is
+retained as the pre-patch baseline.
+
+### Reproduction on the application's opening circuit
+
+Before the local transcript patch, the finding was additionally reproduced
+on `openingCircuit` itself, not just the minimal diagnostic circuit. The test compiles the actual 32-byte opening
+relation at rank 256, produces a valid opening proof, reconstructs its
+Fiat-Shamir `evalPoint`, and adds the cyclic-NTT encoding of
+`X - evalPoint` to one public commitment row. That is a nonzero change to the
+public commitment vector; the secret and proof are unchanged. The low-level
+application verifier nevertheless accepts it because the encoded difference
+evaluates to zero at the challenge chosen before the public statement was
+altered. This directly demonstrates proof-to-statement substitution in the
+application relation. It does not by itself prove that the altered commitment
+has no other valid opening under this research commitment relation; that
+requires a separate binding argument. The generic diagnostic circuit above
+does demonstrate acceptance of a mathematically false statement. In either
+case, the current low-level integration does not bind the proof to the exact
+public instance, so it cannot be accepted as the system's standalone verifier.
+
+The pre-patch diagnostic was run 10 consecutive times and passed every time:
+
+```powershell
+go test -run '^TestOpeningDiagnosticStatementSubstitutionAfterFiatShamir$' -count=10
+```
+
+The session wrapper also rejected a substituted commitment when its exact
+canonical commitment digest was independently registered before verification.
+However, `Register` is an in-process policy primitive, with no authenticated
+issuance endpoint or durable verifier-owned enrollment store. Therefore that
+is defense in depth, not a system-level fix. The pre-patch test source is
+[`opening_statement_substitution_diagnostic_test.go`](../ringo_application_probe/opening_statement_substitution_diagnostic_test.go).
+
+### Local transcript-binding remediation and verification
+
+The probe now vendors `ringo-snark` at `306742714785` and patches the Buckler
+prover and verifier to bind the complete encoded public-witness vector before
+the first Fiat-Shamir challenge. The canonical encoding is framed by a
+domain tag, witness count, vector index, rank, and encoded byte length; the
+existing encoded
+polynomial bytes are then absorbed under `projConst`. Both sides call the
+same helper, `buckler.bindPublicWitnesses`, before absorbing private
+commitments. This is intended to make all downstream challenges depend on
+the exact public instance, including the opening commitment and the
+verifier-derived matrix, message, and mask vectors.
+The JSON protocol, binary proof magic, and fixed transport magic were bumped
+to v2 (`zkstego-ringo-opening-probe-v2`, `RZK2`, `RZV2`); tests explicitly
+reject a v1 proof and envelope rather than silently mixing transcript rules.
+
+The two tests now require the original valid proof to verify and the attack
+crafted for the legacy transcript (with public witnesses omitted) to fail:
+one uses a mathematically false minimal circuit, and the other mutates the
+actual opening commitment vector. The
+actual-circuit test also confirms the process-local session pin rejects the
+same altered envelope. After the patch, both tests passed **10/10** runs:
+
+```powershell
+go test -run 'TestRejectStatementSubstitutionAfterFiatShamir|TestOpeningRejectsStatementSubstitutionAfterFiatShamir' -count=10 -v
+```
+
+The complete nested Go module suite passed (`go test -count=1 ./...`,
+19.923 s on the latest run, including explicit v1-envelope rejection), and
+`go vet ./...` passed. This verifies the
+targeted regression and current probe tests only; it is not an independent
+cryptographic review.
+The pinned dependency remains research software, the default race/checkptr
+failure described above remains, and the session registry is still
+in-memory. H.264 embedding/extraction, API/CLI E2E, broad video benchmarks,
+and independent analysis of proof soundness, zero knowledge, and commitment
+binding are still required. Do not infer that the end-to-end objective is
+complete or that this local patch is production-certified.
 
 Primary-source references for this gate are the [pinned Buckler prover](https://github.com/sp301415/ringo-snark/blob/306742714785/buckler/prover.go),
 [pinned verifier](https://github.com/sp301415/ringo-snark/blob/306742714785/buckler/verifier.go),
