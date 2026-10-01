@@ -243,6 +243,49 @@ are not selected. The relation, circuit, context encoding, and public-input
 binding have not been implemented or reviewed. A passing generic R1CS demo
 proves none of those properties.
 
+## New candidate: RoKoko (ePrint 2026/575)
+
+RoKoko is now the strongest candidate to evaluate next for a succinct lattice
+argument with a complete paper-level R1CS application. Its paper reports a
+112 KB proof at the smallest listed benchmark size (`|Z_q| = 2^26`), with
+1.47 s proving and 8.12 ms verification on the paper's target machine; these
+are medians of three runs and exclude any video embed/extract work. The paper
+states that the construction uses the vanishing-SIS (vSIS) assumption for
+succinct verification. This is a distinct, less-established assumption path
+than the standard Module-SIS route, so the paper's reduction and concrete
+hardness estimate need independent review before the backend can be trusted.
+
+The upstream repository is explicitly a proof-of-concept: it says the `snark`
+mode is highly experimental and that support for arbitrary relation
+frameworks is not fully exposed. It pins Rust nightly `2025-03-06`, recommends
+AVX-512 for best performance, and offers `incomplete-rexl` as a pure-Rust
+fallback. This project host has no Rust/Cargo installed and its i7-12700H
+reports AVX2 rather than AVX-512. A Docker attempt to retrieve the pinned Rust
+image failed at Docker Hub DNS resolution, so there is no local RoKoko build or
+runtime result yet. This is an environment constraint, not evidence that the
+candidate cannot build elsewhere.
+
+The reported 112 KB proof is smaller than this repository's Ringo binary proof
+(about 1.65 MB), but still does not fit the measured stable blind carrier
+profile on the 300-frame Foreman CIF clip: 2,941 patchable carriers are only
+about 368 bytes, so the paper proof alone is roughly 305 times larger before
+statement/framing bytes. The clip-specific raw-safe upper bound was 101,842
+bits (about 12.7 KB), also below 112 KB. This does not rule out a much longer
+or higher-capacity video, but it means RoKoko's published proof size is not a
+drop-in fit for the tested clip/profile. No current RoKoko artifact proves the
+payload-opening/session/video-context relation, and its proof has not been
+embedded or blindly extracted from H.264 in this project.
+
+**Decision:** prioritize a pinned, reproducible RoKoko smoke test after a Rust
+toolchain is made available, then determine whether the exposed SNARK interface
+can express the exact bounded payload-opening relation. Do not replace the
+disabled public backend yet. If the build succeeds, first measure exact proof
+and statement bytes, test malformed/tampered proofs, check context binding, and
+re-evaluate the concrete vSIS security estimate; only then attempt the real
+video carrier path. An author write-up from September 2026 describes a
+standard-SIS instantiation, but says that variant is not in the repository's
+main code; it is not treated as an available backend.
+
 ## Remaining gates
 
 - independently check the ISW21 security theorem and concrete parameter
@@ -258,11 +301,12 @@ proves none of those properties.
   and embed/extract it blindly from H.264 Baseline/CAVLC with no proof sidecar;
 - run wrong-payload, changed-context, malformed-proof, tamper, replay, expiry,
   and cross-session negative tests through the actual verifier;
-- obtain and review the revised ePrint 2025/2099 paper and a pinned source
-  revision matching that paper; validate its adaptive knowledge-soundness
-  theorem, random-oracle model, concrete MSIS estimates, designated-verifier
-  setup, complete proof serialization and invalid-proof rejection before
-  deciding whether it supersedes ISW21; and
+- build and run a pinned RoKoko source revision; review its vSIS theorem and
+  parameters; establish that the available code proves this project's exact
+  payload-opening relation; test its full proof codec and negative cases;
+- independently evaluate whether ePrint 2025/2099 has a complete matching
+  implementation and whether its adaptive-knowledge-soundness theorem and
+  MSIS parameters are preferable to RoKoko; and
 - benchmark repeated setup/prove/verify time, peak RSS, visual quality, and
   carrier capacity on multiple real videos and durations.
 
@@ -280,6 +324,17 @@ proves none of those properties.
   2026-07-13; full-paper claim is an MSIS-based DV-LatticeIPA with adaptive
   knowledge soundness via coordinate-wise special soundness in the random-
   oracle model, composed with an LPCP compiler.
+- [Klooß et al., *RoKoko: Lattice-based Succinct Arguments, a Committed
+  Refinement*, ePrint 2026/575](https://eprint.iacr.org/2026/575): the paper
+  reports 112 KB proofs in its `2^26` benchmark and states its succinct
+  construction relies on vSIS; these are paper results, not local
+  application-pipeline measurements.
+- [RoKoko upstream implementation](https://github.com/lattice-arguments/rokoko):
+  README documents the experimental SNARK mode, nightly toolchain and
+  incomplete pure-Rust backend.
+- [Author's standard-SIS instantiation note](https://www.osdnk.me/blog/rokoko-standard-assumptions):
+  describes a variant but says it was not in the repository's main branch at
+  publication; it is not a primary security proof or code artifact.
 - [Linked C implementation](https://github.com/crypolover1998/LatticeBased-Dv-zkSNARK/tree/9bc41a62cd901c360d87f49a708b93c12238b5b8): pinned source reviewed,
   but predates the paper and only simulates lambda=1 commitment/response work;
   it is not a complete implementation of the revised construction.
