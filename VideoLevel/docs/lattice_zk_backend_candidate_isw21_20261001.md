@@ -14,6 +14,14 @@ zkSNARK: setup creates a verifier secret key. Any future integration must
 therefore provision the verification key only to the designated verifier and
 must not describe its proofs as publicly verifiable.
 
+This is no longer the strongest paper-level candidate found for the required
+knowledge-soundness property. The 2025/2099 preprint, revised July 2026,
+claims adaptive knowledge soundness from MSIS in the random-oracle model and
+combines an inner-product argument with an LPCP compiler. It is now the
+highest-priority candidate for source/artifact review. Its abstract and
+security claim are not independent validation, and no implementation of that
+construction has yet been built or reproduced in this repository.
+
 ## Independent assumption review
 
 A primary-source check of the ISW21 paper and the later LUNA analysis changes
@@ -50,6 +58,98 @@ review selects and justifies a viable assumption path (or a different backend
 with an acceptable knowledge theorem), ISW21 remains a proof-of-concept
 integration candidate only; it is not evidence that this project's required
 knowledge relation is securely proved.
+
+## Newer standard-assumption candidate: ePrint 2025/2099
+
+The latest ePrint abstract (revision dated 2026-07-13) describes *A
+Lattice-based Designated Verifier zkSNARK from Standard Assumptions* by
+Ahmadi, Eghlidos, Abdolmaleki, and Nguyen. The authors claim an inner-product
+argument based on Module-SIS (MSIS) with adaptive knowledge soundness in the
+random-oracle model, then combine it with an LPCP compiler for a designated-
+verifier zkSNARK. This directly addresses two limitations relevant to the
+ISW21/LUNA line: reliance on a lattice linear-only/targeted-malleability
+knowledge assumption and knowledge soundness restricted to non-adaptive
+attacks. These are the authors' claims for their construction, not a security
+result independently checked for this project.
+
+The current decision is therefore:
+
+- **Prioritize 2025/2099 for artifact and theorem review**, not immediate
+  integration. The full revised paper reports comparable prover/verifier
+  times, 10x smaller public parameters, and 2.5x larger proofs than its stated
+  baseline. The performance comparison excludes the shared LPCP work and uses
+  simulated LUNA expansion/limited challenge counts, so it is not an
+  end-to-end comparison. No benchmark from this repository reproduces it.
+- **Keep ISW21 as the locally reproducible baseline only.** Its generic R1CS
+  smoke test is useful for toolchain and proof-codec experiments, but the
+  known quantum attack invalidates its stated knowledge-based LO assumption
+  route, and the application relation remains absent.
+- **Keep LUNA as a secondary comparison, not a drop-in replacement.** Its
+  paper gives a ZK-SNARG route under a weaker statistically simulatable strict
+  LTM assumption; its ZK-SNARK route needs computationally simulatable strict
+  LTM and a knowledge-sound LPCP, and the proved soundness is non-adaptive.
+  The public LUNA repository implements the HGSW encryption component
+  (Setup/Encrypt/Add/Decrypt), not the full LUNA prover/verifier pipeline.
+
+### Full-paper review and code artifact audit
+
+The revised 31-page PDF was fetched directly from ePrint (SHA-256
+`bb295e81b4e865e9a28cf9235fae0980d4da9d45412e71366c1650a9678f5faa`) and its
+security, protocol, parameter, and evaluation sections were read. The web
+reader returned 403, but a direct HTTP fetch succeeded; that was a reader
+access issue, not a paper availability blocker.
+
+The paper's security claim is more specific than its abstract: the DV-LatticeIPA
+uses coordinate-wise special soundness and a rewinding extractor that needs
+the setup trapdoors and a programmable random oracle. The paper claims
+adaptive knowledge soundness in that random-oracle model, then composes the
+argument with an LPCP compiler for R1CS. This is a useful candidate theorem
+path, but it is not a standard-model knowledge-soundness result, and this
+review has not re-proved the reduction or independently validated the
+concrete MSIS estimate.
+
+The paper reports, for its 128-bit parameter setting, 20.75 KB proof size and
+1.3 GB full CRS; the proof size includes the commitment and response vectors.
+The benchmark machine was Ubuntu 22.04.5, 4-core Intel i7-12700H, 8 GB RAM.
+The plotted execution comparison excludes LPCP prover/verifier costs; its
+LUNA setup/CRS-expansion comparison is partly simulated, and it extrapolates
+from fewer challenges. Treat those figures as paper-reported component
+measurements, not complete application timings. The proof is about 16.3x the
+10,420-bit (1,302.5-byte) committed capacity measured on this project's
+separate 300-frame Akiyo CIF native run, before adding the video envelope.
+That specific clip is not a universal capacity bound, but it makes the
+current 300-frame operating point plainly insufficient for this proof.
+
+The paper links a public C implementation at
+`crypolover1998/LatticeBased-Dv-zkSNARK`. It is now pinned for review at
+`9bc41a62cd901c360d87f49a708b93c12238b5b8`; however, that repository's latest
+commit is 2025-04-14, before the ePrint submission (2025-11-14) and revised
+paper (2026-07-13). The repository exposes only the `main` branch at that
+commit. Its sole open pull request, #1, is an update to `README.md` only
+(one-line change); it contains no protocol implementation updates. At this
+pinned source:
+
+- `common.h` sets `PARAM_Lambda` to 1 and `PARAM_NumTrapdoors` to 4096;
+- `mainprotocol.c` explicitly says it simulates the commitment phase and the
+  PoK protocol for only lambda=1;
+- after its single inner-product calculation, the program prints a value but
+  does not make an accept/reject decision;
+- the exposed prover interface computes commitments and two challenge
+  responses, but the repo does not serialize a proof, implement the complete
+  LPCP composition, or test malformed/tampered proofs.
+
+Consequently, a public implementation artifact exists, but this checked
+revision is a partial PoC and does not reproduce the complete revised,
+128-bit, non-interactive DV-zkSNARK claimed by the paper. It cannot be used as
+the project's proof backend as-is. Before reconsidering it, obtain a source
+revision that matches the revised paper, pin and build it, verify its complete
+setup/prove/verify and serialization behavior, test invalid proofs, and
+independently review the adaptive extractor, programmable-random-oracle
+argument, designated-verifier key lifecycle, and concrete MSIS estimates.
+Then map the supported statement to this project's bounded payload-opening
+relation and measure exact proof bytes against the selected carrier profile.
+Until those gates pass, it remains a promising paper-level research lead and
+**not** a usable project backend.
 
 ## Reproduced upstream test
 
@@ -157,7 +257,12 @@ proves none of those properties.
 - produce a real proof for the application relation, measure its exact bytes,
   and embed/extract it blindly from H.264 Baseline/CAVLC with no proof sidecar;
 - run wrong-payload, changed-context, malformed-proof, tamper, replay, expiry,
-  and cross-session negative tests through the actual verifier; and
+  and cross-session negative tests through the actual verifier;
+- obtain and review the revised ePrint 2025/2099 paper and a pinned source
+  revision matching that paper; validate its adaptive knowledge-soundness
+  theorem, random-oracle model, concrete MSIS estimates, designated-verifier
+  setup, complete proof serialization and invalid-proof rejection before
+  deciding whether it supersedes ISW21; and
 - benchmark repeated setup/prove/verify time, peak RSS, visual quality, and
   carrier capacity on multiple real videos and durations.
 
@@ -170,6 +275,18 @@ proves none of those properties.
 - [LUNA, ePrint 2022/1690](https://eprint.iacr.org/2022/1690): later analysis of
   ISW21's knowledge-based LWE linear-only assumption, the weaker LTM route to
   argument soundness, and conditions required to recover knowledge soundness.
+- [Ahmadi et al., *A Lattice-based Designated Verifier zkSNARK from Standard
+  Assumptions*, ePrint 2025/2099](https://eprint.iacr.org/2025/2099): revised
+  2026-07-13; full-paper claim is an MSIS-based DV-LatticeIPA with adaptive
+  knowledge soundness via coordinate-wise special soundness in the random-
+  oracle model, composed with an LPCP compiler.
+- [Linked C implementation](https://github.com/crypolover1998/LatticeBased-Dv-zkSNARK/tree/9bc41a62cd901c360d87f49a708b93c12238b5b8): pinned source reviewed,
+  but predates the paper and only simulates lambda=1 commitment/response work;
+  it is not a complete implementation of the revised construction.
+- [Only open pull request (#1)](https://github.com/crypolover1998/LatticeBased-Dv-zkSNARK/pull/1): README-only change; no newer prover/verifier source was found.
+- [LUNA reference implementation](https://github.com/yassimert/LUNA): its
+  README scopes the published code to the HGSW component and documents Linux,
+  C++17/GCC, PALISADE, and a 32-GB-RAM recommendation for the Ng≈2^16 run.
 - [Debris-Alazard, Fallahpour, Stehlé, ePrint 2024/030](https://eprint.iacr.org/2024/030):
   quantum oblivious sampling attack on the standard-model lattice-SNARK
   knowledge assumption discussed by LUNA.
