@@ -238,16 +238,57 @@ should be the payload bits and a bounded lattice opening. The circuit must:
 4. bind all public inputs to the exact statement reconstructed independently
    by the video-only verifier.
 
-The commitment dimensions/distributions and their SIS hiding/binding estimates
-are not selected. The relation, circuit, context encoding, and public-input
-binding have not been implemented or reviewed. A passing generic R1CS demo
-proves none of those properties.
+The production commitment dimensions/distributions and their SIS hiding and
+binding estimates are not selected. Only the insecure toy relation below has
+been implemented; the production relation, context encoding, transcript
+composition, and parameters have not been implemented or reviewed. A passing
+smoke circuit proves none of those properties for the target system.
 
-## New candidate: RoKoko (ePrint 2026/575)
+### 32-byte application-shaped relation smoke (toy parameters)
 
-RoKoko is now the strongest candidate to evaluate next for a succinct lattice
-argument with a complete paper-level R1CS application. Its paper reports a
-112 KB proof at the smallest listed benchmark size (`|Z_q| = 2^26`), with
+The isolated ISW21 smoke circuit now constrains a full 32-byte private
+payload, a 2,816-bit private opening, a 32-byte public context, and a
+128-coordinate commitment. Its relation has the KTX shape
+`C = A * (payload_bits || context_bits) + B * opening_bits (mod q)` and
+constrains all commitment coordinates in the R1CS. It separately rejects an
+altered payload witness and opening, and the proof checks reject changed
+context/commitment and altered serialized response. This exercises the
+intended witness shape and statement binding in the R1CS, but q is only 19
+bits and no concrete SIS security estimate has been made. The generated
+matrices are not a production key setup. This is not a secure commitment, a
+production proof, or an H.264 integration.
+
+Built against the pinned upstream revision
+`48cb4cd4635f5b6e7e9354b7d4b12e9647c4331e` in the Ubuntu 24.04 research
+container, one observed run had 3,520 constraints, QAP degree 4,096, 160
+public inputs, a 21,331-byte serialized response, 4.9513 s LWE secret-key
+setup, 3.8365 s CRS/VK setup, 0.2656 s proving, 0.0006 s honest
+verification, 9.47 s whole-process wall time, and 480,892 KiB peak RSS. This
+was a single smoke measurement, not a benchmark distribution. More
+importantly, source review found the pinned upstream revision closes a
+function-static `/dev/urandom` stream after the first seed read and reuses it
+in later calls; subsequent seed bytes may be uninitialized. Thus this run is
+not valid cryptographic or trustworthy proof-performance evidence until that
+RNG defect is patched and the run repeated. The response length is fixed by
+the selected ISW21 proof parameters and remains 21,331 bytes; its exact
+in-band capacity gap is severe for the measured 300-frame CIF profiles. The
+detailed fixture definition and reproduction steps are in
+[`research/isw21_r1cs_opening_smoke/README.md`](../research/isw21_r1cs_opening_smoke/README.md).
+
+## Rejected as a zero-knowledge backend: RoKoko (ePrint 2026/575)
+
+RoKoko is not currently a viable backend for this zero-knowledge objective.
+The reviewed paper establishes knowledge soundness for its argument, but the
+paper/source reviewed here does not provide a zero-knowledge simulator or
+theorem for the construction or its `snark` mode. The implementation's label
+is not evidence of witness privacy; the final folded witness is verifier
+readable. This is an unmet privacy property, not a proof that no separate
+ZK composition could exist. Reconsider it only if a theorem-backed hiding
+composition and exact implementation are supplied and independently reviewed.
+
+The performance/size figures are still useful for transport comparison. The
+paper reports a 112 KB proof at the smallest listed benchmark size
+(`|Z_q| = 2^26`), with
 1.47 s proving and 8.12 ms verification on the paper's target machine; these
 are medians of three runs and exclude any video embed/extract work. The paper
 states that the construction uses the vanishing-SIS (vSIS) assumption for
@@ -256,14 +297,11 @@ than the standard Module-SIS route, so the paper's reduction and concrete
 hardness estimate need independent review before the backend can be trusted.
 
 The upstream repository is explicitly a proof-of-concept: it says the `snark`
-mode is highly experimental and that support for arbitrary relation
-frameworks is not fully exposed. It pins Rust nightly `2025-03-06`, recommends
-AVX-512 for best performance, and offers `incomplete-rexl` as a pure-Rust
-fallback. This project host has no Rust/Cargo installed and its i7-12700H
-reports AVX2 rather than AVX-512. A Docker attempt to retrieve the pinned Rust
-image failed at Docker Hub DNS resolution, so there is no local RoKoko build or
-runtime result yet. This is an environment constraint, not evidence that the
-candidate cannot build elsewhere.
+mode is highly experimental and arbitrary-relation support is not fully
+exposed. It pins Rust nightly `2025-03-06`, recommends AVX-512 for best
+performance, and offers `incomplete-rexl` as a pure-Rust fallback. No RoKoko
+build or runtime result is claimed locally; that is secondary to the missing
+zero-knowledge guarantee.
 
 The reported 112 KB proof is smaller than this repository's Ringo binary proof
 (about 1.65 MB), but still does not fit the measured stable blind carrier
@@ -276,15 +314,13 @@ drop-in fit for the tested clip/profile. No current RoKoko artifact proves the
 payload-opening/session/video-context relation, and its proof has not been
 embedded or blindly extracted from H.264 in this project.
 
-**Decision:** prioritize a pinned, reproducible RoKoko smoke test after a Rust
-toolchain is made available, then determine whether the exposed SNARK interface
-can express the exact bounded payload-opening relation. Do not replace the
-disabled public backend yet. If the build succeeds, first measure exact proof
-and statement bytes, test malformed/tampered proofs, check context binding, and
-re-evaluate the concrete vSIS security estimate; only then attempt the real
-video carrier path. An author write-up from September 2026 describes a
-standard-SIS instantiation, but says that variant is not in the repository's
-main code; it is not treated as an available backend.
+**Decision:** do not spend integration effort on RoKoko as a ZK backend unless
+the zero-knowledge gap is resolved with a theorem-backed composition. Its
+published proof size alone also exceeds the measured raw-safe capacity of the
+300-frame Foreman CIF profile. An author write-up from September 2026 describes
+a standard-SIS instantiation, but says that variant is not in the repository's
+main code; it neither resolves the privacy gap nor counts as an available
+backend.
 
 ## Remaining gates
 
@@ -293,17 +329,19 @@ main code; it is not treated as an available backend.
   the quantum attack against its knowledge-based LWE linear-only assumption,
   the stronger LTM route to knowledge soundness, the 40-bit statistical ZK
   parameter, and the non-reusable verification-oracle model;
-- implement and review the bounded payload-opening relation and setup/key
-  lifecycle, including verifier-key confidentiality;
+- select a secure lattice commitment with concrete hiding/binding estimates;
+  implement and independently review its bounded payload-opening relation,
+  canonical context encoding and setup/key lifecycle, including verifier-key
+  confidentiality;
 - extend the response-only codec into a versioned proof/statement envelope,
   including parameter identifiers, session fields, and canonical rejection;
 - produce a real proof for the application relation, measure its exact bytes,
   and embed/extract it blindly from H.264 Baseline/CAVLC with no proof sidecar;
 - run wrong-payload, changed-context, malformed-proof, tamper, replay, expiry,
   and cross-session negative tests through the actual verifier;
-- build and run a pinned RoKoko source revision; review its vSIS theorem and
-  parameters; establish that the available code proves this project's exact
-  payload-opening relation; test its full proof codec and negative cases;
+- do not use RoKoko as ZK unless its witness-privacy gap is resolved by a
+  theorem-backed construction and the exact implementation is independently
+  reviewed; and
 - independently evaluate whether ePrint 2025/2099 has a complete matching
   implementation and whether its adaptive-knowledge-soundness theorem and
   MSIS parameters are preferable to RoKoko; and

@@ -23,6 +23,8 @@ using Proof = r1cs_lattice_snark_proof<
     Fp2_b19_pp, RingParameters, ParameterSet>;
 
 constexpr std::uint64_t kCommitmentModulus = (1u << 19) - 1;
+constexpr std::size_t kCommitmentModulusBits = 19;
+constexpr std::size_t kCommitmentRows = 128;
 constexpr auto kCoefficientBoundExclusive =
     ParameterSet::rescale_q + ParameterSet::p_int + 1;
 static_assert(kCoefficientBoundExclusive <= (__uint128_t(1) << 41),
@@ -34,29 +36,42 @@ constexpr std::size_t kResponseBitCount =
     kResponseCoefficientBits * kResponseCoefficientCount;
 constexpr std::size_t kResponseByteCount = (kResponseBitCount + 7) / 8;
 constexpr std::size_t kContextBytes = 32;
-constexpr std::size_t kPayloadBits = 8;
-constexpr std::size_t kOpeningBits = 16;
+constexpr std::size_t kPayloadBytes = 32;
+constexpr std::size_t kPayloadBits = kPayloadBytes * 8;
+constexpr std::size_t kBitsPerByte = 8;
+constexpr std::size_t kContextBits = kContextBytes * kBitsPerByte;
+constexpr std::size_t kMessageBits = kPayloadBits + kContextBits;
+constexpr std::size_t kOpeningBits =
+    kCommitmentRows * (kCommitmentModulusBits + 3);
+constexpr std::size_t kOpeningBytes = (kOpeningBits + kBitsPerByte - 1) / kBitsPerByte;
 
 struct Circuit {
     protoboard<ProofField> board;
     std::array<pb_variable<ProofField>, kContextBytes> context{};
-    pb_variable<ProofField> commitment;
     std::array<pb_variable<ProofField>, kContextBytes * 8> context_bits{};
-    std::array<pb_variable<ProofField>, 19> commitment_bits{};
-    std::array<pb_variable<ProofField>, 19> commitment_prefix_ones{};
-    pb_variable<ProofField> payload;
+    std::array<pb_variable<ProofField>, kCommitmentRows> commitment{};
+    std::array<pb_variable<ProofField>, kPayloadBytes> payload_bytes{};
     std::array<pb_variable<ProofField>, kPayloadBits> payload_bits{};
     std::array<pb_variable<ProofField>, kOpeningBits> opening_bits{};
 };
 
-std::uint64_t opening_coefficient(std::size_t index) {
-    return (104729u * static_cast<std::uint64_t>(index + 1) + 33u) %
-           kCommitmentModulus;
-}
+struct KtxCommitmentKey {
+    std::vector<std::uint64_t> message_matrix;
+    std::vector<std::uint64_t> randomness_matrix;
+};
 
-std::uint64_t context_coefficient(std::size_t index) {
-    return (7919u * static_cast<std::uint64_t>(index + 1) + 17u) %
-           kCommitmentModulus;
+KtxCommitmentKey generate_ktx_commitment_key(
+    LWERandomness::PseudoRandomGenerator &prg) {
+    KtxCommitmentKey key{
+        std::vector<std::uint64_t>(kCommitmentRows * kMessageBits),
+        std::vector<std::uint64_t>(kCommitmentRows * kOpeningBits)};
+    for (auto &coefficient : key.message_matrix) {
+        coefficient = static_cast<std::uint64_t>(prg.bounded(kCommitmentModulus));
+    }
+    for (auto &coefficient : key.randomness_matrix) {
+        coefficient = static_cast<std::uint64_t>(prg.bounded(kCommitmentModulus));
+    }
+    return key;
 }
 
 std::vector<std::uint8_t> serialize_response(const Proof &proof) {
@@ -137,20 +152,34 @@ bool deserialize_response(const std::vector<std::uint8_t> &bytes, Proof &proof) 
     return true;
 }
 
-std::uint64_t commitment_for(
+std::array<std::uint64_t, kCommitmentRows> commitment_for(
+    const KtxCommitmentKey &key,
     const std::array<std::uint8_t, kContextBytes> &context,
-    std::uint8_t payload,
-    std::uint16_t opening) {
-    std::uint64_t result = 31337u * payload;
-    for (std::size_t i = 0; i < context.size(); ++i) {
-        result += context_coefficient(i) * context[i];
-    }
-    for (std::size_t i = 0; i < kOpeningBits; ++i) {
-        if ((opening >> i) & 1u) {
-            result += opening_coefficient(i);
+    const std::array<std::uint8_t, kPayloadBytes> &payload,
+    const std::array<std::uint8_t, kOpeningBytes> &opening) {
+    std::array<std::uint64_t, kCommitmentRows> result{};
+    for (std::size_t row = 0; row < kCommitmentRows; ++row) {
+        std::uint64_t accumulator = 0;
+        for (std::size_t i = 0; i < kPayloadBits; ++i) {
+            if ((payload[i / kBitsPerByte] >> (i % kBitsPerByte)) & 1u) {
+                accumulator += key.message_matrix[row * kMessageBits + i];
+            }
         }
+        for (std::size_t i = 0; i < kContextBits; ++i) {
+            if ((context[i / kBitsPerByte] >> (i % kBitsPerByte)) & 1u) {
+                accumulator += key.message_matrix[
+                    row * kMessageBits + kPayloadBits + i];
+            }
+        }
+        for (std::size_t i = 0; i < kOpeningBits; ++i) {
+            if ((opening[i / kBitsPerByte] >> (i % kBitsPerByte)) & 1u) {
+                accumulator += key.randomness_matrix[
+                    row * kOpeningBits + i];
+            }
+        }
+        result[row] = accumulator % kCommitmentModulus;
     }
-    return result % kCommitmentModulus;
+    return result;
 }
 
 template <std::size_t N>
@@ -179,36 +208,42 @@ void assign_bits(
 }
 
 Circuit make_circuit(
+    const KtxCommitmentKey &key,
     const std::array<std::uint8_t, kContextBytes> &context,
-    std::uint8_t payload,
-    std::uint16_t opening) {
+    const std::array<std::uint8_t, kPayloadBytes> &payload,
+    const std::array<std::uint8_t, kOpeningBytes> &opening) {
     Circuit circuit;
     auto &pb = circuit.board;
 
-    // Public instance: the complete 32-byte verifier context and commitment.
+    // Public instance: the context bytes and KTX commitment vector.
     for (std::size_t i = 0; i < circuit.context.size(); ++i) {
         circuit.context[i].allocate(pb, "public context byte");
         pb.val(circuit.context[i]) = ProofField(context[i]);
     }
-    circuit.commitment.allocate(pb, "public commitment");
-    const std::uint64_t expected_commitment =
-        commitment_for(context, payload, opening);
-    pb.val(circuit.commitment) = ProofField(expected_commitment);
-    pb.set_input_sizes(kContextBytes + 1);
+    const auto expected_commitment = commitment_for(key, context, payload, opening);
+    for (std::size_t row = 0; row < kCommitmentRows; ++row) {
+        circuit.commitment[row].allocate(pb, "public commitment coordinate");
+        pb.val(circuit.commitment[row]) = ProofField(expected_commitment[row]);
+    }
+    pb.set_input_sizes(kContextBytes + kCommitmentRows);
 
-    circuit.payload.allocate(pb, "private payload byte");
-    pb.val(circuit.payload) = ProofField(payload);
+    for (auto &payload_byte : circuit.payload_bytes) {
+        payload_byte.allocate(pb, "private payload byte");
+    }
     for (std::size_t i = 0; i < circuit.context_bits.size(); ++i) {
         circuit.context_bits[i].allocate(pb, "context byte range bit");
     }
-    for (std::size_t i = 0; i < circuit.commitment_bits.size(); ++i) {
-        circuit.commitment_bits[i].allocate(pb, "commitment canonical bit");
+    for (auto &payload_bit : circuit.payload_bits) {
+        payload_bit.allocate(pb, "payload byte bit");
     }
-    for (std::size_t i = 0; i < circuit.commitment_prefix_ones.size(); ++i) {
-        circuit.commitment_prefix_ones[i].allocate(pb, "commitment canonicality prefix");
-    }
-    for (std::size_t i = 0; i < circuit.payload_bits.size(); ++i) {
-        circuit.payload_bits[i].allocate(pb, "payload byte bit");
+    for (std::size_t byte = 0; byte < kPayloadBytes; ++byte) {
+        std::array<pb_variable<ProofField>, kBitsPerByte> bits{};
+        for (std::size_t bit = 0; bit < bits.size(); ++bit) {
+            bits[bit] = circuit.payload_bits[byte * kBitsPerByte + bit];
+        }
+        pb.val(circuit.payload_bytes[byte]) = ProofField(payload[byte]);
+        bind_packed_bits(pb, bits, circuit.payload_bytes[byte], "payload");
+        assign_bits(pb, bits, payload[byte]);
     }
     for (std::size_t i = 0; i < circuit.opening_bits.size(); ++i) {
         circuit.opening_bits[i].allocate(pb, "bounded opening bit");
@@ -222,44 +257,33 @@ Circuit make_circuit(
         bind_packed_bits(pb, bits, circuit.context[byte], "context");
         assign_bits(pb, bits, context[byte]);
     }
-    bind_packed_bits(pb, circuit.commitment_bits, circuit.commitment, "commitment");
-    assign_bits(pb, circuit.commitment_bits, expected_commitment);
-    bind_packed_bits(pb, circuit.payload_bits, circuit.payload, "payload");
-    assign_bits(pb, circuit.payload_bits, payload);
-
-    pb.add_r1cs_constraint(r1cs_constraint<ProofField>(
-        1, circuit.commitment_bits[0], circuit.commitment_prefix_ones[0]));
-    pb.val(circuit.commitment_prefix_ones[0]) =
-        pb.val(circuit.commitment_bits[0]);
-    for (std::size_t i = 1; i < circuit.commitment_prefix_ones.size(); ++i) {
-        pb.add_r1cs_constraint(r1cs_constraint<ProofField>(
-            circuit.commitment_prefix_ones[i - 1], circuit.commitment_bits[i],
-            circuit.commitment_prefix_ones[i]));
-        pb.val(circuit.commitment_prefix_ones[i]) =
-            pb.val(circuit.commitment_prefix_ones[i - 1]) *
-            pb.val(circuit.commitment_bits[i]);
-    }
-    generate_r1cs_equals_const_constraint<ProofField>(
-        pb, circuit.commitment_prefix_ones.back(), ProofField::zero(),
-        "commitment must be less than 2^19-1");
-
-    pb_linear_combination<ProofField> opening_lc;
     for (std::size_t i = 0; i < circuit.opening_bits.size(); ++i) {
         generate_boolean_r1cs_constraint<ProofField>(pb, circuit.opening_bits[i], "opening bit");
-        const bool set = ((opening >> i) & 1u) != 0;
+        const bool set = ((opening[i / kBitsPerByte] >> (i % kBitsPerByte)) & 1u) != 0;
         pb.val(circuit.opening_bits[i]) = ProofField(set ? 1 : 0);
-        opening_lc.add_term(circuit.opening_bits[i],
-                             ProofField(opening_coefficient(i)));
     }
 
-    pb_linear_combination<ProofField> commitment_lc = opening_lc;
-    commitment_lc.add_term(circuit.payload, ProofField(31337u));
-    for (std::size_t i = 0; i < kContextBytes; ++i) {
-        commitment_lc.add_term(circuit.context[i],
-                               ProofField(context_coefficient(i)));
+    for (std::size_t row = 0; row < kCommitmentRows; ++row) {
+        pb_linear_combination<ProofField> commitment_lc;
+        for (std::size_t i = 0; i < kPayloadBits; ++i) {
+            commitment_lc.add_term(
+                circuit.payload_bits[i],
+                ProofField(key.message_matrix[row * kMessageBits + i]));
+        }
+        for (std::size_t i = 0; i < kContextBits; ++i) {
+            commitment_lc.add_term(
+                circuit.context_bits[i],
+                ProofField(key.message_matrix[
+                    row * kMessageBits + kPayloadBits + i]));
+        }
+        for (std::size_t i = 0; i < kOpeningBits; ++i) {
+            commitment_lc.add_term(
+                circuit.opening_bits[i],
+                ProofField(key.randomness_matrix[row * kOpeningBits + i]));
+        }
+        pb.add_r1cs_constraint(r1cs_constraint<ProofField>(
+            1, commitment_lc, circuit.commitment[row]));
     }
-    pb.add_r1cs_constraint(
-        r1cs_constraint<ProofField>(1, commitment_lc, circuit.commitment));
 
     return circuit;
 }
@@ -280,10 +304,19 @@ int main(int argc, char **argv) {
         0x6c, 0xa9, 0x11, 0x08, 0xd2, 0x33, 0x4f, 0x80,
         0x29, 0xf1, 0x63, 0x05, 0x9a, 0x44, 0x18, 0xce,
         0x7d, 0x26, 0xb0, 0x52, 0x0f, 0x8b, 0xd7, 0x31};
-    constexpr std::uint8_t payload = 0x5a;
-    constexpr std::uint16_t opening = 0xa53c;
+    std::array<std::uint8_t, kPayloadBytes> payload{};
+    std::array<std::uint8_t, kOpeningBytes> opening{};
+    LWERandomness::PseudoRandomGenerator commitment_prg;
+    const KtxCommitmentKey commitment_key =
+        generate_ktx_commitment_key(commitment_prg);
+    for (std::size_t i = 0; i < kPayloadBytes; ++i) {
+        payload[i] = static_cast<std::uint8_t>(0x5au + 29u * i);
+    }
+    for (auto &byte : opening) {
+        byte = static_cast<std::uint8_t>(commitment_prg.bounded(1u << kBitsPerByte));
+    }
 
-    Circuit circuit = make_circuit(context, payload, opening);
+    Circuit circuit = make_circuit(commitment_key, context, payload, opening);
     if (!circuit.board.is_satisfied()) {
         const auto constraints = circuit.board.get_constraint_system();
         const auto assignment = circuit.board.full_variable_assignment();
@@ -301,22 +334,19 @@ int main(int argc, char **argv) {
 
     auto recentered_context = context;
     recentered_context[0] = static_cast<std::uint8_t>(recentered_context[0] + 1);
-    Circuit recentered_circuit =
-        make_circuit(recentered_context, payload, opening);
+    Circuit recentered_circuit = make_circuit(
+        commitment_key, recentered_context, payload, opening);
     if (!recentered_circuit.board.is_satisfied()) {
         std::cerr << "recentered statement should have a valid opening witness\n";
         return 2;
     }
 
-    Circuit noncanonical_c = make_circuit(context, payload, opening);
-    noncanonical_c.board.val(noncanonical_c.commitment) = ProofField::zero();
-    for (std::size_t i = 0; i < noncanonical_c.commitment_bits.size(); ++i) {
-        noncanonical_c.board.val(noncanonical_c.commitment_bits[i]) = ProofField::one();
-        noncanonical_c.board.val(noncanonical_c.commitment_prefix_ones[i]) =
-            ProofField::one();
-    }
-    if (noncanonical_c.board.is_satisfied()) {
-        std::cerr << "non-canonical all-ones encoding of q=0 was accepted\n";
+    Circuit altered_commitment = make_circuit(
+        commitment_key, context, payload, opening);
+    altered_commitment.board.val(altered_commitment.commitment[0]) +=
+        ProofField::one();
+    if (altered_commitment.board.is_satisfied()) {
+        std::cerr << "altered KTX commitment unexpectedly satisfies the R1CS\n";
         return 3;
     }
 
@@ -330,6 +360,17 @@ int main(int argc, char **argv) {
     }
     circuit.board.val(circuit.payload_bits[0]) =
         ProofField(1) - circuit.board.val(circuit.payload_bits[0]);
+
+    // Negative opening check: an altered secret opening must not open the
+    // unchanged public commitment while the payload stays unchanged.
+    circuit.board.val(circuit.opening_bits[0]) =
+        ProofField(1) - circuit.board.val(circuit.opening_bits[0]);
+    if (circuit.board.is_satisfied()) {
+        std::cerr << "altered opening unexpectedly satisfies the R1CS relation\n";
+        return 5;
+    }
+    circuit.board.val(circuit.opening_bits[0]) =
+        ProofField(1) - circuit.board.val(circuit.opening_bits[0]);
 
     using namespace LWE;
     auto prg = std::make_unique<LWERandomness::PseudoRandomGenerator>();
@@ -523,7 +564,7 @@ int main(int argc, char **argv) {
 
     std::cout << "HONEST_R1CS=PASS\n"
               << "ALTERED_PAYLOAD_WITNESS=REJECTED\n"
-              << "NONCANONICAL_COMMITMENT=REJECTED\n"
+              << "COMMITMENT_EQUATION_MISMATCH=REJECTED\n"
               << "LATTICE_SNARK_HONEST_VERIFY=PASS\n"
               << "CHANGED_CONTEXT_PROOF=REJECTED\n"
               << "RECENTERED_CONTEXT_STATEMENT_PROOF=REJECTED\n"
@@ -551,7 +592,15 @@ int main(int argc, char **argv) {
               << fixed_width_bytes << " (response only)\n"
               << "constraints=" << example.constraint_system.num_constraints()
               << " public_inputs=" << example.primary_input.size() << '\n'
-              << "WARNING=toy q=2^19-1 commitment, 16-bit binary opening; not secure parameters\n";
+              << "PAYLOAD_BYTES=" << kPayloadBytes << '\n'
+              << "OPENING_BITS=" << kOpeningBits << '\n'
+              << "KTX_COMMITMENT_ROWS=" << kCommitmentRows << '\n'
+              << "KTX_MESSAGE_BITS=" << kMessageBits << '\n'
+              << "KTX_RANDOMNESS_SURPLUS_BITS="
+              << kOpeningBits - kCommitmentRows * kCommitmentModulusBits << '\n'
+              << "RELATION=KTX-style SIS commitment to payload and context\n"
+              << "ALTERED_OPENING=REJECTED\n"
+              << "WARNING=KTX candidate parameters are not independently estimated or reviewed\n";
 
     return 0;
 }

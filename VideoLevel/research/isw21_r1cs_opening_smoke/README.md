@@ -7,33 +7,41 @@ secure commitment suite.
 
 ## Relation in this smoke test
 
-Public input is a 32-byte context digest and one field commitment. The private
-witness is one byte of payload and a 16-bit binary opening. With
-`q = 2^19 - 1`, deterministic public coefficients define:
+Public input is a 32-byte context digest and a 128-coordinate commitment
+vector. The private witness is a 32-byte payload and a 2,816-bit opening. With
+`q = 2^19 - 1`, AES-PRG-generated public matrices define a KTX-shaped toy
+linear commitment over the little-endian bits of payload, context, and opening:
 
 ```text
-C = 31337 * payload
-  + sum_i A_i * opening_bit_i
-  + sum_j H_j * context_byte_j  (mod q)
+C = A * (payload_bits || context_bits) + B * opening_bits  (mod q)
 ```
 
-The R1CS constrains context and payload bytes, each opening bit, the canonical
-19-bit commitment representation, and the commitment equation. The complete
-context bytes and original commitment are public SNARK inputs. Negative
-checks require an altered payload witness, changed context, and changed
-commitment to be rejected. A recentered pair changes one context byte and
-adjusts the commitment by the corresponding public coefficient; although the
-same witness still satisfies that new equation, the old proof must fail for
-the changed full primary input.
+The R1CS constrains context and payload bytes, all 2,816 opening bits, and each
+of the 128 commitment equations. The complete context bytes and commitment
+vector are public SNARK inputs (160 public inputs total). Negative checks
+require an altered payload witness, altered opening, changed context, and
+changed commitment to be rejected. A recentered pair changes one context byte
+and adjusts the commitment by the corresponding public matrix column; although
+the same witness still satisfies that new equation, the old proof must fail
+for the changed full primary input.
 
 ## Security boundary
 
-`q` is only 19 bits and the opening has only 16 bits. The coefficients are
-deterministic test values. This is deliberately insecure and exists only to
-test circuit wiring, primary-input binding, and invocation of the lattice SNARK
-on an application-shaped relation. It provides no meaningful SIS security,
-production parameter estimate, full proof envelope, or H.264 integration. A
-passing result does not satisfy the target relation.
+`q` is only 19 bits, the dimensions are not selected from a concrete SIS
+estimate, and the PRG-generated key is only a smoke fixture. This exists only
+to test circuit wiring, primary-input binding, and invocation of the lattice
+SNARK on a full-length payload/opening relation. It provides no established
+SIS security, production parameter estimate, full proof envelope, or H.264
+integration. A passing result does not satisfy the target relation.
+
+**Cryptographic run caveat:** source review found that the pinned upstream
+revision closes a function-static `/dev/urandom` stream after its first read
+and reuses that closed stream in later seed-generation calls. Later calls can
+therefore expand uninitialized seed bytes. Until that upstream RNG issue is
+patched and the run is repeated, proof-generation output and cryptographic
+timings below are not valid evidence of secure randomness or a trustworthy
+proof execution. The source pin is not modified by this repository's smoke
+test.
 
 ## Response coefficient size diagnostic
 
@@ -95,14 +103,16 @@ cmake --build /tmp/isw21-opening-build --target isw21_r1cs_opening_smoke -j2
 ```
 
 Expected terminal markers include `HONEST_R1CS=PASS`,
-`ALTERED_PAYLOAD_WITNESS=REJECTED`, `NONCANONICAL_COMMITMENT=REJECTED`,
+`ALTERED_PAYLOAD_WITNESS=REJECTED`, `COMMITMENT_EQUATION_MISMATCH=REJECTED`,
 `LATTICE_SNARK_HONEST_VERIFY=PASS`, `CHANGED_CONTEXT_PROOF=REJECTED`,
 `RECENTERED_CONTEXT_STATEMENT_PROOF=REJECTED`, and
 `CHANGED_COMMITMENT_PROOF=REJECTED`, `PROOF_RESPONSE_ROUNDTRIP=PASS`,
 `TAMPERED_SERIALIZED_RESPONSE=REJECTED`,
 `MALFORMED_RESPONSE_ENCODINGS=REJECTED`, and
-`SERIALIZED_RESPONSE_BYTES=21331`. Results must be reported together with the
-explicit toy-parameter warning printed by the program.
+`SERIALIZED_RESPONSE_BYTES=21331`, `PAYLOAD_BYTES=32`,
+`OPENING_BITS=2816`, `KTX_COMMITMENT_ROWS=128`, and
+`ALTERED_OPENING=REJECTED`. Results must be reported
+together with the explicit toy-parameter warning printed by the program.
 
 ## One measured smoke run
 
@@ -111,22 +121,22 @@ host, GCC 13.3, Release build, pinned upstream revision above. One run produced:
 
 | Measurement | Result |
 | --- | ---: |
-| R1CS constraints | 354 |
-| QAP degree | 512 |
-| Public inputs | 33 |
-| LWE secret-key setup | 4.8416 s |
-| CRS and verification-key setup | 0.4968 s |
-| Prove | 0.0546 s |
-| Verify (one accepted proof) | 0.0007 s |
-| Verify after response decode | 0.0011 s |
-| Process wall time, including negative checks | 5.59 s |
-| Peak RSS | 410,336 KiB |
+| R1CS constraints | 3,520 |
+| QAP degree | 4,096 |
+| Public inputs | 160 |
+| LWE secret-key setup | 4.9513 s |
+| CRS and verification-key setup | 3.8365 s |
+| Prove | 0.2656 s |
+| Verify (one accepted proof) | 0.0006 s |
+| Process wall time, including negative checks | 9.47 s |
+| Peak RSS | 480,892 KiB |
 | Canonically encoded response bytes | 21,331 bytes |
 
-These are single-run smoke observations, not stable benchmark statistics.
-Setup is dominated by the upstream designated-verifier key generation.
-Upstream's `Linear comb size 835` is an internal element count, not bytes.
-The response encoding does not include the statement or an application/video
-envelope. This tiny, insecure circuit says nothing about setup/prove
-performance, complete proof capacity, visual quality, realtime behavior, or
-peak memory for the video relation.
+This is one observed run, not a stable benchmark statistic, and is marked
+cryptographically invalid pending the upstream RNG correction described
+above. The reported timings are workload observations only, not reliable ZK
+performance evidence. Upstream's `Linear comb size 1866` is an internal
+element count, not bytes. The response encoding does not include the statement
+or an application/video envelope. The tiny-modulus relation says nothing about
+production security, complete proof capacity, visual quality, realtime
+behavior, or peak memory for the video relation.
