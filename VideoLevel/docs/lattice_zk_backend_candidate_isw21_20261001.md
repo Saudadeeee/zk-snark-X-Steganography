@@ -14,6 +14,43 @@ zkSNARK: setup creates a verifier secret key. Any future integration must
 therefore provision the verification key only to the designated verifier and
 must not describe its proofs as publicly verifiable.
 
+## Independent assumption review
+
+A primary-source check of the ISW21 paper and the later LUNA analysis changes
+how this candidate can be described for this project's knowledge relation:
+
+- The upstream README states computational security parameter 128 and
+  statistical zero-knowledge parameter 40 for its prototype. The latter is
+  the stated distinguishing bound `2^-40 + negl(lambda)`, not a 128-bit
+  zero-knowledge claim. The exact target policy must decide whether that
+  statistical privacy level is acceptable and re-derive parameters for any
+  change.
+- ISW21 is designated-verifier preprocessing: the verifier has a secret key.
+  The paper also states that the construction lacks reusable soundness against
+  a malicious prover making an arbitrary polynomial number of verification
+  oracle queries. It says attacks require a super-constant number of bad
+  proofs, making attempts detectable under the paper's model; this repository
+  has not implemented or analyzed the corresponding oracle/rate-limit policy.
+- More critically for the requested *proof of knowledge*, the later LUNA
+  paper says the knowledge-based linear-only LWE assumption used to obtain
+  knowledge soundness for ISW21 and related schemes is invalid against
+  quantum attacks. It distinguishes this from ordinary argument soundness:
+  a weaker statistically-simulatable strict LTM assumption may still support
+  ZK-SNARG soundness, while the knowledge-sound ZK-SNARK claim needs a stronger
+  computationally-simulatable LTM assumption plus knowledge soundness of the
+  underlying LPCP. That stronger assumption and the exact ISW21-to-application
+  composition have not been established here. This invalidates that stated
+  knowledge-assumption route; it is not, by itself, a demonstrated forgery or
+  a proof that ISW21 is unsound under every alternative assumption.
+
+Therefore, the observed honest verification and altered-public-input
+rejections in the smoke test do not establish post-quantum knowledge
+soundness for the payload-opening relation. Until an independent cryptographic
+review selects and justifies a viable assumption path (or a different backend
+with an acceptable knowledge theorem), ISW21 remains a proof-of-concept
+integration candidate only; it is not evidence that this project's required
+knowledge relation is securely proved.
+
 ## Reproduced upstream test
 
 - Source: `lattice-based-zkSNARKs/lattice-zksnark`, detached at
@@ -109,7 +146,10 @@ proves none of those properties.
 ## Remaining gates
 
 - independently check the ISW21 security theorem and concrete parameter
-  estimates for this exact circuit and designated-verifier setup;
+  estimates for this exact circuit and designated-verifier setup, including
+  the quantum attack against its knowledge-based LWE linear-only assumption,
+  the stronger LTM route to knowledge soundness, the 40-bit statistical ZK
+  parameter, and the non-reusable verification-oracle model;
 - implement and review the bounded payload-opening relation and setup/key
   lifecycle, including verifier-key confidentiality;
 - extend the response-only codec into a versioned proof/statement envelope,
@@ -127,6 +167,12 @@ proves none of those properties.
   zkSNARKs from Lattices*](https://eprint.iacr.org/2021/977)
 - [Upstream reference implementation and build instructions](https://github.com/lattice-based-zkSNARKs/lattice-zksnark)
 - [Pinned upstream source revision](https://github.com/lattice-based-zkSNARKs/lattice-zksnark/tree/48cb4cd4635f5b6e7e9354b7d4b12e9647c4331e)
+- [LUNA, ePrint 2022/1690](https://eprint.iacr.org/2022/1690): later analysis of
+  ISW21's knowledge-based LWE linear-only assumption, the weaker LTM route to
+  argument soundness, and conditions required to recover knowledge soundness.
+- [Debris-Alazard, Fallahpour, Stehlé, ePrint 2024/030](https://eprint.iacr.org/2024/030):
+  quantum oblivious sampling attack on the standard-model lattice-SNARK
+  knowledge assumption discussed by LUNA.
 - [LaZer upstream requirements](https://github.com/lazer-crypto/lazer): Linux
   x86-64 with AVX-512 and AES. The local i7-12700H's Intel product
   specification lists AVX2, not AVX-512, so LaZer is not a local runtime

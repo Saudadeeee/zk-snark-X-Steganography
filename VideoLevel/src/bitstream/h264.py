@@ -121,16 +121,23 @@ class NALParser:
     def _find_start_codes(self) -> List[Tuple[int, int]]:
         """Find all NAL unit start codes. Returns list of (position_after_sc, sc_size)."""
         positions = []
-        i = 0
-        while i < len(self.data) - 3:
-            if self.data[i:i+4] == b'\x00\x00\x00\x01':
-                positions.append((i + 4, 4))
-                i += 4
-            elif self.data[i:i+3] == b'\x00\x00\x01':
-                positions.append((i + 3, 3))
-                i += 3
-            else:
-                i += 1
+        search_from = 0
+        while True:
+            marker = self.data.find(b'\x00\x00\x01', search_from)
+            if marker < 0:
+                break
+
+            # A four-byte start code ends at the same 00 00 01 marker, with
+            # its extra zero immediately before it. Searching for the shared
+            # three-byte suffix avoids allocating a slice at every input byte.
+            start_code_size = 4 if marker > 0 and self.data[marker - 1] == 0 else 3
+            after_start_code = marker + 3
+            if after_start_code > len(self.data) or (
+                after_start_code == len(self.data) and start_code_size == 3
+            ):
+                break
+            positions.append((after_start_code, start_code_size))
+            search_from = after_start_code
         return positions
 
     def _extract_nal_unit(self, start: int, end: int, sc_size: int = 4) -> Optional[NALUnit]:
@@ -164,16 +171,9 @@ class NALParser:
         )
 
     def _remove_emulation_prevention(self, data: bytes) -> bytes:
-        result = bytearray()
-        i = 0
-        while i < len(data):
-            if i + 2 < len(data) and data[i:i+2] == b'\x00\x00' and data[i+2] == 0x03:
-                result.extend(data[i:i+2])
-                i += 3
-            else:
-                result.append(data[i])
-                i += 1
-        return bytes(result)
+        # bytes.replace implements the exact 00 00 03 -> 00 00 removal rule
+        # in native code, avoiding a Python iteration and per-byte slicing.
+        return data.replace(b'\x00\x00\x03', b'\x00\x00')
 
 @dataclass
 class SPSData:
