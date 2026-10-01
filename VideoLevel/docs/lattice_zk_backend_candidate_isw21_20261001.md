@@ -3,10 +3,12 @@
 ## Decision
 
 ISW21 is the first candidate in this repository that passed a real upstream
-Linux build and a prover/verifier smoke test on the current computer. Keep it
-as a **research candidate**, not an accepted application backend. The proof
-was for the upstream generic R1CS demo; it did not encode the video payload
-opening relation, session policy, or normalized H.264 statement.
+Linux build and a prover/verifier smoke test for an application-shaped toy
+R1CS on the current computer. Keep it as a **research candidate**, not an
+accepted application backend. The smoke constrains payload and context bits
+against a toy linear commitment, but does not encode the target relation's
+full session policy, registry binding, normalized H.264 statement, or secure
+commitment parameters.
 
 The upstream project explicitly describes itself as a proof-of-concept and
 not production-ready. The construction is a *designated-verifier* lattice
@@ -280,6 +282,18 @@ honest-proof and negative-case markers (9.12 s wall time, 481,076 KiB peak
 RSS). These are two smoke runs, not a benchmark distribution. The detailed
 fixture definition and reproduction steps are in
 [`research/isw21_r1cs_opening_smoke/README.md`](../research/isw21_r1cs_opening_smoke/README.md).
+
+This is still a one-process proof exercise, not independent prover/verifier
+operation. The smoke regenerates its commitment key, R1CS, CRS, and verifier
+key every run, uses the in-memory verifier key (which contains the LWE secret
+key), and optionally exports only response bytes. Upstream provides no
+portable setup-key serialization for these objects: its LWE `Vector` and
+`Matrix` types have no stream operators, and libff labels its own generic
+serialization fragile and binary output non-portable across word sizes.
+Accordingly, the actual-video verifier cannot consume this response in a
+separate process yet. A dedicated, versioned setup format and confidential
+designated-verifier key provisioning are integration gates, not incidental
+plumbing.
 
 ## Rejected as a zero-knowledge backend: RoKoko (ePrint 2026/575)
 

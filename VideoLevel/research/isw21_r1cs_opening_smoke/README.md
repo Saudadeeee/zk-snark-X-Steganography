@@ -34,6 +34,19 @@ SNARK on a full-length payload/opening relation. It provides no established
 SIS security, production parameter estimate, full proof envelope, or H.264
 integration. A passing result does not satisfy the target relation.
 
+**Not an independent prover/verifier interface:** the program creates the
+commitment matrices, R1CS, CRS, and verification key on each run, then proves
+and verifies in that same process. `--response-output` writes only the 21,331
+response bytes; it does not serialize the public statement, commitment
+matrices, CRS, or verifier key. The verification key contains the LWE secret
+key and must remain with the designated verifier. The pinned source defines
+no serialization for its LWE `Vector`/`Matrix` setup members; libff's generic
+serialization comments call its format fragile and warn binary output is not
+portable across word sizes. Therefore this smoke cannot yet verify a response
+in a separate process or on another machine. A production path needs a
+versioned, parameter-specific, portable setup format and a confidential
+designated-verifier key lifecycle, independently reviewed before use.
+
 **Cryptographic run caveat:** source review found that the pinned upstream
 revision closes a function-static `/dev/urandom` stream after its first read
 and reuses that closed stream in later seed-generation calls. Later calls can

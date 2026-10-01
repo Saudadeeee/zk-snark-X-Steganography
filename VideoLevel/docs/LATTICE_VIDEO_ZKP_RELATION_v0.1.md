@@ -395,6 +395,23 @@ The existing `src/video_zkp_contract.py` is only a statement/context helper:
 - there is no proof backend proving `R_open` or any `R_relation_id`, and the
   composed helper explicitly does not verify a proof or payload opening.
 
+**Latest measured transport/context evidence (2026-10-01):**
+`python -B -m pytest -p no:cacheprovider -q
+src/runtest/test_video_only_blind_sync_integration.py` passed all four tests
+in 394.96 s on the current Windows host. The real-video case uses the
+Foreman CIF 300-frame H.264 fixture: it embeds an 8-byte test payload into
+H.264 residual carriers, extracts it from the stego video without sidecars,
+compares fast and direct CAVLC extraction, and checks deterministic carrier
+and normalized-context reconstruction. The test also exercises the
+video-only statement-context helper. It does **not** create or verify a ZK
+proof, measure isolated pipeline latency, or show that a full ISW21 response
+fits this clip. Separately, the current native-capacity probe on Akiyo CIF
+300-frame input measured 10,420 committed bits, while the ISW21 response alone
+is 170,648 encoded bits before envelope framing. Those are different clips and
+this comparison is clip-specific, but it confirms that the measured native
+300-frame profile cannot carry the smoke response. The current smoke backend
+is not wired to this video path.
+
 Accordingly this draft defines the intended next protocol boundary, not a
 completed implementation. Before coding a backend, fix the public contract,
 select concrete commitment/proof parameters, implement a fixed-size carrier
