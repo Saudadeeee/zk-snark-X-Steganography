@@ -1,0 +1,24 @@
+# Python dependencies for VideoLevel (validated with Python 3.12.10 on Windows).
+# Install: py -3.12 -m pip install -r requirements.txt
+# Non-Python tools: Node.js 22.x (+ `npm ci` in circuits/), circom 2.2.x, ffmpeg.
+
+# Core numerics / media analysis
+numpy==2.2.6
+scipy==1.17.0
+scikit-image==0.26.0
+matplotlib==3.10.8
+
+# Crypto (manifest signing, key policy)
+cryptography==46.0.5
+
+# HTTP / WebSocket service
+fastapi==0.131.0
+starlette==0.52.1
+uvicorn==0.41.0
+python-multipart==0.0.32
+websockets==16.0
+anyio==4.12.1
+
+# Tests and benchmarks
+httpx==0.28.1
+psutil==7.2.2
