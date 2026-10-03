@@ -137,7 +137,7 @@ def raw_input_view(session, source_input: Path, encode_command: list[str], width
         session.say(f"  Y4M header ({len(header)} byte): {header.decode('ascii', 'replace').strip()}")
         if frame_bytes:
             marker = len(b"FRAME\n")
-            for index in range(1, 3):
+            for _ in range(1, 3):
                 offsets.append(offsets[-1] + marker + frame_bytes)
             session.say(f"  Moi frame = 'FRAME\\n' (6 byte) + Y({frame_bytes * 2 // 3}) + U + V = {marker + frame_bytes} byte")
             session.say(f"  Vi tri marker FRAME cua 3 frame dau: {offsets}")

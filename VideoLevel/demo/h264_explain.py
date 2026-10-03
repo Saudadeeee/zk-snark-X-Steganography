@@ -323,7 +323,14 @@ def derive_intra4x4_modes(macroblocks: list[dict], mb_width: int) -> dict[int, l
         for blk in range(16):
             x, y = block_xy(blk)
 
-            def neighbour(dx: int, dy: int) -> tuple[int | None, str]:
+            def neighbour(
+                dx: int,
+                dy: int,
+                x: int = x,
+                y: int = y,
+                derived: list[ModeDerivation | None] = derived,
+                address: int = address,
+            ) -> tuple[int | None, str]:
                 nx, ny = x + dx, y + dy
                 if 0 <= nx < 4 and 0 <= ny < 4:
                     return derived[block_index(nx, ny)].mode, "cung MB"  # type: ignore[union-attr]
