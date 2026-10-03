@@ -37,14 +37,18 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
-# On Windows, npx/npm are .cmd scripts that require shell=True.
-# On Unix we keep shell=False for security.
-_SHELL = sys.platform == "win32"
+# On Windows, npx/npm are .cmd scripts that require shell=True. The locally
+# installed snarkjs CLI is preferred so the fallback is only used when
+# circuits/node_modules is absent.
+_NPX_SHELL = sys.platform == "win32"
+_SNARKJS_LOCAL_CLI = Path("node_modules") / "snarkjs" / "build" / "cli.cjs"
+_SUBPROCESS_TEXT = {"text": True, "encoding": "utf-8", "errors": "replace"}
 
 
 # =============================================================================
@@ -87,23 +91,41 @@ def proof_to_bytes(proof_dict: dict) -> bytes:
         _to32(pi_c[0]),     # pi_c.x
         flags.to_bytes(1, "big")
     ])
-    assert len(blob) == PROOF_SIZE_BYTES
+    if len(blob) != PROOF_SIZE_BYTES:
+        raise ValueError(f"Serialized proof must be {PROOF_SIZE_BYTES} bytes, got {len(blob)}")
     return blob
 
 
-def bytes_to_proof(data: bytes) -> dict:
-    """Deserialize 129-byte binary → snarkjs Groth16 proof dict via Decompression."""
-    assert len(data) == PROOF_SIZE_BYTES
+def _field_element(x_bytes: bytes) -> int:
+    value = int.from_bytes(x_bytes, "big")
+    if value >= _P:
+        raise ValueError("Proof coordinate is not a canonical BN254 field element")
+    return value
 
-    parts = [data[i * 32:(i + 1) * 32] for i in range(4)]
-    flags = int.from_bytes(data[128:129], "big")
+
+def bytes_to_proof(data: bytes) -> dict:
+    """Deserialize 129-byte binary → snarkjs Groth16 proof dict via Decompression.
+
+    Raises ValueError for malformed input (wrong size, unknown flag bits,
+    non-canonical coordinates, or points not on the curve).
+    """
+    if not isinstance(data, (bytes, bytearray)) or len(data) != PROOF_SIZE_BYTES:
+        raise ValueError(f"Serialized proof must be {PROOF_SIZE_BYTES} bytes")
+
+    parts = [bytes(data[i * 32:(i + 1) * 32]) for i in range(4)]
+    flags = data[128]
+    if flags & ~0b111:
+        raise ValueError("Serialized proof has unknown flag bits set")
     y_a_sign = (flags >> 2) & 1
     y_b_sign = (flags >> 1) & 1
     y_c_sign = flags & 1
 
     def recover_g1(x_bytes, sign):
-        x = int.from_bytes(x_bytes, "big")
-        y = pow((pow(x, 3, _P) + 3) % _P, (_P + 1) // 4, _P)
+        x = _field_element(x_bytes)
+        rhs = (pow(x, 3, _P) + 3) % _P
+        y = pow(rhs, (_P + 1) // 4, _P)
+        if (y * y) % _P != rhs:
+            raise ValueError("Proof G1 x-coordinate is not on the curve")
         if (y & 1) != sign:
             y = _P - y
         return str(x), str(y)
@@ -113,7 +135,7 @@ def bytes_to_proof(data: bytes) -> dict:
 
     inv82 = pow(82, _P - 2, _P)
     b0, b1 = (27 * inv82) % _P, (-3 * inv82) % _P
-    x0, x1 = int.from_bytes(parts[1], "big"), int.from_bytes(parts[2], "big")
+    x0, x1 = _field_element(parts[1]), _field_element(parts[2])
     
     X2 = _fq2_mul((x0, x1), (x0, x1))
     X3 = _fq2_mul(X2, (x0, x1))
@@ -134,6 +156,8 @@ def bytes_to_proof(data: bytes) -> dict:
 
     if (2 * c * d) % _P != B:
         d = _P - d
+    if _fq2_mul((c, d), (c, d)) != (A, B):
+        raise ValueError("Proof G2 x-coordinate is not on the twist curve")
 
     my_sign = (c & 1) if c != 0 else (d & 1)
     if my_sign != y_b_sign:
@@ -157,7 +181,8 @@ def pack(message_bytes: bytes, proof_bytes: bytes) -> bytes:
     Pack message + proof → single blob:
       [4 bytes big-endian: len(message)][message][proof (129 bytes)]
     """
-    assert len(proof_bytes) == PROOF_SIZE_BYTES
+    if len(proof_bytes) != PROOF_SIZE_BYTES:
+        raise ValueError(f"proof_bytes must be {PROOF_SIZE_BYTES} bytes, got {len(proof_bytes)}")
     return struct.pack(">I", len(message_bytes)) + message_bytes + proof_bytes
 
 
@@ -189,19 +214,41 @@ class ZKSnarkBridge:
     Circuit: PayloadVerify
       Public:  payload_hash[256], commitment[256], payload_length
       Private: secret[256]
-      Proves:  commitment == SHA256(payload_hash_bytes || secret_bytes)
+      Proves:  every payload_hash/commitment/secret signal is a bit (0/1),
+               commitment == SHA256(payload_hash_bytes || secret_bytes),
+               0 < payload_length < 1,000,000
     """
 
     GENERATE_WITNESS_JS = "generate_witness.js"
     WASM_FILE  = "payload_verify.wasm"
     ZKEY_FILE  = "proving_key.zkey"
     VKEY_FILE  = "verification_key.json"
-    CONSTRAINT_COUNT = 62553
+    CONSTRAINT_COUNT = 63321
 
     def __init__(self, circuits_dir: str):
         self.circuits_dir = Path(circuits_dir).resolve()
         self.build_dir    = self.circuits_dir / "build"
         self.js_dir       = self.build_dir / "payload_verify_js"
+        self._remove_stale_temp_dirs()
+
+    def _remove_stale_temp_dirs(self, max_age_seconds: float = 3600.0) -> None:
+        """Delete witness/verify temp dirs left by a killed process.
+
+        Normal runs clean up in ``finally``; a hard kill between witness and
+        proof generation leaves a witness file that encodes the secret bits.
+        Only directories older than ``max_age_seconds`` are removed so a
+        concurrent prover's live directory is never touched.
+        """
+        if not self.build_dir.is_dir():
+            return
+        cutoff = time.time() - max_age_seconds
+        for pattern in ("zkp_witness_*", "zkp_verify_*"):
+            for path in self.build_dir.glob(pattern):
+                try:
+                    if path.is_dir() and path.stat().st_mtime < cutoff:
+                        shutil.rmtree(path, ignore_errors=True)
+                except OSError:
+                    continue
 
     def get_constraint_count(self) -> int:
         """Return the number of arithmetic constraints in the circuit."""
@@ -267,7 +314,8 @@ class ZKSnarkBridge:
         return bits
 
     def _build_circuit_input(self, payload_bytes: bytes, secret_key: bytes) -> dict:
-        assert len(secret_key) == 32, "secret_key must be exactly 32 bytes"
+        if not isinstance(secret_key, bytes) or len(secret_key) != 32:
+            raise ValueError("secret_key must be exactly 32 bytes")
         payload_hash_bytes = hashlib.sha256(payload_bytes).digest()
         commitment_bytes   = hashlib.sha256(payload_hash_bytes + secret_key).digest()
         return {
@@ -297,7 +345,7 @@ class ZKSnarkBridge:
 
             result = subprocess.run(
                 ["node", str(gen_js), str(wasm_path), str(input_path), str(witness_path)],
-                capture_output=True, text=True, cwd=str(self.circuits_dir),
+                capture_output=True, cwd=str(self.circuits_dir), **_SUBPROCESS_TEXT,
             )
             if result.returncode != 0:
                 raise RuntimeError(
@@ -319,10 +367,9 @@ class ZKSnarkBridge:
         public_out = temp_dir / "public_live.json"
 
         try:
-            result = subprocess.run(
-                ["npx", "snarkjs", "groth16", "prove",
+            result = self._run_snarkjs(
+                ["groth16", "prove",
                  str(zkey_path), str(witness_path), str(proof_out), str(public_out)],
-                capture_output=True, text=True, cwd=str(self.circuits_dir), shell=_SHELL,
             )
             if result.returncode != 0:
                 raise RuntimeError(
@@ -354,13 +401,18 @@ class ZKSnarkBridge:
             with open(public_tmp, "w") as f:
                 json.dump(public_signals, f)
 
-            result = subprocess.run(
-                ["npx", "snarkjs", "groth16", "verify",
-                 str(vkey_path), str(public_tmp), str(proof_tmp)],
-                capture_output=True, text=True, cwd=str(self.circuits_dir), shell=_SHELL,
+            result = self._run_snarkjs(
+                ["groth16", "verify", str(vkey_path), str(public_tmp), str(proof_tmp)],
             )
-            output = (result.stdout + result.stderr).lower()
-            return "ok" in output and "invalid" not in output
+            # snarkjs exits 0 only for a valid proof and logs "OK!". Require both
+            # so a crash, missing file, or unexpected output never verifies.
+            stdout_lines = [line.strip() for line in (result.stdout or "").splitlines()]
+            reported_ok = any(line.endswith("OK!") for line in stdout_lines)
+            if result.returncode == 0 and reported_ok:
+                return True
+            if result.returncode == 0:
+                logger.error("[ZK] snarkjs exited 0 without reporting OK!; treating proof as invalid")
+            return False
         finally:
             proof_tmp.unlink(missing_ok=True)
             public_tmp.unlink(missing_ok=True)
@@ -368,6 +420,18 @@ class ZKSnarkBridge:
                 temp_dir.rmdir()
             except OSError:
                 pass
+
+    def _run_snarkjs(self, args: list) -> subprocess.CompletedProcess:
+        """Run snarkjs, preferring the locally installed CLI without a shell."""
+        local_cli = self.circuits_dir / _SNARKJS_LOCAL_CLI
+        if local_cli.is_file():
+            command, use_shell = ["node", str(local_cli), *args], False
+        else:
+            command, use_shell = ["npx", "snarkjs", *args], _NPX_SHELL
+        return subprocess.run(
+            command, capture_output=True, cwd=str(self.circuits_dir),
+            shell=use_shell, **_SUBPROCESS_TEXT,
+        )
 
     # ------------------------------------------------------------------ #
     # Dependency checks

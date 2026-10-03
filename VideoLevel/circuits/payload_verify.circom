@@ -19,7 +19,13 @@ include "node_modules/circomlib/circuits/comparators.circom";
  *   - secret: Secret key (256 bits)
  * 
  * Circuit verifies:
+ *   every bit of payload_hash, commitment and secret is boolean (0 or 1)
  *   commitment = SHA256(payload_hash || secret)
+ *   0 < payload_length < 1,000,000
+ *
+ * circomlib's Sha256 does not constrain its inputs to be bits, so the
+ * booleanity constraints below are required for soundness: without them a
+ * prover could feed arbitrary field elements into the hash gadget.
  */
 
 template PayloadVerify() {
@@ -31,6 +37,13 @@ template PayloadVerify() {
     // Private inputs
     signal input secret[256];            // Secret key (256 bits)
     
+    // Booleanity: x * (x - 1) === 0 forces every bit signal into {0, 1}.
+    for (var i = 0; i < 256; i++) {
+        secret[i] * (secret[i] - 1) === 0;
+        payload_hash[i] * (payload_hash[i] - 1) === 0;
+        commitment[i] * (commitment[i] - 1) === 0;
+    }
+
     // Intermediate signals
     signal input_bits[512];              // payload_hash + secret (512 bits)
     
