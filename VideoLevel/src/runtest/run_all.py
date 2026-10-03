@@ -20,19 +20,29 @@ ROOT     = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 RUNTEST  = os.path.join(ROOT, 'src', 'runtest')
 
 PHASES = [
-    ("Phase 1", "ZK Proof",           "test_phase1_zk_proof.py"),
-    ("Phase 4", "Reconstruct",         "test_phase4_reconstruct.py"),
-    ("Phase 5", "Extract + Verify",    "test_phase5_extract_verify.py"),
-    ("Phase 6", "Security Hardening",  "test_phase6_security_hardening.py"),
-    ("Phase 7", "HTTP + Key Expiry",   "test_phase7_service_delivery.py"),
-    ("Phase 8", "Blind Extraction",    "test_phase8_blind_extraction.py"),
-    ("Phase 9", "Realtime CAVLC",      "test_phase9_realtime_cavlc.py"),
-    ("Phase 10", "Native CLI Fixture E2E", "test_native_cli_fixture.py"),
-    ("Phase 11", "Benchmark Reproducibility", "test_phase11_benchmark_reproducibility.py"),
-    ("Phase 12", "Native HTTP/Stream E2E", "test_native_http_channel.py"),
+    ("Phase 1", "ZK proof (Groth16)",          "test_zk_proof.py"),
+    ("Phase 2", "Native contract (C++/Python)", "test_native_blind_contract.py"),
+    ("Phase 3", "Native CLI fixture E2E",      "test_native_cli_fixture.py"),
+    ("Phase 4", "H.264 VLC tables",            "test_h264_tables.py"),
+    ("Phase 5", "Service API",                 "test_service_api.py"),
+    ("Phase 6", "Native HTTP/stream E2E",      "test_native_http_channel.py"),
+    ("Phase 7", "Manifest security",           "test_manifest_security.py"),
+    ("Phase 8", "Realtime scheduler",          "test_realtime_scheduler.py"),
+    ("Phase 9", "Benchmark recorder",          "test_benchmark_recorder.py"),
+    ("Phase 10", "Trust interfaces",           "test_trust_interfaces.py"),
+    ("Phase 11", "Demo H.264 explain math",    "test_demo_h264_explain.py"),
+    ("Phase 12", "Demo smoke",                 "test_demo_smoke.py"),
 ]
 
-QUICK_PHASE_LABELS = {"Phase 1", "Phase 6", "Phase 7", "Phase 9", "Phase 11", "Phase 12"}
+# Requires a physical DirectShow camera (ZK_STEGO_CAMERA_NAME); run with --hardware.
+HARDWARE_PHASES = [
+    ("Phase H1", "Native camera HTTP E2E", "test_native_camera_http.py"),
+]
+
+# Fast subset: no FFmpeg-heavy demo runs, no fixture-wide native E2E.
+QUICK_PHASE_LABELS = {
+    "Phase 1", "Phase 2", "Phase 4", "Phase 5", "Phase 6", "Phase 7", "Phase 8", "Phase 9",
+}
 
 SEP  = '-' * 58
 SEP2 = '=' * 58
@@ -102,6 +112,11 @@ def main():
         action="store_true",
         help="Run only the fast proof and security phases, skipping video reconstruction and verification",
     )
+    parser.add_argument(
+        "--hardware",
+        action="store_true",
+        help="Also run hardware-gated phases (physical camera; needs ZK_STEGO_CAMERA_NAME)",
+    )
     args = parser.parse_args()
 
     # Force UTF-8 output on Windows (sys.stdout may be TextIOWrapper with cp1252)
@@ -115,7 +130,14 @@ def main():
     print("  ZK-SNARK Video Steganography — Full Test Suite")
     print(SEP2)
 
-    selected_phases = [phase for phase in PHASES if phase[0] in QUICK_PHASE_LABELS] if args.quick else PHASES
+    selected_phases = [phase for phase in PHASES if phase[0] in QUICK_PHASE_LABELS] if args.quick else list(PHASES)
+    if args.hardware:
+        selected_phases += HARDWARE_PHASES
+    missing = [name for _, _, name in selected_phases if not os.path.isfile(os.path.join(RUNTEST, name))]
+    if missing:
+        # A registered phase without its file can never pass; fail loudly up front.
+        print(f"  [FAIL] Registered test files are missing: {', '.join(missing)}")
+        sys.exit(1)
     summary = []
     for label, desc, filename in selected_phases:
         print(f"\n>>> Running {label} — {desc}")
