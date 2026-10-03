@@ -1,5 +1,16 @@
 # Completion Plan and Evidence Audit
 
+> **Update 2026-10-02.** The test counts below are from 2026-09-24. The current
+> suite has 12 phases plus the hardware phase H1; `run_all.py` passed 126/126 on
+> 2026-10-03 (see README), after native channel protocol v2 (HKDF subkeys, bit
+> whitening) and the bit-constrained circuit (63,321 constraints, new local keys).
+> Earlier camera and media records were made with protocol v1 and the old circuit.
+> The Python media pipeline (Phases 4/5/8 below) was removed the same day; only the
+> native core remains.
+> The 7.608 FPS camera figure predates the 2026-10-02 native
+> stdin-reader and bit-reader speed-up (a 1080p all-intra live embed went from
+> 30.1 s to 2.5 s on the development host) and has not been re-measured.
+
 ## Product boundary
 
 The supported data plane is a constrained Annex-B H.264 Baseline/CAVLC profile:

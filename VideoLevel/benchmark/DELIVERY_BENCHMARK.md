@@ -1,11 +1,9 @@
 # Current delivery benchmark index
 
 This file points to the current measured suite. Legacy `SEC1`–`SEC7` JSON
-datasets from the earlier proof-bearing pipeline were removed; their Python
-drivers remain as historical source and do not define current baseline numbers.
-Some historical PNG charts remain because this environment blocked their
-deletion. They are not current results; the old SEC5 charts in particular
-include simulated/non-equivalent comparisons.
+datasets from the earlier proof-bearing pipeline were removed, their PNG charts on
+2026-10-02, and their Python drivers (with the whole Python media pipeline) on
+2026-10-03; they remain only in git history and do not define current numbers.
 
 ## Current artifacts
 

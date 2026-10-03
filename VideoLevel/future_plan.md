@@ -23,18 +23,17 @@ Các nhận xét này dựa trên source và bằng chứng được lưu trong 
 | Thành phần | Hiện có | Khoảng cách với mục tiêu mới |
 | --- | --- | --- |
 | `native/src/cavlc_stream.cpp` | Parse CAVLC theo profile giới hạn, tìm sign-bit carrier, nhúng/trích payload, HMAC framing | Chưa cung cấp giao thức bảo vệ cả video và xác minh nguồn camera bằng Groth16 |
-| `src/api/native_handlers.py` | API/stream gọi Native CLI; extract thành công trả `valid=True`; `verify_handler=None` | Trạng thái hiện tại không đồng nghĩa proof đã được kiểm; cần thay hợp đồng API |
+| `src/api/native_handlers.py` | API/stream gọi Native CLI; từ 03/10/2026 job verify trích mù rồi bắt buộc Groth16 verify (`succeeded`/`rejected`) | Chưa kiểm binding video/nguồn vì circuit hiện tại chưa có |
 | `src/zk_proof.py`, `circuits/payload_verify.circom` | Groth16 cho quan hệ hash payload và secret; bridge sang snarkjs | Chưa có video commitment, camera credential, session chain hay source attestation |
-| `src/embedder.py`, `src/verifier.py` | Luồng Python tạo proof, nhúng, trích, verify | Cần chuyển API sang dùng chung native media engine và verifier mới |
-| `src/bitstream/`, `src/core/stego.py` | Python parser, safety filter, patch/reconstruct | Giữ làm bản tham chiếu và nghiên cứu trong giai đoạn chuyển đổi; ngừng mở rộng đường production độc lập |
-| `src/trust/provenance.py`, `src/provenance/c2pa_bridge.py` | Helper hash/anchor manifest kiểu C2PA | Chưa phải triển khai C2PA đầy đủ hay bằng chứng nguồn camera |
+| (đã gỡ 03/10/2026) `src/embedder.py`, `src/verifier*.py`, `src/bitstream/`, `src/core/` | Pipeline media Python song song | Đã hợp nhất về một lõi native; xem lại trong lịch sử git nếu cần đối chiếu |
+| `src/trust/provenance.py`, `src/trust/c2pa_bridge.py` | Helper hash/anchor manifest kiểu C2PA | Chưa phải triển khai C2PA đầy đủ hay bằng chứng nguồn camera |
 | `src/trust/attestation.py` | `MockTEESigner` dùng HMAC; giao diện attestation | Chưa có hardware attestation hoặc đường sensor-to-signer được bảo vệ |
 | `src/trust/fingerprint.py`, các circuit fingerprint/receipt | Thử nghiệm fingerprint và chứng minh tính toán nhỏ | Không thay thế strict integrity hoặc camera provenance |
 | Benchmark hiện tại | Có fixture, strict decode, extraction và host E2E | Cần mở rộng dữ liệu, GOP, thiết bị thật, tải dài và security experiments |
 
 Các giới hạn cần mang theo khi lập baseline:
 
-- [README](README.md) ghi nhận prototype, profile có giới hạn và realtime chưa được nghiệm thu trên edge target. Lần camera E2E đã sửa cách đếm source frame đạt 7.608 FPS, chưa đạt cổng 30 FPS của cấu hình đó.
+- [README](README.md) ghi nhận prototype, profile có giới hạn và realtime chưa được nghiệm thu trên edge target. Lần camera E2E đã sửa cách đếm source frame đạt 7.608 FPS, chưa đạt cổng 30 FPS của cấu hình đó. Số này đo trước đợt tăng tốc bộ đọc stdin/bit native ngày 02/10/2026 và chưa được đo lại.
 - [NEW_BENCHMARKS](benchmark/NEW_BENCHMARKS.md) mô tả media benchmark dùng 30 frame/case, cấu hình all-intra. Các ảnh 640×480 và 1280×960 được scale từ CIF nên chưa đại diện cho video có độ phân giải gốc cao.
 - Tài liệu này ghi 13/27 case có PSNR frame đã sửa dưới 40 dB. Chạy đúng chức năng chưa đồng nghĩa đạt mục tiêu chất lượng.
 - [Completion plan](doc/completion_plan.md) và [manifest thiết bị mẫu](doc/edge_deployment_manifest.template.yaml) là nguồn kế thừa cho việc đo đạc; không biến kết quả trên host thành kết quả edge.
@@ -305,8 +304,6 @@ Các đường dẫn ghi “mới” chỉ là thiết kế; chưa được tạ
 | `circuits/video_attestation_v2.circom` — mới | Quan hệ media/message/source/registry/context theo thiết kế đã review |
 | `src/trust/attestation.py` | Giữ mock rõ tên; adapter phần cứng thực riêng, không dùng mock cho release |
 | `src/api/app.py`, `src/api/native_handlers.py` | Chuyển các route sản phẩm vào verifier chung; sửa ý nghĩa `valid`; hạn chế raw extraction thành nội bộ |
-| `src/embedder.py`, `src/verifier.py` | Facade dùng core/protocol/verifier mới; bỏ backend media chọn tùy ý trên public API |
-| `src/bitstream/`, `src/core/stego.py` | Đóng băng reference trước; loại khỏi production dependency sau khi đối chiếu đạt |
 | `benchmark/`, `src/runtest/`, `native/tests/` | Attack corpus, integration, differential/fuzz, measurements và báo cáo tái lập |
 | `doc/` | Protocol spec, threat model, security argument, target manifest, hướng dẫn tái lập |
 
@@ -479,7 +476,7 @@ Giao diện chỉ cần timeline đoạn và verdict dễ hiểu, camera trust s
 
 ### 16.2. Điều kiện đủ để tự đánh giá “hoàn chỉnh”
 
-- [ ] Một media engine và một verifier policy cho CLI/API/stream.
+- [x] Một media engine (native) và một giao thức kênh (theo đoạn IDR, v2) cho CLI/API/stream — 03/10/2026. Verifier policy chung vẫn chờ circuit v2.
 - [ ] Groth16 đúng là bắt buộc trên mọi đường sản phẩm.
 - [ ] All-frame binding và carrier coverage được triển khai, có security argument và negative tests.
 - [ ] Nguồn capture thật đáp ứng trust claim; mock không nằm trên đường acceptance.

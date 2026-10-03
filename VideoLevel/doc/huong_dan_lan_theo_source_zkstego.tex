@@ -1,3 +1,4 @@
+\PassOptionsToPackage{obeyspaces,spaces}{url}
 \documentclass[11pt,a4paper]{article}
 
 \usepackage[a4paper,margin=23mm]{geometry}
@@ -32,6 +33,10 @@
 \usepackage{hyperref}
 \usepackage{url}
 \usepackage{fancyhdr}
+\makeatletter
+\g@addto@macro\UrlBreaks{\do\-\do\:}
+\makeatother
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
 
 \hypersetup{colorlinks=true,linkcolor=blue!55!black,urlcolor=blue!55!black}
 \setlength{\emergencystretch}{3em}
@@ -78,58 +83,70 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{Cẩm nang source VideoLevel}
-\fancyhead[R]{Luồng native CAVLC và nhánh Python}
+\fancyhead[R]{Một lõi native CAVLC, giao thức kênh v2}
 \fancyfoot[C]{\thepage}
 \setlength{\headheight}{14pt}
 
 \title{Cẩm nang đọc source và lần theo pipeline VideoLevel\\
-\large Từ đầu vào H.264 đến proof, nhúng, blind extraction và xác minh}
+\large Từ điểm vào demo, CLI và API đến các hàm native C++}
 \author{Tài liệu kỹ thuật tiếng Việt}
-\date{26 tháng 9 năm 2026}
+\date{3 tháng 10 năm 2026}
 
 \begin{document}
 \maketitle
+
+\noindent\fcolorbox{CoreBlue}{SoftBlue}{\parbox{\dimexpr\linewidth-2\fboxsep-2\fboxrule\relax}{%
+\textbf{Cập nhật 03/10/2026.} Tài liệu được viết lại theo cây mã nguồn hiện tại.
+Repository chỉ còn \textbf{một lõi media} là thư viện C++
+\path{native/src/cavlc_stream.cpp}; nhánh Python full-video cũ đã bị gỡ.
+Kênh dùng \textbf{giao thức v2} (khóa con HKDF, frame version \texttt{0x02}, làm trắng
+bit bằng keystream XOR) và \textbf{một giao thức duy nhất theo đoạn IDR}. Demo chỉ
+còn \path{demo/terminal_demo.py}; endpoint \path{/api/v1/jobs/verify} đã chạy thật
+(trích mù + Groth16 bắt buộc). Nguồn đối chiếu: \path{doc/he_thong_hoat_dong.md},
+\path{README.md}, \path{demo/README.md} và chính mã nguồn.}}
+
 \tableofcontents
 \clearpage
 
 \section{Mục đích và cách dùng tài liệu}
 
 Tài liệu này là bản đồ đọc code của repository VideoLevel. Mục tiêu là giúp người
-đọc lần theo một dữ liệu cụ thể qua từng lớp: script demo, giao thức API, chương
-trình C++ phân tích CAVLC, bộ đóng gói Groth16 và bộ xác minh. Mỗi phần nêu file,
-hàm, đầu vào, đầu ra, tác dụng lên pipeline và bước kế tiếp sử dụng kết quả đó
-như thế nào. Đây là hướng dẫn source, không phải đặc tả cho mọi profile H.264.
+đọc lần theo một dữ liệu cụ thể qua từng lớp: điểm vào (demo, CLI, API), bộ sinh
+proof Groth16, CLI native, thư viện C++ phân tích CAVLC, lịch nhúng có khóa, khung
+xác thực, rồi ngược lại ở phía bên nhận. Mỗi phần nêu file, hàm, đầu vào, đầu ra,
+tác dụng lên pipeline và bước kế tiếp dùng kết quả đó. Mọi tên file và tên hàm
+trong tài liệu đã được đối chiếu với mã nguồn ngày 03/10/2026. Đây là hướng dẫn
+source, không phải đặc tả cho mọi profile H.264.
 
-Điểm quan trọng đầu tiên là repository hiện có hai đường xử lý video khác nhau.
-Demo chính từ bước 00 đến 12 gọi CLI native C++ để nhúng/trích xuất theo lịch
-blind có khóa. Script 13 chạy riêng nhánh Python cũ \path{src/embedder.py} /
-\path{src/verifier.py}; nhánh này phân tích toàn video, dùng sidecar/vị trí và có
-chi phí lớn hơn. Không nên lấy tên hàm Python \path{embed()} làm bằng chứng rằng
-HTTP/WebSocket realtime hiện dùng hàm đó: native adapter gọi
-\path{zkstego_blind_bits}.
+Điểm quan trọng đầu tiên: chỉ có \textbf{một} đường xử lý video. Demo, HTTP job và
+WebSocket đều gọi cùng tiến trình \path{zkstego_blind_bits}, và tiến trình này gọi
+cùng các hàm trong \path{native/src/cavlc_stream.cpp}. Python chỉ điều phối: sinh
+proof, đóng gói payload, quản lý job/stream và giải thích trong demo. Python có một
+bản tham chiếu byte-for-byte của lịch và khung (\path{src/native_blind_contract.py})
+để kiểm thử chéo, nhưng bản này không nhúng hay trích video.
 
 \subsection{Ba lớp kết quả cần phân biệt}
 
 \begin{itemize}
   \item \textbf{Thành công cú pháp video:} FFmpeg đọc và giải mã stream mà không
   báo lỗi nghiêm ngặt. Điều này chưa đo PSNR, SSIM hay chất lượng cảm nhận.
-  \item \textbf{Thành công khôi phục payload:} extractor lấy đúng các byte đã
-  đóng gói từ dấu hệ số CAVLC trong video. Điều này cần đúng khóa của lịch blind
-  và frame authentication.
-  \item \textbf{Thành công mệnh đề ZK:} verifier kiểm tra Groth16 proof trên đúng
-  public inputs. Kết quả này không tự chứng minh nguồn gốc camera, danh tính
-  người ký, thời hạn giấy phép hay video không bị xử lý ở nơi khác.
+  \item \textbf{Thành công khôi phục payload:} extractor native lấy đúng các byte
+  đã đóng gói từ dấu hệ số CAVLC và tag HMAC của khung khớp. Điều này cần đúng khóa
+  32 byte và đúng giới hạn \texttt{max\_bits\_per\_IDR}.
+  \item \textbf{Thành công mệnh đề ZK:} \path{snarkjs groth16 verify} trả mã thoát 0
+  \emph{và} in \texttt{OK!} trên đúng public signals. Kết quả này không tự chứng
+  minh nguồn gốc camera, danh tính người ký hay rằng video không bị xử lý ở nơi khác.
 \end{itemize}
 
 \subsection{Một khác biệt kiến trúc ảnh hưởng đến giao thức}
 
-Video stego là artifact mang thông điệp và proof, nhưng trong cài đặt hiện tại
-verifier còn cần khóa 32 byte để blind-extract và để helper Python dựng public
-signals. Nếu verifier đã được cấp khóa an toàn từ trước thì media channel có thể
-chỉ truyền video; nếu chưa, cần một kênh cấp khóa riêng. Endpoint native
-\path{/api/v1/jobs/verify} hiện bị cấu hình thành 501: native API embed/extract
-không tự chạy Groth16 verifier. Demo thực hiện Groth16 verification ở bước Python
-riêng sau khi trích xuất.
+Video stego mang thông điệp và proof, nhưng verifier vẫn cần khóa 32 byte: khóa
+sinh lại các khóa con để tái tạo lịch, bỏ làm trắng, kiểm HMAC, và để
+\path{ZKSnarkBridge._build_public_signals()} tính lại commitment. Nếu verifier đã
+được cấp khóa an toàn từ trước thì kênh media chỉ cần truyền video; nếu chưa, cần
+một kênh cấp khóa riêng. Endpoint \path{/api/v1/jobs/verify} hiện thực hiện đầy đủ
+trích mù $\to$ unpack $\to$ Groth16 verify ở phía server và chỉ trả message khi
+proof hợp lệ.
 
 \section{Sơ đồ hoạt động tổng thể}
 
@@ -137,705 +154,753 @@ riêng sau khi trích xuất.
 \centering
 \resizebox{\textwidth}{!}{%
 \begin{tikzpicture}[node distance=9mm and 8mm]
-  \node[flowbox] (inputs) {Video H.264 Annex-B\\message $m$\\khóa 32 byte $k$};
-  \node[flowwide,right=of inputs] (proof) {\path{src/zk_proof.py}\\Groth16 proof cho payload\\proof nén còn 129 byte};
-  \node[flowwide,right=of proof] (pack) {\path{pack()}\\$[\text{len}_{32BE}][m][proof]$\\ví dụ: 148 byte};
-  \node[flowwide,right=of pack] (native) {CLI C++\\đọc IDR/CAVLC, chọn dấu theo $k$\\đóng frame xác thực và patch sign};
+  \node[flowbox] (inputs) {Video H.264 Baseline/CAVLC\\message $m$\\khóa 32 byte $k$};
+  \node[flowwide,right=of inputs] (proof) {\path{src/zk_proof.py}\\Groth16 proof cho message\\proof nén còn 129 byte};
+  \node[flowwide,right=of proof] (pack) {\path{pack()}\\$[\text{len}_{32BE}][m][proof]$\\ví dụ: 150 byte};
+  \node[flowwide,right=of pack] (native) {\path{zkstego_blind_bits}\\HKDF, khung v2 + làm trắng,\\lịch HMAC theo đoạn IDR, patch dấu};
   \node[flowbox,right=of native] (video) {Video stego\\NAL H.264 đầu ra};
   \draw[flowarrow] (inputs) -- (proof);
   \draw[flowarrow] (proof) -- (pack);
   \draw[flowarrow] (pack) -- (native);
   \draw[flowarrow] (native) -- (video);
 
-  \node[flowwide,below=23mm of native] (extract) {CLI C++ blind extractor\\video stego + khóa $k$\\đọc dấu theo cùng lịch, kiểm HMAC};
+  \node[flowwide,below=23mm of native] (extract) {\path{zkstego_blind_bits}\\video stego + khóa $k$\\cùng lịch, bỏ làm trắng, kiểm HMAC};
   \node[flowwide,left=of extract] (unpack) {\path{unpack()}\\tách message và proof 129 byte};
-  \node[flowwide,left=of unpack] (verify) {\path{ZKSnarkBridge.verify()}\\dựng public signals\\Groth16 verify};
-  \node[flowbox,left=of verify] (result) {Verifier\\ACCEPT / REJECT\\và message nếu hợp lệ};
+  \node[flowwide,left=of unpack] (verify) {\path{verify_proof_for_payload()}\\dựng public signals\\snarkjs: exit 0 + \texttt{OK!}};
+  \node[flowbox,left=of verify] (result) {Verifier\\\texttt{succeeded} / \texttt{rejected}\\message chỉ khi hợp lệ};
   \draw[flowarrow] (video.south) -- ++(0,-8mm) -| (extract.north);
   \draw[flowarrow] (extract) -- node[above,font=\scriptsize]{payload byte[]} (unpack);
   \draw[flowarrow] (unpack) -- node[above,font=\scriptsize]{message, proof} (verify);
   \draw[flowarrow] (verify) -- (result);
-  \draw[flowarrow,draw=CoreOrange] (inputs.south) -- ++(0,-18mm) -| node[pos=.25,below,font=\scriptsize,align=center]{khóa được cấp trước\\hoặc truyền ngoài video} (extract.south);
+  \draw[flowarrow,draw=CoreOrange] (inputs.west) -- ++(-5mm,0) |- node[pos=.75,below,font=\scriptsize]{khóa $k$ được cấp trước hoặc truyền ngoài video} ($(extract.south)+(0,-8mm)$) -- (extract.south);
 \end{tikzpicture}%
 }
-\caption{Luồng proof-bearing của demo. Khóa là input ngoài video ở cả pha nhúng lẫn blind extraction.}
+\caption{Luồng proof-bearing. Khóa là input ngoài video ở cả pha nhúng lẫn trích mù.}
 \label{fig:overall}
 \end{figure}
 
-\subsection{Luồng gọi theo thứ tự}
+\subsection{Ba điểm vào và nơi chúng gặp nhau}
 
-\begin{longtable}{p{.07\textwidth}p{.24\textwidth}p{.29\textwidth}p{.28\textwidth}}
+\begin{longtable}{P{.2\textwidth}P{.36\textwidth}P{.35\textwidth}}
 \toprule
-\textbf{Bước} & \textbf{Điểm vào} & \textbf{Input chính} & \textbf{Output chuyển tiếp} \\
+\textbf{Điểm vào} & \textbf{Hàm Python/C++ đầu tiên} & \textbf{Gặp lõi native ở đâu} \\
 \midrule
 \endfirsthead
-\toprule\textbf{Bước} & \textbf{Điểm vào} & \textbf{Input chính} & \textbf{Output chuyển tiếp} \\
+\toprule\textbf{Điểm vào} & \textbf{Hàm Python/C++ đầu tiên} & \textbf{Gặp lõi native ở đâu} \\
 \midrule\endhead
-00 & \path{demo/00_prepare.py} & Đường dẫn cover H.264, message text & \path{session.json}, \path{message.bin}, \path{secret_key.bin} \\
-01 & \path{demo/01_generate_proof.py} & \path{message.bin}, \path{secret_key.bin}, artifacts circuit & proof JSON, proof nén 129 B, public signals \\
-02 & \path{demo/02_pack_payload.py} & \path{message.bin}, proof nén & \path{packed_payload.bin} \\
-03--04 & \path{demo/03_read_video.py}, \path{04_find_positions.py} & Annex-B H.264, kích thước payload & log parser, số IDR/candidate/capacity, probe một sign \\
-05 & \path{demo/05_embed_video.py} & Cover, packed payload, key & \path{stego_video.h264} \\
-06--07 & \path{demo/06_read_stego_video.py}, \path{07_blind_extract.py} & Stego, FFmpeg, key & log decode, \path{extracted_payload.bin} \\
-08--09 & \path{demo/08_unpack_payload.py}, \path{09_verify_proof.py} & Payload, verification key, key & message/proof khôi phục và kết quả Groth16 \\
-10--12 & Wrong-key, HTTP job, WebSocket E2E & Video/payload/key và channel test & Log từ chối, round-trip, test report \\
-13 (tùy chọn) & \path{demo/13_python_pipeline.py} & Contract benchmark Python, video khác, key & python\_pipeline\_stego.h264, cache, log \\
-14 & \path{demo/14_summary.py} & Các log hiện có và \path{session.json} & \path{SUMMARY.txt} \\
+Demo & \path{demo/terminal_demo.py::main()} $\to$ \path{walkthrough()} & \path{demo/native_io.py::native_embed()} / \path{native_extract()} chạy \path{zkstego_blind_bits}; \path{trace_video()} / \path{inspect_segments()} chạy \path{zkstego_inspect}. \\
+CLI & \path{native/tools/blind_bits.cpp::wmain()/main()} $\to$ \path{run()} & Gọi trực tiếp \path{embed_authenticated_cavlc_stream_file()}, \path{extract_authenticated_cavlc_stream_file()} hoặc các hàm live trong cùng file. \\
+API HTTP & \path{src/api/app.py::start_embed()/start_extract()/start_verify()} & Handler do \path{src/api/native_handlers.py::create_native_app()} inject; \path{invoke()} chạy CLI với khóa qua stdin. \\
+API WebSocket & \path{native_handlers.py::native_stream()} & Mở tiến trình con \path{embed-live-auth-stdin} hoặc \path{extract-live-auth-stdin}. \\
+Soi/kiểm toán & \path{native/tools/inspect.cpp::run()} & Chỉ đọc: \path{decode_baseline_i_idr_slices()}, \path{analyze_cavlc_stream_file()}. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Luồng gọi theo thứ tự trong demo}\label{sec:flow}
+
+\path{walkthrough()} là kịch bản chính; mỗi \path{session.stage()} in một bước trên
+terminal. Bảng dưới liệt kê đúng thứ tự gọi trong mã.
+
+\begin{longtable}{P{.05\textwidth}P{.29\textwidth}P{.26\textwidth}P{.27\textwidth}}
+\toprule
+\textbf{\#} & \textbf{Hàm được gọi} & \textbf{Input chính} & \textbf{Output chuyển tiếp} \\
+\midrule
+\endfirsthead
+\toprule\textbf{\#} & \textbf{Hàm được gọi} & \textbf{Input chính} & \textbf{Output chuyển tiếp} \\
+\midrule\endhead
+1 & \path{setup()} (chỉ khi \path{--setup}) & Toolchain CMake, npm, Circom & Binary native, artifact circuit, khóa Groth16 \emph{demo} \\
+2 & \path{preflight()} & PATH, \path{circuits/build} & \path{Tools}, \path{MeasuredBridge}; dừng nếu thiếu artifact \\
+3 & \path{video_prepare()} (\path{choose_input()}) & File \path{.y4m}/video, \path{--frames}, \path{--gop}, \path{--qp} & \path{source.h264} Baseline/CAVLC, \path{encode.stderr} \\
+4 & \path{make_proof()} & Message UTF-8, khóa ngẫu nhiên 32 byte & message bytes, khóa, proof 129 byte, public signals \\
+5 & \path{trace_video()} + \path{show_video_trace()} & \path{source.h264} & \path{trace_before.json} (NAL, slice, ứng viên) \\
+6 & \path{deep_trace.nal_anatomy()}, \path{library_header_trace()} & Trace + FFmpeg \path{trace_headers} & Đối chiếu header (bỏ khi \path{--brief}) \\
+7 & \path{pack_and_select()} & message, proof, khóa, \path{--segments} & payload, \path{EmbedPlan}, \path{schedule.json} \\
+8 & \path{native_embed()} & cover, payload, khóa, \texttt{max\_bits} & \path{stego.h264} \\
+9 & \path{trace_video()} + \path{audit_embedding()} & \path{stego.h264} & \path{trace_after.json}, ứng viên mẫu \\
+10 & \path{visual_quality()} & source, stego & PSNR Y/U/V, bản đồ $\Delta$Y \\
+11 & \path{deep_trace.block_anatomy()}, \path{embedded_bit_location()} & Ứng viên mẫu, ảnh chưa deblock & Giải phẫu một khối, vị trí byte trong file \\
+12 & \path{verify_message()} & \path{stego.h264}, khóa & message khôi phục + proof đã verify \\
+13 & \path{negative_cases.run_all()} & stego, khóa sai, proof sửa & Các ca từ chối \\
+14 & \path{service_steps.run_all()} & cùng input & Job HTTP và WebSocket (bỏ khi \path{--no-service}) \\
+15 & \path{Session.finish()} & Trạng thái & \path{transcript.txt}, \path{report.json} \\
 \bottomrule
 \end{longtable}
 
 \section{Cách đọc cấu trúc repository}
 
-\begin{longtable}{p{.32\textwidth}p{.61\textwidth}}
+\begin{longtable}{P{.32\textwidth}P{.61\textwidth}}
 \toprule
 \textbf{Đường dẫn} & \textbf{Vai trò và ảnh hưởng đến pipeline} \\
 \midrule
 \endfirsthead
 \toprule\textbf{Đường dẫn} & \textbf{Vai trò và ảnh hưởng đến pipeline} \\
 \midrule\endhead
-\path{demo/00...14_*.py} & Kịch bản có thể chạy theo từng công đoạn. Chúng ghép các module hiện có; không phải mỗi file là một implementation codec riêng. \\
-\path{src/zk_proof.py} & Định nghĩa payload format, serialize proof Groth16, sinh witness/proof bằng Node/snarkjs, dựng public inputs và verify. \\
-\path{circuits/payload_verify.circom} & Mệnh đề circuit: quan hệ SHA-256 giữa hash payload, commitment và secret; đây là logic được proving key chứng minh. \\
-\path{native/tools/blind_bits.cpp} & CLI native: đọc key/payload, chọn chế độ, stream H.264, gọi API trong thư viện C++, ghi H.264 hoặc payload. \\
-\path{native/src/cavlc_stream.cpp} & Parser Annex-B/SPS/PPS/IDR/CAVLC, sinh candidate sign, lịch keyed, framing HMAC, encoder/decoder incremental. \\
-\path{native/include/zkstego/cavlc_stream.hpp} & Kiểu dữ liệu và interface công khai của C++: SPS/PPS/slice, macroblock, candidate, stream reader/encoder/decoder. \\
-\path{src/api/native_handlers.py} & Adapter FastAPI/WebSocket gọi native CLI; quản lý input streaming, bounded buffers, resource metrics và HTTP handlers. \\
-\path{src/api/app.py} & Lõi API chung: settings, auth token, giới hạn request/upload, queue/job store, file lưu tạm/cleanup, endpoint job. \\
-\path{src/embedder.py}, \path{src/verifier.py} & Nhánh Python full-video cũ; phân tích cover, chọn/ghi sidecar vị trí, patch/reconstruct và verify theo cover. \\
-\path{src/bitstream/} & Parser Python H.264/CAVLC và bit reader/writer; chủ yếu được dùng bởi nhánh Python, không phải parser native gọi từ FastAPI. \\
-\path{src/core/pipeline.py}, \path{src/core/stego.py} & Phân tích IDR, vị trí safe, sửa/trích bit và dựng video cho nhánh Python; một số iterator streaming cũng được các prototype blind dùng. \\
-\path{src/native_blind_contract.py} & Python executable specification của serialization candidate, HMAC schedule và frame native. Đây là contract/test aid; native CLI vẫn thi hành logic C++. \\
-\path{src/realtime_cavlc.py} & Scheduler abstraction có giới hạn queue/latency. Tests exercise abstraction; native WebSocket adapter hiện tự quản lý subprocess/backpressure chứ không gọi scheduler này. \\
-\path{src/key_policy.py}, \path{src/manifest.py} & Certificate thời hạn Ed25519 và sidecar manifest/signature. Đây không được gọi bởi demo native HTTP/WebSocket hiện tại; không nên kết luận nó tự hết hạn khóa native nếu chưa tích hợp tại enforcement point. \\
-\path{src/trust/}, \path{src/provenance/} & Các helper fingerprint/attestation/provenance mở rộng. Không nằm trên luồng 00--12 đã demo; xem test/API cụ thể trước khi coi là runtime trust root. \\
+\path{native/include/zkstego/cavlc_stream.hpp} & Kiểu dữ liệu và interface công khai: SPS/PPS/slice, macroblock, ứng viên, HKDF, lịch, khung, stream encoder/decoder, reader Annex-B tăng dần. \\
+\path{native/src/cavlc_stream.cpp} & Lõi media duy nhất: parser Annex-B/SPS/PPS/IDR/CAVLC, ứng viên dấu, khóa con HKDF, lịch HMAC, khung v2, làm trắng, patch RBSP, chế độ file và chế độ stream. \\
+\path{native/tools/blind_bits.cpp} & CLI \path{zkstego_blind_bits}: đọc khóa/payload qua stdin, dispatch 5 lệnh, ghi H.264 hoặc payload hex. \\
+\path{native/tools/inspect.cpp} & Công cụ soi duy nhất \path{zkstego_inspect}: JSON (mặc định), \path{--summary}, \path{--macroblock}, \path{--segments}. \\
+\path{native/tools/cli_io.hpp} & I/O dùng chung cho hai tool: đối số UTF-8 trên Windows, đọc file có giới hạn, ghi file mới không ghi đè. \\
+\path{native/tests/cavlc_stream_tests.cpp} & CTest native (\path{zkstego_cavlc_stream_tests}). \\
+\path{src/zk_proof.py} & Định dạng payload, nén proof 129 byte, \path{ZKSnarkBridge} gọi Node/snarkjs để prove/verify. \\
+\path{circuits/payload_verify.circom} & Mạch \path{PayloadVerify}: commitment SHA-256, ràng buộc bit, giới hạn độ dài (63\,321 constraint). \\
+\path{src/native_blind_contract.py} & Bản tham chiếu Python của HKDF, lịch, khung, làm trắng và \path{segment_schedule()}; dùng cho test chéo và phần giải thích của demo. \\
+\path{src/api/app.py} & Lõi job chung: settings, xác thực trước body, giới hạn thử sai, hàng đợi, lưu trữ job, endpoint. \\
+\path{src/api/native_handlers.py} & Ứng dụng native: handler embed/extract/verify gọi CLI, verify Groth16 bắt buộc, WebSocket \path{/api/v1/stream}. \\
+\path{src/realtime_cavlc.py} & Bộ lập lịch realtime mô phỏng theo đoạn IDR (hàng đợi có giới hạn, epoch, p95). \\
+\path{src/h264_tables.py} & Chỉ chứa bảng VLC CAVLC chuẩn cho phần giải thích của demo; không có parser. \\
+\path{src/key_policy.py}, \path{src/manifest.py} & Chứng chỉ khóa Ed25519 có hạn và manifest có chữ ký. Không nằm trên đường embed/extract native. \\
+\path{src/trust/} & Giao diện trust thử nghiệm: provenance, fingerprint, attestation, watermark receipt, \path{c2pa_bridge.py}. \\
+\path{demo/} & Demo duy nhất \path{terminal_demo.py} và các module \path{deep_trace.py}, \path{h264_explain.py}, \path{segment_plan.py}, \path{negative_cases.py}, \path{service_steps.py}, \path{native_io.py}. \\
+\path{src/runtest/} & \path{run_all.py} (12 phase), \path{prepare_fixtures.py}, các file \path{test_*.py}. \\
+\path{benchmark/} & Benchmark media/crypto/ZKP, bộ ghi benchmark camera và báo cáo. \\
 \bottomrule
 \end{longtable}
 
-\section{Pha prover: từ message đến proof-bearing payload}
+\section{Điểm vào demo: \texorpdfstring{\texttt{demo/terminal\_demo.py}}{terminal\_demo.py}}
 
-\subsection{Chuẩn bị session: script 00}
+\subsection{Session và các helper dùng chung}
 
-\path{demo/00_prepare.py::main()} parse cờ \path{--input} và \path{--message},
-đọc toàn bộ cover để tính byte length/SHA-256, tạo folder
-\path{demo/runs/session_<UTC>/}, ghi message UTF-8 thành \path{message.bin} và
-sinh khóa demo ngẫu nhiên 32 byte vào \path{secret_key.bin} với quyền hạn chế.
-\path{session.json} lưu đường dẫn input, số byte, hash và thời điểm; log không
-ghi nội dung khóa.
+Mọi bước đều đi qua đối tượng \path{Session} trong \path{terminal_demo.py}. Thư mục
+chạy là \path{demo/runs/terminal_<YYYYmmdd_HHMMSS>_<6 hex>/}.
 
-Output này điều khiển mọi bước sau. Nếu đường dẫn \path{--session} không đúng,
-\path{common.require_session()} dừng trước khi module proof/native được gọi. Việc
-truyền \path{/runs/...} trên Windows tạo đường dẫn từ gốc ổ đĩa; từ thư mục
-repository phải dùng đường dẫn đầy đủ hoặc \path{demo/runs/...}.
-
-\subsection{Các helper dùng chung trong demo}
-
-Mỗi file đánh số đều có \path{main()}, nhưng phần lớn chỉ điều phối: đọc
-\path{--session}, kiểm artifact đầu vào, gọi module thật rồi in đường dẫn/log.
-Các hành vi dùng chung nằm trong \path{demo/common.py}:
-
-\begin{longtable}{p{.31\textwidth}p{.29\textwidth}p{.3\textwidth}}
-\toprule\textbf{Hàm} & \textbf{Input $\to$ output} & \textbf{Vai trò trong stage} \\
+\begin{longtable}{P{.27\textwidth}P{.3\textwidth}P{.34\textwidth}}
+\toprule\textbf{Phương thức} & \textbf{Input $\to$ output} & \textbf{Vai trò} \\
 \midrule\endfirsthead
-\toprule\textbf{Hàm} & \textbf{Input $\to$ output} & \textbf{Vai trò trong stage} \\
+\toprule\textbf{Phương thức} & \textbf{Input $\to$ output} & \textbf{Vai trò} \\
 \midrule\endhead
-\path{require_session()} & Path argument $\to$ session folder + state dict & Resolve path, đọc \path{session.json}, dừng sớm nếu session hỏng/không tồn tại. \\
-\path{read_key()} & Session $\to$ 32-byte key & Đọc key ở bước native/ZK; không ghi bytes khóa vào log. \\
-\path{native_tool()} & Tên CLI $\to$ built executable path & Kiểm tra tìm thấy binary native đúng tên trước subprocess. \\
-\path{require_artifact()} & Session + filename $\to$ existing path & Làm dependency gate giữa các bước, báo file trung gian còn thiếu. \\
-\path{write_process_log()} & command/stdout/stderr/exit $\to$ text log & Lưu lệnh, mô tả stdin đã redacted, streams và mã thoát để debug. \\
-\path{run_logged()} & Native command + optional stdin $\to$ completed process result & Chạy subprocess có timeout, lưu output/log; key stdin được mô tả redacted. \\
-\path{python_stage_log()} & Stage/title/lines $\to$ stage log & Ghi marker kết quả cho script Python không có process con. \\
-\path{run_python_logged()} & Callable Python $\to$ PASS/error log & Bắt exception, ghi traceback/status và cho stage dừng đúng mã lỗi. \\
+\path{Session.say()} & text, \texttt{private} $\to$ terminal + transcript & Giá trị \texttt{private=True} (secret, khóa con) chỉ in ra terminal; transcript ghi dòng che. \\
+\path{Session.stage()} & tiêu đề $\to$ bước mới & Dừng chờ Enter nếu không có \path{--auto}. \\
+\path{Session.run()} & label, argv, stdin $\to$ \texttt{CompletedProcess} & Chạy tiến trình con, lưu \path{<label>.stdout/.stderr} và thời gian. \\
+\path{Session.check()} & tên, bool $\to$ \texttt{[PASS]/[FAIL]} & Một \texttt{[FAIL]} dừng demo với mã thoát 1. \\
+\path{Session.save()} & tên, giá trị $\to$ file JSON & Lưu trace, lịch, proof vào thư mục chạy. \\
+\path{Session.finish()} & --- & Ghi \path{report.json}, đóng transcript. \\
 \bottomrule\end{longtable}
 
-\path{demo/test_common.py::test_stage_log_records_full_process_result_without_stdin_secret()}
-kiểm tra log chứa đầy đủ kết quả process mà không lộ secret stdin. Các script
-00--14 và artifact cụ thể của chúng được liệt kê ở Bảng 1; file test này chỉ
-kiểm tra tiện ích log, không sinh artifact của một lần chạy pipeline.
+\subsection{Các module demo và hàm chính}
+
+\begin{longtable}{P{.31\textwidth}P{.6\textwidth}}
+\toprule\textbf{Hàm} & \textbf{Tác dụng} \\
+\midrule\endfirsthead
+\toprule\textbf{Hàm} & \textbf{Tác dụng} \\
+\midrule\endhead
+\multicolumn{2}{l}{\textit{\path{demo/native_io.py} --- mọi lời gọi tool native}} \\
+\path{native_tool()}, \path{find_tools()} & Tìm \path{zkstego_blind_bits} và \path{zkstego_inspect} trong \path{native/build/Release}, \path{Debug} hoặc \path{native/build}. \\
+\path{trace_video()} & \path{zkstego_inspect <video>} $\to$ JSON schema 1 (NAL, slice IDR, ứng viên toàn file). \\
+\path{inspect_segments()} & \path{zkstego_inspect <video> --segments MAX} $\to$ JSON \texttt{segments-1}. \\
+\path{native_embed()} & \path{embed-stream-auth-stdin}; stdin = khóa hex + payload hex. \\
+\path{native_extract()} & \path{extract-stream-auth <video> - 4096 MAX}; stdin = khóa hex. \\
+\path{verify_groth16()} & Gọi \path{snarkjs groth16 verify}; chỉ \texttt{True} khi exit 0 và có \texttt{OK!}; lỗi hạ tầng ném \texttt{RuntimeError}, không bị tính là ``từ chối hợp lệ''. \\
+\multicolumn{2}{l}{\textit{\path{demo/segment_plan.py} --- dung lượng và lịch theo đoạn}} \\
+\path{resolve_max_bits()} & Mặc định 64 bit/IDR; nếu không truyền cờ và clip quá ngắn thì nâng lên giá trị nhỏ nhất đủ dung lượng. \\
+\path{segment_capacity()}, \path{show_allocation()} & Tính $\sum \min(\text{max\_bits}, \text{ứng viên})$; in đoạn nào mang khoảng bit nào của khung. \\
+\path{file_candidate()} & Đổi định danh ứng viên trong đoạn sang chỉ số NAL trong file. \\
+\multicolumn{2}{l}{\textit{\path{demo/deep_trace.py} và \path{demo/h264_explain.py} --- giải thích sâu}} \\
+\path{ffmpeg_pipeline()}, \path{raw_input_view()}, \path{encode_loss()} & Đọc log verbose của FFmpeg/libx264, hiển thị frame thô, PSNR do nén. \\
+\path{nal_anatomy()}, \path{library_header_trace()} & Bảng NAL/EPB, đối chiếu header do \path{trace_headers} của FFmpeg giải với parser native. \\
+\path{block_anatomy()} & Gọi \path{zkstego_inspect --macroblock}, \path{decoder_mb_maps()}, rồi các hàm \path{h264_explain} (\path{parse_i_macroblock_header()}, \path{segment_cavlc_block()}, \path{dequantize()}, \path{inverse_transform()}, \path{predict_intra4x4()}\ldots) để tái tạo pixel từng mẫu. \\
+\path{embedded_bit_location()}, \path{file_offset_of_rbsp_bit()} & Từ thứ hạng HMAC $\to$ chỉ số bit khung $\to$ trường payload $\to$ byte RBSP/EBSP $\to$ offset trong file. \\
+\multicolumn{2}{l}{\textit{\path{demo/negative_cases.py} và \path{demo/service_steps.py}}} \\
+\path{negative_cases.run_all()} & Đổi message, proof sai, thiếu proof, sai khóa, lật một bit mang dữ liệu; kiểm thông báo lỗi bằng \path{is_authentication_failure()}. \\
+\path{service_steps.run_all()} & Dựng \path{create_native_app()} trong \path{TestClient}; \path{_http_jobs()} (embed/extract/verify) và \path{_websocket_stream()}. \\
+\bottomrule\end{longtable}
+
+\section{Pha prover: từ message đến payload mang proof}
 
 \subsection{Circuit hiện đang chứng minh điều gì}
 
-Trong \path{src/zk_proof.py}, payload là bytes $p$ và khóa 32 byte là $k$.
+Trong \path{src/zk_proof.py}, message là bytes $m$ và khóa 32 byte là $k$.
 \path{ZKSnarkBridge._build_circuit_input()} tính
 \[
- h=\operatorname{SHA256}(p), \qquad c=\operatorname{SHA256}(h\Vert k).
+ h=\operatorname{SHA256}(m), \qquad c=\operatorname{SHA256}(h\Vert k).
 \]
-Circuit \path{circuits/payload_verify.circom} nhận $h$, $c$ và độ dài payload làm
-public signals, còn $k$ là private witness; constraints kiểm tra rằng $c$ đúng
-là hash của $h\Vert k$ và độ dài nằm trong miền hợp lệ. Groth16 proof là bằng
-chứng cho quan hệ này dưới circuit/proving key hiện hành. Circuit này không
-nhận pixel/frame H.264 và không chứng minh video xuất phát từ camera hay rằng
-video chưa bị transcode.
+Template \path{PayloadVerify} trong \path{circuits/payload_verify.circom} nhận
+$h[256]$, $c[256]$ và \texttt{payload\_length} làm public signals (tổng 513), còn
+$k[256]$ là private witness. Ràng buộc gồm: $c = \operatorname{SHA256}(h\Vert k)$;
+$0 < \texttt{payload\_length} < 10^6$; và từ 03/10/2026 mọi tín hiệu của $h$, $c$,
+$k$ phải là bit, $x(x-1)=0$, vì thành phần \texttt{Sha256} của circomlib không tự ép
+đầu vào về 0/1. Mạch có 63\,321 constraint
+(\path{ZKSnarkBridge.CONSTRAINT_COUNT}). Proof tạo bằng khóa của mạch cũ không verify
+được với khóa hiện tại. Circuit không nhận pixel/frame H.264, không chứa hash video
+hay danh tính camera.
 
-Trong demo, \path{01_generate_proof.py} gọi
-\path{generate_proof_for_payload(message, key)} với đúng bytes trong
-\path{message.bin}. Vì vậy proof ràng buộc message user (15 byte trong session
-mẫu), không phải toàn bộ blob 148 byte đã gồm proof; bước 02 mới tạo outer blob
-để chuyển qua H.264.
-
-\begin{longtable}{p{.27\textwidth}p{.3\textwidth}p{.34\textwidth}}
+\begin{longtable}{P{.29\textwidth}P{.3\textwidth}P{.32\textwidth}}
 \toprule
-\textbf{Hàm/file} & \textbf{Input $\to$ output} & \textbf{Tác dụng kế tiếp} \\
+\textbf{Hàm} & \textbf{Input $\to$ output} & \textbf{Tác dụng kế tiếp} \\
 \midrule
 \endfirsthead
-\toprule\textbf{Hàm/file} & \textbf{Input $\to$ output} & \textbf{Tác dụng kế tiếp} \\
+\toprule\textbf{Hàm} & \textbf{Input $\to$ output} & \textbf{Tác dụng kế tiếp} \\
 \midrule\endhead
-\path{_build_circuit_input(p,k)} & Bytes $p$, key 32 B $k$ $\to$ dictionary các bit $h,c,k$ và length & Node witness generator đọc JSON này. \\
-\path{_compute_witness(input)} & Circuit input $\to$ file witness tạm & Gọi JS/WASM; xóa file input chứa key sau khi tạo witness. \\
-\path{_snarkjs_prove(witness)} & Witness + proving key $\to$ proof JSON và public JSON & Trả về hai đối tượng snarkjs cho bước serialize và demo log. \\
-\path{generate_proof_for_payload(p,k)} & Payload bytes + key $\to$ $(proof,public)$ & Đầu vào công khai ở đây không tự được gửi qua C++ embed; proof mới được serialize thành bytes. \\
-\path{proof_to_bytes(proof)} & Pi A/B/C dạng point $\to$ 129 bytes & Cắt kích thước proof JSON để nhúng vào elementary stream. \\
-\path{pack(p,proofBytes)} & $p$, proof 129 B $\to [\text{4-byte len}_{BE}][p][proof]$ & Blob được gửi cho native embed như payload opaque. \\
-\path{blob_bit_length(p)} & Độ dài message $\to (4+|p|+129)\times8$ bit & Ước lượng capacity ở các caller Python cũ. \\
+\path{_build_circuit_input(m,k)} & $m$, $k$ $\to$ dict bit của $h,c,k$ và length & Witness generator của Node đọc JSON này. \\
+\path{_compute_witness(input)} & Circuit input $\to$ file witness tạm & Chạy WASM của mạch; file input chứa khóa bị xóa sau khi có witness. \\
+\path{_snarkjs_prove(witness)} & Witness + \path{proving_key.zkey} $\to$ (proof, public) & Hai dict snarkjs cho bước nén và log. \\
+\path{generate_proof_for_payload(m,k)} & $m$, $k$ $\to$ (proof, public) & Wrapper đầy đủ; demo gọi qua \path{MeasuredBridge} để đo thời gian. \\
+\path{proof_to_bytes(proof)} & A, B, C $\to$ 129 byte & Nén proof để nhúng. \\
+\path{pack(m, proofBytes)} & $m$, proof $\to [\text{len}_{32BE}][m][proof]$ & Blob opaque đưa cho CLI native. \\
+\path{_build_public_signals(m,k)} & $m$, $k$ $\to$ 513 chuỗi & Verifier tự dựng lại public input. \\
+\path{verify_proof_for_payload()} & proof, $m$, $k$ $\to$ bool & Dựng public signals rồi \path{verify()} $\to$ \path{_snarkjs_verify()}. \\
 \bottomrule
 \end{longtable}
 
 \subsection{Ví dụ byte-for-byte với demo}
 
-Với message \path{ZK demo payload}, UTF-8 dài 15 byte. Sau khi sinh proof,
-\path{proof_to_bytes()} trả về đúng 129 byte. \path{pack()} ghép:
+Với \path{--auto} và không truyền \path{--message}, \path{make_proof()} dùng message
+\texttt{Xin chao ZK video}, UTF-8 dài 17 byte. \path{pack()} ghép:
 \begin{lstlisting}[numbers=none]
-00 00 00 0f | 5a 4b 20 64 65 6d 6f 20 70 61 79 6c 6f 61 64 | <129 proof bytes>
-  length=15                   message UTF-8
+00 00 00 11 | 58 69 6e 20 63 68 61 6f 20 5a 4b 20 76 69 64 65 6f | <129 proof bytes>
+  length=17                       message UTF-8
 \end{lstlisting}
-Tổng blob là $4+15+129=148$ byte, tương đương 1.184 bit. Blob 148 byte này
-chính là đầu vào payload mà script 05 đưa cho native CAVLC embedder.
+Tổng payload là $4+17+129=150$ byte. Khung native v2 thêm $1+2+16=19$ byte, nên khung
+dài 169 byte, tức 1\,352 bit phải nhúng. Message tối đa là $4096-4-129=3963$ byte vì
+lệnh stdin nhận payload tối đa 4096 byte.
 
 \subsection{Mã hóa/nén proof}
 
-\path{proof_to_bytes()} ghi bốn tọa độ $x$ của các điểm Groth16 (mỗi tọa độ 32
-byte big-endian) và một byte cờ chứa parity/sign của tọa độ $y$. Tổng là
-$4\times32+1=129$ byte. \path{bytes_to_proof()} làm chiều ngược: khôi phục sign,
-giải phương trình đường cong BN128 để dựng lại $y$, rồi tạo cấu trúc pi\_a,
-pi\_b, pi\_c mà snarkjs nhận.
+\path{proof_to_bytes()} ghi tọa độ $x$ của A, hai phần tử $\mathbb{F}_{p^2}$ của
+B.x và C.x (mỗi phần 32 byte big-endian), cộng một byte cờ chứa 3 bit chẵn/lẻ của
+$y$: $4\times32+1=129$ byte. \path{bytes_to_proof()} làm chiều ngược: kiểm tọa độ
+$<p$, giải phương trình đường cong BN254 để dựng lại $y$, kiểm điểm nằm trên đường
+cong; dữ liệu hỏng ném \texttt{ValueError}. Không được cắt/gắn proof tùy ý: mọi byte
+đều đi vào phép giải nén.
 
-Đây là serialization riêng của source. Không được cắt/gắn proof tùy ý: mọi byte
-đều đi vào phép giải nén tọa độ hoặc cờ sign, và sai định dạng làm verify thất
-bại hoặc bị assertion/error.
+\subsection{Xác minh Groth16}
 
-\section{Đường native: đọc H.264 và chọn vị trí sign CAVLC}
+\path{_snarkjs_verify()} ghi proof/public tạm rồi chạy
+\path{snarkjs groth16 verify}. Kết quả chỉ là \texttt{True} khi \textbf{mã thoát 0
+và stdout có dòng kết thúc bằng \texttt{OK!}}; exit 0 mà không có \texttt{OK!} bị coi
+là không hợp lệ. Khóa proving/verification là thiết lập giáo dục cục bộ
+(\path{circuits/build/DEMO_SETUP_ONLY.txt}), không phải trusted ceremony.
 
-\subsection{Tại sao sửa đúng một bit hệ số có thể giữ parser đồng bộ}
+\section{Đường native: đọc H.264 và liệt kê ứng viên dấu CAVLC}
 
-CAVLC residual block mở đầu bằng coeff\_token để mã hóa TotalCoeff và
-TrailingOnes. Với mỗi trailing one, stream ghi một sign bit riêng: bit 0 nghĩa
-giá trị hệ số dương 1, bit 1 nghĩa âm 1. Đổi sign chỉ thay giá trị hệ số từ $+1$
-sang $-1$ hoặc ngược lại; không đổi số hệ số, số zero-run, VLC codeword length
-hay vị trí bắt đầu block tiếp theo. Vì vậy native implementation tìm sign
-position đã parse được rồi patch đúng RBSP bit đó, thay vì decode frame thành
-pixel rồi encode lại.
+\subsection{Tại sao lật đúng một bit dấu giữ parser đồng bộ}
 
-Điều này chỉ an toàn cho candidate sign hợp lệ. Không thể lật tùy tiện một bit
-trong NAL: nó có thể sửa coeff\_token, level, macroblock header hoặc emulation
-prevention byte và khiến các bit sau bị đọc lệch.
+CAVLC residual block mở đầu bằng \texttt{coeff\_token} mã hóa TotalCoeff và
+TrailingOnes. Với mỗi trailing one, stream ghi một
+\texttt{trailing\_ones\_sign\_flag}: bit 0 là $+1$, bit 1 là $-1$. Lật bit này chỉ
+đổi dấu một hệ số; không đổi số hệ số, $n_C$ của các khối sau, bảng VLC được chọn,
+độ dài mã hay vị trí khối kế tiếp. Vì vậy native patch đúng bit RBSP đó thay vì giải
+mã frame thành pixel rồi encode lại. Không thể lật tùy tiện một bit trong NAL: nó có
+thể sửa \texttt{coeff\_token}, level hoặc header macroblock và làm lệch toàn bộ phần
+sau.
 
 \subsection{Annex-B, EBSP và RBSP}
 
-\path{split_annex_b()} quét start code 3/4 byte, cắt elementary stream thành NAL
-units và giữ header/index/offset. \path{AnnexBNalUnit::rbsp()} gọi
-\path{ebsp_to_rbsp()} để bỏ emulation-prevention byte \path{0x03} đặt sau
-\path{00 00}. Parser đọc syntax trên RBSP. Khi đã patch xong,
-\path{rbsp_to_ebsp()} chèn prevention bytes cần thiết và
-\path{assemble_annex_b()} ghép start code + header + payload về Annex-B.
-
-Ví dụ nếu trong EBSP có chuỗi byte mã hóa tương đương \path{00 00 01}, encoder
-phải ngăn chuỗi đó bị nhầm với start code; parser trước hết bỏ byte escape, đọc
-bit syntax trên RBSP, sau đó serializer phục hồi escape khi ghi output.
+\path{split_annex_b()} quét start code 3/4 byte, cắt elementary stream thành
+\path{AnnexBNalUnit} (offset, độ dài start code, header, payload EBSP).
+\path{AnnexBNalUnit::rbsp()} gọi \path{ebsp_to_rbsp()} để bỏ byte \texttt{0x03}
+đặt sau \texttt{00 00}. Parser đọc cú pháp trên RBSP bằng \path{RbspBitReader}
+(\path{read_bits()}, \path{read_ue()}, \path{read_se()}). Khi patch,
+\path{patch_annex_b_rbsp_plan()} áp các \path{FixedLengthBitPatch} theo từng NAL,
+\path{rbsp_to_ebsp()} chèn lại emulation-prevention byte và
+\path{assemble_annex_b()} ghép start code + header + payload. Độ dài bit RBSP không
+đổi, nhưng độ dài byte EBSP có thể lệch vài byte.
 
 \subsection{Các kiểu dữ liệu C++ giữ kết quả parser}
 
-\begin{longtable}{p{.32\textwidth}p{.58\textwidth}}
+\begin{longtable}{P{.32\textwidth}P{.58\textwidth}}
 \toprule
 \textbf{Kiểu trong header} & \textbf{Dữ liệu và consumer tiếp theo} \\
 \midrule
 \endfirsthead
 \toprule\textbf{Kiểu trong header} & \textbf{Dữ liệu và consumer tiếp theo} \\
 \midrule\endhead
-\path{AnnexBNalUnit} & Offset, start-code length, NAL header/type, EBSP payload; dùng để tìm IDR, parameter set và RBSP. \\
-\path{H264BaselineSps} & Profile/level, kích thước picture theo macroblock, frame/POC fields; xác định cấu trúc và cách đọc header. \\
-\path{H264BaselinePps} & Entropy mode và các syntax flag; native path yêu cầu CAVLC, không phải CABAC. \\
-\shortstack[l]{\texttt{H264BaselineIdr}\\\texttt{SliceHeader}} & first MB, slice type, PPS id, frame/id fields, QP delta và offset residual đầu slice. \\
-\path{CavlcCoeffToken} & TotalCoeff, TrailingOnes và offset của sign bits; là nền để giải mã level/tail. \\
-\path{CavlcDecodedLumaBlock} & Token, levels, zero/run tail, hệ số tái dựng; consumer tạo sign candidates. \\
-\path{CavlcDecodedIMacroblock} & Header I-macroblock và residual plane blocks; slice decoder đi qua macroblock theo địa chỉ. \\
-\path{CavlcDecodedIdrSlice} & SPS/PPS/slice header, macroblocks và trailing-bit offset; đầu vào collector candidate. \\
-\path{CavlcSignCandidate} & (NAL index, macroblock address, category, block index, RBSP bit offset); identity vật lý sẽ được xếp thứ tự bằng key. \\
-\shortstack[l]{\texttt{AuthenticatedCavlc}\\\texttt{StreamSegment}} & Bytes output, candidate capacity, bit count đã nhúng, trạng thái complete; trả về qua mỗi segment. \\
+\path{AnnexBNalUnit} & Offset, độ dài start code, \texttt{nal\_ref\_idc}, \texttt{nal\_unit\_type}, payload EBSP; \path{is_idr()}, \path{rbsp()}. \\
+\path{H264BaselineSps} & Profile/level, id, kích thước theo MB, trường frame/POC; \path{validated_picture_macroblock_count()} giới hạn kích thước ảnh. \\
+\path{H264BaselinePps} & Entropy mode (phải là CAVLC), slice group, QP khởi đầu, cờ deblocking. \\
+\shortstack[l]{\texttt{H264BaselineIdr}\\\texttt{SliceHeader}} & first MB, slice type, PPS id, frame/IDR id, QP delta và \texttt{data\_bit\_offset} đầu slice data. \\
+\path{CavlcCoeffToken} & TotalCoeff, TrailingOnes, \texttt{sign\_bit\_offsets}, offset level; \texttt{start\_bit\_offset} và \texttt{n\_c} chỉ để chẩn đoán. \\
+\path{CavlcDecodedLumaBlock} & Token, levels, tail (total zeros/runs), hệ số tái dựng. Dùng chung cho luma, LumaDC, chroma DC/AC. \\
+\shortstack[l]{\texttt{H264BaselineI}\\\texttt{MacroblockHeader}} & \texttt{mb\_type}, CBP, QP delta, 16 mode Intra4x4, offset residual. \\
+\path{CavlcDecodedIMacroblock} & Địa chỉ MB, header, \texttt{luma\_dc}, 16 khối luma, 2 chroma DC, 8 chroma AC. \\
+\path{CavlcDecodedIdrSlice} & NAL index, SPS/PPS/slice header, danh sách MB, offset trailing bits; đầu vào của bộ thu ứng viên. \\
+\path{CavlcSignCandidate} & (NAL index, địa chỉ MB, \path{CavlcResidualCategory}, chỉ số khối, offset bit RBSP). \\
+\shortstack[l]{\texttt{AuthenticatedCavlc}\\\texttt{StreamSegment}} & Byte output, \texttt{candidate\_capacity}, \texttt{bits\_embedded}, \texttt{session\_complete}; trả về sau mỗi đoạn. \\
+\shortstack[l]{\texttt{CavlcStreamSegment}\\\texttt{Candidates}} & Với mỗi đoạn IDR: chỉ số NAL trong file, chỉ số NAL trong input phân tích, danh sách ứng viên. \\
 \bottomrule
 \end{longtable}
 
-\subsection{Call chain C++ từ Annex-B đến candidate}
+\subsection{Call chain C++ từ Annex-B đến ứng viên}
 
-Các hàm dưới đây nằm chủ yếu trong \path{native/src/cavlc_stream.cpp}, interface
-ở \path{native/include/zkstego/cavlc_stream.hpp}:
+Các hàm dưới đây nằm trong \path{native/src/cavlc_stream.cpp}, interface ở
+\path{native/include/zkstego/cavlc_stream.hpp}:
 
-\begin{longtable}{p{.32\textwidth}p{.29\textwidth}p{.3\textwidth}}
+\begin{longtable}{P{.34\textwidth}P{.28\textwidth}P{.29\textwidth}}
 \toprule
 \textbf{Hàm} & \textbf{Input $\to$ output} & \textbf{Ảnh hưởng/consumer} \\
 \midrule
 \endfirsthead
 \toprule\textbf{Hàm} & \textbf{Input $\to$ output} & \textbf{Ảnh hưởng/consumer} \\
 \midrule\endhead
-\path{ebsp_to_rbsp()} / \path{rbsp_to_ebsp()} & Byte vector $\leftrightarrow$ byte vector & Chuyển giữa byte syntax NAL bên ngoài và bitstream RBSP parser/patcher thao tác. \\
-\path{parse_baseline_sps()} & SPS RBSP $\to$ SPS struct & Cung cấp dimensions/flags cho slice và MB parsing. \\
-\path{parse_baseline_pps()} & PPS RBSP $\to$ PPS struct & Cung cấp PPS syntax; kiểm entropy mode và parameters. \\
-\path{parse_baseline_idr_slice_header()} & Slice RBSP + SPS/PPS $\to$ header, data offset & Chỉ ra điểm bắt đầu macroblock residual. \\
-\path{parse_cavlc_coeff_token()} & RBSP, start bit, $n_C$ $\to$ TotalCoeff/TrailingOnes/sign offsets & Chọn bảng VLC đúng context; trả candidate sign offsets. \\
-\path{decode_cavlc_non_trailing_levels()} & Token + RBSP $\to$ trailing values, levels, next offset & Nhảy qua phần level sau sign bits để xác định tail đúng. \\
-\path{decode_cavlc_residual_tail()} & TotalCoeff, giới hạn block, offset $\to$ total zeros/runs/next offset & Đồng bộ vị trí block kế tiếp. \\
-\path{reconstruct_cavlc_block()} & Levels + runs + max coefficients $\to$ vector coefficients & Xác nhận residual có cấu trúc phù hợp và điền vị trí coefficient. \\
-\path{decode_cavlc_luma_block()} / \path{decode_cavlc_chroma_*()} & RBSP + offset + context $\to$ decoded block & Chuyên biệt hóa luma/chroma, luma AC/DC. \\
-\path{decode_cavlc_luma_macroblock()} & CBP, offset, neighbour TotalCoeff $\to$ 16 luma blocks & Tính $n_C$ theo hàng xóm đã giải mã, xử lý từng block coded. \\
-\path{parse_baseline_i_macroblock_header()} & RBSP + offset $\to$ MB type, CBP, QP delta, residual offset & MB parser quyết định syntax residual tiếp theo. \\
-\path{decode_baseline_i_idr_slice()} & RBSP + SPS/PPS $\to$ một decoded IDR slice & Lặp macroblock I slice và gom offset/sign metadata. \\
-\path{decode_baseline_i_idr_slices()} & Annex-B bytes $\to$ danh sách IDR I slices & Dùng bởi capacity scan, embedding và extraction full-buffer. \\
-\path{collect_cavlc_trailing_one_sign_candidates()} & Decoded slices $\to$ candidate vector & Mỗi residual block đóng góp các sign offsets trailing-one patchable theo parser. \\
-\path{inspect_baseline_idr_headers()} & Annex-B $\to$ header/mẫu đầu IDR & Công cụ inspect dùng để giải thích NAL/MB đầu, không quyết định lịch embed cuối. \\
+\path{ebsp_to_rbsp()} / \path{rbsp_to_ebsp()} & Byte vector $\leftrightarrow$ byte vector & Chuyển giữa byte NAL và bitstream parser/patcher thao tác. \\
+\path{parse_baseline_sps()} & SPS RBSP $\to$ SPS & Kích thước, cờ cho slice và MB. \\
+\path{parse_baseline_pps()} & PPS RBSP $\to$ PPS & Kiểm entropy mode và tham số. \\
+\path{parse_baseline_idr_slice_header()} & Slice RBSP + SPS/PPS $\to$ header & Chỉ ra \texttt{data\_bit\_offset}. \\
+\path{parse_baseline_i_macroblock_header()} & RBSP + offset $\to$ header MB & Quyết định cú pháp residual tiếp theo. \\
+\path{parse_cavlc_coeff_token()} & RBSP, bit, $n_C$ $\to$ token & Chọn bảng VLC theo $n_C$; trả các offset bit dấu. \\
+\path{decode_cavlc_non_trailing_levels()} & Token + RBSP $\to$ levels & Nhảy qua phần level sau bit dấu. \\
+\path{decode_cavlc_residual_tail()} (và biến thể luma/chroma DC) & TotalCoeff, offset $\to$ total zeros, runs & Đồng bộ vị trí khối kế tiếp. \\
+\path{reconstruct_cavlc_block()} & Levels + runs $\to$ hệ số & Điền hệ số theo thứ tự quét. \\
+\path{decode_cavlc_luma_block()}, \path{decode_cavlc_luma_ac_block()}, \path{decode_cavlc_chroma_dc_block()}, \path{decode_cavlc_chroma_ac_block()} & RBSP + offset + ngữ cảnh $\to$ khối & Chuyên biệt theo loại khối. \\
+\path{decode_cavlc_luma_macroblock()} / \path{decode_cavlc_luma_ac_macroblock()} & CBP, offset, TotalCoeff hàng xóm $\to$ 16 khối & Tính $n_C$ theo hàng xóm đã giải mã. \\
+\path{decode_baseline_i_idr_slice()} & RBSP + SPS/PPS $\to$ một slice & Lặp các MB của I-slice. \\
+\path{decode_baseline_i_idr_slices()} & Annex-B $\to$ các slice IDR & Theo dõi SPS/PPS theo id; dùng cho inspect, đo dung lượng và chuẩn bị đoạn. \\
+\path{collect_cavlc_trailing_one_sign_candidates()} & Các slice $\to$ ứng viên & \textbf{Một ứng viên mỗi khối}: dấu trailing-one đầu tiên, theo thứ tự LumaDC, Luma4x4, ChromaDC, ChromaAC. \\
+\path{serialize_cavlc_sign_candidate()} & Ứng viên $\to$ chuỗi ASCII & Định danh để chấm điểm HMAC. \\
+\path{inspect_baseline_idr_headers()} & Annex-B $\to$ header/khối đầu IDR & Hàm chẩn đoán, không quyết định lịch. \\
 \bottomrule
 \end{longtable}
 
-\subsection{Ví dụ một candidate}
+\subsection{Ví dụ một ứng viên}
 
-Candidate trong log inspect demo có thể đọc như địa chỉ trong syntax, không phải
-tọa độ pixel: \path{patched_nal=3 macroblock=0 rbsp_bit=91}. Công cụ
-\path{zkstego_idr_inspect --flip-first-sign} tạo \path{candidate_probe.h264}
-để thấy một sign bit riêng lẻ có thể patch. File probe này không chứa payload
-hoàn chỉnh và không phải output của bước 05.
+Định danh có dạng \path{nal_index:macroblock_address:category:block_index:rbsp_bit_offset},
+ví dụ \texttt{24:326:1:6:67801} (category 1 = Luma4x4). Đây là địa chỉ cú pháp,
+không phải tọa độ pixel. Trong giao thức theo đoạn, \texttt{nal\_index} tính trong
+\emph{input phân tích của đoạn} (SPS+PPS+IDR), không phải chỉ số NAL trong file; demo
+dùng \path{segment_plan.file_candidate()} để đổi sang chỉ số trong file.
 
-\section{Lịch keyed, frame integrity và stream encoder/decoder}
+\section{Kênh xác thực v2: khóa con, lịch, khung và làm trắng}
 
-\subsection{Định danh candidate và thứ tự bí mật}
+\subsection{Khóa con HKDF}
 
-\path{serialize_cavlc_sign_candidate()} biến tuple candidate thành chuỗi định
-danh ổn định gồm NAL, MB, loại residual, block và offset. Hàm
-\path{score_keyed_cavlc_sign_candidate()} tính HMAC-SHA-256 trên định danh bằng
-khóa lịch có domain separation. \path{select_keyed_cavlc_sign_candidates()} sắp
-xếp candidate theo score rồi lấy đủ số bit cần. Verifier quét cùng video stego,
-tái tạo cùng candidate list và dùng cùng key, nên trích bit theo đúng thứ tự.
-Khóa không được giấu trong H.264; nó phải được provision riêng.
-
-\subsection{Authenticated frame bên trong stream}
-
-Native C++ dùng một framing khác với outer payload format của Python:
+Secret 32 byte không bao giờ được dùng trực tiếp làm khóa HMAC. Hàm nội bộ
+\path{derive_cavlc_subkey()} gọi \path{hkdf_sha256_extract()} và
+\path{hkdf_sha256_expand()} (RFC 5869); hàm công khai \path{hkdf_sha256()} dùng cho
+test vector:
 \begin{lstlisting}[numbers=none]
-frame = version_u8 || payload_length_u16_be || payload || tag_16_bytes
+PRK           = HMAC-SHA256(key = "zkstego-cavlc-v2-salt", msg = secret)
+schedule_key  = HKDF-Expand(PRK, "zkstego/cavlc/v2/schedule",  32)
+frame_key     = HKDF-Expand(PRK, "zkstego/cavlc/v2/frame-tag", 32)
+whitening_key = HKDF-Expand(PRK, "zkstego/cavlc/v2/whitening", 32)
 \end{lstlisting}
-Tag là 16 byte đầu của HMAC-SHA-256 theo domain riêng. Phần overhead là
-$1+2+16=19$ byte. Vì vậy blob proof-bearing 148 byte trở thành frame 167 byte,
-tức 1.336 bit phải nhúng. Đây là lý do log capacity báo 1.336 bit, trong khi
-\path{02_pack_payload.log} báo 1.184 bit.
+Lộ một khóa con không làm lộ secret hay các khóa con khác. Encoder/decoder xóa
+secret của caller ngay sau khi dẫn xuất và chỉ giữ khóa con.
 
-\path{pack_authenticated_cavlc_frame()} thêm version/length/tag;
-\path{unpack_authenticated_cavlc_frame()} kiểm version, giới hạn length, đúng
-kích thước và so sánh tag constant-time trước khi trả payload. HMAC không thay
-Groth16: HMAC bảo vệ framing/channel với shared key; Groth16 kiểm quan hệ
-payload/key theo circuit. Wrong key có thể hỏng keyed schedule và/hoặc HMAC
-frame, trước cả khi đến bước Groth16.
+\subsection{Lịch có khóa}
 
-\subsection{Patch và extraction bit-level}
+\path{select_with_schedule_key()} (nội bộ) kiểm từng ứng viên bằng
+\path{validate_blind_schedule_candidate()}, từ chối định danh hoặc đích patch
+(\texttt{nal:bit}) trùng lặp, tính
+\[
+  \text{score} = \operatorname{HMAC}(\text{schedule\_key}, \text{định danh}),
+\]
+rồi
+\texttt{std::partial\_sort} theo (score, định danh) để lấy $N$ ứng viên đầu. Nếu
+$N$ lớn hơn số ứng viên, hàm ném \path{blind schedule capacity is insufficient}.
+Các hàm công khai \path{score_keyed_cavlc_sign_candidate()} và
+\path{select_keyed_cavlc_sign_candidates()} nhận secret gốc, tự dẫn xuất
+\texttt{schedule\_key} rồi gọi cùng logic.
 
-\path{embed_keyed_cavlc_sign_bits()} nhận Annex-B, key, bit vector; giải mã IDR,
-tạo candidate, chọn đúng số sign offsets và patch sign bit trong RBSP. Hàm không
-re-encode nguyên video. \path{extract_keyed_cavlc_sign_bits()} tái tạo candidate
-list và đọc dấu theo cùng thứ tự. Các helper
-\path{bytes_to_msb_bits()} / \path{msb_bits_to_bytes()} quy định bit order MSB
-trước để hai phía đồng bộ.
+\subsection{Khung xác thực và làm trắng}
 
-Ở chế độ stream, \path{AuthenticatedCavlcStreamEncoder::process_segment()} nhận
-một Annex-B segment (SPS/PPS cộng IDR nếu có), lấy tối đa cấu hình bit mỗi IDR,
-patch phần kế tiếp của framed payload và báo \path{bits_embedded} cùng trạng
-thái complete. \path{complete()} / \path{remaining_bits()} hỗ trợ caller biết
-khi nào payload xong. Decoder dùng
-\path{AuthenticatedCavlcStreamDecoder::consume_segment()} để tích lũy sign bits,
-đọc header length, chờ đủ body+tag rồi chỉ xuất
-\path{authenticated_payload()} sau khi kiểm tag; \path{failed()} là trạng thái
-fail-closed.
+\begin{lstlisting}[numbers=none]
+frame        = [0x02][payload_len BE16][payload][tag 16 bytes]
+tag          = HMAC-SHA256(frame_key, version || len || payload)[0:16]
+keystream    = HMAC(whitening_key, uint64_be(0)) || HMAC(whitening_key, uint64_be(1)) || ...
+embedded[i]  = frame_bit[i] XOR keystream_bit[i]     (i global over all segments, MSB-first)
+\end{lstlisting}
 
-\subsection{CLI native và chế độ byte stream}
-
-File \path{native/tools/blind_bits.cpp} là process boundary mà Python API gọi.
-\path{main()} dispatch lệnh như \path{measure-live-capacity-stdin},
-\path{embed-stream-auth-stdin}, \path{extract-stream-auth} và
-\path{extract-live-auth-stdin}. Các helper chính:
-
-\begin{longtable}{p{.34\textwidth}p{.26\textwidth}p{.29\textwidth}}
-\toprule\textbf{Hàm} & \textbf{I/O} & \textbf{Vai trò} \\
+\begin{longtable}{P{.33\textwidth}P{.58\textwidth}}
+\toprule\textbf{Hàm (\path{cavlc_stream.cpp})} & \textbf{Vai trò} \\
 \midrule\endfirsthead
-\toprule\textbf{Hàm} & \textbf{I/O} & \textbf{Vai trò} \\
+\toprule\textbf{Hàm} & \textbf{Vai trò} \\
 \midrule\endhead
-\path{decode_hex()} & Hex key/payload $\to$ sensitive bytes & Kiểm tra ký tự hex và tránh in secret. \\
-\path{read_key_file()} / \path{read_key_stdin_line()} & Key source $\to$ key bytes & Hỗ trợ file quyền hạn chế hoặc truyền key qua stdin, không argv. \\
-\path{read_binary()} / \path{write_new_binary()} & File bytes $\leftrightarrow$ vector & I/O command non-live; output tạo mới để không ghi đè. \\
-\path{run_live_capacity_measure()} & Annex-B stdin $\to$ JSON metrics stdout & Parse stream và đếm IDR/candidate/capacity. \\
-\path{run_live_authenticated_embed()} & stdin chứa key, payload rồi Annex-B $\to$ Annex-B stego stdout & Incremental reader + stream encoder; xử lý từng NAL/IDR. \\
-\path{run_live_authenticated_extract()} & Key line + Annex-B stdin $\to$ payload hex stdout & Incremental reader + stream decoder; kết thúc khi payload authenticate. \\
-\path{set_standard_streams_to_binary()} & stdin/stdout handles $\to$ binary mode & Bắt buộc trên Windows để CRLF/encoding text không đổi bytes H.264. \\
-\path{parse_bit_count()} & decimal string $\to$ \path{size_t} & Reject số âm, overflow, ký tự thừa. \\
+\path{pack_frame_with_key()} & Ghép version \texttt{0x02}, độ dài BE16, payload, 16 byte đầu của \path{authenticated_frame_tag()}. Payload tối đa 65\,535 byte theo định dạng. \\
+\path{unpack_frame_with_key()} & Kiểm version, độ dài $\le$ giới hạn và đúng kích thước, so tag theo thời gian hằng; ném lỗi \texttt{frame version/length/tag}. \\
+\path{bytes_to_msb_bits()}, \path{msb_bits_to_bytes()} & Quy ước bit MSB trước cho cả hai phía. \\
+\path{whitening_block()} & Khối keystream thứ $j$ = HMAC(\texttt{whitening\_key}, \texttt{uint64\_be}($j$)). \\
+\path{whiten_cavlc_frame_bits()} & XOR bit với keystream bắt đầu từ chỉ số bit toàn cục; gọi lại lần nữa để bỏ làm trắng. \\
+\path{pack_authenticated_cavlc_frame()}, \path{unpack_authenticated_cavlc_frame()}, \path{cavlc_whitening_keystream()} & Bản công khai nhận secret gốc; dùng trong CTest và để so với bản Python. \\
 \bottomrule\end{longtable}
 
-\path{AnnexBNalStreamReader::read_next()} giữ buffer hữu hạn quanh một NAL và một
-input chunk, nhận cả start code đi qua ranh giới chunk; giới hạn NAL tối đa mặc
-định 16 MiB. Đây là cơ chế giảm yêu cầu giữ toàn bộ raw input trong live
-WebSocket, nhưng không đồng nghĩa toàn bộ API/circuit/video analytics đều có
-memory bounded như nhau.
+Làm trắng cần thiết vì byte version cố định, trường độ dài nhỏ và cấu trúc proof làm
+thống kê dấu tại các vị trí được chọn bị lệch. Giao thức v2 không đọc được file stego
+do phiên bản trước tạo ra.
 
-\section{Verifier: từ video stego đến quyết định accept/reject}
+\subsection{Giao thức theo đoạn IDR}
 
-\subsection{Blind extraction native}
+Chỉ có một giao thức, dùng chung cho file, job HTTP và luồng live: mỗi đoạn là
+ngữ cảnh SPS/PPS đã thấy + đúng một IDR; mỗi đoạn mang tối đa
+\texttt{max\_bits\_per\_IDR} bit của khung; chỉ số bit khung chạy liên tục qua các
+đoạn. Bên nhận phải dùng cùng \texttt{max\_bits\_per\_IDR}.
 
-\path{demo/07_blind_extract.py::main()} đọc \path{stego_video.h264}, lấy key
-từ session, gọi \path{zkstego_blind_bits extract-stream-auth}. Cover video không
-được truyền cho lệnh này. Output stdout hex được chuyển về bytes và ghi
-\path{extracted_payload.bin}. Native decoder:
+\begin{longtable}{P{.36\textwidth}P{.55\textwidth}}
+\toprule\textbf{Hàm} & \textbf{Vai trò} \\
+\midrule\endfirsthead
+\toprule\textbf{Hàm} & \textbf{Vai trò} \\
+\midrule\endhead
+\path{update_parameter_set_context()} & Giữ đúng một SPS và một PPS; cùng id thì thay, khác id cùng loại thì từ chối. \\
+\path{assemble_cavlc_stream_segment()} & Ghép ngữ cảnh SPS/PPS + một IDR thành một đoạn Annex-B. \\
+\path{prepare_cavlc_stream_segment()} (nội bộ) & Kiểm đoạn có đúng một IDR và không có P-slice; dựng input phân tích; giải mã slice; thu ứng viên. \\
+\path{AuthenticatedCavlc}\allowbreak\path{StreamEncoder} (constructor) & Dẫn xuất ba khóa con, đóng khung, đổi sang bit, làm trắng toàn bộ một lần; chỉ giữ \texttt{schedule\_key} và bit khung đã làm trắng. \\
+\path{AuthenticatedCavlc}\allowbreak\path{StreamEncoder::}\allowbreak\path{process_segment()} & Chọn $\min(\text{max\_bits}, \text{ứng viên})$ vị trí theo lịch; chỉ patch phần bit khung còn lại; vị trí thừa ở đoạn cuối giữ dấu gốc; gọi \path{patch_annex_b_rbsp_plan()} rồi \path{remove_stream_context_prefix()}. \\
+\path{complete()}, \path{remaining_bits()} & Caller biết khi nào khung đã nhúng hết. \\
+\path{AuthenticatedCavlc}\allowbreak\path{StreamDecoder::}\allowbreak\path{consume_segment()} & \path{extract_keyed_bits_from_candidates()} đọc bit dấu theo lịch; bỏ làm trắng với chỉ số toàn cục; sau 24 bit kiểm version và độ dài; đủ bit thì \path{unpack_frame_with_key()}. Mọi lỗi chuyển decoder sang \path{failed()} (fail-closed). \\
+\path{authenticated_payload()} & Trả payload chỉ khi tag đã khớp; nếu chưa: \texttt{authenticated CAVLC stream is incomplete}. \\
+\path{embed_authenticated_cavlc_stream_file()} & Chế độ file: \path{visit_cavlc_stream_file()} duyệt NAL; IDR còn cần bit thì qua encoder và \path{single_idr_payload()}; NAL khác và IDR sau khi xong được sao chép nguyên. \\
+\path{extract_authenticated_cavlc_stream_file()} & Chế độ file phía nhận: đưa từng đoạn vào decoder, dừng khi xong. \\
+\path{analyze_cavlc_stream_file()} & Góc nhìn kiểm toán: ứng viên của từng đoạn đúng như codec thu được; nguồn của \path{zkstego_inspect --segments}. \\
+\bottomrule\end{longtable}
 
+\subsection{Thông báo lỗi native}
+
+Mọi lỗi của CLI in \texttt{error: \ldots} ra stderr và thoát mã 2.
+
+\begin{longtable}{P{.5\textwidth}P{.41\textwidth}}
+\toprule\textbf{Thông báo} & \textbf{Khi nào / hàm phát sinh} \\
+\midrule\endfirsthead
+\toprule\textbf{Thông báo} & \textbf{Khi nào / hàm phát sinh} \\
+\midrule\endhead
+\texttt{authenticated CAVLC stream version is invalid} & Decoder: byte đầu sau khi bỏ làm trắng khác \texttt{0x02}, thường do sai khóa. \\
+\texttt{authenticated CAVLC stream length exceeds configured maximum} & Decoder: trường độ dài vượt giới hạn payload. \\
+\texttt{authenticated CAVLC frame tag is invalid} & \path{unpack_frame_with_key()}: đủ bit nhưng HMAC sai (sai khóa hoặc bit bị sửa). \\
+\texttt{authenticated CAVLC frame version/length is invalid} & \path{unpack_frame_with_key()} khi khung sai định dạng. \\
+\texttt{blind schedule capacity is insufficient} & Lịch cần nhiều bit hơn số ứng viên. \\
+\texttt{IDR stream capacity is insufficient for authenticated payload} & Embed chế độ file: hết IDR trước khi nhúng đủ khung. \\
+\texttt{IDR stream ended before authenticated payload capacity was met} & Embed live (\path{embed-live-auth-stdin}). \\
+\texttt{IDR stream ended before authenticated payload was complete} & Extract chế độ file. \\
+\texttt{input stream ended before authenticated payload was complete} & Extract live (\path{extract-live-auth-stdin}). \\
+\bottomrule\end{longtable}
+
+HMAC hợp lệ chỉ chứng minh payload đến từ người có khóa và không bị sửa; nó
+\textbf{không} thay cho việc kiểm proof Groth16.
+
+\section{CLI native và công cụ soi}
+
+\subsection{\texorpdfstring{\texttt{zkstego\_blind\_bits}}{zkstego\_blind\_bits}}
+
+\path{native/tools/blind_bits.cpp}: \path{wmain()} (Windows, đối số wide) hoặc
+\path{main()} gọi \path{zkstego::cli::utf8_arguments()} rồi \path{run()}. Hàm
+\path{run()} dispatch đúng năm lệnh:
+
+\begin{longtable}{P{.3\textwidth}P{.3\textwidth}P{.31\textwidth}}
+\toprule\textbf{Lệnh và đối số} & \textbf{stdin / stdout} & \textbf{Hàm lõi được gọi} \\
+\midrule\endfirsthead
+\toprule\textbf{Lệnh và đối số} & \textbf{stdin / stdout} & \textbf{Hàm lõi được gọi} \\
+\midrule\endhead
+\path{embed-stream-auth-stdin} \texttt{in out max\_bits} & stdin: dòng khóa hex, dòng payload hex; ghi file mới & \path{embed_authenticated_cavlc_stream_file()} \\
+\path{extract-stream-auth} \texttt{in key|- max\_payload max\_bits} & khóa từ file quyền hạn chế hoặc stdin (\texttt{-}); stdout: payload hex & \path{extract_authenticated_cavlc_stream_file()} \\
+\path{measure-live-capacity-stdin} \texttt{max\_bits} & stdin: Annex-B; stdout: \texttt{ZKSTEG\_CAPACITY\_METRICS} JSON & \path{run_live_capacity_measure()} \\
+\path{embed-live-auth-stdin} \texttt{max\_bits} & stdin: khóa, payload, rồi Annex-B; stdout: H.264; stderr: \texttt{ZKSTEG\_STREAM\_METRICS} & \path{run_live_authenticated_embed()} \\
+\path{extract-live-auth-stdin} \texttt{max\_payload max\_bits} & stdin: khóa, rồi Annex-B; stdout: payload hex & \path{run_live_authenticated_extract()} \\
+\bottomrule\end{longtable}
+
+\begin{longtable}{P{.36\textwidth}P{.55\textwidth}}
+\toprule\textbf{Helper trong \path{blind_bits.cpp}} & \textbf{Vai trò} \\
+\midrule\endfirsthead
+\toprule\textbf{Helper} & \textbf{Vai trò} \\
+\midrule\endhead
+\path{read_key_stdin_line()}, \path{read_key_file()} & Đúng một dòng 64 ký tự hex; bộ đệm \path{SensitiveKeyText} bị xóa khi hủy. Khóa không bao giờ đi qua argv. \\
+\path{read_hex_payload_stdin_line()}, \path{decode_hex()} & Payload hex không rỗng, tối đa 4096 byte; giữ trong \path{SensitiveBytes}. \\
+\path{parse_bit_count()} & Từ chối số âm, tràn, ký tự thừa; các lệnh tự kiểm \texttt{max\_bits} $>0$. \\
+\path{set_standard_streams_to_binary()} & Bắt buộc trên Windows để stdin/stdout không đổi byte H.264. \\
+\path{is_bare_start_code()}, \path{parse_single_stream_nal()} & Bỏ NAL rỗng ở chế độ live; tách đúng một NAL từ reader. \\
+\path{run_live_authenticated_embed()} & Mỗi IDR: \path{assemble_cavlc_stream_segment()} $\to$ \path{encoder.process_segment()} $\to$ ghi lại đúng IDR đã patch; SPS/PPS/NAL khác chuyển nguyên; đo p50/p95 thời gian mỗi đoạn. \\
+\path{run_live_authenticated_extract()} & Mỗi IDR: \path{decoder.consume_segment()}; trả ngay khi \path{complete()}. \\
+\bottomrule\end{longtable}
+
+\path{native/tools/cli_io.hpp} cung cấp \path{utf8_arguments()}, \path{os_path()},
+\path{read_binary_file()} (giới hạn \path{kMaxAnnexBFileBytes} = 1 GiB) và
+\path{write_new_binary_file()} (không ghi đè file đã có).
+\path{AnnexBNalStreamReader::read_next()} chỉ giữ một NAL cộng một chunk input,
+nhận start code nằm vắt qua ranh giới chunk, mặc định từ chối NAL lớn hơn 16 MiB.
+
+\subsection{\texorpdfstring{\texttt{zkstego\_inspect}}{zkstego\_inspect} và lịch tham chiếu Python}
+
+\path{native/tools/inspect.cpp::run()} chọn một trong bốn chế độ:
+\path{trace()} (mặc định, JSON schema 1: NAL, slice IDR, ứng viên toàn file),
+\path{summary()} (\path{--summary}, văn bản), \path{trace_macroblock()}
+(\path{--macroblock NAL MB}, schema \texttt{macroblock-detail-1}: header mọi MB của
+slice và từng phần tử CAVLC của một MB) và \path{segments()}
+(\path{--segments MAX_BITS}, schema \texttt{segments-1}, dựa trên
+\path{analyze_cavlc_stream_file()}).
+
+Python \path{src.native_blind_contract.segment_schedule()} nhận JSON
+\texttt{segments-1}, khóa, số bit khung và \texttt{max\_bits\_per\_IDR}, trả danh sách
+\path{SchedulePlacement} (đoạn, ứng viên, chỉ số bit khung) đúng như encoder native.
+Demo dùng hàm này hai lần: trước khi nhúng (\path{pack_and_select()}) và sau khi
+verify (\path{verify_message()}) để chứng tỏ bên nhận tự dựng lại cùng lịch từ video
+stego.
+
+\begin{longtable}{P{.36\textwidth}P{.55\textwidth}}
+\toprule\textbf{Hàm trong \path{src/native_blind_contract.py}} & \textbf{Tương ứng native} \\
+\midrule\endfirsthead
+\toprule\textbf{Hàm} & \textbf{Tương ứng native} \\
+\midrule\endhead
+\path{derive_channel_keys()}, \path{hkdf_sha256()} & \path{derive_cavlc_subkey()}, \path{hkdf_sha256()} \\
+\path{NativeCavlcCandidate.serialize()}, \path{score_candidate()}, \path{select_candidates()} & \path{serialize_cavlc_sign_candidate()}, \path{score_keyed_cavlc_sign_candidate()}, \path{select_keyed_cavlc_sign_candidates()} \\
+\path{pack_authenticated_frame()}, \path{unpack_authenticated_frame()} & \path{pack_authenticated_cavlc_frame()}, \path{unpack_authenticated_cavlc_frame()} \\
+\path{whitening_keystream_bits()}, \path{whiten_bits()} (= \path{unwhiten_bits}) & \path{cavlc_whitening_keystream()}, \path{whiten_cavlc_frame_bits()} \\
+\path{embedded_frame_bits()}, \path{recover_authenticated_payload()} & Bit khung đã làm trắng / chiều ngược \\
+\path{segment_schedule()} & Lịch của \path{process_segment()} qua mọi đoạn \\
+\bottomrule\end{longtable}
+
+\section{Verifier: từ video stego đến quyết định}
+
+\subsection{Trích mù native}
+
+``Mù'' nghĩa là bên nhận không cần video gốc hay file phụ. Với
+\path{extract-stream-auth}, native:
 \begin{enumerate}
-  \item cập nhật SPS/PPS gần nhất;
-  \item nhận IDR NAL, dựng segment cho stream decoder;
-  \item decode lại CAVLC candidates, xếp theo keyed schedule, gom sign bits;
-  \item đọc frame length/version, đợi đủ dữ liệu, xác thực HMAC;
-  \item trả payload bytes hoặc lỗi nếu stream hết/sai key/sai tag.
+  \item duyệt NAL, cập nhật ngữ cảnh SPS/PPS, ghép mỗi IDR thành một đoạn;
+  \item giải mã lại CAVLC, thu ứng viên (giống phía gửi vì lật dấu không đổi cấu trúc);
+  \item dẫn xuất khóa con, xếp lịch HMAC của đoạn, đọc bit dấu tại vị trí đã chọn;
+  \item bỏ làm trắng 24 bit đầu, kiểm version \texttt{0x02} và độ dài, biết tổng số bit cần đọc;
+  \item đọc đủ khung qua các đoạn, kiểm tag HMAC; trả payload hoặc thoát mã 2.
 \end{enumerate}
 
 \subsection{Unpack và verify Groth16}
 
-\path{unpack(blob)} kiểm tra tối thiểu 4 byte đầu, đọc độ dài message big-endian,
-kiểm tra blob đủ $4+|m|+129$ byte rồi tách $(m,proofBytes)$. Trong demo,
-\path{08_unpack_payload.py} ghi hai output riêng
-\path{recovered_message.bin} và \path{recovered_proof_129_bytes.bin}.
+\path{unpack(blob)} đọc độ dài message big-endian và kiểm blob đủ $4+|m|+129$ byte
+rồi tách $(m, \text{proof})$. Các caller hiện tại còn đòi độ dài \emph{chính xác}
+(không dư byte): \path{verify_message()} trong demo và
+\path{make_proof_verify_handler()} trong API. Tiếp theo \path{bytes_to_proof()}
+dựng lại điểm Groth16, \path{_build_public_signals(m, k)} tính hash, commitment và
+length, rồi snarkjs verify. Message chỉ được dùng sau khi proof hợp lệ.
 
-Tiếp theo \path{bytes_to_proof()} tái dựng điểm Groth16.
-\path{ZKSnarkBridge._build_public_signals(message,key)} tính hash message,
-commitment và length theo circuit. \path{verify()} gọi snarkjs với
-\path{verification_key.json}; \path{_snarkjs_verify()} tạo temporary public/proof
-JSON rồi đọc exit/result. \path{verify_proof_for_payload()} là wrapper thuận
-tiện dựng public signals từ payload/key trước khi gọi verify.
+\subsection{Verifier phía API}
 
-Trong demo 09, cùng proof với message gốc phải valid; nối thêm một byte
-\path{!} phải invalid. Đây là test negative hữu ích, nhưng không kiểm tra mọi
-kiểu tamper vào H.264, mọi public statement hoặc quản lý key trong production.
+\path{native_handlers.make_proof_verify_handler()} trả về:
 
-\subsection{HTTP và WebSocket làm gì, không làm gì}
+\begin{longtable}{P{.36\textwidth}P{.55\textwidth}}
+\toprule\textbf{Kết quả} & \textbf{Điều kiện} \\
+\midrule\endfirsthead
+\toprule\textbf{Kết quả} & \textbf{Điều kiện} \\
+\midrule\endhead
+\texttt{valid: true}, \texttt{message\_b64} & Trích được payload, unpack đúng, proof verify. Job $\to$ \texttt{succeeded}. \\
+\texttt{reason: payload\_not\_authenticated} & CLI thoát khác 0 (\path{NativePayloadNotAuthenticated}). Job $\to$ \texttt{rejected}. \\
+\texttt{reason: malformed\_proof\_payload} & \path{unpack()} / \path{bytes_to_proof()} ném \texttt{ValueError} hoặc độ dài lệch. \\
+\texttt{reason: proof\_invalid} & Groth16 trả \texttt{False}. \\
+Ngoại lệ hạ tầng & Timeout, thiếu Node.js hoặc verification key $\to$ job \texttt{failed}, không phải \texttt{rejected}. \\
+\bottomrule\end{longtable}
 
-\path{create_native_app()} trong \path{src/api/native_handlers.py} dựng app bằng
-\path{create_app()} nhưng đưa \path{verify_handler=None}. HTTP embed nhận cover,
-message bytes và secret key; HTTP extract nhận stego cùng key. Endpoint verify
-native vì thế trả 501. Nếu muốn embed Groth16, caller phải tự tạo proof-bearing
-blob trước và truyền blob đó như \path{message}; native layer coi payload là
-opaque bytes.
+\section{API: hàm nào nhận request, hàm nào chạy job}
 
-WebSocket \path{/api/v1/stream} nhận control JSON đầu tiên. Embed control chứa
-operation, key và message base64; sau đó client đẩy các binary chunk Annex-B và
-gửi control \path{"type":"end"}. Server mở native process, forward chunk qua
-stdin và output qua WebSocket với flow-control/backpressure. Extract control
-chứa operation, key và maximum payload bytes; output là extracted bytes.
-\path{native_stream()} giới hạn thời gian, tổng byte, kích thước chunk, số chunk,
-stdin high/low-water mark và lấy mẫu RSS/CPU/latency. Đây là service streaming
-trên elementary H.264; input camera device/capture driver chưa tự được mở bởi
-module này.
+\subsection{Lõi job chung \texorpdfstring{\texttt{src/api/app.py}}{src/api/app.py}}
 
-\section{API chung: hàm nào nhận request, hàm nào chạy job}
+\path{create_app(settings, embed_handler=, verify_handler=, extract_handler=)} đăng ký
+endpoint; endpoint có handler \texttt{None} trả 501. Ứng dụng native inject đủ cả ba.
 
-\path{src/api/app.py::create_app()} đăng ký endpoints và ghép các handler được
-inject. Các khối hàm chính:
-
-\begin{longtable}{p{.34\textwidth}p{.28\textwidth}p{.27\textwidth}}
+\begin{longtable}{P{.34\textwidth}P{.28\textwidth}P{.29\textwidth}}
 \toprule\textbf{Hàm/lớp} & \textbf{Input $\to$ output} & \textbf{Ảnh hưởng} \\
 \midrule\endfirsthead
 \toprule\textbf{Hàm/lớp} & \textbf{Input $\to$ output} & \textbf{Ảnh hưởng} \\
 \midrule\endhead
-\path{RequestBodyGuard.__call__()} & ASGI receive/send $\to$ guarded request & Reject body quá giới hạn hoặc timeout trước khi parse upload. \\
-\path{WorkDirLease.acquire/release()} & work directory $\to$ lease lifecycle & Ngăn nhiều service instance dùng chung work directory trái phép. \\
-\path{ApiSettings.from_environment()} & environment $\to$ settings & Nạp token, paths, queue/upload/time limits. \\
-\path{JobStore.create/get/update/discard()} & job record $\leftrightarrow$ JSON on disk & Job ID/status persist để client poll và download. \\
-\path{_decode_key()} / \path{_decode_message()} & base64 form field $\to$ bytes & Kiểm format/độ dài trước gọi native handler. \\
-\path{_save_upload()} & UploadFile $\to$ file bounded-size & Ghi video input theo giới hạn request; lỗi sẽ cleanup. \\
-\path{require_token()} & Authorization header $\to$ pass/401 & API bearer authentication, không phải key CAVLC/Groth16. \\
-\path{reserve_capacity()} & semaphore $\to$ slot hoặc reject & Chặn vượt số worker/job queue cấu hình. \\
-\path{submit()} & job id + operation + callable $\to$ worker thread, cập nhật state & Chạy tác vụ nền; job endpoint trả 202 rồi client poll. \\
-\path{startup()/shutdown()} & service lifecycle $\to$ recovery/cleanup & Khôi phục job dang dở, khởi động/dừng cleanup worker. \\
-\path{start_embed()} & upload cover + message/key $\to$ accepted job & Lưu input, tạo job và gọi injected embed handler. \\
-\path{start_extract()} & upload stego + key/bounds $\to$ accepted job & Gọi extractor và lưu payload artifact để download. \\
-\path{start_verify()} & stego + cover + key/length $\to$ job hoặc 501 & Chỉ chạy nếu verify handler được inject; native adapter cố ý không inject. \\
-\path{get_job()} / \path{download_artifact()} & job id $\to$ status/file response & Poll và tải kết quả; cleanup/policy quyết định thời gian tồn tại. \\
+\path{ApiSettings.from_environment()} & env $\to$ settings & \path{ZK_STEGO_API_TOKEN} bắt buộc, tối thiểu 32 ký tự (\path{MIN_API_TOKEN_LENGTH}); work dir, circuits dir, timeout upload, thời gian giữ job, \path{ZK_STEGO_API_DOCS}. \\
+\path{RequestBodyGuard.__call__()} & ASGI scope $\to$ request được bảo vệ & Kiểm Bearer token \textbf{trước khi đọc body}, giới hạn kích thước/thời gian upload, tối đa 4 upload đồng thời. \\
+\path{AuthFailureLimiter} & IP $\to$ \path{retry_after()} & 10 lần sai trong 60 s $\to$ 429 kèm \texttt{Retry-After}; dùng chung cho HTTP và WebSocket. \\
+\path{bearer_token_matches()}, \path{require_token()} & header $\to$ pass/401 & So token; \path{require_token()} là lớp phòng thủ thứ hai. \\
+\path{WorkDirLease.acquire()/release()} & work dir $\to$ khóa & Ngăn hai instance dùng chung thư mục. \\
+\path{JobStore.create/get/update/discard()} & record $\leftrightarrow$ JSON & Không lưu secret hay nội dung message. \\
+\path{_decode_key()}, \path{_decode_message()} & base64 $\to$ bytes & Kiểm định dạng trước khi xếp job. \\
+\path{_save_upload()} & UploadFile $\to$ file & Ghi có giới hạn; lỗi thì dọn. \\
+\path{reserve_capacity()} & semaphore $\to$ slot/503 & Mặc định 1 worker + 2 job chờ. \\
+\path{submit()} & job id, operation, callable & Chạy nền; job \texttt{verify} có \texttt{valid} khác \texttt{True} $\to$ \texttt{rejected}; ngoại lệ $\to$ \texttt{failed}. \\
+\path{start_embed()} & \texttt{video},\texttt{message\_b64}, \texttt{secret\_key\_b64} & Gọi \texttt{embed\_handler}. \\
+\path{start_extract()} & \texttt{stego\_video}, khóa, \texttt{maximum\_payload\_bytes} (1..4096) & Gọi \texttt{extract\_handler}; artifact \path{payload.bin}. \\
+\path{start_verify()} & \texttt{stego\_video}, khóa, \texttt{maximum\_payload\_bytes} & Gọi \texttt{verify\_handler}; không cần video gốc. \\
+\path{get_job()}, \path{download_artifact()} & job id $\to$ trạng thái/file & Artifact tải \textbf{một lần}, hết hạn sau 10 phút. \\
+\path{startup()}, \path{shutdown()}, \path{recover_interrupted_jobs()}, \path{purge_expired_jobs()} & vòng đời & Khôi phục job dang dở, dọn job quá hạn (mặc định 24 h). \\
 \bottomrule\end{longtable}
 
-Trong \path{native_handlers.py}, \path{invoke()} đưa key vào stdin child process,
-không đặt key trên command line hay key temp file. \path{embed_handler()} gọi
-\path{embed-stream-auth-stdin}; \path{extract_handler()} gọi
-\path{extract-stream-auth} rồi validate hex, giới hạn payload và tạo file mới.
-\path{native_stream()} là đường WebSocket độc lập với queue HTTP; nó quản lý
-child process, tasks cho stdin/stdout, cancellation, deadlines và metrics.
+\subsection{Ứng dụng native \texorpdfstring{\texttt{src/api/native\_handlers.py}}{native\_handlers.py}}
 
-\section{Nhánh Python full-video cũ: các hàm và phụ thuộc}
-
-\subsection{Không nhầm nhánh này với native blind}
-
-\path{src/embedder.py::embed()} là pipeline Python đã tồn tại song song. Nó cần
-cover để phân tích vị trí, tạo proof bên trong hàm, gói payload, lấy safe
-positions, patch coefficients qua Python reconstruction và ghi sidecars. Hàm
-\path{src/verifier.py::verify()} yêu cầu cả stego lẫn original cover, trừ khi
-caller cung cấp vị trí đã tính trước. Demo 13 gọi nhánh này riêng trên operating
-contract benchmark khác.
-
-\subsection{Các helper của embedder}
-
-\begin{longtable}{p{.34\textwidth}p{.28\textwidth}p{.27\textwidth}}
-\toprule\textbf{Hàm trong \path{src/embedder.py}} & \textbf{Input $\to$ output} & \textbf{Consumer} \\
-\midrule\endfirsthead
-\toprule\textbf{Hàm} & \textbf{Input $\to$ output} & \textbf{Consumer} \\
-\midrule\endhead
-\path{_get_bridge(circuits_dir)} & path $\to$ cached bridge & Dùng lại ZK wrapper cho lần embed tiếp theo. \\
-\path{_prune_patchable_positions()} & safe positions + offsets $\to$ chỉ candidate block có thể patch & Ngăn yêu cầu vượt quá patchability thật của bitstream. \\
-\path{_limit_positions_per_block()} & positions, cap $\to$ bounded schedule & Thực thi giới hạn sửa mỗi block để giảm artifact/duplicate. \\
-\path{_filter_reconstructed_positions()} & planned/applied block sets $\to$ thật sự được output áp dụng & Không báo “đã nhúng” cho patch mà reconstructor bỏ qua. \\
-\path{_resolve_video_analysis()} & video hoặc precomputed tuple $\to$ 6 phần phân tích & Ưu tiên tuple caller, nếu không nạp/build cache. \\
-\path{embed()} & video, message, key, circuit path, options $\to$ EmbedResult + H.264 + sidecars & Orchestrator của Python legacy branch. \\
-\bottomrule\end{longtable}
-
-Bên trong \path{embed()}, trình tự chính là: validate file/message/key;
-\path{analyze_stream_profile()}; sinh Groth16 proof; nén proof; \path{pack()};
-(tùy chọn) chaos scramble; resolve analysis/cache; lọc safety/patchability; gọi
-\path{PayloadEmbedder.embed_payload()}; gọi
-\path{BitstreamReconstructor.reconstruct_video()}; lọc lại vị trí theo
-\path{applied_block_keys}; thử tối đa 12 vòng loại các block không tái dựng
-được; lưu video, \path{.positions.json}, \path{.meta.json},
-\path{.manifest.json}; trả \path{EmbedResult}. Dữ liệu quan trọng trong result
-gồm bits yêu cầu/đã nhúng, capacity từng lớp, output path, proof/public dict và
-used positions.
-
-\subsection{Phân tích H.264/CAVLC của Python path}
-
-\begin{longtable}{p{.35\textwidth}p{.26\textwidth}p{.28\textwidth}}
-\toprule\textbf{Hàm/lớp} & \textbf{Input $\to$ output} & \textbf{Ý nghĩa trong chuỗi} \\
-\midrule\endfirsthead
-\toprule\textbf{Hàm/lớp} & \textbf{Input $\to$ output} & \textbf{Ý nghĩa trong chuỗi} \\
-\midrule\endhead
-\path{NALParser.parse()} & H.264 bytes $\to$ NALUnit list & Tách start codes, header và EBSP để các parser cấp sau làm việc. \\
-\path{_find_start_codes()} & bytes $\to$ [(offset,size)] & Tìm phân cách Annex-B 3/4 byte. \\
-\path{_extract_nal_unit()} & offset range $\to$ NALUnit & Lấy type/ref idc và loại emulation-prevention bytes cho RBSP. \\
-\path{SliceHeaderParser.parse()} & reader + NAL/SPS/PPS $\to$ SliceHeader & Đọc các Exp-Golomb/slice flags cần để đến macroblock data. \\
-\path{MacroblockParser.parse_macroblock()} & reader + slice context $\to$ MacroblockData & Đọc mb type, prediction/CBP và phân ranh residual syntax. \\
-\path{MacroblockParser.calculate_nC()} & tọa độ block + neighbour counts $\to n_C$ & Context này chọn đúng coeff\_token table của CAVLC. \\
-\path{TraceableCAVLCParser.extract_with_offsets()} & IDR NAL + SPS/PPS $\to$ block levels, offsets, MB indices & Cấp cho safety filter/patcher biết bit nào mã hóa hệ số nào. \\
-\path{CAVLCDecoder.decode_block_cavlc()} & bit reader + $n_C$ + max coeff $\to$ CoefficientBlock & Giải coeff\_token, trailing signs, levels và zero runs thành coefficient list. \\
-\path{_decode_coeff_token()} & $n_C$ + reader $\to$ TotalCoeff, TrailingOnes & TrailingOnes quyết định sign bits được đọc trước levels. \\
-\path{_decode_levels()} & count + trailing ones $\to$ level list & Đọc level code sau sign prefix. \\
-\path{_decode_total_zeros()} / \path{_decode_runs()} & block residual syntax $\to$ positions of nonzero coeff & Giữ đúng scan order khi reconstruct block. \\
-\path{CAVLCEncoder.encode_block_cavlc()} & coefficient list + $n_C$ $\to$ VLC bits & Legacy reconstruction reserializes modified blocks. \\
-\path{BitstreamReader.read_ue/read_se()} & RBSP bits $\to$ unsigned/signed Exp-Golomb value & Dùng cho syntax H.264 như ue(v), se(v). \\
-\bottomrule\end{longtable}
-
-\subsection{Safety filter, patch và tái dựng Python}
-
-Trong \path{src/core/stego.py}, \path{CAVLCSafetyFilter._detect_trailing_ones()}
-tìm index trailing-one; \path{_verify_block_bit_length_invariance()} kiểm rằng
-ứng viên không làm đổi bit length theo tiêu chí patch; \path{get_safe_positions()}
-lấy tập an toàn rộng hơn; \path{get_safe_sign_positions()} giới hạn vào sign
-positions phù hợp. \path{sort_blocks_interleaved()} phân bố thứ tự theo block/MB
-để tránh dồn sửa một vùng.
-
-\path{PayloadEmbedder.embed_payload()} chuyển blob thành bit, cấp từng bit cho
-candidate và gọi \path{_embed_with_safety_filter()}; output là danh sách
-coefficient block đã đổi, số bit thực nhúng và vị trí đã dùng. Chiều đọc là
-\path{extract_payload()} / \path{_extract_with_safety_filter()}, lấy sign từ
-coefficient theo đúng position order rồi \path{_bits_to_bytes()}. Hàm
-\path{_modify_lsb()} thực chất sửa dấu/LSB theo quy tắc block hiện hành; không
-nên hiểu là sửa pixel LSB trong ảnh RGB.
-
-\path{BitstreamPatcher.patch_slice()} áp các modification vào NAL theo offset;
-\path{validate_block_patchability()} xác nhận vị trí/độ dài block;
-\path{_encode_coefficients_to_bits()} tái mã hóa CAVLC block. Sau đó
-\path{BitstreamReconstructor.reconstruct_video()} cập nhật NALs và gọi
-\path{_reconstruct_slice_with_cavlc()} / \path{_write_h264_file()} để tạo file
-mới; SPS/PPS parser duy trì context; emulation prevention được thêm lại. Các
-validator FFmpeg/PSNR là tùy chọn, không đồng nghĩa mọi lần chạy embed mặc định
-đều đã chứng minh quality.
-
-\subsection{Verifier Python yêu cầu những gì}
-
-\path{src/verifier.py::verify()} validate cả \path{stego_video_path} và
-\path{original_video_path}, circuit path, 32-byte key và message length. Nó đọc
-sidecar qua \path{_load_sidecar_data()} nếu có; nếu không thì tái phân tích cover
-để tạo position map. Tiếp đó tính số bit cần, dựng CAVLC analysis, áp chaos
-inverse nếu bật, đọc bit bằng \path{extract_bits_direct()}, gọi \path{unpack()},
-\path{bytes_to_proof()}, dựng public signals rồi \path{bridge.verify()}. Output
-\path{VerifyResult} gồm valid, message (chỉ giữ khi hợp lệ), proof/public dict và
-bits extracted.
-
-\path{verifier_blind_keyed.py::verify_blind_keyed()} là một thử nghiệm riêng
-không sidecar: lấy message length để ước lượng fixed payload bits, gọi
-\path{derive_blind_positions_validated_pool_proxy()}, parse stego, trích block,
-đọc bits, unpack và verify. Nó nêu assumption cố định/no-chaos; không nên đánh
-đồng nhất với native stream decoder vốn có format/frame/selector contract khác.
-
-\section{Cache, scheduler và những nhánh hỗ trợ}
-
-\subsection{Cache phân tích video}
-
-\path{src/core/analysis_cache.py::_video_fingerprint()} tạo dấu vân tay đầu vào;
-\path{_code_fingerprint()} gắn cache với fingerprint source; \path{_cache_path()}
-chọn file; \path{load_or_build_video_analysis()} chạy NAL/CAVLC analysis và
-safety filter hoặc nạp trusted pickle; \path{_build_reconstruction_context()}
-chuẩn bị dữ liệu reconstructor; \path{load_or_build_reconstruction_context()}
-đọc/build context riêng; \path{clear_video_analysis_cache()} xóa các pickle cache.
-
-Cache giảm thời gian lặp lại nhưng pickle chỉ an toàn nếu nguồn cache đáng tin
-cậy. Biến \path{ZK_STEGO_TRUSTED_PICKLE_CACHE=1} là opt-in rõ ràng ở nhánh
-Python demo; không bật với cache nhận từ nguồn lạ. Native CLI demo không dùng
-Python pickle analysis cache.
-
-\subsection{Realtime scheduler abstraction}
-
-\path{CAVLCRealtimeBudget.__post_init__()} validate FPS/queue/memory bounds;
-\path{frame_interval_s} trả $1/fps$; \path{latency_limit_s} chọn p95 limit hoặc
-frame interval. \path{RealtimeCAVLCScheduler.submit()} validate segment size,
-epoch/cache và queue bound; \path{process_next()} lấy segment + proof callback,
-gọi patch callback, đo latency; \path{report()} tính processed/dropped/p95 và
-\path{accepted}. Đây là orchestration/test abstraction; implementation comment
-chủ động cấm dùng full-video Python embed làm patcher realtime. Native WebSocket
-hiện gọi native process trực tiếp và có cơ chế riêng.
-
-\subsection{Key certificate và manifest}
-
-\path{src/key_policy.py::issue_key_certificate()} ký Ed25519 certificate có
-subject public key, key id, issuer, not-before và expires-at;
-\path{KeyCertificate.verify()} kiểm chữ ký issuer, format/version và cửa sổ
-thời gian; \path{verify_manifest_with_certificate()} kiểm certificate trước,
-rồi dùng subject public key để verify manifest.
-\path{src/manifest.py::StegoManifest.sign()}, \path{verify_signature()},
-\path{compute_content_hash()}, \path{to_json()/from_json()} quản lý metadata
-sidecar.
-
-Các helper này chỉ enforce expiry nếu đúng verifier được gọi ở mọi điểm chấp
-nhận key. Demo native hiện cấp trực tiếp một raw 32-byte key và không gọi
-\path{KeyCertificate.verify()}; vì vậy certificate module không tự làm cho raw
-key native hết hạn.
-
-\section{Demo đã chạy: input cụ thể và cách suy luận}
-
-Session kiểm chứng gần nhất nằm ở
-\path{demo/runs/session_20260925T033640Z/}. Cover là
-\path{data/encoded/foreman_cif_q18_g1_300f.h264}; message 15 byte; proof nén
-129 byte; tất cả stage log 00--13 báo PASS trong \path{SUMMARY.txt}.
-
-\begin{longtable}{p{.27\textwidth}p{.31\textwidth}p{.32\textwidth}}
-\toprule\textbf{Artifact/log} & \textbf{Giá trị thực tế} & \textbf{Có thể suy ra / chưa thể suy ra} \\
-\midrule\endfirsthead
-\toprule\textbf{Artifact/log} & \textbf{Giá trị thực tế} & \textbf{Có thể suy ra / chưa thể suy ra} \\
-\midrule\endhead
-\path{01_generate_proof.log} & 129 B proof, 513 public signal scalars & Proving chạy với setup hiện có; không chứng minh key/proving key được quản lý production. \\
-\path{02_pack_payload.log} & 15 B message + 129 B proof + 4 B length = 148 B & Outer payload format đúng, 1.184 bit trước native frame overhead. \\
-\path{04_candidate_capacity.log} & 300 IDR; 105,516 raw sign candidates; capacity bị cap 19,200 bit & Fixture có nhiều candidate hơn yêu cầu 1,336 bit; không đại diện mọi H.264/GOP. \\
-\path{04_first_candidate_location.log} & NAL 3, MB 0, RBSP bit 91 & Parser tìm được một sign sample có địa chỉ; file probe chỉ minh họa một bit. \\
-\path{05_embed_video.log} & 148 B payload; H.264 output 3,551,610 B & Native embed hoàn tất với fixture; kích thước output giống input trong sample. \\
-\path{06_ffmpeg_decode.log} & FFmpeg -xerror exit 0 & Stream giải mã được; không suy ra PSNR/SSIM hay invisibility. \\
-\path{07_blind_extract.log} & Trích được 148 B, không cấp cover file & Blind extraction hoạt động cho fixture/key này. \\
-\path{09_verify_proof.log} & Original message valid; message sửa một byte invalid & Proof verification và negative case chạy; không kiểm mọi loại statement/tamper. \\
-\path{10_wrong_key_rejection.log} & Exit 2, authenticated frame version invalid & Sai key bị reject; lỗi xảy ra ở native frame/extraction chứ không phải Groth16. \\
-\path{11_http_transport.log} & HTTP embed/extract round-trip; verify endpoint 501 đúng thiết kế test & Channel vận chuyển payload hoạt động; native server chưa verify Groth16. \\
-\path{12_websocket_e2e.log} & 5/5 native channel E2E tests PASS & Loopback tests xác nhận protocol/process path, không phải thiết bị camera edge production. \\
-\path{13_python_pipeline.log} & Nhánh Python verify PASS, 1,176 bit; output 16,768,616 B trên deadline 600-frame input & Chứng minh nhánh legacy hoạt động với benchmark contract khác; không phải so sánh cùng nguồn hay performance công bằng. \\
-\bottomrule
-\end{longtable}
-
-\subsection{Artifacts nên giữ khi debug}
+\path{create_native_app()} đọc \path{ZK_STEGO_NATIVE_CLI} (đường dẫn
+\path{zkstego_blind_bits}) và \path{ZK_STEGO_MAX_BITS_PER_IDR} (mặc định 64), rồi định
+nghĩa:
 
 \begin{itemize}
-  \item \path{session.json}, \path{00_prepare.log}: xác nhận input đúng và
-  fingerprint có thể tái lập.
-  \item \path{candidate_capacity.json}, \path{04_positions_summary.txt}:
-  kiểm tra payload có vượt sức chứa hay không.
-  \item \path{stego_video.h264}: output chính của đường native; so hash với
-  \path{http_stego_video.h264} khi kiểm tra HTTP artifact.
-  \item \path{extracted_payload.bin}, \path{recovered_message.bin},
-  \path{recovered_proof_129_bytes.bin}: xác định lỗi nằm ở extraction, framing,
-  unpack hay ZK verify.
-  \item \path{SUMMARY.txt}: trạng thái tổng hợp. Luôn mở log gốc để xem vì sao
-  step fail; summary chỉ phân loại theo marker PASS/exit code.
+  \item \path{invoke()}: chạy CLI không qua shell, có timeout; stdin = khóa hex +
+  phần đuôi; mã thoát khác 0 $\to$ \path{NativePayloadNotAuthenticated}.
+  \item \path{embed_handler()}: \path{embed-stream-auth-stdin}; \texttt{bits\_embedded}
+  được \emph{tính} là $(|m|+19)\times 8$ (\texttt{bits\_embedded\_source} =
+  \texttt{computed\_frame\_size}), không do CLI báo.
+  \item \path{native_extract_payload()} và \path{extract_handler()}:
+  \path{extract-stream-auth ... -}, kiểm hex và giới hạn payload, ghi file mới.
+  \item \path{groth16_verify()}: \path{ZKSnarkBridge(settings.circuits_dir)}; thiếu
+  verification key là lỗi triển khai (\texttt{failed}).
+  \item \path{native_stream()}: WebSocket \path{/api/v1/stream}.
 \end{itemize}
 
-\path{secret_key.bin} là dữ liệu nhạy cảm, dù là key demo. Không commit, gửi
-người khác hoặc đưa vào log. \path{wrong_key.bin} chỉ phục vụ negative test.
+Giao thức WebSocket: xác thực \emph{trước} \texttt{accept()} (thiếu token thì
+handshake bị từ chối). Trình tự thông điệp:
+\begin{lstlisting}[numbers=none]
+client -> {"operation":"embed","secret_key_b64":...,"message_b64":...}
+       or {"operation":"extract","secret_key_b64":...,"maximum_payload_bytes":N}
+server -> {"type":"ready","operation":...}
+client -> binary Annex-B chunks ..., then {"type":"end"}
+server -> embed: binary H.264 chunks, then {"type":"complete",...}
+          extract: {"type":"payload","payload_b64":...}
+          error:   {"type":"error","code":"payload_not_authenticated" | "stream_idle_timeout" | ...}
+\end{lstlisting}
+Server giới hạn byte/chunk, đặt high/low water mark stdin của tiến trình con
+(64/16 KiB), đọc stderr liên tục và đóng luồng sau
+\path{ZK_STEGO_STREAM_IDLE_TIMEOUT_SECONDS} (15 s) không có dữ liệu. Đây là dịch vụ
+trên elementary stream H.264; module này không tự mở thiết bị camera.
+
+\section{Các module hỗ trợ ngoài đường embed/extract}
+
+\subsection{Bộ lập lịch realtime}
+
+\path{src/realtime_cavlc.py}: \path{CAVLCRealtimeBudget.__post_init__()} kiểm FPS,
+giới hạn hàng đợi và bộ nhớ; \path{RealtimeCAVLCScheduler.submit()} nhận một đoạn với
+epoch tăng đơn điệu, bỏ đoạn cũ nhất khi đầy; \path{process_next()} lấy proof qua
+\path{_proof_for()} (cache tối đa 4 epoch), gọi callback patch, đo độ trễ;
+\path{report()} tính số đoạn bị bỏ, \texttt{failed\_segments}, p95 và
+\texttt{accepted}. Đây là abstraction được test riêng; WebSocket native tự quản lý
+tiến trình con và backpressure, không gọi scheduler này. Đo trên camera thật hiện
+\textbf{chưa} đạt cổng 30 FPS.
+
+\subsection{Chứng chỉ khóa và manifest}
+
+\path{src/key_policy.py::issue_key_certificate()} ký chứng chỉ Ed25519 (khóa công
+khai chủ thể, key id, issuer, thời điểm bắt đầu/hết hạn);
+\path{KeyCertificate.verify()} kiểm chữ ký, định dạng và cửa sổ thời gian;
+\path{verify_manifest_with_certificate()} kiểm chứng chỉ rồi verify manifest.
+\path{src/manifest.py::StegoManifest} có \path{sign()}, \path{verify_signature()},
+\path{compute_content_hash()}, \path{to_json()/from_json()}. Các helper này chỉ có
+hiệu lực nếu được gọi tại điểm chấp nhận khóa; đường native hiện nhận khóa thô 32 byte
+và không gọi \path{KeyCertificate.verify()}.
+
+\subsection{Giao diện trust thử nghiệm}
+
+\path{src/trust/} gồm \path{provenance.py}, \path{fingerprint.py},
+\path{attestation.py}, \path{watermark_receipt.py}, \path{canonical.py} và
+\path{c2pa_bridge.py} (\path{build_c2pa_anchor()}, \path{verify_c2pa_anchor()}).
+Các mạch \path{circuits/fingerprint_verify.circom} và
+\path{circuits/detector_receipt.circom} thuộc cùng hướng thử nghiệm. Chúng được kiểm
+bởi \path{test_trust_interfaces.py} nhưng không nằm trên đường runtime của demo hay API.
+
+\section{Kiểm thử và tái lập}
+
+\begin{lstlisting}[numbers=none]
+py -3.12 -m pip install -r requirements.txt
+cd circuits; npm ci; cd ..
+cmake --build native/build --config Release
+py -3.12 src/runtest/prepare_fixtures.py     # regenerate data/encoded/*.h264 from data/raw
+py -3.12 src/runtest/run_all.py              # all 12 phases
+py -3.12 src/runtest/run_all.py --quick      # fast phases only
+ctest --test-dir native/build -C Release --output-on-failure
+\end{lstlisting}
+
+\begin{longtable}{P{.08\textwidth}P{.34\textwidth}P{.49\textwidth}}
+\toprule\textbf{Phase} & \textbf{File trong \path{src/runtest/}} & \textbf{Nội dung} \\
+\midrule\endfirsthead
+\toprule\textbf{Phase} & \textbf{File} & \textbf{Nội dung} \\
+\midrule\endhead
+1 & \path{test_zk_proof.py} & Proof Groth16: định dạng, nén, verify, fail-closed \\
+2 & \path{test_native_blind_contract.py} & C++ và Python khớp HKDF, lịch, khung, làm trắng, lịch theo đoạn \\
+3 & \path{test_native_cli_fixture.py} & CLI nhúng/trích trên fixture, decode nghiêm ngặt, sai khóa \\
+4 & \path{test_h264_tables.py} & Bảng VLC (prefix-free, Kraft, giá trị chuẩn) \\
+5 & \path{test_service_api.py} & Lõi job, xác thực trước body, giới hạn thử sai, job verify \\
+6 & \path{test_native_http_channel.py} & Job HTTP và WebSocket qua Uvicorn thật \\
+7 & \path{test_manifest_security.py} & Ký manifest và ràng buộc liên quan \\
+8 & \path{test_realtime_scheduler.py} & Bộ lập lịch realtime \\
+9 & \path{test_benchmark_recorder.py} & Fail-closed của bộ ghi benchmark camera \\
+10 & \path{test_trust_interfaces.py} & Provenance, C2PA, attestation thử nghiệm \\
+11 & \path{test_demo_h264_explain.py} & Toán giải thích của demo khớp native và pixel FFmpeg \\
+12 & \path{test_demo_smoke.py} & Toàn bộ demo chạy không có \texttt{[FAIL]} \\
+H1 & \path{test_native_camera_http.py} & Camera thật, chỉ khi \path{--hardware} \\
+\bottomrule\end{longtable}
+
+Mã thoát của \path{run_all.py}: 0 = tất cả qua, 1 = có lỗi, 2 = có phase thiếu bằng
+chứng (bị bỏ qua). Theo \path{README.md}, lần chạy ngày 03/10/2026 đạt 126/126 qua
+12 phase và CTest native 1/1; phase camera H1 không nằm trong con số này.
+
+\section{Demo đã chạy: artifact và cách suy luận}
+
+\begin{longtable}{P{.3\textwidth}P{.3\textwidth}P{.31\textwidth}}
+\toprule\textbf{Artifact} & \textbf{Nội dung} & \textbf{Dùng để kết luận gì} \\
+\midrule\endfirsthead
+\toprule\textbf{Artifact} & \textbf{Nội dung} & \textbf{Dùng để kết luận gì} \\
+\midrule\endhead
+\path{transcript.txt}, \path{report.json} & Thuyết minh (secret bị che), kết quả kiểm tra, thời gian & Trạng thái tổng; luôn mở log tiến trình gốc khi có lỗi. \\
+\path{encode.stderr}, \path{encoder_input.yuv}, \path{source_decoded.yuv} & Log FFmpeg/libx264, frame trước/sau nén & Mất mát do nén, tách biệt với nhúng. \\
+\path{trace_before.json}, \path{trace_after.json} & NAL, slice, ứng viên, bit dấu, hệ số & Chỉ đúng các bit đã lập lịch đổi; cấu trúc giữ nguyên. \\
+\path{segments_before.json}, \path{segments_after.json} & Ứng viên từng đoạn (\texttt{segments-1}) & Bên nhận dựng lại cùng lịch từ stego. \\
+\path{schedule.json} & Bit khung, keystream, bit nhúng, cũ/mới từng vị trí & Kiểm lịch HMAC và làm trắng. \\
+\path{proof.json}, \path{proof.bin}, \path{public_signals.json} & Proof và 513 public signal & Kiểm nén/giải nén proof. \\
+\path{mb_detail_before.json}, \path{mb_detail_after.json} & Output \path{--macroblock} & Giải phẫu khối mẫu. \\
+\path{native_embed.*}, \path{native_extract.*}, \path{reject_*.*} & stdout/stderr từng tiến trình & Mã thoát 2 và thông báo lỗi đúng lý do. \\
+\bottomrule\end{longtable}
+
+PASS của demo là bằng chứng chức năng trên một clip/một lần chạy, không phải benchmark:
+nó không đo chất lượng cảm nhận trên tập lớn và không chứng minh deadline realtime.
 
 \section{Các giới hạn cần nhớ khi đọc code}
 
 \begin{enumerate}
-  \item \textbf{Không phải mọi H.264 đều được hỗ trợ như nhau.} Native path nhắm
-  Baseline/CAVLC và các điều kiện parser/slice cụ thể; CABAC, FMO, MBAFF và nhiều
-  trường hợp profile khác nằm ngoài primitive đã mô tả.
-  \item \textbf{I/P/B và nhúng là hai lớp khác nhau.} Parser native thu candidate
-  từ IDR I-slice CAVLC; demo fixture all-intra khiến mỗi frame phù hợp là IDR.
-  Đừng suy ra từ đó rằng mọi P/B residual hiện đều có thể làm carrier.
-  \item \textbf{Blind không có nghĩa không cần key.} Blind có nghĩa extractor
-  không cần cover gốc; vẫn cần key để đồng bộ lịch và authenticate frame.
-  \item \textbf{Groth16 và HMAC khác nhiệm vụ.} Proof kiểm relation circuit;
-  HMAC kiểm frame payload theo shared key; bearer token xác thực API caller; các
-  lớp không thay thế nhau.
-  \item \textbf{Native streaming và camera realtime không đồng nghĩa.} WebSocket
-  nhận byte stream Annex-B và có bounded I/O; camera capture/device driver và
-  chứng minh deadline trên edge cần test riêng.
-  \item \textbf{Nhánh Python sinh sidecar.} \path{.positions.json},
-  \path{.meta.json}, \path{.manifest.json} là artifact của nhánh cũ, không cần
-  cho native blind extraction.
+  \item \textbf{Không phải mọi H.264 đều được hỗ trợ.} Parser native chỉ nhận
+  Baseline, CAVLC, progressive, 4:2:0, một slice mỗi frame bắt đầu ở MB 0, không
+  I\_PCM, không nhiều SPS/PPS khác id.
+  \item \textbf{Chỉ IDR mang bit.} Với GOP $>1$, P-frame được sao chép nguyên.
+  \item \textbf{Mù không có nghĩa không cần khóa.} Extractor không cần video gốc
+  nhưng cần khóa và cùng \texttt{max\_bits\_per\_IDR}.
+  \item \textbf{Groth16, HMAC và bearer token khác nhiệm vụ.} Proof kiểm quan hệ
+  circuit; HMAC kiểm khung theo khóa chung; token xác thực caller của API.
+  \item \textbf{Không chống phát lại.} Khung và proof không chứa định danh video hay
+  bộ đếm; payload có thể bị chép sang video khác dùng cùng khóa
+  (xem \path{future_plan.md}).
+  \item \textbf{Ai có khóa cũng tạo được proof}, vì verifier phải biết secret để tính
+  lại commitment.
 \end{enumerate}
 
 \section{Lộ trình đọc source cho người mới tiếp nhận}
 
-Để nắm hệ thống mà ít bị phân tán, nên đọc theo thứ tự sau:
 \begin{enumerate}
-  \item Chạy/đọc \path{demo/README.md}, rồi theo các script 00--09. Mở mỗi log
-  ngay sau khi chạy để liên hệ input/output.
-  \item Đọc \path{demo/05_embed_video.py} và \path{demo/07_blind_extract.py}
-  để thấy Python chỉ làm orchestration ở luồng chính.
-  \item Đọc \path{src/api/native_handlers.py::embed_handler()},
-  \path{extract_handler()} và \path{native_stream()} để nắm boundary HTTP/WS.
-  \item Đọc CLI \path{native/tools/blind_bits.cpp::main()}, sau đó
-  \path{run_live_authenticated_embed()} / \path{run_live_authenticated_extract()}.
-  \item Đọc C++ library theo chuỗi
-  \path{split_annex_b()} $\to$ SPS/PPS/slice parsing $\to$
-  \path{decode_baseline_i_idr_slices()} $\to$
-  \path{collect_cavlc_trailing_one_sign_candidates()} $\to$
-  \path{select_keyed_cavlc_sign_candidates()} $\to$
+  \item Đọc \path{doc/he_thong_hoat_dong.md} và \path{demo/README.md}, chạy
+  \path{py -3.12 demo/terminal_demo.py --auto}, mở thư mục \path{demo/runs/terminal_*}.
+  \item Đọc \path{terminal_demo.py::walkthrough()} theo bảng ở Mục~\ref{sec:flow}, rồi
+  \path{demo/native_io.py} để thấy Python chỉ gọi tiến trình native.
+  \item Đọc \path{native/tools/blind_bits.cpp::run()}, sau đó
+  \path{embed_authenticated_cavlc_stream_file()} và
+  \path{extract_authenticated_cavlc_stream_file()}.
+  \item Đọc thư viện theo chuỗi \path{split_annex_b()} $\to$ \path{decode_baseline_i_idr_slices()}
+  $\to$ \path{collect_cavlc_trailing_one_sign_candidates()} $\to$
+  \path{prepare_cavlc_stream_segment()} $\to$ \path{select_with_schedule_key()} $\to$
   \path{AuthenticatedCavlcStreamEncoder/Decoder}.
-  \item Đọc proof path: \path{src/zk_proof.py::pack()},
-  \path{proof_to_bytes()}, \path{ZKSnarkBridge} và
-  \path{circuits/payload_verify.circom}.
-  \item Cuối cùng đọc \path{src/embedder.py}/\path{src/verifier.py} để hiểu vì
-  sao nhánh Python khác native; đọc \path{demo/13_python_pipeline.py} như một
-  integration test/benchmark path riêng.
+  \item Đối chiếu với \path{src/native_blind_contract.py} và
+  \path{test_native_blind_contract.py}.
+  \item Đọc proof path: \path{src/zk_proof.py} và \path{circuits/payload_verify.circom}.
+  \item Đọc boundary dịch vụ: \path{native_handlers.create_native_app()},
+  \path{make_proof_verify_handler()}, \path{native_stream()} và \path{app.create_app()}.
 \end{enumerate}
 
 \section{Tra cứu nhanh theo câu hỏi debug}
 
-\begin{longtable}{p{.37\textwidth}p{.54\textwidth}}
+\begin{longtable}{P{.34\textwidth}P{.57\textwidth}}
 \toprule\textbf{Triệu chứng} & \textbf{Nơi bắt đầu lần theo} \\
 \midrule\endfirsthead
 \toprule\textbf{Triệu chứng} & \textbf{Nơi bắt đầu lần theo} \\
 \midrule\endhead
-Không thấy video NAL/IDR & \path{demo/03_read_video.log}, C++ \path{split_annex_b()}, \path{decode_baseline_i_idr_slices()}, SPS/PPS parser. \\
-Capacity thấp hoặc payload không fit & \path{04_candidate_capacity.log}, \path{collect_cavlc_trailing_one_sign_candidates()}, max bits mỗi IDR. \\
-Embed trả nonzero hoặc output thiếu & \path{05_embed_video.log}, \path{run_live_authenticated_embed()}, encoder \path{process_segment()/complete()}. \\
-FFmpeg từ chối video & \path{06_ffmpeg_decode.log}; xác định parser/patch/EBSP boundary trước khi kiểm quality. \\
-Extract báo sai version/tag & So key bytes hai phía, cùng native schedule/frame domain, sau đó \path{AuthenticatedCavlcStreamDecoder::consume_segment()}. \\
-Payload extract được nhưng ZK false & So \path{packed_payload.bin} với output unpack; kiểm 4-byte length, proof 129 B, message/key/public signals và verification key. \\
-HTTP status 501 cho verify & Đúng với native adapter hiện tại: \path{create_native_app(... verify_handler=None)}. ZK verify phải chạy riêng. \\
-Python chạy lâu/RAM cao & Nhánh \path{src/embedder.py}, parser toàn-video, analysis cache và \path{demo/13_python_pipeline.py}; không quy kết cho native CLI. \\
-Khóa hết hạn vẫn dùng được & Kiểm tra có gọi \path{KeyCertificate.verify()} tại enforcement boundary hay chỉ cấp raw key cho native. Hiện demo path cấp raw key. \\
+Không thấy IDR / parser từ chối & \path{zkstego_inspect --summary}; \path{split_annex_b()}, \path{parse_baseline_sps()/pps()}, \path{decode_baseline_i_idr_slices()}; kiểm profile và \texttt{slices=1}. \\
+Dung lượng thấp, payload không vừa & \path{zkstego_inspect --segments N}; \path{segment_plan.resolve_max_bits()}; tăng \texttt{max\_bits\_per\_IDR}, số frame hoặc giảm message. \\
+Embed thoát mã 2 & stderr của \path{native_embed}; \path{embed_authenticated_cavlc_stream_file()}, \path{process_segment()}. \\
+FFmpeg từ chối video & Kiểm ranh giới patch/EBSP: \path{patch_annex_b_rbsp_plan()}, \path{rbsp_to_ebsp()}. \\
+Extract báo sai version/tag & Cùng khóa hai phía? Cùng \texttt{max\_bits\_per\_IDR}? Rồi \path{consume_segment()}, \path{unpack_frame_with_key()}. \\
+Lịch Python khác native & \path{segment_schedule()} so với \path{analyze_cavlc_stream_file()}; nhớ \texttt{nal\_index} tính trong input phân tích của đoạn. \\
+Payload trích được nhưng ZK false & Kiểm 4 byte độ dài, proof 129 byte, public signals và \path{verification_key.json}; xem \path{_snarkjs_verify()}. \\
+Job verify \texttt{rejected} & Đọc \texttt{reason}: \texttt{payload\_not\_authenticated}, \texttt{malformed\_proof\_payload}, \texttt{proof\_invalid}. \\
+Job verify \texttt{failed} & Lỗi hạ tầng: Node.js, \path{ZK_STEGO_CIRCUITS_DIR}, verification key, timeout. \\
+HTTP 401/429 & \path{RequestBodyGuard}, \path{AuthFailureLimiter}; token phải $\ge$ 32 ký tự. \\
+Khóa hết hạn vẫn dùng được & Đường native nhận khóa thô; \path{KeyCertificate.verify()} chưa được gọi ở đó. \\
 \bottomrule
 \end{longtable}
 
 \section{Kết luận vận hành}
 
-Khi đọc một đường lỗi, lần theo artifact tuần tự: đầu vào/session fingerprint,
-proof bytes, packed blob, capacity, stego output, extracted blob, unpacked
-message/proof, rồi Groth16 result. Điểm nối quan trọng nhất là native CLI nhận
-payload bytes opaque; Python demo tạo proof và blob, còn H.264 syntax parsing,
-keyed sign schedule, HMAC frame, patch, blind extraction thuộc C++.
+Khi đọc một đường lỗi, lần theo artifact tuần tự: message, proof 129 byte, payload,
+khung v2 (đã làm trắng), lịch theo đoạn, video stego, payload trích được, message và
+proof sau unpack, rồi kết quả Groth16. Điểm nối quan trọng nhất là CLI native nhận
+payload là byte opaque: Python tạo proof và payload; phân tích cú pháp H.264, khóa con,
+lịch, khung, làm trắng, patch và trích mù đều nằm trong C++. Khi sửa một hàm, kiểm
+đúng consumer kế tiếp của nó và chạy test ở boundary tương ứng (CTest cho lõi, phase 2
+cho hợp đồng chéo, phase 3/5/6 cho CLI và dịch vụ).
 
-Đường native đã được chạy end-to-end trên fixture hỗ trợ, nhưng source vẫn có
-nhánh Python legacy, scheduler abstraction, certificate/manifest helpers và
-trust experiments không tự động nằm trong đường runtime đó. Khi thay đổi code,
-hãy kiểm tra đúng consumer kế tiếp của hàm vừa sửa và chạy test ở boundary tương
-ứng; PASS ở một nhánh không xác nhận các nhánh còn lại.
+\paragraph{Ghi chú lịch sử.} Trước ngày 03/10/2026, repository còn một nhánh Python
+full-video (\path{src/embedder.py}, \path{src/verifier*.py}, \path{src/core/},
+\path{src/bitstream/}, chaos map, sidecar \path{positions.json}, cache pickle) và bộ
+demo nhiều script đánh số; nhánh này và các benchmark SEC1--SEC10 đã bị gỡ (vẫn xem
+được trong lịch sử git), còn \path{c2pa_bridge.py} được chuyển từ
+\path{src/provenance/} sang \path{src/trust/}.
 
 \end{document}

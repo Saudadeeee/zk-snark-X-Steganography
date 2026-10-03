@@ -1,5 +1,11 @@
 # Realtime CAVLC Theory and Implementation
 
+> **Note (2026-10-03).** This is a dated engineering record. Since then the Python
+> pipeline and the whole-clip/raw CLI commands were removed, `zkstego_idr_inspect` and
+> `zkstego_demo_trace` were merged into `zkstego_inspect` (`--summary`, `--macroblock`,
+> `--segments`), and the channel moved to protocol v2 (HKDF subkeys, whitening). Older
+> sections keep the tool names and figures as they were measured.
+
 ## Purpose and current status
 
 This document specifies the constrained native data plane: change selected
@@ -362,9 +368,13 @@ block, with identity serialized as ASCII:
 ```
 
 where `category` is `0=LumaDc`, `1=Luma4x4`, `2=ChromaDc`, or `3=ChromaAc`.
-For a 32-byte secret `K`, the ordering score is the 32-byte HMAC-SHA-256
-digest of that serialization under
-the literal ASCII bytes `blind-native-cavlc-v1`, followed by one NUL byte and `K`.
+For a 32-byte secret `K`, protocol v2 (2026-10-03) first derives independent
+subkeys with HKDF-SHA-256 (RFC 5869): `PRK = HMAC-SHA-256("zkstego-cavlc-v2-salt", K)`,
+then `schedule_key`, `frame_key` and `whitening_key` by HKDF-Expand with infos
+`zkstego/cavlc/v2/schedule`, `zkstego/cavlc/v2/frame-tag` and
+`zkstego/cavlc/v2/whitening`. The ordering score is the 32-byte
+HMAC-SHA-256 digest of that serialization under `schedule_key`. (Protocol v1,
+superseded, keyed the score with `blind-native-cavlc-v1`, NUL, `K`.)
 Candidates are sorted lexicographically by
 `(score, serialized identity)`, and the first `required_bits` candidates carry
 payload bits in that order. The framing layer must authenticate and length-bind
@@ -382,12 +392,17 @@ sequence with a fixed wrong key. These functions are not a message protocol:
 they carry neither a length nor an authentication tag, so a caller cannot infer
 wrong-key rejection from raw bits alone.
 
-The native authenticated frame is now `version=1 | u16be(payload_length) |
+The native authenticated frame is now `version=2 | u16be(payload_length) |
 payload | tag[16]`. Its tag is the first 16 bytes of HMAC-SHA-256 over the
-preceding frame bytes, using the distinct derived HMAC key composed of the
-literal ASCII bytes `blind-native-frame-v1`, one NUL byte, and `K`. The
-receiver obtains the fixed 3-byte header first, validates the configured length
-bound, then derives the longer schedule prefix and verifies the tag. Tests on
+preceding frame bytes under `frame_key`. Before embedding, frame bit `i` is
+XORed with bit `i` of the keystream `HMAC-SHA-256(whitening_key, u64be(0)) ||
+HMAC-SHA-256(whitening_key, u64be(1)) || ...`, with `i` counted across the
+whole frame even when it spans several IDR segments, so the embedded signs carry
+no fixed header or proof structure. The receiver un-whitens and obtains the
+3-byte header first, validates the version and the configured length bound,
+then derives the longer schedule prefix and verifies the tag. (v1 used
+`version=1`, no whitening, and a tag keyed with `blind-native-frame-v1`, NUL, `K`;
+v2 cannot read v1 stego files.) Tests on
 the locked fixture recover a correct-key payload and reject a wrong key and a
 modified payload bit; an actual CLI E2E output also passes FFmpeg strict decode.
 This authenticates a byte payload, including a serialized proof if supplied;
