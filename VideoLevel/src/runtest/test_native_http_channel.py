@@ -19,8 +19,10 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketDenialResponse
+from starlette.websockets import WebSocketDisconnect
 
-from src.api.app import ApiSettings
+from src.api.app import TERMINAL_JOB_STATUSES, ApiSettings
 from src.api.native_handlers import create_native_app
 from src.runtest._helpers import run_test, section, summarise
 
@@ -34,7 +36,7 @@ def _wait_terminal(client: TestClient, job_id: str, headers: dict[str, str]) -> 
         response = client.get(f"/api/v1/jobs/{job_id}", headers=headers)
         assert response.status_code == 200, response.text
         record = response.json()
-        if record["status"] in {"succeeded", "failed"}:
+        if record["status"] in TERMINAL_JOB_STATUSES:
             return record
         time.sleep(0.05)
     raise AssertionError(f"job {job_id} did not finish within 15 seconds")
@@ -47,28 +49,29 @@ def t_native_http_embed_blind_extract_wrong_key_and_strict_decode():
     fixture_bytes = FIXTURE.read_bytes()
     key = bytes(range(32))
     payload = b"native-http-proof"
-    headers = {"Authorization": "Bearer integration-test-token"}
+    headers = {"Authorization": "Bearer integration-test-token-0123456789abcdef"}
 
     with tempfile.TemporaryDirectory() as temp_dir:
         app = create_native_app(
-            ApiSettings(api_token="integration-test-token", work_dir=Path(temp_dir), max_workers=1, max_queued_jobs=1),
+            ApiSettings(api_token="integration-test-token-0123456789abcdef", work_dir=Path(temp_dir), max_workers=1, max_queued_jobs=1),
             cli_path=cli,
         )
         with TestClient(app) as client:
-            unsupported_verify = client.post(
+            # The cover fixture carries no authenticated payload: the native verify job must be
+            # "rejected" (never "succeeded"), with no message in the result.
+            cover_verify = client.post(
                 "/api/v1/jobs/verify",
                 headers=headers,
                 data={
                     "secret_key_b64": base64.b64encode(key).decode("ascii"),
-                    "message_length": "1",
+                    "maximum_payload_bytes": "512",
                 },
-                files={
-                    "stego_video": ("stego.h264", fixture_bytes, "video/h264"),
-                    "original_video": ("original.h264", fixture_bytes, "video/h264"),
-                },
+                files={"stego_video": ("stego.h264", fixture_bytes, "video/h264")},
             )
-            assert unsupported_verify.status_code == 501, unsupported_verify.text
-            assert list((Path(temp_dir) / "jobs").glob("*.json")) == []
+            assert cover_verify.status_code == 202, cover_verify.text
+            cover_verify_job = _wait_terminal(client, cover_verify.json()["job_id"], headers)
+            assert cover_verify_job["status"] == "rejected", cover_verify_job
+            assert cover_verify_job["result"] == {"valid": False, "reason": "payload_not_authenticated"}
 
             embedded = client.post(
                 "/api/v1/jobs/embed",
@@ -141,19 +144,22 @@ def t_native_http_embed_blind_extract_wrong_key_and_strict_decode():
             for index, tail in enumerate((b"\n", b"f\n", b"f" * 8194 + b"\n")):
                 malformed_output = Path(temp_dir) / f"malformed-{index}.h264"
                 malformed = subprocess.run(
-                    [str(cli), "embed-auth-stdin", str(FIXTURE), str(malformed_output)],
+                    [str(cli), "embed-stream-auth-stdin", str(FIXTURE), str(malformed_output), "64"],
                     input=key.hex().encode("ascii") + b"\n" + tail,
                     capture_output=True, check=False,
                 )
                 assert malformed.returncode != 0
+                # Must fail on the malformed stdin, not because the command is unknown.
+                assert b"usage" not in malformed.stderr.lower(), malformed.stderr
                 assert not malformed_output.exists()
 
             overlong_key = subprocess.run(
-                [str(cli), "embed-auth-stdin", str(FIXTURE), str(Path(temp_dir) / "overlong-key.h264")],
+                [str(cli), "embed-stream-auth-stdin", str(FIXTURE), str(Path(temp_dir) / "overlong-key.h264"), "64"],
                 input=(b"1" * 65) + b"\n" + payload.hex().encode("ascii") + b"\n",
                 capture_output=True, check=False,
             )
             assert overlong_key.returncode != 0
+            assert b"usage" not in overlong_key.stderr.lower(), overlong_key.stderr
             assert not (Path(temp_dir) / "overlong-key.h264").exists()
 
 
@@ -264,7 +270,7 @@ def t_native_authenticated_websocket_live_round_trip():
     fixture = FIXTURE.read_bytes()
     key = bytes(range(32))
     payload = b"ws-proof"
-    token = "websocket-e2e-token"
+    token = "websocket-e2e-token-0123456789abcdef"
     headers = {"Authorization": f"Bearer {token}"}
 
     def drain_messages(messages: queue.Queue, terminal: threading.Event) -> tuple[list[bytes], dict]:
@@ -289,9 +295,13 @@ def t_native_authenticated_websocket_live_round_trip():
             cli_path=cli,
         )
         with TestClient(app) as client:
-            with client.websocket_connect("/api/v1/stream") as unauthenticated:
-                denial = unauthenticated.receive()
-                assert denial.get("type") == "websocket.close" and denial.get("code") == 4401, denial
+            # Authentication happens before accept(): the handshake itself is refused.
+            for bad_headers in ({}, {"Authorization": "Bearer töken".encode("latin-1")}):
+                try:
+                    with client.websocket_connect("/api/v1/stream", headers=bad_headers):
+                        raise AssertionError("unauthenticated WebSocket handshake was accepted")
+                except WebSocketDisconnect as exc:
+                    assert exc.code == 4401, exc.code
 
             with client.websocket_connect("/api/v1/stream", headers=headers) as occupied:
                 occupied.send_json({
@@ -434,6 +444,68 @@ def t_native_authenticated_websocket_live_round_trip():
             response = extract_over_websocket(wrong_key)
             assert response.get("type") == "error" and response.get("code") == "payload_not_authenticated", response
             assert "key" not in json.dumps(response).lower()
+
+
+def t_native_websocket_idle_stream_releases_capacity():
+    cli = Path(os.environ.get("ZK_STEGO_NATIVE_CLI", DEFAULT_CLI))
+    assert cli.is_file(), f"native CLI missing: {cli}"
+    token = "websocket-idle-token-0123456789abcdef"
+    headers = {"Authorization": f"Bearer {token}"}
+    start = {
+        "operation": "extract",
+        "secret_key_b64": base64.b64encode(bytes(range(32))).decode("ascii"),
+        "maximum_payload_bytes": 64,
+    }
+    with tempfile.TemporaryDirectory() as temp_dir:
+        app = create_native_app(
+            ApiSettings(api_token=token, work_dir=Path(temp_dir), max_workers=1, max_queued_jobs=0),
+            cli_path=cli,
+            stream_idle_timeout_seconds=0.5,
+        )
+        with TestClient(app) as client:
+            started = time.perf_counter()
+            with client.websocket_connect("/api/v1/stream", headers=headers) as idle:
+                idle.send_json(start)
+                assert idle.receive_json() == {"type": "ready", "operation": "extract"}
+                assert idle.receive_json() == {"type": "error", "code": "stream_idle_timeout"}
+                closed = idle.receive()
+                assert closed.get("type") == "websocket.close" and closed.get("code") == 4408, closed
+            assert time.perf_counter() - started < 10.0
+            # The slot held by the idle stream must have been released.
+            with client.websocket_connect("/api/v1/stream", headers=headers) as follow_up:
+                follow_up.send_json(start)
+                assert follow_up.receive_json() == {"type": "ready", "operation": "extract"}
+                follow_up.send_text(json.dumps({"type": "end"}))
+                assert follow_up.receive_json()["type"] == "error"
+
+
+def t_native_websocket_auth_failures_are_throttled():
+    cli = Path(os.environ.get("ZK_STEGO_NATIVE_CLI", DEFAULT_CLI))
+    assert cli.is_file(), f"native CLI missing: {cli}"
+    token = "websocket-throttle-token-0123456789abcdef"
+    headers = {"Authorization": f"Bearer {token}"}
+    with tempfile.TemporaryDirectory() as temp_dir:
+        app = create_native_app(
+            ApiSettings(api_token=token, work_dir=Path(temp_dir), auth_failure_limit=2),
+            cli_path=cli,
+        )
+        with TestClient(app) as client:
+            for _ in range(2):
+                try:
+                    with client.websocket_connect("/api/v1/stream", headers={"Authorization": "Bearer wrong"}):
+                        raise AssertionError("unauthenticated WebSocket handshake was accepted")
+                except WebSocketDisconnect as exc:
+                    assert not isinstance(exc, WebSocketDenialResponse) and exc.code == 4401, exc
+            # Throttled before the token is checked, so even the right token is refused until the window ends.
+            try:
+                with client.websocket_connect("/api/v1/stream", headers=headers):
+                    raise AssertionError("throttled WebSocket handshake was accepted")
+            except WebSocketDenialResponse as denial:
+                assert denial.status_code == 429, denial.status_code
+                assert int(denial.headers["retry-after"]) >= 1
+            # The limiter is shared with the HTTP guard: the same client is throttled on jobs too.
+            throttled = client.get("/api/v1/jobs/" + "a" * 24, headers=headers)
+            assert throttled.status_code == 429, throttled.text
 
 
 def t_native_uvicorn_network_websocket_round_trip():
@@ -597,6 +669,8 @@ def main():
         run_test("native_incremental_stdin_stdout_stream_round_trip", t_native_incremental_stdin_stdout_stream_round_trip),
         run_test("native_full_stream_capacity_scan", t_native_full_stream_capacity_scan),
         run_test("native_authenticated_websocket_live_round_trip", t_native_authenticated_websocket_live_round_trip),
+        run_test("native_websocket_idle_stream_releases_capacity", t_native_websocket_idle_stream_releases_capacity),
+        run_test("native_websocket_auth_failures_are_throttled", t_native_websocket_auth_failures_are_throttled),
         run_test("native_uvicorn_network_websocket_round_trip", t_native_uvicorn_network_websocket_round_trip),
     ]
     sys.exit(summarise(results, "Native channel E2E"))

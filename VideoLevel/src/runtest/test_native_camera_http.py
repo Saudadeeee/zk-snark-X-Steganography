@@ -367,7 +367,7 @@ def t_physical_camera_tcp_websocket_live_round_trip():
     proof_dict, _public_signals = proof_bridge.generate_proof_for_payload(payload, key)
     proof_generation_ms = (time.perf_counter() - proof_started) * 1000.0
     proof_payload = pack(payload, proof_to_bytes(proof_dict))
-    token = "live-camera-websocket-token"
+    token = "live-camera-websocket-token-for-tests-only"
     headers = {"Authorization": f"Bearer {token}"}
     temporary_work_dir = tempfile.TemporaryDirectory(prefix="zkstego-live-camera-ws-")
     camera_process = None

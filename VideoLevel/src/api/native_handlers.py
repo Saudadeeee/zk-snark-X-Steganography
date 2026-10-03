@@ -10,20 +10,83 @@ import asyncio
 import base64
 import contextlib
 import json
+import logging
 import math
 import os
-import secrets
 import subprocess
 import time
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import psutil
 from fastapi import FastAPI, WebSocket
+from fastapi.responses import JSONResponse
 from starlette.websockets import WebSocketDisconnect
 
-from src.api.app import ApiSettings, create_app
+from src.api.app import ApiSettings, bearer_token_matches, client_host, create_app
+from src.zk_proof import PROOF_SIZE_BYTES, ZKSnarkBridge, bytes_to_proof, unpack
+
+_LOGGER = logging.getLogger(__name__)
+
+NATIVE_STDERR_TAIL_BYTES = 64 * 1024
+DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 15.0
+
+# (stego_video_path, secret_key, maximum_payload_bytes) -> authenticated payload bytes.
+PayloadExtractor = Callable[[str, bytes, int], bytes]
+# (proof_dict, message, secret_key) -> True only when the Groth16 proof verifies.
+ProofVerifier = Callable[[dict, bytes, bytes], bool]
+
+
+class _StreamIdleTimeout(Exception):
+    pass
+
+
+class NativePayloadNotAuthenticated(RuntimeError):
+    """The native CLI exited non-zero: no authenticated payload under this key (or a bad stream)."""
+
+
+def make_proof_verify_handler(
+    extract_payload: PayloadExtractor, verify_proof: ProofVerifier,
+) -> Callable[..., dict[str, Any]]:
+    """Blind-extract ``pack(message, proof)`` and accept it only if its Groth16 proof verifies.
+
+    Returns ``{"valid": True, "message_b64", "payload_bytes"}`` for a verified proof and
+    ``{"valid": False, "reason"}`` when no authenticated payload, a malformed blob or an
+    invalid proof is found. Infrastructure errors (timeouts, missing Node.js/circuits)
+    propagate, so the job service marks the job "failed" rather than "rejected".
+    """
+
+    def verify_handler(*, stego_video_path: str, secret_key: bytes, maximum_payload_bytes: int) -> dict[str, Any]:
+        try:
+            blob = extract_payload(stego_video_path, secret_key, maximum_payload_bytes)
+        except NativePayloadNotAuthenticated:
+            return {"valid": False, "reason": "payload_not_authenticated"}
+        try:
+            message, proof_bytes = unpack(blob)
+            if not message or len(blob) != 4 + len(message) + PROOF_SIZE_BYTES:
+                raise ValueError("proof payload length mismatch")
+            proof = bytes_to_proof(proof_bytes)
+        except ValueError:
+            return {"valid": False, "reason": "malformed_proof_payload"}
+        if verify_proof(proof, message, secret_key) is not True:
+            return {"valid": False, "reason": "proof_invalid"}
+        return {
+            "valid": True,
+            "message_b64": base64.b64encode(message).decode("ascii"),
+            "payload_bytes": len(blob),
+        }
+
+    return verify_handler
+
+
+async def _drain_bounded(stream: asyncio.StreamReader, tail: bytearray, limit: int) -> None:
+    """Continuously drain a child pipe so it never blocks, keeping only the last ``limit`` bytes."""
+    while chunk := await stream.read(16 * 1024):
+        tail.extend(chunk)
+        if len(tail) > limit:
+            del tail[: len(tail) - limit]
 
 
 def create_native_app(
@@ -32,12 +95,31 @@ def create_native_app(
     cli_path: str | Path | None = None,
     timeout_seconds: float = 120.0,
     stream_timeout_seconds: float = 3600.0,
+    stream_idle_timeout_seconds: float | None = None,
+    payload_extractor: PayloadExtractor | None = None,
+    proof_verifier: ProofVerifier | None = None,
 ) -> FastAPI:
-    """Create bounded HTTP-job and WebSocket-stream services backed by native authenticated CAVLC."""
+    """Create bounded HTTP-job and WebSocket-stream services backed by native authenticated CAVLC.
+
+    ``stream_idle_timeout_seconds`` (default ``ZK_STEGO_STREAM_IDLE_TIMEOUT_SECONDS`` or 15 s)
+    bounds how long a stream may hold a capacity slot without sending a frame.
+    ``/api/v1/jobs/verify`` blind-extracts with the native CLI and verifies the Groth16 proof
+    against ``settings.circuits_dir`` (``ZK_STEGO_CIRCUITS_DIR``); ``payload_extractor`` and
+    ``proof_verifier`` replace those two steps (tests inject them for determinism).
+    """
     if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be finite and positive")
     if not math.isfinite(stream_timeout_seconds) or stream_timeout_seconds <= 0:
         raise ValueError("stream_timeout_seconds must be finite and positive")
+    if stream_idle_timeout_seconds is None:
+        try:
+            stream_idle_timeout_seconds = float(os.environ.get(
+                "ZK_STEGO_STREAM_IDLE_TIMEOUT_SECONDS", DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS,
+            ))
+        except ValueError as exc:
+            raise ValueError("ZK_STEGO_STREAM_IDLE_TIMEOUT_SECONDS must be a number of seconds") from exc
+    if not math.isfinite(stream_idle_timeout_seconds) or stream_idle_timeout_seconds <= 0:
+        raise ValueError("stream_idle_timeout_seconds must be finite and positive")
     settings = settings or ApiSettings.from_environment()
     configured_cli = cli_path or os.environ.get("ZK_STEGO_NATIVE_CLI")
     if not configured_cli:
@@ -68,7 +150,7 @@ def create_native_app(
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError("native CAVLC operation timed out") from exc
         if result.returncode != 0:
-            raise RuntimeError("native CAVLC operation failed")
+            raise NativePayloadNotAuthenticated("native CAVLC operation failed")
         return result
 
     def embed_handler(
@@ -81,12 +163,18 @@ def create_native_app(
         )
         if not Path(output_path).is_file():
             raise RuntimeError("native CAVLC operation did not create output")
-        # IDR segments carry one authenticated frame: version + length + HMAC tag + payload.
-        return {"valid": True, "bits_embedded": (len(message) + 19) * 8, "output_file": Path(output_path).name}
+        # NOTE: computed here, not reported by the native CLI. One authenticated frame is
+        # version(1) + length(2) + HMAC tag(16) + payload, i.e. (len + 19) bytes. The
+        # "bits_embedded" key is kept for API compatibility; "bits_embedded_source" says how it was derived.
+        computed_frame_bits = (len(message) + 19) * 8
+        return {
+            "valid": True,
+            "bits_embedded": computed_frame_bits,
+            "bits_embedded_source": "computed_frame_size",
+            "output_file": Path(output_path).name,
+        }
 
-    def extract_handler(
-        *, stego_video_path: str, output_path: str, secret_key: bytes, maximum_payload_bytes: int,
-    ) -> dict[str, Any]:
+    def native_extract_payload(stego_video_path: str, secret_key: bytes, maximum_payload_bytes: int) -> bytes:
         result = invoke(
             ["extract-stream-auth", stego_video_path, "-", str(maximum_payload_bytes), str(maximum_bits_per_idr)],
             secret_key,
@@ -97,6 +185,19 @@ def create_native_app(
             raise RuntimeError("native CAVLC extractor returned malformed payload") from exc
         if len(payload) > maximum_payload_bytes:
             raise RuntimeError("native CAVLC extractor exceeded requested payload bound")
+        return payload
+
+    def groth16_verify(proof: dict, message: bytes, secret_key: bytes) -> bool:
+        bridge = ZKSnarkBridge(str(settings.circuits_dir))
+        # A missing verification key is a deployment fault ("failed"), not an invalid proof.
+        if not (bridge.build_dir / bridge.VKEY_FILE).is_file():
+            raise RuntimeError("Groth16 verification key is not available")
+        return bridge.verify_proof_for_payload(proof, message, secret_key)
+
+    def extract_handler(
+        *, stego_video_path: str, output_path: str, secret_key: bytes, maximum_payload_bytes: int,
+    ) -> dict[str, Any]:
+        payload = native_extract_payload(stego_video_path, secret_key, maximum_payload_bytes)
         destination = Path(output_path)
         try:
             with destination.open("xb") as stream:
@@ -109,18 +210,37 @@ def create_native_app(
     app = create_app(
         settings,
         embed_handler=embed_handler,
-        verify_handler=None,
+        verify_handler=make_proof_verify_handler(
+            payload_extractor or native_extract_payload, proof_verifier or groth16_verify,
+        ),
         extract_handler=extract_handler,
     )
 
     @app.websocket("/api/v1/stream")
     async def native_stream(websocket: WebSocket) -> None:
-        authorization = websocket.headers.get("authorization")
-        expected = f"Bearer {settings.api_token}"
-        await websocket.accept()
-        if not authorization or not secrets.compare_digest(authorization, expected):
+        # Authenticate before accept(): an unauthenticated peer never completes the handshake
+        # (uvicorn answers HTTP 403; the ASGI close code stays 4401 for in-process clients).
+        # Failures share the HTTP guard's per-client limiter, so the WebSocket is no bypass.
+        auth_limiter = app.state.auth_failure_limiter
+        client = client_host(websocket.scope)
+        retry_after = auth_limiter.retry_after(client)
+        if retry_after:
+            if "websocket.http.response" in websocket.scope.get("extensions", {}):
+                await websocket.send_denial_response(JSONResponse(
+                    {"detail": "too many failed authentication attempts; retry later"},
+                    status_code=429, headers={"Retry-After": str(retry_after)},
+                ))
+            else:
+                await websocket.close(code=4429, reason="too many failed authentication attempts")
+            return
+        if not bearer_token_matches(websocket.headers.get("authorization"), settings.api_token):
+            failures = auth_limiter.record_failure(client)
+            _LOGGER.warning(
+                "WebSocket authentication failed: client=%s failures_in_window=%s", client, failures,
+            )
             await websocket.close(code=4401, reason="authentication required")
             return
+        await websocket.accept()
         if not app.state.capacity.acquire(blocking=False):
             await websocket.send_json({"type": "error", "code": "stream_capacity_reached"})
             await websocket.close(code=1013, reason="stream capacity reached")
@@ -130,6 +250,8 @@ def create_native_app(
         input_task: asyncio.Task[None] | None = None
         output_task: asyncio.Task[None] | None = None
         resource_task: asyncio.Task[None] | None = None
+        stderr_task: asyncio.Task[None] | None = None
+        stderr_tail = bytearray()
         native_resources: dict[str, int | float] = {
             "sample_count": 0,
             "peak_rss_bytes": 0,
@@ -193,6 +315,10 @@ def create_native_app(
                 limit=64 * 1024,
             )
             assert process.stdin is not None and process.stdout is not None and process.stderr is not None
+            # Drain stderr concurrently; an unread pipe would block the child once its buffer fills.
+            stderr_task = asyncio.create_task(
+                _drain_bounded(process.stderr, stderr_tail, NATIVE_STDERR_TAIL_BYTES),
+            )
             native_stdin_high_water_bytes = 64 * 1024
             native_stdin_low_water_bytes = 16 * 1024
             stdin_transport = process.stdin.transport
@@ -274,7 +400,14 @@ def create_native_app(
                     remaining = deadline - asyncio.get_running_loop().time()
                     if remaining <= 0:
                         raise TimeoutError("native stream deadline exceeded")
-                    event = await asyncio.wait_for(websocket.receive(), timeout=remaining)
+                    try:
+                        event = await asyncio.wait_for(
+                            websocket.receive(), timeout=min(remaining, stream_idle_timeout_seconds),
+                        )
+                    except asyncio.TimeoutError:
+                        if deadline - asyncio.get_running_loop().time() <= 0:
+                            raise
+                        raise _StreamIdleTimeout from None
                     if event["type"] == "websocket.disconnect":
                         process.stdin.close()
                         return
@@ -354,8 +487,11 @@ def create_native_app(
                         if resource_task is not None:
                             with contextlib.suppress(asyncio.TimeoutError):
                                 await asyncio.wait_for(asyncio.shield(resource_task), timeout=0.5)
-                        assert process.stderr is not None
-                        native_diagnostics = await process.stderr.read()
+                        if stderr_task is not None:
+                            # The child has exited, so EOF is imminent; bound the wait regardless.
+                            with contextlib.suppress(asyncio.TimeoutError):
+                                await asyncio.wait_for(asyncio.shield(stderr_task), timeout=2.0)
+                        native_diagnostics = bytes(stderr_tail)
                         stream_metrics = None
                         for line in native_diagnostics.decode("utf-8", errors="replace").splitlines():
                             if line.startswith("ZKSTEG_STREAM_METRICS "):
@@ -464,6 +600,10 @@ def create_native_app(
                 await output_task
         except (WebSocketDisconnect, ConnectionError, BrokenPipeError):
             pass
+        except _StreamIdleTimeout:
+            with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+                await websocket.send_json({"type": "error", "code": "stream_idle_timeout"})
+                await websocket.close(code=4408, reason="stream idle timeout")
         except Exception:  # noqa: BLE001 - errors are deliberately generic on the wire.
             if accepted:
                 with contextlib.suppress(RuntimeError, WebSocketDisconnect):
@@ -476,10 +616,11 @@ def create_native_app(
                         task.cancel()
                         with contextlib.suppress(asyncio.CancelledError, Exception):
                             await task
-                if resource_task is not None and not resource_task.done():
-                    resource_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await resource_task
+                for task in (resource_task, stderr_task):
+                    if task is not None and not task.done():
+                        task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError, Exception):
+                            await task
                 if process is not None:
                     if process.stdin is not None and not process.stdin.is_closing():
                         process.stdin.close()
