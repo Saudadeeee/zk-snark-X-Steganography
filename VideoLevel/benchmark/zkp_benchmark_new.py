@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import re
 import secrets
 import shutil
-import statistics
 import subprocess
 import time
 import uuid
@@ -125,7 +123,8 @@ def run_zkp_benchmark(output_root: Path, trials: int = 1,
                              str(witness), str(proof_path), str(public_path), timeout=7200)
             verify = _verify_with_cli(BUILD / "verification_key.json", public_path, proof_path, "groth16")
             verification_output = (verify["stdout"] + verify["stderr"]).decode(errors="replace").lower()
-            groth_ok = "ok" in verification_output and "invalid" not in verification_output
+            # snarkjs exits 0 and prints "OK!" only for a valid proof.
+            groth_ok = verify["returncode"] == 0 and "ok!" in verification_output
             groth_public = json.loads(public_path.read_text(encoding="utf-8"))
             groth_proof = json.loads(proof_path.read_text(encoding="utf-8"))
             tampered_public = list(groth_public)
@@ -133,7 +132,8 @@ def run_zkp_benchmark(output_root: Path, trials: int = 1,
             tampered_path.write_text(json.dumps(tampered_public), encoding="utf-8")
             negative = _verify_expected_invalid(BUILD / "verification_key.json", tampered_path, proof_path, "groth16")
             negative_output = (negative["stdout"] + negative["stderr"]).decode(errors="replace").lower()
-            groth_tamper = "invalid" in negative_output or negative["returncode"] != 0
+            # A crash must not count as a rejection: require snarkjs' own invalid-proof verdict.
+            groth_tamper = negative["returncode"] != 0 and "invalid proof" in negative_output
             results.append({
                 "algorithm": "Groth16 BN254 / snarkjs", "trial": trial + 1,
                 "witness_ms": witness_ms,
@@ -171,7 +171,8 @@ def run_zkp_benchmark(output_root: Path, trials: int = 1,
         raise RuntimeError("could not read circuit constraint count from snarkjs r1cs info: " + info_text[-1500:])
     actual_constraints = int(count_match.group(1))
     # snarkjs' PLONK arithmetization adds selector/permutation constraints; its
-    # reported domain for this 62,553-row R1CS is 221,039, so allow a 4x margin.
+    # reported domain for the R1CS (62,553 rows when measured; 63,321 since the
+    # 2026-10-03 bit constraints) was 221,039, so allow a 4x margin.
     power = max(18, math.ceil(math.log2(4 * actual_constraints)))
     plonk_zkey = out_dir / "payload_verify_plonk.zkey"
     plonk_vkey = out_dir / "payload_verify_plonk_vkey.json"
@@ -200,17 +201,16 @@ def run_zkp_benchmark(output_root: Path, trials: int = 1,
             prove = _run_cli("plonk", "prove", str(plonk_zkey), str(witness),
                              str(proof_path), str(public_path), timeout=7200)
             verify = _verify_with_cli(plonk_vkey, public_path, proof_path, "plonk")
-            proof_data = json.loads(proof_path.read_text(encoding="utf-8"))
             public_data = json.loads(public_path.read_text(encoding="utf-8"))
             verification_output = (verify["stdout"] + verify["stderr"]).decode(errors="replace").lower()
-            valid = "ok" in verification_output and "invalid" not in verification_output
+            valid = verify["returncode"] == 0 and "ok!" in verification_output
             tampered_public = list(public_data)
             tampered_public[-1] = str(int(tampered_public[-1]) + 1)
             tampered_path = work / "plonk_public_tampered.json"
             tampered_path.write_text(json.dumps(tampered_public), encoding="utf-8")
             negative = _verify_expected_invalid(plonk_vkey, tampered_path, proof_path, "plonk")
             negative_output = (negative["stdout"] + negative["stderr"]).decode(errors="replace").lower()
-            rejected = "invalid" in negative_output or negative["returncode"] != 0
+            rejected = negative["returncode"] != 0 and "invalid proof" in negative_output
             record = {
                 "algorithm": "PLONK KZG / snarkjs", "trial": trial + 1,
                 "witness_ms": witness_ms,

@@ -17,6 +17,7 @@ import re
 import shutil
 import statistics
 import subprocess
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -87,9 +88,24 @@ def _sha256_file(path: Path) -> str:
 def _run_measured(args: list[str], stdin: bytes, timeout: int = 3600) -> dict[str, Any]:
     start_ns = time.perf_counter_ns()
     process = psutil.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    assert process.stdin is not None
-    process.stdin.write(stdin)
-    process.stdin.close()
+    assert process.stdin is not None and process.stdout is not None and process.stderr is not None
+    # Read stdout/stderr and write stdin on threads: a child that writes more than
+    # the OS pipe buffer must never block while this loop is only sampling resources.
+    captured: dict[str, bytes] = {}
+    readers = [threading.Thread(target=lambda name=name, pipe=pipe: captured.__setitem__(name, pipe.read()), daemon=True)
+               for name, pipe in (("stdout", process.stdout), ("stderr", process.stderr))]
+
+    def feed_stdin() -> None:
+        try:
+            process.stdin.write(stdin)
+        except (BrokenPipeError, OSError):
+            pass
+        finally:
+            process.stdin.close()
+
+    writer = threading.Thread(target=feed_stdin, daemon=True)
+    for thread in (*readers, writer):
+        thread.start()
     peak_rss = 0
     peak_cpu = 0.0
     process_info = psutil.Process(process.pid)
@@ -105,8 +121,9 @@ def _run_measured(args: list[str], stdin: bytes, timeout: int = 3600) -> dict[st
             process.kill()
             raise TimeoutError(f"process exceeded {timeout}s: {args[0]}")
         time.sleep(0.005)
-    stdout = process.stdout.read() if process.stdout else b""
-    stderr = process.stderr.read() if process.stderr else b""
+    for thread in (writer, *readers):
+        thread.join()
+    stdout, stderr = captured.get("stdout", b""), captured.get("stderr", b"")
     return {"returncode": int(process.returncode), "stdout": stdout, "stderr": stderr,
             "wall_ms": (time.perf_counter_ns() - start_ns) / 1e6,
             "peak_rss_bytes_sampled": peak_rss, "cpu_seconds_sampled": peak_cpu}
@@ -135,7 +152,6 @@ def convert_sources_full(output_root: Path, sources: list[Path] | None = None) -
     raw_sources = sorted((sources or list(RAW_DIR.glob("*.y4m"))), key=lambda path: path.name.lower())
     if not raw_sources:
         raise RuntimeError(f"no .y4m sources found in {RAW_DIR}")
-    native = _native_binary()
     output_dir = output_root / "converted_h264_new"
     output_dir.mkdir(parents=True, exist_ok=True)
     records: list[dict[str, Any]] = []
@@ -201,7 +217,7 @@ def _quality(reference: Path, stego: Path, out_prefix: Path,
             prep = "[0:v]format=yuv420p[ref];"
             compare = f"[ref][1:v]{metric}=stats_file={stats_name}:shortest=1"
         result = _run([ffmpeg, "-v", "error", "-i", str(reference), "-i", str(stego),
-                       "-filter_complex", prep + compare, "-f", "null", "NUL"])
+                       "-filter_complex", prep + compare, "-f", "null", "-"])
         if result.returncode:
             raise RuntimeError(f"{metric} failed for {stego.name}: {result.stderr.decode(errors='replace')[-500:]}")
     return (_parse_stat_file(out_prefix.with_suffix(".psnr.log"), "psnr"),
@@ -215,6 +231,18 @@ def _summary(values: list[float | None]) -> dict[str, Any]:
             "p05_finite": sorted(finite)[max(0, int(0.05 * (len(finite) - 1)))] if finite else None,
             "identical_or_infinite_frames": len(values) - len(finite),
             "frames_measured": len(values)}
+
+
+AUTH_FAILURE_MARKERS = (
+    "authenticated CAVLC frame tag is invalid",
+    "authenticated CAVLC frame version is invalid",
+    "authenticated CAVLC frame length",
+    "authenticated CAVLC stream version is invalid",
+    "authenticated CAVLC stream length exceeds configured maximum",
+    "authenticated CAVLC stream is incomplete",
+    "ended before authenticated payload",
+    "blind schedule capacity is insufficient",
+)
 
 
 def _extract(native: Path, stego_path: Path, key: bytes) -> tuple[int, bytes, str]:
@@ -284,15 +312,16 @@ def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
             decoded_ok = False
             if embedded:
                 strict_result = _run([_tool("ffmpeg"), "-v", "error", "-xerror", "-i", str(stego),
-                                      "-f", "null", "NUL"])
-                decoded_ok = strict_result.returncode == 0
+                                      "-f", "null", "-"])
+                decoded_ok = strict_result.returncode == 0 and _probe(stego)["frames"] == encoded_meta["frames"]
             recovered_code, recovered_hex, extract_error = (-1, b"", "not attempted")
             if embedded:
                 recovered_code, recovered_hex, extract_error = _extract(native, stego, key)
             correct_key = recovered_code == 0 and recovered_hex.decode("ascii", errors="ignore") == PAYLOAD.hex()
             wrong_key = os.urandom(32)
             wrong_code, _, wrong_error = _extract(native, stego, wrong_key) if embedded else (-1, b"", "not attempted")
-            wrong_key_rejected = wrong_code != 0
+            # Exit 2 is also used for I/O and parse errors; require an authentication failure message.
+            wrong_key_rejected = wrong_code == 2 and any(marker in wrong_error for marker in AUTH_FAILURE_MARKERS)
             measured = bool(capacity_ok and embedded and decoded_ok and correct_key and wrong_key_rejected)
             quality_records: dict[str, Any] = {}
             frame_rows: list[dict[str, Any]] = []
@@ -305,7 +334,10 @@ def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
                     "cover_to_stego_psnr_y": _summary(diff_psnr),
                     "cover_to_stego_ssim": _summary(diff_ssim),
                 }
-                frame_count = min(map(len, (raw_psnr, raw_ssim, diff_psnr, diff_ssim)))
+                lengths = {len(raw_psnr), len(raw_ssim), len(diff_psnr), len(diff_ssim)}
+                if lengths != {encoded_meta["frames"]}:
+                    raise RuntimeError(f"quality stats cover {sorted(lengths)} frames, expected {encoded_meta['frames']} for {stego.name}")
+                frame_count = encoded_meta["frames"]
                 for index in range(frame_count):
                     frame_rows.append({
                         "source": source.name, "resolution": f"{width}x{height}",

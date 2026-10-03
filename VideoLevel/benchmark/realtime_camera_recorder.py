@@ -20,6 +20,8 @@ import psutil
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = ROOT / "benchmark" / "results"
+# Fixed overhead (proof generation, ffmpeg startup, verification) for the camera E2E child.
+CAMERA_TEST_TIMEOUT_BASE_SECONDS = 900.0
 REQUIRED_TRUE_FIELDS = (
     "correct_key_payload_match",
     "wrong_key_rejected",
@@ -432,7 +434,19 @@ def main(argv: list[str] | None = None) -> int:
             else ROOT / "native" / "edge-build" / "zkstego_blind_bits"
         )
     command = [sys.executable, str(ROOT / "src" / "runtest" / "test_native_camera_http.py")]
-    result = subprocess.run(command, cwd=ROOT, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    # Capture + embed + strict decode + proof checks scale with capture duration; bound the
+    # child so a wedged camera or native process cannot hang the recorder forever.
+    child_timeout_seconds = CAMERA_TEST_TIMEOUT_BASE_SECONDS + 10.0 * args.duration
+    try:
+        result = subprocess.run(
+            command, cwd=ROOT, env=environment, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=child_timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        partial = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        print(partial, end="")
+        print(f"Camera E2E timed out after {child_timeout_seconds:.0f} s", file=sys.stderr)
+        return 2
     print(result.stdout, end="")
     if result.returncode != 0:
         return result.returncode
