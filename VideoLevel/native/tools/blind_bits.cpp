@@ -1,4 +1,5 @@
 #include "zkstego/cavlc_stream.hpp"
+#include "cli_io.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -102,29 +103,6 @@ SensitiveBytes decode_hex(const std::string_view text) {
     return bytes;
 }
 
-std::vector<std::uint8_t> bytes_to_bits(const std::vector<std::uint8_t>& bytes) {
-    std::vector<std::uint8_t> bits;
-    bits.reserve(bytes.size() * 8U);
-    for (const auto byte : bytes) {
-        for (std::uint8_t shift = 8U; shift-- > 0U;) bits.push_back((byte >> shift) & 1U);
-    }
-    return bits;
-}
-
-std::string bits_to_hex(const std::vector<std::uint8_t>& bits) {
-    if (bits.size() % 8U != 0U) throw std::invalid_argument("extraction bit count must be a multiple of eight");
-    constexpr char hex[] = "0123456789abcdef";
-    std::string text;
-    text.reserve(bits.size() / 4U);
-    for (std::size_t index = 0; index < bits.size(); index += 8U) {
-        std::uint8_t byte = 0;
-        for (std::size_t bit = 0; bit < 8U; ++bit) byte = static_cast<std::uint8_t>((byte << 1U) | bits[index + bit]);
-        text.push_back(hex[byte >> 4U]);
-        text.push_back(hex[byte & 0x0fU]);
-    }
-    return text;
-}
-
 std::string bytes_to_hex(const std::vector<std::uint8_t>& bytes) {
     constexpr char hex[] = "0123456789abcdef";
     std::string text;
@@ -137,16 +115,14 @@ std::string bytes_to_hex(const std::vector<std::uint8_t>& bytes) {
 }
 
 std::vector<std::uint8_t> read_binary(const std::string& path) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) throw std::invalid_argument("cannot open input video");
-    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    return zkstego::cli::read_binary_file(path);
 }
 
 SensitiveBytes read_key_file(const std::string& path) {
     std::ifstream key_file;
     std::istream* input = &std::cin;
     if (path != "-") {
-        key_file.open(path);
+        key_file.open(zkstego::cli::os_path(path));
         if (!key_file) throw std::invalid_argument("cannot open protected key file");
         input = &key_file;
     }
@@ -206,91 +182,15 @@ SensitiveBytes read_hex_payload_stdin_line() {
 }
 
 void write_new_binary(const std::string& path, const std::vector<std::uint8_t>& bytes) {
-    std::FILE* output = nullptr;
-#ifdef _MSC_VER
-    if (fopen_s(&output, path.c_str(), "wbx") != 0 || output == nullptr) {
-        throw std::invalid_argument("cannot exclusively create output video");
-    }
-#else
-    output = std::fopen(path.c_str(), "wbx");
-    if (output == nullptr) throw std::invalid_argument("cannot exclusively create output video");
-#endif
-    const auto written = std::fwrite(bytes.data(), 1U, bytes.size(), output);
-    const auto closed = std::fclose(output);
-    if (written != bytes.size() || closed != 0) {
-        throw std::invalid_argument("failed while writing output video");
-    }
+    zkstego::cli::write_new_binary_file(path, bytes);
 }
 
-std::vector<std::uint8_t> embed_authenticated_idr_stream(
-    const std::vector<std::uint8_t>& input,
-    const std::vector<std::uint8_t>& key,
-    const std::vector<std::uint8_t>& payload,
-    const std::size_t maximum_bits_per_segment) {
-    const auto units = zkstego::split_annex_b(input);
-    if (units.empty()) throw std::invalid_argument("input contains no Annex-B NAL units");
-    zkstego::AuthenticatedCavlcStreamEncoder encoder(key, payload, maximum_bits_per_segment);
-    std::vector<zkstego::AnnexBNalUnit> parameter_sets;
-    std::vector<zkstego::AnnexBNalUnit> output_units;
-    std::size_t idr_count = 0;
-    for (const auto& unit : units) {
-        if (unit.nal_unit_type == 7U || unit.nal_unit_type == 8U) {
-            const auto existing = std::find_if(parameter_sets.begin(), parameter_sets.end(),
-                [&](const auto& item) { return item.nal_unit_type == unit.nal_unit_type; });
-            if (existing == parameter_sets.end()) parameter_sets.push_back(unit);
-            else *existing = unit;
-        }
-        if (unit.nal_unit_type != 5U) {
-            output_units.push_back(unit);
-            continue;
-        }
-        ++idr_count;
-        auto segment = parameter_sets;
-        segment.push_back(unit);
-        auto result = encoder.process_segment(zkstego::assemble_annex_b(segment));
-        const auto patched = zkstego::split_annex_b(result.output);
-        const auto idr = std::find_if(patched.begin(), patched.end(),
-            [](const auto& item) { return item.nal_unit_type == 5U; });
-        if (idr == patched.end() || std::find_if(std::next(idr), patched.end(),
-            [](const auto& item) { return item.nal_unit_type == 5U; }) != patched.end()) {
-            throw std::invalid_argument("native stream patch did not return exactly one IDR slice");
-        }
-        auto output_idr = unit;
-        output_idr.payload = idr->payload;
-        output_units.push_back(std::move(output_idr));
-    }
-    if (idr_count == 0U) throw std::invalid_argument("input contains no IDR slices");
-    if (!encoder.complete()) throw std::invalid_argument("IDR stream capacity is insufficient for authenticated payload");
-    return zkstego::assemble_annex_b(output_units);
-}
-
-std::vector<std::uint8_t> extract_authenticated_idr_stream(
-    const std::vector<std::uint8_t>& input,
-    const std::vector<std::uint8_t>& key,
-    const std::size_t maximum_payload_bytes,
-    const std::size_t maximum_bits_per_segment) {
-    const auto units = zkstego::split_annex_b(input);
-    if (units.empty()) throw std::invalid_argument("input contains no Annex-B NAL units");
-    zkstego::AuthenticatedCavlcStreamDecoder decoder(key, maximum_payload_bytes, maximum_bits_per_segment);
-    std::vector<zkstego::AnnexBNalUnit> parameter_sets;
-    std::size_t idr_count = 0;
-    for (const auto& unit : units) {
-        if (unit.nal_unit_type == 7U || unit.nal_unit_type == 8U) {
-            const auto existing = std::find_if(parameter_sets.begin(), parameter_sets.end(),
-                [&](const auto& item) { return item.nal_unit_type == unit.nal_unit_type; });
-            if (existing == parameter_sets.end()) parameter_sets.push_back(unit);
-            else *existing = unit;
-        } else if (unit.nal_unit_type == 5U) {
-            ++idr_count;
-            auto segment = parameter_sets;
-            segment.push_back(unit);
-            decoder.consume_segment(zkstego::assemble_annex_b(segment));
-            if (decoder.complete()) break;
-        }
-    }
-    if (idr_count == 0U) throw std::invalid_argument("input contains no IDR slices");
-    if (!decoder.complete()) throw std::invalid_argument("IDR stream ended before authenticated payload was complete");
-    return decoder.authenticated_payload();
+// A start code followed immediately by another start code or EOF yields an empty
+// NAL. split_annex_b() drops it in file mode; live mode must skip it too.
+bool is_bare_start_code(const std::vector<std::uint8_t>& bytes) {
+    const std::vector<std::uint8_t> three{0, 0, 1};
+    const std::vector<std::uint8_t> four{0, 0, 0, 1};
+    return bytes == three || bytes == four;
 }
 
 zkstego::AnnexBNalUnit parse_single_stream_nal(const std::vector<std::uint8_t>& bytes) {
@@ -320,20 +220,16 @@ void run_live_capacity_measure(
     std::size_t raw_candidate_signs = 0U;
     std::size_t candidate_capacity_bits = 0U;
     while (reader.read_next(nal_bytes)) {
+        if (is_bare_start_code(nal_bytes)) continue;
         const auto unit = parse_single_stream_nal(nal_bytes);
         if (unit.nal_unit_type == 7U || unit.nal_unit_type == 8U) {
-            const auto existing = std::find_if(parameter_sets.begin(), parameter_sets.end(),
-                [&](const auto& item) { return item.nal_unit_type == unit.nal_unit_type; });
-            if (existing == parameter_sets.end()) parameter_sets.push_back(unit);
-            else *existing = unit;
+            zkstego::update_parameter_set_context(parameter_sets, unit);
             continue;
         }
         if (unit.nal_unit_type != 5U) continue;
 
-        auto segment = parameter_sets;
-        segment.push_back(unit);
         const auto slices = zkstego::decode_baseline_i_idr_slices(
-            zkstego::assemble_annex_b(segment));
+            zkstego::assemble_cavlc_stream_segment(parameter_sets, unit));
         if (slices.size() != 1U) {
             throw std::invalid_argument("capacity measurement requires one supported IDR slice per segment");
         }
@@ -383,13 +279,14 @@ void run_live_authenticated_embed(
     std::size_t candidate_capacity_bits = 0;
     std::size_t bits_embedded = 0;
     while (reader.read_next(nal_bytes)) {
+        if (is_bare_start_code(nal_bytes)) {
+            write_stream_bytes(output, nal_bytes);  // keep the output byte-identical
+            continue;
+        }
         const auto idr_service_started = std::chrono::steady_clock::now();
         auto unit = parse_single_stream_nal(nal_bytes);
         if (unit.nal_unit_type == 7U || unit.nal_unit_type == 8U) {
-            const auto existing = std::find_if(parameter_sets.begin(), parameter_sets.end(),
-                [&](const auto& item) { return item.nal_unit_type == unit.nal_unit_type; });
-            if (existing == parameter_sets.end()) parameter_sets.push_back(unit);
-            else *existing = unit;
+            zkstego::update_parameter_set_context(parameter_sets, unit);
             write_stream_bytes(output, nal_bytes);
             continue;
         }
@@ -407,10 +304,9 @@ void run_live_authenticated_embed(
             continue;
         }
         ++idr_count;
-        auto segment = parameter_sets;
-        segment.push_back(unit);
+        const auto segment = zkstego::assemble_cavlc_stream_segment(parameter_sets, unit);
         const auto processing_started = std::chrono::steady_clock::now();
-        const auto result = encoder.process_segment(zkstego::assemble_annex_b(segment));
+        const auto result = encoder.process_segment(segment);
         candidate_capacity_bits += result.candidate_capacity;
         bits_embedded += result.bits_embedded;
         const auto processing_elapsed = std::chrono::duration<double, std::milli>(
@@ -457,17 +353,13 @@ std::vector<std::uint8_t> run_live_authenticated_extract(
     std::vector<std::uint8_t> nal_bytes;
     std::size_t idr_count = 0;
     while (reader.read_next(nal_bytes)) {
+        if (is_bare_start_code(nal_bytes)) continue;
         const auto unit = parse_single_stream_nal(nal_bytes);
         if (unit.nal_unit_type == 7U || unit.nal_unit_type == 8U) {
-            const auto existing = std::find_if(parameter_sets.begin(), parameter_sets.end(),
-                [&](const auto& item) { return item.nal_unit_type == unit.nal_unit_type; });
-            if (existing == parameter_sets.end()) parameter_sets.push_back(unit);
-            else *existing = unit;
+            zkstego::update_parameter_set_context(parameter_sets, unit);
         } else if (unit.nal_unit_type == 5U) {
             ++idr_count;
-            auto segment = parameter_sets;
-            segment.push_back(unit);
-            decoder.consume_segment(zkstego::assemble_annex_b(segment));
+            decoder.consume_segment(zkstego::assemble_cavlc_stream_segment(parameter_sets, unit));
             if (decoder.complete()) return decoder.authenticated_payload();
         }
     }
@@ -493,79 +385,33 @@ std::size_t parse_bit_count(const std::string& text) {
     return static_cast<std::size_t>(count);
 }
 
-}  // namespace
-
-int main(int argc, char* argv[]) {
+int run(const std::vector<std::string>& argv) {
+    const auto argc = static_cast<int>(argv.size());
     if (argc < 2) {
-        std::cerr << "usage: zkstego_blind_bits embed <input.h264> <protected-key-file> <payload-hex> <new-output.h264>\n"
-                     "   or: zkstego_blind_bits extract <input.h264> <protected-key-file> <bit-count-multiple-of-8>\n"
-                     "   or: zkstego_blind_bits embed-auth <input.h264> <protected-key-file> <payload-hex> <new-output.h264>\n"
-                     "   or: zkstego_blind_bits embed-auth-stdin <input.h264> <new-output.h264>\n"
-                     "   or: zkstego_blind_bits extract-auth <input.h264> <protected-key-file> <maximum-payload-bytes>\n"
-                     "   or: zkstego_blind_bits embed-stream-auth-stdin <input.h264> <new-output.h264> <max-bits-per-IDR>\n"
-                     "   or: zkstego_blind_bits extract-stream-auth <input.h264> <protected-key-file> <maximum-payload-bytes> <max-bits-per-IDR>\n"
-                     "   or: zkstego_blind_bits measure-live-capacity-stdin <max-bits-per-IDR> (raw Annex-B stdin; JSON metrics stdout)\n"
-                     "   or: zkstego_blind_bits embed-live-auth-stdin <max-bits-per-IDR> (key+payload lines, then raw Annex-B stdin; H.264 stdout)\n"
-                     "   or: zkstego_blind_bits extract-live-auth-stdin <maximum-payload-bytes> <max-bits-per-IDR> (key line, then raw Annex-B stdin; payload hex stdout)\n"
-                     "key source: one 64-hex-character key line; use '-' to read it from stdin.\n"
-                     "embed-auth-stdin reads the key line followed by one payload-hex line from stdin.\n"
-                     "key files must have restricted OS access.\n"
-                     "warning: extraction prints unauthenticated raw bits; it does not reject wrong keys.\n";
+        std::cerr << "usage: zkstego_blind_bits <command> ...  (authenticated CAVLC segment protocol v2)\n"
+                     "  embed-stream-auth-stdin <input.h264> <new-output.h264> <max-bits-per-IDR>\n"
+                     "      stdin: key line, payload-hex line; writes the stego file\n"
+                     "  extract-stream-auth <input.h264> <key-file|-> <maximum-payload-bytes> <max-bits-per-IDR>\n"
+                     "      prints the authenticated payload hex; a wrong key or tampering fails\n"
+                     "  measure-live-capacity-stdin <max-bits-per-IDR>\n"
+                     "      stdin: raw Annex-B; stdout: ZKSTEG_CAPACITY_METRICS JSON\n"
+                     "  embed-live-auth-stdin <max-bits-per-IDR>\n"
+                     "      stdin: key line, payload-hex line, then raw Annex-B; stdout: H.264\n"
+                     "  extract-live-auth-stdin <maximum-payload-bytes> <max-bits-per-IDR>\n"
+                     "      stdin: key line, then raw Annex-B; stdout: payload hex\n"
+                     "Each IDR is one segment (stored SPS/PPS + that IDR) carrying at most\n"
+                     "max-bits-per-IDR scheduled sign bits. A key is one 64-hex-character line;\n"
+                     "key files must have restricted OS access ('-' reads the key from stdin).\n";
         return 2;
     }
     try {
         const std::string operation{argv[1]};
-        if (operation == "embed" && argc == 6) {
-            const auto key = read_key_file(argv[3]);
-            const auto payload = decode_hex(argv[4]);
-            const auto stego = zkstego::embed_keyed_cavlc_sign_bits(
-                read_binary(argv[2]), key.value(), bytes_to_bits(payload.value()));
-            write_new_binary(argv[5], stego);
-            std::cout << "embedded_bits=" << payload.size() * 8U << " output_bytes=" << stego.size() << '\n';
-            return 0;
-        }
-        if (operation == "embed-auth" && argc == 6) {
-            const auto key = read_key_file(argv[3]);
-            const auto payload = decode_hex(argv[4]);
-            const auto stego = zkstego::embed_authenticated_cavlc_payload(
-                read_binary(argv[2]), key.value(), payload.value());
-            write_new_binary(argv[5], stego);
-            std::cout << "embedded_authenticated_payload_bytes=" << payload.size()
-                      << " output_bytes=" << stego.size() << '\n';
-            return 0;
-        }
-        if (operation == "embed-auth-stdin" && argc == 4) {
-            auto key = read_key_stdin_line();
-            auto payload = read_hex_payload_stdin_line();
-            const auto stego = zkstego::embed_authenticated_cavlc_payload(
-                read_binary(argv[2]), key.value(), payload.value());
-            write_new_binary(argv[3], stego);
-            std::cout << "embedded_authenticated_payload_bytes=" << payload.size()
-                      << " output_bytes=" << stego.size() << '\n';
-            return 0;
-        }
-        if (operation == "extract" && argc == 5) {
-            const auto key = read_key_file(argv[3]);
-            const auto count = parse_bit_count(argv[4]);
-            if (count % 8U != 0U) throw std::invalid_argument("bit count must be a multiple of eight");
-            std::cerr << "warning: printing unauthenticated raw bits; wrong keys are not rejected\n";
-            std::cout << bits_to_hex(zkstego::extract_keyed_cavlc_sign_bits(
-                read_binary(argv[2]), key.value(), count)) << '\n';
-            return 0;
-        }
-        if (operation == "extract-auth" && argc == 5) {
-            const auto key = read_key_file(argv[3]);
-            const auto maximum_payload_bytes = parse_bit_count(argv[4]);
-            std::cout << bytes_to_hex(zkstego::extract_authenticated_cavlc_payload(
-                read_binary(argv[2]), key.value(), maximum_payload_bytes)) << '\n';
-            return 0;
-        }
         if (operation == "embed-stream-auth-stdin" && argc == 5) {
             auto key = read_key_stdin_line();
             auto payload = read_hex_payload_stdin_line();
             const auto maximum_bits = parse_bit_count(argv[4]);
             if (maximum_bits == 0U) throw std::invalid_argument("max-bits-per-IDR must be positive");
-            const auto output = embed_authenticated_idr_stream(
+            const auto output = zkstego::embed_authenticated_cavlc_stream_file(
                 read_binary(argv[2]), key.value(), payload.value(), maximum_bits);
             write_new_binary(argv[3], output);
             std::cout << "embedded_authenticated_stream_payload_bytes=" << payload.size()
@@ -577,7 +423,7 @@ int main(int argc, char* argv[]) {
             const auto maximum_payload = parse_bit_count(argv[4]);
             const auto maximum_bits = parse_bit_count(argv[5]);
             if (maximum_bits == 0U) throw std::invalid_argument("max-bits-per-IDR must be positive");
-            const auto payload = extract_authenticated_idr_stream(
+            const auto payload = zkstego::extract_authenticated_cavlc_stream_file(
                 read_binary(argv[2]), key.value(), maximum_payload, maximum_bits);
             std::cout << bytes_to_hex(payload) << '\n';
             return 0;
@@ -609,6 +455,22 @@ int main(int argc, char* argv[]) {
             return 0;
         }
         throw std::invalid_argument("invalid command arguments");
+    } catch (const std::exception& error) {
+        std::cerr << "error: " << error.what() << '\n';
+        return 2;
+    }
+}
+
+}  // namespace
+
+// Windows uses wide arguments so Unicode input/output paths survive.
+#ifdef _WIN32
+int wmain(int argc, wchar_t* argv[]) {
+#else
+int main(int argc, char* argv[]) {
+#endif
+    try {
+        return run(zkstego::cli::utf8_arguments(argc, argv));
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << '\n';
         return 2;

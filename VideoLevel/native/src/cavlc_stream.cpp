@@ -1,6 +1,34 @@
 #include "zkstego/cavlc_stream.hpp"
 
+
 #include <array>
+#include <algorithm>
+#include <iterator>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <bcrypt.h>
+#else
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
+#endif
+
+namespace zkstego {
+
+namespace {
 
 struct CoeffTokenCode {
     const char* bits;
@@ -71,33 +99,6 @@ constexpr std::array coeff_token_n4_7{
     CoeffTokenCode{"0000000011", 16, 2},
     CoeffTokenCode{"0000000010", 16, 3},
 };
-#include <array>
-#include <algorithm>
-#include <limits>
-#include <stdexcept>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-#include <unordered_set>
-
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#include <bcrypt.h>
-#else
-#include <openssl/crypto.h>
-#include <openssl/evp.h>
-#include <openssl/hmac.h>
-#endif
-
-namespace zkstego {
-
-namespace {
 
 std::size_t start_code_length_at(const std::vector<std::uint8_t>& bytes, std::size_t offset) {
     if (offset + 3 <= bytes.size() && bytes[offset] == 0 && bytes[offset + 1] == 0 && bytes[offset + 2] == 1) {
@@ -148,16 +149,6 @@ constexpr std::array coeff_token_n2_3{
     CoeffTokenCode{"00000000000111", 16, 0}, CoeffTokenCode{"00000000000110", 16, 1}, CoeffTokenCode{"00000000000101", 16, 2}, CoeffTokenCode{"00000000000100", 16, 3},
 };
 
-constexpr std::array coeff_token_n4_5{
-    CoeffTokenCode{"1111", 0, 0}, CoeffTokenCode{"1110", 1, 1}, CoeffTokenCode{"1101", 2, 2}, CoeffTokenCode{"1100", 3, 3}, CoeffTokenCode{"1011", 4, 3}, CoeffTokenCode{"1010", 5, 3}, CoeffTokenCode{"1001", 6, 3}, CoeffTokenCode{"1000", 7, 3},
-    CoeffTokenCode{"01111", 2, 1}, CoeffTokenCode{"01100", 3, 1}, CoeffTokenCode{"01110", 3, 2}, CoeffTokenCode{"01010", 4, 1}, CoeffTokenCode{"01011", 4, 2}, CoeffTokenCode{"01000", 5, 1}, CoeffTokenCode{"01001", 5, 2}, CoeffTokenCode{"01101", 8, 3},
-    CoeffTokenCode{"011111", 1, 0}, CoeffTokenCode{"011011", 2, 0}, CoeffTokenCode{"011000", 3, 0}, CoeffTokenCode{"011110", 6, 1}, CoeffTokenCode{"011101", 6, 2}, CoeffTokenCode{"011010", 7, 1}, CoeffTokenCode{"011001", 7, 2}, CoeffTokenCode{"011100", 9, 3},
-    CoeffTokenCode{"0101111", 4, 0}, CoeffTokenCode{"0101011", 5, 0}, CoeffTokenCode{"0101001", 6, 0}, CoeffTokenCode{"0101000", 7, 0}, CoeffTokenCode{"0101110", 8, 1}, CoeffTokenCode{"0101101", 8, 2}, CoeffTokenCode{"0101010", 9, 2}, CoeffTokenCode{"0101100", 10, 3},
-    CoeffTokenCode{"01001111", 8, 0}, CoeffTokenCode{"01001011", 9, 0}, CoeffTokenCode{"01001110", 9, 1}, CoeffTokenCode{"01001010", 10, 1}, CoeffTokenCode{"01001101", 10, 2}, CoeffTokenCode{"01001001", 11, 2}, CoeffTokenCode{"01001100", 11, 3}, CoeffTokenCode{"01001000", 12, 3},
-    CoeffTokenCode{"010001111", 10, 0}, CoeffTokenCode{"010001011", 11, 0}, CoeffTokenCode{"010001110", 11, 1}, CoeffTokenCode{"010001000", 12, 0}, CoeffTokenCode{"010001010", 12, 1}, CoeffTokenCode{"010001101", 12, 2}, CoeffTokenCode{"010000111", 13, 1}, CoeffTokenCode{"010001001", 13, 2}, CoeffTokenCode{"010001100", 13, 3},
-    CoeffTokenCode{"0100001101", 13, 0}, CoeffTokenCode{"0100001001", 14, 0}, CoeffTokenCode{"0100001100", 14, 1}, CoeffTokenCode{"0100001011", 14, 2}, CoeffTokenCode{"0100001010", 14, 3}, CoeffTokenCode{"0100000101", 15, 0}, CoeffTokenCode{"0100001000", 15, 1}, CoeffTokenCode{"0100000111", 15, 2}, CoeffTokenCode{"0100000110", 15, 3}, CoeffTokenCode{"0100000001", 16, 0}, CoeffTokenCode{"0100000100", 16, 1}, CoeffTokenCode{"0100000011", 16, 2}, CoeffTokenCode{"0100000010", 16, 3},
-};
-
 constexpr std::array coeff_token_chroma_dc{
     CoeffTokenCode{"1", 1, 1}, CoeffTokenCode{"01", 0, 0}, CoeffTokenCode{"001", 2, 2}, CoeffTokenCode{"000010", 4, 0},
     CoeffTokenCode{"000011", 3, 0}, CoeffTokenCode{"000100", 2, 0}, CoeffTokenCode{"000101", 3, 3}, CoeffTokenCode{"000110", 2, 1},
@@ -191,7 +182,23 @@ H264BaselineSps parse_baseline_sps(const std::vector<std::uint8_t>& rbsp) {
     sps.pic_width_in_mbs_minus1 = reader.read_ue();
     sps.pic_height_in_map_units_minus1 = reader.read_ue();
     sps.frame_mbs_only_flag = reader.read_bit() != 0;
+    static_cast<void>(validated_picture_macroblock_count(sps));
     return sps;
+}
+
+std::size_t validated_picture_macroblock_count(const H264BaselineSps& sps) {
+    // Field/MBAFF pictures double the map-unit height; they are rejected by
+    // the slice parser but are bounded here as frames for a safe estimate.
+    const auto width = static_cast<std::size_t>(sps.pic_width_in_mbs_minus1) + 1U;
+    const auto map_units = static_cast<std::size_t>(sps.pic_height_in_map_units_minus1) + 1U;
+    const auto height = sps.frame_mbs_only_flag ? map_units : map_units * 2U;
+    if (width > kMaxPictureDimensionMbs || height > kMaxPictureDimensionMbs ||
+        width * height > kMaxPictureMacroblocks) {
+        throw std::invalid_argument(
+            "SPS picture size exceeds the native decoder bound of " +
+            std::to_string(kMaxPictureMacroblocks) + " macroblocks");
+    }
+    return width * height;
 }
 
 H264BaselinePps parse_baseline_pps(const std::vector<std::uint8_t>& rbsp) {
@@ -203,7 +210,7 @@ H264BaselinePps parse_baseline_pps(const std::vector<std::uint8_t>& rbsp) {
     if (pps.entropy_coding_mode_flag) {
         throw std::invalid_argument("native CAVLC path rejects CABAC PPS");
     }
-    static_cast<void>(reader.read_bit());  // bottom_field_pic_order_in_frame_present_flag
+    pps.bottom_field_pic_order_in_frame_present_flag = reader.read_bit() != 0;
     pps.num_slice_groups_minus1 = reader.read_ue();
     if (pps.num_slice_groups_minus1 != 0) {
         throw std::invalid_argument("native CAVLC path does not support PPS slice groups");
@@ -244,6 +251,13 @@ H264BaselineIdrSliceHeader parse_baseline_idr_slice_header(
     if (sps.pic_order_cnt_type == 0) {
         header.pic_order_cnt_lsb = reader.read_bits(
             static_cast<std::size_t>(sps.log2_max_pic_order_cnt_lsb_minus4) + 4);
+        // field_pic_flag is absent (inferred 0) because frame_mbs_only_flag
+        // is required above, so the bottom-field delta is present whenever
+        // the PPS flag is set. pic_order_cnt_type 1 (delta_pic_order_cnt[])
+        // is rejected by both the SPS and this parser.
+        if (pps.bottom_field_pic_order_in_frame_present_flag) {
+            header.delta_pic_order_cnt_bottom = reader.read_se();
+        }
     }
     if (pps.redundant_pic_cnt_present_flag) {
         static_cast<void>(reader.read_ue());
@@ -270,7 +284,9 @@ CavlcCoeffToken parse_cavlc_coeff_token(
     const std::vector<std::uint8_t>& rbsp,
     const std::size_t start_bit,
     const int n_c) {
-    if (n_c < -2) {
+    // nC == -1 selects the 4:2:0 ChromaDC table. nC == -2 (4:2:2 ChromaDC)
+    // and anything lower are outside the supported baseline 4:2:0 profile.
+    if (n_c < -1) {
         throw std::invalid_argument("native coeff_token parser received an unsupported nC context");
     }
     RbspBitReader reader(rbsp);
@@ -294,6 +310,8 @@ CavlcCoeffToken parse_cavlc_coeff_token(
             token.sign_bit_offsets.push_back(reader.position() + index);
         }
         token.level_bit_offset = reader.position() + token.trailing_ones;
+        token.start_bit_offset = start_bit;
+        token.n_c = n_c;
         return token;
     }
     std::string bits;
@@ -344,9 +362,11 @@ CavlcCoeffToken parse_cavlc_coeff_token(
             token.sign_bit_offsets.push_back(token_end + index);
         }
         token.level_bit_offset = token_end + token.trailing_ones;
+        token.start_bit_offset = start_bit;
+        token.n_c = n_c;
         return token;
     }
-    throw std::invalid_argument("invalid CAVLC coeff_token for nC 0 or 1");
+    throw std::invalid_argument("invalid CAVLC coeff_token for nC " + std::to_string(n_c));
 }
 
 CavlcDecodedLevels decode_cavlc_non_trailing_levels(
@@ -971,12 +991,10 @@ CavlcDecodedIdrSlice decode_baseline_i_idr_slice(
     if (slice_header.first_mb_in_slice != 0U) {
         throw std::invalid_argument("native I-slice traversal requires a slice starting at macroblock zero");
     }
+    // The SPS struct is public and may be constructed directly, so bound the
+    // picture again here before any per-macroblock allocation.
+    const auto macroblock_count = validated_picture_macroblock_count(sps);
     const auto width = static_cast<std::size_t>(sps.pic_width_in_mbs_minus1) + 1U;
-    const auto height = static_cast<std::size_t>(sps.pic_height_in_map_units_minus1) + 1U;
-    if (width == 0U || height == 0U || width > std::numeric_limits<std::size_t>::max() / height) {
-        throw std::invalid_argument("invalid native I-slice traversal dimensions");
-    }
-    const auto macroblock_count = width * height;
     if (macroblock_count > rbsp.size() * 8U) {
         throw std::invalid_argument("declared macroblock count exceeds available RBSP bits");
     }
@@ -985,7 +1003,10 @@ CavlcDecodedIdrSlice decode_baseline_i_idr_slice(
     decoded.sps = sps;
     decoded.pps = pps;
     decoded.header = slice_header;
-    decoded.macroblocks.reserve(macroblock_count);
+    // Reserve only a modest prefix: a slice that fails early must not have
+    // already committed memory for every declared macroblock.
+    constexpr std::size_t kMacroblockReserveHint = 8160U;  // 1920x1088
+    decoded.macroblocks.reserve(std::min(macroblock_count, kMacroblockReserveHint));
     auto bit_offset = slice_header.data_bit_offset;
 
     constexpr std::array<std::size_t, 4> kLumaRightEdge{{5, 7, 13, 15}};
@@ -1162,6 +1183,44 @@ std::vector<AnnexBNalUnit> split_annex_b(const std::vector<std::uint8_t>& annex_
     return units;
 }
 
+std::uint32_t parameter_set_id(const AnnexBNalUnit& unit) {
+    // Only the leading syntax is needed; an SPS id follows three fixed bytes.
+    const std::vector<std::uint8_t> prefix(
+        unit.payload.begin(),
+        unit.payload.begin() + static_cast<std::ptrdiff_t>(std::min<std::size_t>(unit.payload.size(), 32U)));
+    const auto rbsp = ebsp_to_rbsp(prefix);
+    RbspBitReader reader(rbsp);
+    if (unit.nal_unit_type == 7U) {
+        reader.skip_bits(24U);  // profile_idc, constraint flags, level_idc
+        const auto id = reader.read_ue();
+        if (id > 31U) throw std::invalid_argument("SPS id exceeds 31");
+        return id;
+    }
+    if (unit.nal_unit_type == 8U) {
+        const auto id = reader.read_ue();
+        if (id > 255U) throw std::invalid_argument("PPS id exceeds 255");
+        return id;
+    }
+    throw std::invalid_argument("NAL unit is not an SPS or PPS");
+}
+
+void update_parameter_set_context(std::vector<AnnexBNalUnit>& parameter_sets, const AnnexBNalUnit& unit) {
+    const auto existing = std::find_if(parameter_sets.begin(), parameter_sets.end(), [&](const auto& item) {
+        return item.nal_unit_type == unit.nal_unit_type;
+    });
+    if (existing == parameter_sets.end()) {
+        static_cast<void>(parameter_set_id(unit));
+        parameter_sets.push_back(unit);
+        return;
+    }
+    if (parameter_set_id(*existing) != parameter_set_id(unit)) {
+        throw std::invalid_argument(unit.nal_unit_type == 7U
+            ? "native stream supports a single SPS id; a second SPS id appeared"
+            : "native stream supports a single PPS id; a second PPS id appeared");
+    }
+    *existing = unit;
+}
+
 AnnexBNalStreamReader::AnnexBNalStreamReader(
     std::istream& input,
     const std::size_t maximum_nal_bytes)
@@ -1175,26 +1234,51 @@ AnnexBNalStreamReader::AnnexBNalStreamReader(
     buffer_.reserve(std::min<std::size_t>(maximum_nal_bytes_, 1024U * 1024U));
 }
 
+void AnnexBNalStreamReader::compact() {
+    if (head_ == 0U) return;
+    buffer_.erase(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(head_));
+    scan_ = scan_ > head_ ? scan_ - head_ : 0U;
+    head_ = 0U;
+}
+
 void AnnexBNalStreamReader::read_more() {
     if (eof_) return;
+    // Drop already-returned bytes at most once per returned NAL.
+    compact();
     auto* source = input_.rdbuf();
     if (source == nullptr) throw std::invalid_argument("Annex-B input stream is unavailable");
-    constexpr std::size_t chunk_size = 64U * 1024U;
-    std::array<char, chunk_size> chunk{};
-    const auto available = source->in_avail();
-    if (available > 0) {
-        const auto requested = std::min<std::streamsize>(available, static_cast<std::streamsize>(chunk.size()));
-        const auto received = source->sgetn(chunk.data(), requested);
-        if (received <= 0) throw std::invalid_argument("failed while reading Annex-B input stream");
-        buffer_.insert(buffer_.end(), chunk.begin(), chunk.begin() + received);
+    constexpr std::streamsize chunk_size = 64 * 1024;
+    // Only request what the stream buffer promises it can deliver without
+    // blocking (in_avail), so a live pipe never waits to fill a whole chunk.
+    const auto append_available = [&](const std::streamsize limit) {
+        const auto available = source->in_avail();
+        if (available <= 0 || limit <= 0) return;
+        const auto requested = std::min(available, limit);
+        const auto old_size = buffer_.size();
+        buffer_.resize(old_size + static_cast<std::size_t>(requested));
+        const auto received = source->sgetn(
+            reinterpret_cast<char*>(buffer_.data() + old_size), requested);
+        // in_avail() promised `requested` bytes; anything else is a stream
+        // fault, and accepting zero here could spin forever.
+        if (received <= 0 || received > requested) {
+            buffer_.resize(old_size);
+            throw std::invalid_argument("failed while reading Annex-B input stream");
+        }
+        buffer_.resize(old_size + static_cast<std::size_t>(received));
+    };
+    if (source->in_avail() > 0) {
+        append_available(chunk_size);
         return;
     }
+    // Nothing buffered: block for a single byte, then drain anything that
+    // arrived with it.
     const auto next = source->sbumpc();
     if (std::char_traits<char>::eq_int_type(next, std::char_traits<char>::eof())) {
         eof_ = true;
         return;
     }
     buffer_.push_back(static_cast<std::uint8_t>(std::char_traits<char>::to_char_type(next)));
+    append_available(chunk_size - 1);
 }
 
 bool AnnexBNalStreamReader::read_next(std::vector<std::uint8_t>& nal_bytes) {
@@ -1209,6 +1293,9 @@ bool AnnexBNalStreamReader::read_next(std::vector<std::uint8_t>& nal_bytes) {
 
     while (true) {
         if (!started_) {
+            // Before the first start code the buffer is trimmed to at most
+            // three carried bytes plus one read, so this rescan is bounded.
+            compact();
             std::size_t start = 0U;
             while (start < buffer_.size() && marker_at(buffer_, start) == 0U) ++start;
             if (start < buffer_.size()) {
@@ -1218,6 +1305,7 @@ bool AnnexBNalStreamReader::read_next(std::vector<std::uint8_t>& nal_bytes) {
                 }
                 if (start > 0U) buffer_.erase(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(start));
                 started_ = true;
+                scan_ = 0U;
             } else {
                 if (eof_) {
                     if (buffer_.empty()) return false;
@@ -1236,23 +1324,38 @@ bool AnnexBNalStreamReader::read_next(std::vector<std::uint8_t>& nal_bytes) {
             }
         }
 
-        const auto first_marker_size = marker_at(buffer_, 0U);
+        const auto first_marker_size = marker_at(buffer_, head_);
         if (first_marker_size == 0U) throw std::invalid_argument("Annex-B start code was corrupted");
-        for (std::size_t offset = first_marker_size; offset < buffer_.size(); ++offset) {
-            if (marker_at(buffer_, offset) == 0U) continue;
-            if (offset > maximum_nal_bytes_) throw std::invalid_argument("Annex-B NAL exceeds configured size limit");
-            nal_bytes.assign(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(offset));
-            buffer_.erase(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(offset));
-            return true;
+        // Offsets below scan_ were fully decided by an earlier pass; resume
+        // there instead of rescanning the pending NAL from its start.
+        scan_ = std::max(scan_, head_ + first_marker_size);
+        while (scan_ + 3U <= buffer_.size()) {
+            if (marker_at(buffer_, scan_) != 0U) {
+                if (scan_ - head_ > maximum_nal_bytes_) {
+                    throw std::invalid_argument("Annex-B NAL exceeds configured size limit");
+                }
+                nal_bytes.assign(buffer_.begin() + static_cast<std::ptrdiff_t>(head_),
+                                 buffer_.begin() + static_cast<std::ptrdiff_t>(scan_));
+                head_ = scan_;
+                return true;
+            }
+            // 00 00 00 with the fourth byte still unread may become a
+            // four-byte start code; leave that offset undecided.
+            if (!eof_ && scan_ + 4U > buffer_.size()) break;
+            ++scan_;
         }
         if (eof_) {
-            if (buffer_.size() > maximum_nal_bytes_) throw std::invalid_argument("Annex-B NAL exceeds configured size limit");
-            if (buffer_.empty()) return false;
-            nal_bytes.swap(buffer_);
+            const auto pending = buffer_.size() - head_;
+            if (pending > maximum_nal_bytes_) throw std::invalid_argument("Annex-B NAL exceeds configured size limit");
+            if (pending == 0U) return false;
+            nal_bytes.assign(buffer_.begin() + static_cast<std::ptrdiff_t>(head_), buffer_.end());
+            buffer_.clear();
+            head_ = 0U;
+            scan_ = 0U;
             started_ = false;
             return true;
         }
-        if (buffer_.size() > maximum_nal_bytes_ + 3U) {
+        if (buffer_.size() - head_ > maximum_nal_bytes_ + 3U) {
             throw std::invalid_argument("Annex-B NAL exceeds configured size limit");
         }
         read_more();
@@ -1396,19 +1499,21 @@ std::string serialize_cavlc_sign_candidate(const CavlcSignCandidate& candidate) 
 
 namespace {
 
+void secure_wipe(std::uint8_t* data, const std::size_t size) noexcept {
+    if (data == nullptr || size == 0U) return;
+#ifdef _WIN32
+    SecureZeroMemory(data, size);
+#else
+    OPENSSL_cleanse(data, size);
+#endif
+}
+
 class SensitiveBytes {
 public:
     explicit SensitiveBytes(std::vector<std::uint8_t> value) : value_(std::move(value)) {}
     SensitiveBytes(const SensitiveBytes&) = delete;
     SensitiveBytes& operator=(const SensitiveBytes&) = delete;
-    ~SensitiveBytes() noexcept {
-        if (value_.empty()) return;
-#ifdef _WIN32
-        SecureZeroMemory(value_.data(), value_.size());
-#else
-        OPENSSL_cleanse(value_.data(), value_.size());
-#endif
-    }
+    ~SensitiveBytes() noexcept { secure_wipe(value_.data(), value_.size()); }
     const std::vector<std::uint8_t>& value() const noexcept { return value_; }
     std::vector<std::uint8_t>& value() noexcept { return value_; }
 
@@ -1416,20 +1521,16 @@ private:
     std::vector<std::uint8_t> value_;
 };
 
-#ifdef _WIN32
-class CngAlgorithmHandle {
-public:
-    CngAlgorithmHandle() = default;
-    CngAlgorithmHandle(const CngAlgorithmHandle&) = delete;
-    CngAlgorithmHandle& operator=(const CngAlgorithmHandle&) = delete;
-    CngAlgorithmHandle(CngAlgorithmHandle&&) = delete;
-    CngAlgorithmHandle& operator=(CngAlgorithmHandle&&) = delete;
-    ~CngAlgorithmHandle() noexcept {
-        if (value != nullptr) static_cast<void>(BCryptCloseAlgorithmProvider(value, 0));
-    }
-    BCRYPT_ALG_HANDLE value{};
-};
+void validate_blind_schedule_candidate(const CavlcSignCandidate& candidate) {
+    const auto category = static_cast<std::uint8_t>(candidate.category);
+    const auto valid_block = (category == 0U && candidate.block_index == 0U) ||
+        (category == 1U && candidate.block_index < 16U) ||
+        (category == 2U && candidate.block_index < 2U) ||
+        (category == 3U && candidate.block_index < 8U);
+    if (!valid_block) throw std::invalid_argument("blind schedule candidate category or block index is invalid");
+}
 
+#ifdef _WIN32
 class CngHashHandle {
 public:
     CngHashHandle() = default;
@@ -1442,73 +1543,180 @@ public:
     }
     BCRYPT_HASH_HANDLE value{};
 };
+
+// Opening a CNG algorithm provider is far more expensive than one HMAC, so a
+// single process-wide provider is opened once (thread-safe static init) and
+// intentionally kept for the process lifetime. CNG provider handles may be
+// shared between threads; hash objects are per HmacSha256 instance.
+struct CngHmacProvider {
+    BCRYPT_ALG_HANDLE handle{};
+    DWORD object_size{};
+    bool reusable{};
+};
+
+const CngHmacProvider& cng_hmac_provider() {
+    static const CngHmacProvider provider = [] {
+        CngHmacProvider opened;
+        // BCRYPT_HASH_REUSABLE_FLAG (Windows 8+) lets one keyed hash object
+        // be finished and reused; fall back to per-digest hash objects.
+        if (BCryptOpenAlgorithmProvider(&opened.handle, BCRYPT_SHA256_ALGORITHM, nullptr,
+                BCRYPT_ALG_HANDLE_HMAC_FLAG | BCRYPT_HASH_REUSABLE_FLAG) >= 0) {
+            opened.reusable = true;
+        } else if (BCryptOpenAlgorithmProvider(&opened.handle, BCRYPT_SHA256_ALGORITHM, nullptr,
+                       BCRYPT_ALG_HANDLE_HMAC_FLAG) < 0) {
+            throw std::runtime_error("cannot initialize Windows CNG HMAC-SHA-256");
+        }
+        DWORD result_size = 0;
+        const auto status = BCryptGetProperty(
+            opened.handle, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PUCHAR>(&opened.object_size),
+            sizeof(opened.object_size), &result_size, 0);
+        if (status < 0 || result_size != sizeof(opened.object_size)) {
+            static_cast<void>(BCryptCloseAlgorithmProvider(opened.handle, 0));
+            throw std::runtime_error("cannot query Windows CNG HMAC object length");
+        }
+        return opened;
+    }();
+    return provider;
+}
 #endif
 
-void validate_blind_schedule_candidate(const CavlcSignCandidate& candidate) {
-    const auto category = static_cast<std::uint8_t>(candidate.category);
-    const auto valid_block = (category == 0U && candidate.block_index == 0U) ||
-        (category == 1U && candidate.block_index < 16U) ||
-        (category == 2U && candidate.block_index < 2U) ||
-        (category == 3U && candidate.block_index < 8U);
-    if (!valid_block) throw std::invalid_argument("blind schedule candidate category or block index is invalid");
+// Keyed HMAC-SHA-256 that amortizes key setup across many messages. Output
+// is identical to a one-shot HMAC over the same key and message.
+class HmacSha256 {
+public:
+    explicit HmacSha256(const std::vector<std::uint8_t>& key) : key_(key) {
+#ifdef _WIN32
+        if (cng_hmac_provider().reusable) create_hash(object_, hash_);
+#endif
+    }
+    HmacSha256(const HmacSha256&) = delete;
+    HmacSha256& operator=(const HmacSha256&) = delete;
+    HmacSha256(HmacSha256&&) = delete;
+    HmacSha256& operator=(HmacSha256&&) = delete;
+    ~HmacSha256() = default;
+
+    std::array<std::uint8_t, 32> digest(const std::string_view message) {
+        std::array<std::uint8_t, 32> output{};
+#ifdef _WIN32
+        if (cng_hmac_provider().reusable) {
+            finish(hash_.value, message, output);
+        } else {
+            SensitiveBytes object{std::vector<std::uint8_t>{}};
+            CngHashHandle hash;
+            create_hash(object, hash);
+            finish(hash.value, message, output);
+        }
+#else
+        unsigned int digest_size = 0;
+        if (HMAC(EVP_sha256(), key_.value().data(), static_cast<int>(key_.value().size()),
+                 reinterpret_cast<const unsigned char*>(message.data()), message.size(),
+                 output.data(), &digest_size) == nullptr || digest_size != output.size()) {
+            throw std::runtime_error("OpenSSL HMAC-SHA-256 failed");
+        }
+#endif
+        return output;
+    }
+
+private:
+    SensitiveBytes key_;
+#ifdef _WIN32
+    // CNG retains the object buffer until BCryptDestroyHash. Declare it
+    // before the handle so reverse destruction releases the handle first.
+    SensitiveBytes object_{std::vector<std::uint8_t>{}};
+    CngHashHandle hash_;
+
+    void create_hash(SensitiveBytes& object, CngHashHandle& hash) const {
+        const auto& provider = cng_hmac_provider();
+        object.value().resize(provider.object_size);
+        const auto status = BCryptCreateHash(
+            provider.handle, &hash.value, object.value().data(), static_cast<ULONG>(object.value().size()),
+            const_cast<PUCHAR>(key_.value().data()), static_cast<ULONG>(key_.value().size()),
+            provider.reusable ? BCRYPT_HASH_REUSABLE_FLAG : 0);
+        if (status < 0) throw std::runtime_error("cannot create Windows CNG HMAC");
+    }
+
+    static void finish(const BCRYPT_HASH_HANDLE hash, const std::string_view message,
+                       std::array<std::uint8_t, 32>& output) {
+        const auto data_status = BCryptHashData(
+            hash, reinterpret_cast<PUCHAR>(const_cast<char*>(message.data())),
+            static_cast<ULONG>(message.size()), 0);
+        const auto finish_status = data_status < 0 ? data_status : BCryptFinishHash(
+            hash, output.data(), static_cast<ULONG>(output.size()), 0);
+        if (finish_status < 0) throw std::runtime_error("Windows CNG HMAC-SHA-256 failed");
+    }
+#endif
+};
+
+// ---- Blind channel protocol v2: HKDF key separation, frame tag, whitening.
+
+constexpr std::size_t kSubkeyBytes = 32U;
+constexpr std::size_t kFrameHeaderBytes = 3U;
+constexpr std::size_t kFrameTagBytes = 16U;
+constexpr std::size_t kKeystreamBlockBits = 256U;
+constexpr std::string_view kHkdfSalt{"zkstego-cavlc-v2-salt"};
+constexpr std::string_view kScheduleInfo{"zkstego/cavlc/v2/schedule"};
+constexpr std::string_view kFrameTagInfo{"zkstego/cavlc/v2/frame-tag"};
+constexpr std::string_view kWhiteningInfo{"zkstego/cavlc/v2/whitening"};
+
+std::string_view byte_view(const std::vector<std::uint8_t>& bytes) noexcept {
+    return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
 }
 
-std::array<std::uint8_t, 32> hmac_sha256(
-    const std::vector<std::uint8_t>& key, const std::string& message) {
-    std::array<std::uint8_t, 32> digest{};
-#ifdef _WIN32
-    // CNG retains pbHashObject until BCryptDestroyHash. Declare this buffer
-    // before the handle so reverse destruction releases the handle first.
-    SensitiveBytes object{std::vector<std::uint8_t>{}};
-    CngAlgorithmHandle algorithm;
-    CngHashHandle hash;
-    if (BCryptOpenAlgorithmProvider(&algorithm.value, BCRYPT_SHA256_ALGORITHM, nullptr,
-                                    BCRYPT_ALG_HANDLE_HMAC_FLAG) < 0) {
-        throw std::runtime_error("cannot initialize Windows CNG HMAC-SHA-256");
+// RFC 5869 HKDF-Extract. The returned PRK is secret: callers own and wipe it.
+std::vector<std::uint8_t> hkdf_sha256_extract(
+    const std::vector<std::uint8_t>& salt,
+    const std::vector<std::uint8_t>& input_key_material) {
+    const std::vector<std::uint8_t> zero_salt(32U, 0U);
+    HmacSha256 hmac(salt.empty() ? zero_salt : salt);
+    auto digest = hmac.digest(byte_view(input_key_material));
+    std::vector<std::uint8_t> prk(digest.begin(), digest.end());
+    secure_wipe(digest.data(), digest.size());
+    return prk;
+}
+
+// RFC 5869 HKDF-Expand. Every intermediate block is wiped; the returned OKM
+// is owned (and wiped) by the caller.
+std::vector<std::uint8_t> hkdf_sha256_expand(
+    const std::vector<std::uint8_t>& prk,
+    const std::string_view info,
+    const std::size_t length) {
+    if (prk.size() < 32U) throw std::invalid_argument("HKDF pseudorandom key must be at least 32 bytes");
+    if (length > 255U * 32U) throw std::invalid_argument("HKDF output length exceeds 255 SHA-256 blocks");
+    HmacSha256 hmac(prk);
+    std::vector<std::uint8_t> output;
+    output.reserve(length + 32U);
+    SensitiveBytes block_input(std::vector<std::uint8_t>{});
+    block_input.value().reserve(32U + info.size() + 1U);
+    std::array<std::uint8_t, 32> block{};
+    for (std::size_t counter = 1U; output.size() < length; ++counter) {
+        block_input.value().clear();
+        if (counter > 1U) block_input.value().insert(block_input.value().end(), block.begin(), block.end());
+        block_input.value().insert(block_input.value().end(), info.begin(), info.end());
+        block_input.value().push_back(static_cast<std::uint8_t>(counter));
+        block = hmac.digest(byte_view(block_input.value()));
+        output.insert(output.end(), block.begin(), block.end());
     }
-    DWORD object_size = 0;
-    DWORD result_size = 0;
-    const auto object_status = BCryptGetProperty(
-        algorithm.value, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PUCHAR>(&object_size),
-        sizeof(object_size), &result_size, 0);
-    if (object_status < 0 || result_size != sizeof(object_size)) {
-        throw std::runtime_error("cannot query Windows CNG HMAC object length");
-    }
-    object.value().resize(object_size);
-    const auto hash_status = BCryptCreateHash(
-        algorithm.value, &hash.value, object.value().data(), static_cast<ULONG>(object.value().size()),
-        const_cast<PUCHAR>(key.data()), static_cast<ULONG>(key.size()), 0);
-    if (hash_status < 0) {
-        throw std::runtime_error("cannot create Windows CNG HMAC");
-    }
-    const auto data_status = BCryptHashData(
-        hash.value, reinterpret_cast<PUCHAR>(const_cast<char*>(message.data())),
-        static_cast<ULONG>(message.size()), 0);
-    const auto finish_status = data_status < 0 ? data_status : BCryptFinishHash(
-        hash.value, digest.data(), static_cast<ULONG>(digest.size()), 0);
-    if (finish_status < 0) throw std::runtime_error("Windows CNG HMAC-SHA-256 failed");
-    return digest;
-#else
-    unsigned int digest_size = 0;
-    if (HMAC(EVP_sha256(), key.data(), static_cast<int>(key.size()),
-             reinterpret_cast<const unsigned char*>(message.data()), message.size(),
-             digest.data(), &digest_size) == nullptr || digest_size != digest.size()) {
-        throw std::runtime_error("OpenSSL HMAC-SHA-256 failed");
-    }
-    return digest;
-#endif
+    secure_wipe(block.data(), block.size());
+    secure_wipe(output.data() + length, output.size() - length);
+    output.resize(length);
+    return output;
+}
+
+// One v2 subkey of a 32-byte channel secret. The caller wipes the result.
+std::vector<std::uint8_t> derive_cavlc_subkey(
+    const std::vector<std::uint8_t>& secret_key,
+    const std::string_view info) {
+    if (secret_key.size() != 32U) throw std::invalid_argument("native CAVLC key must be 32 bytes");
+    SensitiveBytes prk(hkdf_sha256_extract(
+        std::vector<std::uint8_t>(kHkdfSalt.begin(), kHkdfSalt.end()), secret_key));
+    return hkdf_sha256_expand(prk.value(), info, kSubkeyBytes);
 }
 
 std::array<std::uint8_t, 32> authenticated_frame_tag(
-    const std::vector<std::uint8_t>& secret_key,
+    const std::vector<std::uint8_t>& frame_key,
     const std::vector<std::uint8_t>& frame_without_tag) {
-    if (secret_key.size() != 32U) throw std::invalid_argument("authenticated frame key must be exactly 32 bytes");
-    SensitiveBytes authentication_key(std::vector<std::uint8_t>{
-        'b','l','i','n','d','-','n','a','t','i','v','e','-','f','r','a','m','e','-','v','1',0});
-    authentication_key.value().insert(
-        authentication_key.value().end(), secret_key.begin(), secret_key.end());
-    return hmac_sha256(authentication_key.value(), std::string(
-        frame_without_tag.begin(), frame_without_tag.end()));
+    HmacSha256 hmac(frame_key);
+    return hmac.digest(byte_view(frame_without_tag));
 }
 
 std::vector<std::uint8_t> bytes_to_msb_bits(const std::vector<std::uint8_t>& bytes) {
@@ -1535,31 +1743,104 @@ std::vector<std::uint8_t> msb_bits_to_bytes(const std::vector<std::uint8_t>& bit
     return bytes;
 }
 
-}  // namespace
-
-std::array<std::uint8_t, 32> score_keyed_cavlc_sign_candidate(
-    const CavlcSignCandidate& candidate,
-    const std::vector<std::uint8_t>& secret_key) {
-    if (secret_key.size() != 32U) throw std::invalid_argument("blind schedule key must be exactly 32 bytes");
-    validate_blind_schedule_candidate(candidate);
-    SensitiveBytes ordering_key(std::vector<std::uint8_t>{
-        'b','l','i','n','d','-','n','a','t','i','v','e','-','c','a','v','l','c','-','v','1',0});
-    ordering_key.value().insert(
-        ordering_key.value().end(), secret_key.begin(), secret_key.end());
-    return hmac_sha256(ordering_key.value(), serialize_cavlc_sign_candidate(candidate));
+// Keystream block j = HMAC-SHA256(whitening_key, uint64_be(j)).
+std::array<std::uint8_t, 32> whitening_block(HmacSha256& hmac, const std::uint64_t block_index) {
+    std::array<char, 8> counter{};
+    for (std::size_t index = 0; index < counter.size(); ++index) {
+        counter[index] = static_cast<char>((block_index >> (56U - 8U * index)) & 0xffU);
+    }
+    return hmac.digest(std::string_view(counter.data(), counter.size()));
 }
 
-std::vector<CavlcSignCandidate> select_keyed_cavlc_sign_candidates(
+// Returns bits[i] XOR keystream bit (first_bit_index + i). The bit index is
+// global to one frame, so a stream session whitens each segment by passing
+// the number of frame bits already carried by earlier segments. XOR is an
+// involution: the same call un-whitens extracted bits.
+std::vector<std::uint8_t> whiten_cavlc_frame_bits(
+    const std::vector<std::uint8_t>& bits,
+    const std::vector<std::uint8_t>& whitening_key,
+    const std::size_t first_bit_index) {
+    std::vector<std::uint8_t> output;
+    output.reserve(bits.size());
+    if (bits.empty()) return output;
+    HmacSha256 hmac(whitening_key);
+    std::array<std::uint8_t, 32> block{};
+    std::uint64_t loaded_block = 0;
+    bool block_loaded = false;
+    for (std::size_t index = 0; index < bits.size(); ++index) {
+        if (bits[index] > 1U) throw std::invalid_argument("authenticated frame bit is invalid");
+        const auto global_bit = static_cast<std::uint64_t>(first_bit_index) + index;
+        const auto block_index = global_bit / kKeystreamBlockBits;
+        if (!block_loaded || block_index != loaded_block) {
+            block = whitening_block(hmac, block_index);
+            loaded_block = block_index;
+            block_loaded = true;
+        }
+        const auto bit_in_block = static_cast<std::size_t>(global_bit % kKeystreamBlockBits);
+        const auto key_bit = static_cast<std::uint8_t>((block[bit_in_block / 8U] >> (7U - bit_in_block % 8U)) & 1U);
+        output.push_back(static_cast<std::uint8_t>(bits[index] ^ key_bit));
+    }
+    secure_wipe(block.data(), block.size());
+    return output;
+}
+
+std::vector<std::uint8_t> pack_frame_with_key(
+    const std::vector<std::uint8_t>& payload,
+    const std::vector<std::uint8_t>& frame_key) {
+    if (payload.size() > std::numeric_limits<std::uint16_t>::max()) {
+        throw std::invalid_argument("authenticated payload exceeds 65535 bytes");
+    }
+    std::vector<std::uint8_t> frame;
+    frame.reserve(kFrameHeaderBytes + payload.size() + kFrameTagBytes);
+    frame.push_back(kAuthenticatedCavlcFrameVersion);
+    frame.push_back(static_cast<std::uint8_t>(payload.size() >> 8U));
+    frame.push_back(static_cast<std::uint8_t>(payload.size()));
+    frame.insert(frame.end(), payload.begin(), payload.end());
+    const auto tag = authenticated_frame_tag(frame_key, frame);
+    frame.insert(frame.end(), tag.begin(), tag.begin() + static_cast<std::ptrdiff_t>(kFrameTagBytes));
+    return frame;
+}
+
+std::vector<std::uint8_t> unpack_frame_with_key(
+    const std::vector<std::uint8_t>& frame,
+    const std::vector<std::uint8_t>& frame_key,
+    const std::size_t maximum_payload_bytes) {
+    if (maximum_payload_bytes > std::numeric_limits<std::uint16_t>::max()) {
+        throw std::invalid_argument("authenticated payload maximum exceeds 65535 bytes");
+    }
+    if (frame.size() < kFrameHeaderBytes + kFrameTagBytes || frame[0] != kAuthenticatedCavlcFrameVersion) {
+        throw std::invalid_argument("authenticated CAVLC frame version is invalid");
+    }
+    const auto payload_size = (static_cast<std::size_t>(frame[1]) << 8U) | frame[2];
+    if (payload_size > maximum_payload_bytes || frame.size() != kFrameHeaderBytes + payload_size + kFrameTagBytes) {
+        throw std::invalid_argument("authenticated CAVLC frame length is invalid");
+    }
+    const auto authenticated_size = kFrameHeaderBytes + payload_size;
+    const std::vector<std::uint8_t> authenticated_data(
+        frame.begin(), frame.begin() + static_cast<std::ptrdiff_t>(authenticated_size));
+    const auto expected_tag = authenticated_frame_tag(frame_key, authenticated_data);
+    std::uint8_t difference = 0;
+    for (std::size_t index = 0; index < kFrameTagBytes; ++index) {
+        difference |= static_cast<std::uint8_t>(expected_tag[index] ^ frame[authenticated_size + index]);
+    }
+    if (difference != 0U) throw std::invalid_argument("authenticated CAVLC frame tag is invalid");
+    return {frame.begin() + static_cast<std::ptrdiff_t>(kFrameHeaderBytes),
+            frame.begin() + static_cast<std::ptrdiff_t>(authenticated_size)};
+}
+
+std::vector<CavlcSignCandidate> select_with_schedule_key(
     const std::vector<CavlcSignCandidate>& candidates,
-    const std::vector<std::uint8_t>& secret_key,
+    const std::vector<std::uint8_t>& schedule_key,
     const std::size_t required_bits) {
-    if (secret_key.size() != 32U) throw std::invalid_argument("blind schedule key must be exactly 32 bytes");
     if (required_bits > candidates.size()) throw std::invalid_argument("blind schedule capacity is insufficient");
     struct ScoredCandidate { std::array<std::uint8_t, 32> score; std::string identity; CavlcSignCandidate candidate; };
     std::vector<ScoredCandidate> scored;
     scored.reserve(candidates.size());
     std::unordered_set<std::string> identities;
     std::unordered_set<std::string> physical_targets;
+    // One keyed HMAC context scores every candidate; each digest equals
+    // score_keyed_cavlc_sign_candidate() for the same candidate and secret.
+    HmacSha256 ordering_hmac(schedule_key);
     for (const auto& candidate : candidates) {
         validate_blind_schedule_candidate(candidate);
         auto identity = serialize_cavlc_sign_candidate(candidate);
@@ -1571,150 +1852,85 @@ std::vector<CavlcSignCandidate> select_keyed_cavlc_sign_candidates(
         if (!physical_targets.insert(physical_target).second) {
             throw std::invalid_argument("blind schedule candidate patch target is duplicated");
         }
-        scored.push_back({score_keyed_cavlc_sign_candidate(candidate, secret_key), std::move(identity), candidate});
+        const auto score = ordering_hmac.digest(identity);
+        scored.push_back({score, std::move(identity), candidate});
     }
-    std::sort(scored.begin(), scored.end(), [](const auto& left, const auto& right) {
-        return left.score != right.score ? left.score < right.score : left.identity < right.identity;
-    });
+    // (score, identity) is a strict total order because identities are unique
+    // (checked above), so partially sorting the lowest required_bits yields
+    // exactly the same prefix, in the same order, as a full sort.
+    std::partial_sort(scored.begin(), scored.begin() + static_cast<std::ptrdiff_t>(required_bits), scored.end(),
+        [](const auto& left, const auto& right) {
+            return left.score != right.score ? left.score < right.score : left.identity < right.identity;
+        });
     std::vector<CavlcSignCandidate> selected;
     selected.reserve(required_bits);
     for (std::size_t index = 0; index < required_bits; ++index) selected.push_back(scored[index].candidate);
     return selected;
 }
 
-std::vector<std::uint8_t> embed_keyed_cavlc_sign_bits(
-    const std::vector<std::uint8_t>& annex_b,
-    const std::vector<std::uint8_t>& secret_key,
-    const std::vector<std::uint8_t>& payload_bits) {
-    for (const auto bit : payload_bits) {
-        if (bit > 1U) throw std::invalid_argument("CAVLC payload bits must be zero or one");
-    }
-    const auto candidates = collect_cavlc_trailing_one_sign_candidates(
-        decode_baseline_i_idr_slices(annex_b));
-    const auto selected = select_keyed_cavlc_sign_candidates(
-        candidates, secret_key, payload_bits.size());
-    const auto units = split_annex_b(annex_b);
-    std::vector<std::vector<FixedLengthBitPatch>> patches_by_nal(units.size());
-    for (std::size_t index = 0; index < selected.size(); ++index) {
-        const auto& candidate = selected[index];
-        patches_by_nal[candidate.nal_index].push_back(
-            {candidate.rbsp_bit_offset, {payload_bits[index]}});
-    }
-    std::vector<AnnexBRbspPatchPlan> plan;
-    plan.reserve(units.size());
-    for (std::size_t nal_index = 0; nal_index < patches_by_nal.size(); ++nal_index) {
-        if (!patches_by_nal[nal_index].empty()) {
-            plan.push_back({nal_index, std::move(patches_by_nal[nal_index])});
-        }
-    }
-    return patch_annex_b_rbsp_plan(annex_b, plan);
+}  // namespace
+
+std::vector<std::uint8_t> hkdf_sha256(
+    const std::vector<std::uint8_t>& salt,
+    const std::vector<std::uint8_t>& input_key_material,
+    const std::vector<std::uint8_t>& info,
+    const std::size_t length) {
+    SensitiveBytes prk(hkdf_sha256_extract(salt, input_key_material));
+    return hkdf_sha256_expand(prk.value(), byte_view(info), length);
 }
 
-std::vector<std::uint8_t> extract_keyed_cavlc_sign_bits(
-    const std::vector<std::uint8_t>& annex_b,
+std::vector<std::uint8_t> cavlc_whitening_keystream(
     const std::vector<std::uint8_t>& secret_key,
-    const std::size_t payload_bit_count) {
-    const auto candidates = collect_cavlc_trailing_one_sign_candidates(
-        decode_baseline_i_idr_slices(annex_b));
-    const auto selected = select_keyed_cavlc_sign_candidates(
-        candidates, secret_key, payload_bit_count);
-    const auto units = split_annex_b(annex_b);
-    std::vector<std::uint8_t> payload_bits;
-    payload_bits.reserve(selected.size());
-    for (const auto& candidate : selected) {
-        if (candidate.nal_index >= units.size()) {
-            throw std::invalid_argument("blind schedule candidate NAL is outside the segment");
-        }
-        const auto rbsp = units[candidate.nal_index].rbsp();
-        if (candidate.rbsp_bit_offset >= rbsp.size() * 8U) {
-            throw std::invalid_argument("blind schedule candidate bit is outside RBSP");
-        }
-        payload_bits.push_back(static_cast<std::uint8_t>(
-            (rbsp[candidate.rbsp_bit_offset / 8U] >>
-             (7U - candidate.rbsp_bit_offset % 8U)) & 1U));
+    const std::size_t byte_count) {
+    SensitiveBytes whitening_key(derive_cavlc_subkey(secret_key, kWhiteningInfo));
+    HmacSha256 hmac(whitening_key.value());
+    std::vector<std::uint8_t> keystream;
+    keystream.reserve(byte_count + 32U);
+    for (std::uint64_t block_index = 0; keystream.size() < byte_count; ++block_index) {
+        auto block = whitening_block(hmac, block_index);
+        keystream.insert(keystream.end(), block.begin(), block.end());
+        secure_wipe(block.data(), block.size());
     }
-    return payload_bits;
+    secure_wipe(keystream.data() + byte_count, keystream.size() - byte_count);
+    keystream.resize(byte_count);
+    return keystream;
+}
+
+std::array<std::uint8_t, 32> score_keyed_cavlc_sign_candidate(
+    const CavlcSignCandidate& candidate,
+    const std::vector<std::uint8_t>& secret_key) {
+    if (secret_key.size() != 32U) throw std::invalid_argument("blind schedule key must be exactly 32 bytes");
+    validate_blind_schedule_candidate(candidate);
+    SensitiveBytes schedule_key(derive_cavlc_subkey(secret_key, kScheduleInfo));
+    HmacSha256 hmac(schedule_key.value());
+    return hmac.digest(serialize_cavlc_sign_candidate(candidate));
+}
+
+std::vector<CavlcSignCandidate> select_keyed_cavlc_sign_candidates(
+    const std::vector<CavlcSignCandidate>& candidates,
+    const std::vector<std::uint8_t>& secret_key,
+    const std::size_t required_bits) {
+    if (secret_key.size() != 32U) throw std::invalid_argument("blind schedule key must be exactly 32 bytes");
+    if (required_bits > candidates.size()) throw std::invalid_argument("blind schedule capacity is insufficient");
+    SensitiveBytes schedule_key(derive_cavlc_subkey(secret_key, kScheduleInfo));
+    return select_with_schedule_key(candidates, schedule_key.value(), required_bits);
 }
 
 std::vector<std::uint8_t> pack_authenticated_cavlc_frame(
     const std::vector<std::uint8_t>& payload,
     const std::vector<std::uint8_t>& secret_key) {
-    constexpr std::uint8_t frame_version = 1;
-    constexpr std::size_t tag_bytes = 16;
-    if (payload.size() > std::numeric_limits<std::uint16_t>::max()) {
-        throw std::invalid_argument("authenticated payload exceeds 65535 bytes");
-    }
-    std::vector<std::uint8_t> frame;
-    frame.reserve(3U + payload.size() + tag_bytes);
-    frame.push_back(frame_version);
-    frame.push_back(static_cast<std::uint8_t>(payload.size() >> 8U));
-    frame.push_back(static_cast<std::uint8_t>(payload.size()));
-    frame.insert(frame.end(), payload.begin(), payload.end());
-    const auto tag = authenticated_frame_tag(secret_key, frame);
-    frame.insert(frame.end(), tag.begin(), tag.begin() + static_cast<std::ptrdiff_t>(tag_bytes));
-    return frame;
+    if (secret_key.size() != 32U) throw std::invalid_argument("authenticated frame key must be exactly 32 bytes");
+    SensitiveBytes frame_key(derive_cavlc_subkey(secret_key, kFrameTagInfo));
+    return pack_frame_with_key(payload, frame_key.value());
 }
 
 std::vector<std::uint8_t> unpack_authenticated_cavlc_frame(
     const std::vector<std::uint8_t>& frame,
     const std::vector<std::uint8_t>& secret_key,
     const std::size_t maximum_payload_bytes) {
-    constexpr std::uint8_t frame_version = 1;
-    constexpr std::size_t header_bytes = 3;
-    constexpr std::size_t tag_bytes = 16;
-    if (maximum_payload_bytes > std::numeric_limits<std::uint16_t>::max()) {
-        throw std::invalid_argument("authenticated payload maximum exceeds 65535 bytes");
-    }
-    if (frame.size() < header_bytes + tag_bytes || frame[0] != frame_version) {
-        throw std::invalid_argument("authenticated CAVLC frame version is invalid");
-    }
-    const auto payload_size = (static_cast<std::size_t>(frame[1]) << 8U) | frame[2];
-    if (payload_size > maximum_payload_bytes || frame.size() != header_bytes + payload_size + tag_bytes) {
-        throw std::invalid_argument("authenticated CAVLC frame length is invalid");
-    }
-    const auto authenticated_size = header_bytes + payload_size;
-    std::vector<std::uint8_t> authenticated_data(
-        frame.begin(), frame.begin() + static_cast<std::ptrdiff_t>(authenticated_size));
-    const auto expected_tag = authenticated_frame_tag(secret_key, authenticated_data);
-    std::uint8_t difference = 0;
-    for (std::size_t index = 0; index < tag_bytes; ++index) {
-        difference |= static_cast<std::uint8_t>(expected_tag[index] ^ frame[authenticated_size + index]);
-    }
-    if (difference != 0U) throw std::invalid_argument("authenticated CAVLC frame tag is invalid");
-    return {frame.begin() + static_cast<std::ptrdiff_t>(header_bytes),
-            frame.begin() + static_cast<std::ptrdiff_t>(authenticated_size)};
-}
-
-std::vector<std::uint8_t> embed_authenticated_cavlc_payload(
-    const std::vector<std::uint8_t>& annex_b,
-    const std::vector<std::uint8_t>& secret_key,
-    const std::vector<std::uint8_t>& payload) {
-    return embed_keyed_cavlc_sign_bits(
-        annex_b, secret_key, bytes_to_msb_bits(pack_authenticated_cavlc_frame(payload, secret_key)));
-}
-
-std::vector<std::uint8_t> extract_authenticated_cavlc_payload(
-    const std::vector<std::uint8_t>& annex_b,
-    const std::vector<std::uint8_t>& secret_key,
-    const std::size_t maximum_payload_bytes) {
-    constexpr std::uint8_t frame_version = 1;
-    constexpr std::size_t header_bytes = 3;
-    constexpr std::size_t tag_bytes = 16;
-    if (maximum_payload_bytes > std::numeric_limits<std::uint16_t>::max()) {
-        throw std::invalid_argument("authenticated payload maximum exceeds 65535 bytes");
-    }
-    const auto header = msb_bits_to_bytes(extract_keyed_cavlc_sign_bits(
-        annex_b, secret_key, header_bytes * 8U));
-    if (header.size() != header_bytes || header[0] != frame_version) {
-        throw std::invalid_argument("authenticated CAVLC frame version is invalid");
-    }
-    const auto payload_size = (static_cast<std::size_t>(header[1]) << 8U) | header[2];
-    if (payload_size > maximum_payload_bytes) {
-        throw std::invalid_argument("authenticated CAVLC frame length exceeds configured maximum");
-    }
-    const auto full_frame = msb_bits_to_bytes(extract_keyed_cavlc_sign_bits(
-        annex_b, secret_key, (header_bytes + payload_size + tag_bytes) * 8U));
-    return unpack_authenticated_cavlc_frame(full_frame, secret_key, maximum_payload_bytes);
+    if (secret_key.size() != 32U) throw std::invalid_argument("authenticated frame key must be exactly 32 bytes");
+    SensitiveBytes frame_key(derive_cavlc_subkey(secret_key, kFrameTagInfo));
+    return unpack_frame_with_key(frame, frame_key.value(), maximum_payload_bytes);
 }
 
 namespace {
@@ -1750,11 +1966,7 @@ PreparedCavlcStreamSegment prepare_cavlc_stream_segment(
             saw_idr = true;
         } else if (unit.nal_unit_type == 7U || unit.nal_unit_type == 8U) {
             if (saw_idr) throw std::invalid_argument("stream parameter sets must precede the IDR slice");
-            const auto existing = std::find_if(parameter_sets.begin(), parameter_sets.end(), [&](const auto& item) {
-                return item.nal_unit_type == unit.nal_unit_type;
-            });
-            if (existing == parameter_sets.end()) parameter_sets.push_back(unit);
-            else *existing = unit;
+            update_parameter_set_context(parameter_sets, unit);
         }
     }
     const auto has_parameter_set = [&](const std::uint8_t type) {
@@ -1779,10 +1991,10 @@ PreparedCavlcStreamSegment prepare_cavlc_stream_segment(
 
 std::vector<std::uint8_t> extract_keyed_bits_from_candidates(
     const std::vector<std::uint8_t>& annex_b,
-    const std::vector<std::uint8_t>& secret_key,
+    const std::vector<std::uint8_t>& schedule_key,
     const std::vector<CavlcSignCandidate>& candidates,
     const std::size_t payload_bit_count) {
-    const auto selected = select_keyed_cavlc_sign_candidates(candidates, secret_key, payload_bit_count);
+    const auto selected = select_with_schedule_key(candidates, schedule_key, payload_bit_count);
     const auto units = split_annex_b(annex_b);
     std::vector<std::uint8_t> payload_bits;
     payload_bits.reserve(selected.size());
@@ -1818,16 +2030,33 @@ AuthenticatedCavlcStreamEncoder::AuthenticatedCavlcStreamEncoder(
     std::vector<std::uint8_t> secret_key,
     const std::vector<std::uint8_t>& payload,
     const std::size_t maximum_bits_per_segment)
-    : secret_key_(std::move(secret_key)),
-      frame_bits_(bytes_to_msb_bits(pack_authenticated_cavlc_frame(payload, secret_key_))),
-      maximum_bits_per_segment_(maximum_bits_per_segment) {
-    if (maximum_bits_per_segment_ == 0U) {
-        throw std::invalid_argument("maximum stream bits per segment must be positive");
+    : maximum_bits_per_segment_(maximum_bits_per_segment) {
+    // The caller's secret is wiped as soon as the v2 subkeys exist. The
+    // destructor does not run when a constructor throws, so wipe the derived
+    // schedule key and any frame material before rethrowing.
+    SensitiveBytes secret(std::move(secret_key));
+    try {
+        if (maximum_bits_per_segment_ == 0U) {
+            throw std::invalid_argument("maximum stream bits per segment must be positive");
+        }
+        if (secret.value().size() != 32U) {
+            throw std::invalid_argument("authenticated frame key must be exactly 32 bytes");
+        }
+        schedule_key_ = derive_cavlc_subkey(secret.value(), kScheduleInfo);
+        SensitiveBytes frame_key(derive_cavlc_subkey(secret.value(), kFrameTagInfo));
+        SensitiveBytes whitening_key(derive_cavlc_subkey(secret.value(), kWhiteningInfo));
+        SensitiveBytes frame(pack_frame_with_key(payload, frame_key.value()));
+        SensitiveBytes plain_bits(bytes_to_msb_bits(frame.value()));
+        frame_bits_ = whiten_cavlc_frame_bits(plain_bits.value(), whitening_key.value(), 0U);
+    } catch (...) {
+        wipe_stream_secret(schedule_key_);
+        wipe_stream_secret(frame_bits_);
+        throw;
     }
 }
 
 AuthenticatedCavlcStreamEncoder::~AuthenticatedCavlcStreamEncoder() noexcept {
-    wipe_stream_secret(secret_key_);
+    wipe_stream_secret(schedule_key_);
     wipe_stream_secret(frame_bits_);
 }
 
@@ -1840,16 +2069,17 @@ AuthenticatedCavlcStreamSegment AuthenticatedCavlcStreamEncoder::process_segment
     const auto segment_capacity = std::min(maximum_bits_per_segment_, candidates.size());
     if (segment_capacity == 0U) return {annex_b_segment, 0U, 0U, false};
 
-    std::vector<std::uint8_t> segment_bits(segment_capacity, 0U);
+    // The decoder reads all segment_capacity scheduled positions, so the
+    // schedule size must stay segment_capacity. Only the first bits_embedded
+    // positions carry (whitened) frame bits; positions past the frame end in
+    // the final segment keep their cover sign instead of a forced constant.
     const auto bits_embedded = std::min(segment_capacity, remaining_bits());
-    std::copy_n(frame_bits_.begin() + static_cast<std::ptrdiff_t>(next_bit_), bits_embedded,
-                segment_bits.begin());
-    const auto selected = select_keyed_cavlc_sign_candidates(candidates, secret_key_, segment_capacity);
+    const auto selected = select_with_schedule_key(candidates, schedule_key_, segment_capacity);
     auto units = split_annex_b(prepared.analysis_input);
     std::vector<std::vector<FixedLengthBitPatch>> patches_by_nal(units.size());
-    for (std::size_t index = 0; index < selected.size(); ++index) {
+    for (std::size_t index = 0; index < bits_embedded; ++index) {
         patches_by_nal[selected[index].nal_index].push_back(
-            {selected[index].rbsp_bit_offset, {segment_bits[index]}});
+            {selected[index].rbsp_bit_offset, {frame_bits_[next_bit_ + index]}});
     }
     std::vector<AnnexBRbspPatchPlan> plan;
     for (std::size_t index = 0; index < patches_by_nal.size(); ++index) {
@@ -1873,20 +2103,34 @@ AuthenticatedCavlcStreamDecoder::AuthenticatedCavlcStreamDecoder(
     std::vector<std::uint8_t> secret_key,
     const std::size_t maximum_payload_bytes,
     const std::size_t maximum_bits_per_segment)
-    : secret_key_(std::move(secret_key)),
-      maximum_payload_bytes_(maximum_payload_bytes),
+    : maximum_payload_bytes_(maximum_payload_bytes),
       maximum_bits_per_segment_(maximum_bits_per_segment) {
-    if (secret_key_.size() != 32U) throw std::invalid_argument("native CAVLC key must be 32 bytes");
+    // The caller's secret is wiped when this scope ends (also on throw); only
+    // the derived subkeys are retained.
+    SensitiveBytes secret(std::move(secret_key));
+    if (secret.value().size() != 32U) throw std::invalid_argument("native CAVLC key must be 32 bytes");
     if (maximum_payload_bytes_ > std::numeric_limits<std::uint16_t>::max()) {
         throw std::invalid_argument("authenticated payload maximum exceeds 65535 bytes");
     }
     if (maximum_bits_per_segment_ == 0U) {
         throw std::invalid_argument("maximum stream bits per segment must be positive");
     }
+    try {
+        schedule_key_ = derive_cavlc_subkey(secret.value(), kScheduleInfo);
+        frame_key_ = derive_cavlc_subkey(secret.value(), kFrameTagInfo);
+        whitening_key_ = derive_cavlc_subkey(secret.value(), kWhiteningInfo);
+    } catch (...) {
+        wipe_stream_secret(schedule_key_);
+        wipe_stream_secret(frame_key_);
+        wipe_stream_secret(whitening_key_);
+        throw;
+    }
 }
 
 AuthenticatedCavlcStreamDecoder::~AuthenticatedCavlcStreamDecoder() noexcept {
-    wipe_stream_secret(secret_key_);
+    wipe_stream_secret(schedule_key_);
+    wipe_stream_secret(frame_key_);
+    wipe_stream_secret(whitening_key_);
     wipe_stream_secret(collected_bits_);
     if (payload_.has_value()) wipe_stream_secret(*payload_);
 }
@@ -1901,23 +2145,29 @@ void AuthenticatedCavlcStreamDecoder::consume_segment(
         const auto& candidates = prepared.candidates;
         const auto segment_bit_count = std::min(maximum_bits_per_segment_, candidates.size());
         if (segment_bit_count == 0U) return;
-        const auto segment_bits = extract_keyed_bits_from_candidates(
-            prepared.analysis_input, secret_key_, candidates, segment_bit_count);
-        for (const auto bit : segment_bits) {
+        // Un-whiten with the global frame bit index (bits already collected
+        // from earlier segments), so the 24-bit header below is parsed from
+        // plaintext; a wrong key yields a keystream-random version byte.
+        SensitiveBytes segment_bits(whiten_cavlc_frame_bits(
+            extract_keyed_bits_from_candidates(prepared.analysis_input, schedule_key_, candidates, segment_bit_count),
+            whitening_key_, collected_bits_.size()));
+        for (const auto bit : segment_bits.value()) {
             if (expected_frame_bits_.has_value() && collected_bits_.size() >= *expected_frame_bits_) break;
             collected_bits_.push_back(bit);
-            if (!expected_frame_bits_.has_value() && collected_bits_.size() == 24U) {
+            if (!expected_frame_bits_.has_value() && collected_bits_.size() == kFrameHeaderBytes * 8U) {
                 const auto header = msb_bits_to_bytes(collected_bits_);
-                if (header[0] != 1U) throw std::invalid_argument("authenticated CAVLC stream version is invalid");
+                if (header[0] != kAuthenticatedCavlcFrameVersion) {
+                    throw std::invalid_argument("authenticated CAVLC stream version is invalid");
+                }
                 const auto payload_size = (static_cast<std::size_t>(header[1]) << 8U) | header[2];
                 if (payload_size > maximum_payload_bytes_) {
                     throw std::invalid_argument("authenticated CAVLC stream length exceeds configured maximum");
                 }
-                expected_frame_bits_ = (3U + payload_size + 16U) * 8U;
+                expected_frame_bits_ = (kFrameHeaderBytes + payload_size + kFrameTagBytes) * 8U;
             }
             if (expected_frame_bits_.has_value() && collected_bits_.size() == *expected_frame_bits_) {
-                payload_ = unpack_authenticated_cavlc_frame(
-                    msb_bits_to_bytes(collected_bits_), secret_key_, maximum_payload_bytes_);
+                payload_ = unpack_frame_with_key(
+                    msb_bits_to_bytes(collected_bits_), frame_key_, maximum_payload_bytes_);
                 break;
             }
         }
@@ -1935,6 +2185,124 @@ void AuthenticatedCavlcStreamDecoder::consume_segment(
 const std::vector<std::uint8_t>& AuthenticatedCavlcStreamDecoder::authenticated_payload() const {
     if (!payload_.has_value()) throw std::logic_error("authenticated CAVLC stream is incomplete");
     return *payload_;
+}
+
+std::vector<std::uint8_t> assemble_cavlc_stream_segment(
+    const std::vector<AnnexBNalUnit>& parameter_sets,
+    const AnnexBNalUnit& idr) {
+    if (!idr.is_idr()) throw std::invalid_argument("stream segment must end with an IDR slice");
+    auto units = parameter_sets;
+    units.push_back(idr);
+    return assemble_annex_b(units);
+}
+
+namespace {
+
+// Walks a whole Annex-B file in segment-protocol order. visit(file_index, unit,
+// segment, context) runs for every NAL unit; segment is the assembled
+// SPS/PPS-context + IDR stream segment for IDR units and null otherwise, and
+// context is the parameter-set context it was assembled from. Returning false
+// stops the walk. Returns the number of IDR segments visited.
+template <class Visitor>
+std::size_t visit_cavlc_stream_file(const std::vector<std::uint8_t>& annex_b, Visitor&& visit) {
+    const auto units = split_annex_b(annex_b);
+    if (units.empty()) throw std::invalid_argument("input contains no Annex-B NAL units");
+    std::vector<AnnexBNalUnit> parameter_sets;
+    std::size_t idr_count = 0;
+    for (std::size_t index = 0; index < units.size(); ++index) {
+        const auto& unit = units[index];
+        if (unit.nal_unit_type == 7U || unit.nal_unit_type == 8U) {
+            update_parameter_set_context(parameter_sets, unit);
+        }
+        if (!unit.is_idr()) {
+            if (!visit(index, unit, static_cast<const std::vector<std::uint8_t>*>(nullptr), parameter_sets)) break;
+            continue;
+        }
+        ++idr_count;
+        const auto segment = assemble_cavlc_stream_segment(parameter_sets, unit);
+        if (!visit(index, unit, &segment, parameter_sets)) break;
+    }
+    return idr_count;
+}
+
+std::vector<std::uint8_t> single_idr_payload(const std::vector<std::uint8_t>& patched_segment) {
+    const auto units = split_annex_b(patched_segment);
+    const auto is_idr = [](const AnnexBNalUnit& unit) { return unit.is_idr(); };
+    const auto idr = std::find_if(units.begin(), units.end(), is_idr);
+    if (idr == units.end() || std::find_if(std::next(idr), units.end(), is_idr) != units.end()) {
+        throw std::invalid_argument("native stream patch did not return exactly one IDR slice");
+    }
+    return idr->payload;
+}
+
+}  // namespace
+
+std::vector<std::uint8_t> embed_authenticated_cavlc_stream_file(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    const std::vector<std::uint8_t>& payload,
+    const std::size_t maximum_bits_per_segment) {
+    AuthenticatedCavlcStreamEncoder encoder(secret_key, payload, maximum_bits_per_segment);
+    std::vector<AnnexBNalUnit> output_units;
+    const auto idr_count = visit_cavlc_stream_file(annex_b,
+        [&](std::size_t, const AnnexBNalUnit& unit, const std::vector<std::uint8_t>* segment,
+            const std::vector<AnnexBNalUnit>&) {
+            if (segment == nullptr || encoder.complete()) {
+                output_units.push_back(unit);
+                return true;
+            }
+            auto output_idr = unit;
+            output_idr.payload = single_idr_payload(encoder.process_segment(*segment).output);
+            output_units.push_back(std::move(output_idr));
+            return true;
+        });
+    if (idr_count == 0U) throw std::invalid_argument("input contains no IDR slices");
+    if (!encoder.complete()) throw std::invalid_argument("IDR stream capacity is insufficient for authenticated payload");
+    return assemble_annex_b(output_units);
+}
+
+std::vector<std::uint8_t> extract_authenticated_cavlc_stream_file(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    const std::size_t maximum_payload_bytes,
+    const std::size_t maximum_bits_per_segment) {
+    AuthenticatedCavlcStreamDecoder decoder(secret_key, maximum_payload_bytes, maximum_bits_per_segment);
+    const auto idr_count = visit_cavlc_stream_file(annex_b,
+        [&](std::size_t, const AnnexBNalUnit&, const std::vector<std::uint8_t>* segment,
+            const std::vector<AnnexBNalUnit>&) {
+            if (segment != nullptr) decoder.consume_segment(*segment);
+            return !decoder.complete();
+        });
+    if (idr_count == 0U) throw std::invalid_argument("input contains no IDR slices");
+    if (!decoder.complete()) throw std::invalid_argument("IDR stream ended before authenticated payload was complete");
+    return decoder.authenticated_payload();
+}
+
+std::vector<CavlcStreamSegmentCandidates> analyze_cavlc_stream_file(
+    const std::vector<std::uint8_t>& annex_b) {
+    // Mirrors AuthenticatedCavlcStreamEncoder::process_segment: the codec keeps
+    // its own parameter-set context and prepares each segment identically.
+    std::vector<AnnexBNalUnit> codec_parameter_sets;
+    std::vector<CavlcStreamSegmentCandidates> segments;
+    const auto idr_count = visit_cavlc_stream_file(annex_b,
+        [&](const std::size_t file_index, const AnnexBNalUnit&, const std::vector<std::uint8_t>* segment,
+            const std::vector<AnnexBNalUnit>& context) {
+            if (segment == nullptr) return true;
+            auto prepared = prepare_cavlc_stream_segment(*segment, codec_parameter_sets);
+            codec_parameter_sets = std::move(prepared.parameter_sets);
+            // The segment is context + IDR, and the analysis input prepends
+            // context_nal_count stored parameter sets to the segment.
+            const auto analysis_nal_index = prepared.context_nal_count + context.size();
+            for (const auto& candidate : prepared.candidates) {
+                if (candidate.nal_index != analysis_nal_index) {
+                    throw std::logic_error("stream segment candidate is outside the segment IDR");
+                }
+            }
+            segments.push_back({file_index, analysis_nal_index, std::move(prepared.candidates)});
+            return true;
+        });
+    if (idr_count == 0U) throw std::invalid_argument("input contains no IDR slices");
+    return segments;
 }
 
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units) {

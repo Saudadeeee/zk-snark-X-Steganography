@@ -12,18 +12,48 @@
 
 namespace zkstego {
 
+// Resource bounds shared by the library and CLI tools.
+//
+// kMaxPictureMacroblocks is the H.264 Table A-1 MaxFS of levels 5.1/5.2
+// (36864 macroblocks, e.g. 4096x2304), which covers 3840x2160 UHD. Each
+// decoded I macroblock retains several kilobytes of residual state, so this
+// bounds worst-case decoder memory per slice to a few hundred MiB instead of
+// letting a hostile SPS scale it with the RBSP size. kMaxPictureDimensionMbs
+// is the matching A.3.1 bound floor(sqrt(8 * MaxFS)) on either dimension.
+inline constexpr std::size_t kMaxPictureMacroblocks = 36864U;
+inline constexpr std::size_t kMaxPictureDimensionMbs = 543U;
+// Whole-file inputs read by the CLI tools are loaded into memory; 1 GiB is far
+// above the 300..3000-frame CIF fixtures while refusing unbounded allocation.
+inline constexpr std::size_t kMaxAnnexBFileBytes = 1024U * 1024U * 1024U;
+
+// Non-owning MSB-first bit reader over an RBSP byte range. Constructing from
+// an lvalue vector stores only a view, so the vector must outlive the reader;
+// constructing from an rvalue vector (including a braced list) moves the
+// bytes into the reader so a temporary can never dangle. The reader is
+// neither copyable nor movable because the view may point into its own
+// storage.
 class RbspBitReader {
 public:
-    explicit RbspBitReader(std::vector<std::uint8_t> bytes) : bytes_(std::move(bytes)) {}
+    explicit RbspBitReader(const std::vector<std::uint8_t>& bytes) noexcept
+        : data_(bytes.data()), size_(bytes.size()) {}
+    explicit RbspBitReader(std::vector<std::uint8_t>&& bytes)
+        : owned_(std::move(bytes)), data_(owned_.data()), size_(owned_.size()) {}
+    RbspBitReader(const std::uint8_t* data, std::size_t size) noexcept : data_(data), size_(size) {}
+    RbspBitReader(const RbspBitReader&) = delete;
+    RbspBitReader& operator=(const RbspBitReader&) = delete;
+    RbspBitReader(RbspBitReader&&) = delete;
+    RbspBitReader& operator=(RbspBitReader&&) = delete;
+    ~RbspBitReader() = default;
+
     [[nodiscard]] std::size_t position() const noexcept { return position_; }
-    [[nodiscard]] std::size_t remaining_bits() const noexcept { return bytes_.size() * 8 - position_; }
+    [[nodiscard]] std::size_t remaining_bits() const noexcept { return size_ * 8 - position_; }
     void skip_bits(std::size_t count) {
         if (count > remaining_bits()) throw std::out_of_range("RBSP bit skip past end");
         position_ += count;
     }
     [[nodiscard]] std::uint8_t read_bit() {
-        if (position_ >= bytes_.size() * 8) throw std::out_of_range("RBSP bit read past end");
-        const auto bit = static_cast<std::uint8_t>((bytes_[position_ / 8] >> (7 - position_ % 8)) & 1U);
+        if (position_ >= size_ * 8) throw std::out_of_range("RBSP bit read past end");
+        const auto bit = static_cast<std::uint8_t>((data_[position_ / 8] >> (7 - position_ % 8)) & 1U);
         ++position_;
         return bit;
     }
@@ -46,7 +76,9 @@ public:
         return -static_cast<std::int32_t>(code_num / 2U);
     }
 private:
-    std::vector<std::uint8_t> bytes_;
+    std::vector<std::uint8_t> owned_;
+    const std::uint8_t* data_{};
+    std::size_t size_{};
     std::size_t position_{};
 };
 
@@ -72,6 +104,11 @@ struct H264BaselineSps {
     std::uint32_t pic_height_in_map_units_minus1{};
 };
 
+// Throws std::invalid_argument unless the SPS picture size is within
+// kMaxPictureDimensionMbs / kMaxPictureMacroblocks. Returns the macroblock
+// count of one frame.
+std::size_t validated_picture_macroblock_count(const H264BaselineSps& sps);
+
 struct H264BaselinePps {
     std::uint32_t pic_parameter_set_id{};
     std::uint32_t sequence_parameter_set_id{};
@@ -79,6 +116,7 @@ struct H264BaselinePps {
     std::uint32_t num_slice_groups_minus1{};
     std::uint32_t num_ref_idx_l0_default_active_minus1{};
     std::uint32_t num_ref_idx_l1_default_active_minus1{};
+    bool bottom_field_pic_order_in_frame_present_flag{};
     std::int32_t pic_init_qp_minus26{};
     bool deblocking_filter_control_present_flag{};
     bool redundant_pic_cnt_present_flag{};
@@ -91,6 +129,7 @@ struct H264BaselineIdrSliceHeader {
     std::uint32_t frame_num{};
     std::uint32_t idr_pic_id{};
     std::uint32_t pic_order_cnt_lsb{};
+    std::int32_t delta_pic_order_cnt_bottom{};
     std::int32_t slice_qp_delta{};
     std::size_t data_bit_offset{};
 };
@@ -100,6 +139,10 @@ struct CavlcCoeffToken {
     std::uint32_t trailing_ones{};
     std::vector<std::size_t> sign_bit_offsets;
     std::size_t level_bit_offset{};
+    // Diagnostics only: RBSP bit where coeff_token starts and the nC context
+    // used to choose its VLC table. They do not affect parsing or embedding.
+    std::size_t start_bit_offset{};
+    int n_c{};
 };
 
 struct CavlcDecodedLevels {
@@ -278,6 +321,34 @@ std::vector<CavlcDecodedIdrSlice> decode_baseline_i_idr_slices(
 std::vector<CavlcSignCandidate> collect_cavlc_trailing_one_sign_candidates(
     const std::vector<CavlcDecodedIdrSlice>& slices);
 std::string serialize_cavlc_sign_candidate(const CavlcSignCandidate& candidate);
+
+// Blind channel protocol v2. One 32-byte secret K is never used as an HMAC
+// key directly; RFC 5869 HKDF-SHA-256 separates it into independent subkeys:
+//   PRK           = HMAC-SHA256(key = "zkstego-cavlc-v2-salt", msg = K)
+//   schedule_key  = HKDF-Expand(PRK, "zkstego/cavlc/v2/schedule", 32)
+//   frame_key     = HKDF-Expand(PRK, "zkstego/cavlc/v2/frame-tag", 32)
+//   whitening_key = HKDF-Expand(PRK, "zkstego/cavlc/v2/whitening", 32)
+// Schedule score = HMAC(schedule_key, identity); frame = [0x02][len BE16]
+// [payload][HMAC(frame_key, header || payload)[:16]]. Embedded bit i (global
+// across every IDR segment of one session) = frame bit i XOR keystream bit i,
+// where the keystream is HMAC(whitening_key, uint64_be(j)) for j = 0, 1, ...
+// and both bit streams are MSB-first. src/native_blind_contract.py is the
+// byte-for-byte Python reference.
+inline constexpr std::uint8_t kAuthenticatedCavlcFrameVersion = 2U;
+
+// RFC 5869 HKDF with SHA-256 (empty salt means 32 zero bytes). length must
+// not exceed 255 * 32 bytes.
+std::vector<std::uint8_t> hkdf_sha256(
+    const std::vector<std::uint8_t>& salt,
+    const std::vector<std::uint8_t>& input_key_material,
+    const std::vector<std::uint8_t>& info,
+    std::size_t length);
+// Whitening keystream bytes [0, byte_count) for a 32-byte secret; bits are
+// read MSB-first from these bytes.
+std::vector<std::uint8_t> cavlc_whitening_keystream(
+    const std::vector<std::uint8_t>& secret_key,
+    std::size_t byte_count);
+
 std::array<std::uint8_t, 32> score_keyed_cavlc_sign_candidate(
     const CavlcSignCandidate& candidate,
     const std::vector<std::uint8_t>& secret_key);
@@ -285,27 +356,11 @@ std::vector<CavlcSignCandidate> select_keyed_cavlc_sign_candidates(
     const std::vector<CavlcSignCandidate>& candidates,
     const std::vector<std::uint8_t>& secret_key,
     std::size_t required_bits);
-std::vector<std::uint8_t> embed_keyed_cavlc_sign_bits(
-    const std::vector<std::uint8_t>& annex_b,
-    const std::vector<std::uint8_t>& secret_key,
-    const std::vector<std::uint8_t>& payload_bits);
-std::vector<std::uint8_t> extract_keyed_cavlc_sign_bits(
-    const std::vector<std::uint8_t>& annex_b,
-    const std::vector<std::uint8_t>& secret_key,
-    std::size_t payload_bit_count);
-std::vector<std::uint8_t> embed_authenticated_cavlc_payload(
-    const std::vector<std::uint8_t>& annex_b,
-    const std::vector<std::uint8_t>& secret_key,
-    const std::vector<std::uint8_t>& payload);
 std::vector<std::uint8_t> pack_authenticated_cavlc_frame(
     const std::vector<std::uint8_t>& payload,
     const std::vector<std::uint8_t>& secret_key);
 std::vector<std::uint8_t> unpack_authenticated_cavlc_frame(
     const std::vector<std::uint8_t>& frame,
-    const std::vector<std::uint8_t>& secret_key,
-    std::size_t maximum_payload_bytes);
-std::vector<std::uint8_t> extract_authenticated_cavlc_payload(
-    const std::vector<std::uint8_t>& annex_b,
     const std::vector<std::uint8_t>& secret_key,
     std::size_t maximum_payload_bytes);
 
@@ -331,7 +386,9 @@ public:
     [[nodiscard]] std::size_t remaining_bits() const noexcept;
 
 private:
-    std::vector<std::uint8_t> secret_key_;
+    // Only the derived schedule key and the already-whitened frame bits are
+    // retained; the caller's secret is wiped after HKDF in the constructor.
+    std::vector<std::uint8_t> schedule_key_;
     std::vector<std::uint8_t> frame_bits_;
     std::vector<AnnexBNalUnit> parameter_sets_;
     std::size_t maximum_bits_per_segment_{};
@@ -354,7 +411,11 @@ public:
     [[nodiscard]] const std::vector<std::uint8_t>& authenticated_payload() const;
 
 private:
-    std::vector<std::uint8_t> secret_key_;
+    // Derived v2 subkeys; the caller's secret is wiped after HKDF.
+    // collected_bits_ holds un-whitened frame bits.
+    std::vector<std::uint8_t> schedule_key_;
+    std::vector<std::uint8_t> frame_key_;
+    std::vector<std::uint8_t> whitening_key_;
     std::vector<AnnexBNalUnit> parameter_sets_;
     std::size_t maximum_payload_bytes_{};
     std::size_t maximum_bits_per_segment_{};
@@ -374,11 +435,62 @@ H264BaselineIMacroblockHeader parse_baseline_i_macroblock_header(
 std::vector<H264BaselineIdrNalHeader> inspect_baseline_idr_headers(
     const std::vector<std::uint8_t>& annex_b);
 std::vector<AnnexBNalUnit> split_annex_b(const std::vector<std::uint8_t>& annex_b);
+// Returns seq_parameter_set_id (SPS, type 7) or pic_parameter_set_id (PPS,
+// type 8). Throws std::invalid_argument for other NAL types or bad ids.
+std::uint32_t parameter_set_id(const AnnexBNalUnit& unit);
+// Maintains the single-SPS/single-PPS context prepended to stream segments.
+// A repeated parameter set with the same id replaces the stored one; a
+// different id of the same type is rejected rather than silently replacing
+// the active set, because the blind schedule's NAL indices assume exactly
+// one stored SPS and one stored PPS.
+void update_parameter_set_context(std::vector<AnnexBNalUnit>& parameter_sets, const AnnexBNalUnit& unit);
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units);
+
+// File-mode segment protocol (the only channel protocol). Every IDR NAL of a
+// whole Annex-B file is one stream segment: the SPS/PPS context seen so far in
+// the file (update_parameter_set_context) followed by that IDR. The live
+// stdin/stdout CLI commands build segments from a pipe with the same helper.
+std::vector<std::uint8_t> assemble_cavlc_stream_segment(
+    const std::vector<AnnexBNalUnit>& parameter_sets,
+    const AnnexBNalUnit& idr);
+// Embeds the authenticated frame across the file's IDR segments (at most
+// maximum_bits_per_segment scheduled signs per IDR). Non-IDR NAL units and
+// IDRs after the frame is complete are copied unchanged. Throws when the file
+// has no IDR or not enough capacity.
+std::vector<std::uint8_t> embed_authenticated_cavlc_stream_file(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    const std::vector<std::uint8_t>& payload,
+    std::size_t maximum_bits_per_segment);
+std::vector<std::uint8_t> extract_authenticated_cavlc_stream_file(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    std::size_t maximum_payload_bytes,
+    std::size_t maximum_bits_per_segment);
+
+// Audit view of the file-mode schedule input: for each IDR segment, the
+// trailing-one sign candidates exactly as the stream codec collects them.
+// Candidate identities (nal_index) are relative to the codec's analysis input
+// (stored SPS/PPS context + the segment's own NAL units); rbsp_bit_offset is
+// also the bit offset inside the file's IDR NAL at idr_nal_index.
+struct CavlcStreamSegmentCandidates {
+    std::size_t idr_nal_index{};       // IDR NAL index in the whole file
+    std::size_t analysis_nal_index{};  // the same IDR inside the analysis input
+    std::vector<CavlcSignCandidate> candidates;
+};
+std::vector<CavlcStreamSegmentCandidates> analyze_cavlc_stream_file(
+    const std::vector<std::uint8_t>& annex_b);
 
 // Incremental Annex-B reader. It retains at most one NAL plus one input chunk,
 // recognizes start codes crossing read boundaries, and fails closed on a NAL
 // larger than the configured bound. Returned bytes include the start code.
+//
+// Input strategy: it never asks the stream buffer for more bytes than
+// in_avail() reports (capped at 64 KiB), so a live pipe is never stalled
+// waiting to fill a large block. When nothing is buffered it blocks for one
+// byte, then drains whatever became available. Start-code scanning resumes
+// where the previous call stopped, so total work is linear in the input even
+// for stream buffers that only ever expose one byte at a time.
 class AnnexBNalStreamReader {
 public:
     explicit AnnexBNalStreamReader(std::istream& input, std::size_t maximum_nal_bytes = 16U * 1024U * 1024U);
@@ -388,10 +500,15 @@ private:
     std::istream& input_;
     std::size_t maximum_nal_bytes_{};
     std::vector<std::uint8_t> buffer_;
+    // buffer_[0, head_) has already been returned; buffer_[head_, ...) is the
+    // pending NAL. scan_ is the next undecided start-code offset.
+    std::size_t head_{};
+    std::size_t scan_{};
     bool started_{};
     bool eof_{};
 
     void read_more();
+    void compact();
 };
 std::vector<std::uint8_t> apply_fixed_length_patches(
     const std::vector<std::uint8_t>& source,
