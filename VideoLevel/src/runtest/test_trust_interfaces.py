@@ -6,12 +6,13 @@ the frozen paper-grade runtime phases unless explicitly added later.
 
 import os
 import sys
+import tempfile
 
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from src.provenance import (
+from src.trust.c2pa_bridge import (
     attach_anchor_to_manifest,
     build_c2pa_anchor,
     load_audit_sidecar,
@@ -38,6 +39,7 @@ from src.trust import (
     verify_provenance_root,
 )
 from src.manifest import StegoManifest, VideoMetadata
+from src.trust.attestation import SignedAttestation
 
 
 def t_provenance_root_detects_tamper():
@@ -59,10 +61,94 @@ def t_c2pa_bridge_audit_sidecar_roundtrip():
     try:
         save_audit_sidecar(sidecar, path)
         loaded = load_audit_sidecar(path)
-        assert verify_c2pa_anchor(loaded, manifest), "loaded audit sidecar should verify"
+        assert verify_c2pa_anchor(
+            loaded, manifest, embedded_payload=sidecar.anchor.payload_bytes
+        ), "loaded audit sidecar should verify against the embedded root"
+        assert not verify_c2pa_anchor(loaded, manifest), "unanchored verification must fail closed"
     finally:
         if os.path.exists(path):
             os.remove(path)
+
+
+def _write(path: str, data: bytes) -> str:
+    with open(path, "wb") as f:
+        f.write(data)
+    return path
+
+
+def t_provenance_root_rejects_tampered_media_without_media_hash():
+    manifest = {"assertions": [{"label": "policy", "value": "anchor-v1"}]}
+    with tempfile.TemporaryDirectory() as tmp:
+        media = _write(os.path.join(tmp, "media.h264"), b"original-media")
+        root_no_media = build_provenance_root(manifest)
+        assert root_no_media.media_hash is None
+        assert not verify_provenance_root(root_no_media, manifest, media_path=media), \
+            "a root without media_hash must not vouch for media"
+        root = build_provenance_root(manifest, media_path=media)
+        assert verify_provenance_root(root, manifest, media_path=media)
+        _write(media, b"tampered-media")
+        assert not verify_provenance_root(root, manifest, media_path=media)
+        assert not verify_provenance_root({"manifest_uri": None}, manifest), "malformed root -> False"
+
+
+def t_c2pa_anchor_rejects_tampered_media_and_hash_disagreement():
+    manifest = {"claim_generator": "unit-test", "assertions": [{"label": "root", "value": "ok"}]}
+    with tempfile.TemporaryDirectory() as tmp:
+        media = _write(os.path.join(tmp, "media.h264"), b"original-media")
+        no_media = build_c2pa_anchor(manifest, registry_uri="registry://unit-test/manifest")
+        payload = no_media.anchor.payload_bytes
+        assert not verify_c2pa_anchor(no_media, manifest, media_path=media, embedded_payload=payload), \
+            "media_hash=None must not verify supplied media"
+
+        sidecar = build_c2pa_anchor(manifest, registry_uri="registry://unit-test/manifest", media_path=media)
+        assert verify_c2pa_anchor(sidecar, manifest, media_path=media, embedded_payload=payload)
+
+        data = sidecar.to_dict()
+        data["media_hash"] = "ff" * 32
+        assert not verify_c2pa_anchor(data, manifest, embedded_payload=payload), \
+            "top-level and root media hashes must agree"
+        data = sidecar.to_dict()
+        data["anchor"]["root"]["media_hash"] = None
+        assert not verify_c2pa_anchor(data, manifest, media_path=media, embedded_payload=payload)
+
+        _write(media, b"tampered-media")
+        assert not verify_c2pa_anchor(sidecar, manifest, media_path=media, embedded_payload=payload)
+        assert not verify_c2pa_anchor({"anchor": {}}, manifest, embedded_payload=payload)
+
+
+def t_c2pa_forged_sidecar_without_payload_is_rejected():
+    genuine = {"claim_generator": "unit-test", "assertions": [{"label": "owner", "value": "alice"}]}
+    forged = {"claim_generator": "unit-test", "assertions": [{"label": "owner", "value": "mallory"}]}
+    genuine_root = build_c2pa_anchor(genuine, registry_uri="registry://unit-test/manifest").anchor.payload_bytes
+    with tempfile.TemporaryDirectory() as tmp:
+        media = _write(os.path.join(tmp, "media.h264"), b"forged-media")
+        forged_sidecar = build_c2pa_anchor(forged, registry_uri="registry://unit-test/manifest",
+                                           media_path=media)
+        assert not verify_c2pa_anchor(forged_sidecar, forged, media_path=media), \
+            "self-consistent forged sidecar must not verify without an embedded root"
+        assert not verify_c2pa_anchor(forged_sidecar, forged, media_path=media,
+                                      embedded_payload=genuine_root), \
+            "forged sidecar must not match the genuine embedded root"
+        # Explicit opt-in is a self-consistency check only (documented as not authentication).
+        assert verify_c2pa_anchor(forged_sidecar, forged, media_path=media, allow_unanchored=True)
+
+
+def t_mock_tee_rejects_malformed_signature():
+    bundle = AttestationBundle(
+        video_hash="aa" * 32,
+        model_config_hash="bb" * 32,
+        model_binary_hash="cc" * 32,
+        policy_id="policy-v1",
+        timestamp="2026-06-08T00:00:00Z",
+    )
+    signer = MockTEESigner(b"test-key")
+    signed = signer.sign(bundle)
+    non_ascii = SignedAttestation(bundle=bundle, signature="é" * 64, signer_id=signed.signer_id)
+    assert signer.verify(non_ascii) is False, "non-ASCII signature must return False, not raise"
+    not_str = SignedAttestation(bundle=bundle, signature=None, signer_id=signed.signer_id)  # type: ignore[arg-type]
+    assert signer.verify(not_str) is False
+    truncated = SignedAttestation(bundle=bundle, signature=signed.signature[:-2], signer_id=signed.signer_id)
+    assert signer.verify(truncated) is False
 
 
 def t_manifest_provenance_fields_roundtrip():
@@ -175,6 +261,13 @@ def main():
     results = [
         run_test("provenance_root_detects_tamper", t_provenance_root_detects_tamper),
         run_test("c2pa_bridge_audit_sidecar_roundtrip", t_c2pa_bridge_audit_sidecar_roundtrip),
+        run_test("provenance_root_rejects_tampered_media_without_media_hash",
+                 t_provenance_root_rejects_tampered_media_without_media_hash),
+        run_test("c2pa_anchor_rejects_tampered_media_and_hash_disagreement",
+                 t_c2pa_anchor_rejects_tampered_media_and_hash_disagreement),
+        run_test("c2pa_forged_sidecar_without_payload_is_rejected",
+                 t_c2pa_forged_sidecar_without_payload_is_rejected),
+        run_test("mock_tee_rejects_malformed_signature", t_mock_tee_rejects_malformed_signature),
         run_test("manifest_provenance_fields_roundtrip", t_manifest_provenance_fields_roundtrip),
         run_test("c2pa_anchor_attaches_to_manifest", t_c2pa_anchor_attaches_to_manifest),
         run_test("fingerprint_registry_threshold_match", t_fingerprint_registry_threshold_match),
@@ -185,7 +278,7 @@ def main():
         run_test("attestation_sidecar_roundtrip", t_attestation_sidecar_roundtrip),
         run_test("zkml_interface_is_explicit_stub", t_zkml_interface_is_explicit_stub),
     ]
-    sys.exit(summarise(results, "Future Trust Architecture"))
+    sys.exit(summarise(results, "Trust interfaces"))
 
 
 if __name__ == "__main__":

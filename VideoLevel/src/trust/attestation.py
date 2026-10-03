@@ -137,11 +137,24 @@ class MockTEESigner:
         return SignedAttestation(bundle=bundle, signature=signature, signer_id=self.signer_id)
 
     def verify(self, signed: SignedAttestation) -> bool:
-        expected = self.sign(signed.bundle)
+        """Return True only for a well-formed signature from this signer.
+
+        Malformed input (non-str or non-ASCII signature, unserializable bundle)
+        returns False instead of raising.
+        """
+        signature = getattr(signed, "signature", None)
+        if not isinstance(signature, str):
+            return False
+        try:
+            provided = signature.encode("ascii")
+            expected = self.sign(signed.bundle)
+        except (UnicodeEncodeError, TypeError, ValueError, AttributeError):
+            return False
+        signature_ok = hmac.compare_digest(provided, expected.signature.encode("ascii"))
         return (
-            signed.signer_id == self.signer_id
+            signature_ok
+            and signed.signer_id == self.signer_id
             and signed.scheme == expected.scheme
-            and hmac.compare_digest(signed.signature, expected.signature)
         )
 
 

@@ -1,31 +1,13 @@
 """
-ZK-SNARK CAVLC Video Steganography
-Core CAVLC-based video steganography system with Zero-Knowledge proofs.
+ZK-SNARK CAVLC Video Steganography (Python orchestration layer).
+
+The H.264/CAVLC media core is native C++ (native/, driven through the
+zkstego_blind_bits CLI); this package holds the Groth16 proof bridge and
+payload format, manifests/key policy, the HTTP service and test tooling.
 """
 
 __version__ = "3.1-upgrade-v3"
 
-# Public APIs
-from .embedder import embed, EmbedResult
-from .verifier import verify, VerifyResult
-from .verifier_blind import verify_near_blind
-from .verify_modes import (
-    verify_strict,
-    verify_nearblind,
-    verify_benchmark,
-    verify_auto,
-)
-from .manifest import StegoManifest, compute_file_hash
+from .zk_proof import PROOF_SIZE_BYTES, pack, unpack
 
-__all__ = [
-    "embed",
-    "EmbedResult",
-    "verify",
-    "VerifyResult",
-    "verify_near_blind",
-    "verify_strict",
-    "verify_benchmark",
-    "verify_auto",
-    "StegoManifest",
-    "compute_file_hash",
-]
+__all__ = ["PROOF_SIZE_BYTES", "pack", "unpack", "__version__"]

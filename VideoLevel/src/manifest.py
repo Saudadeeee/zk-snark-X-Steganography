@@ -36,6 +36,10 @@ class EmbeddingMetadata:
     max_modifications_per_block: int = 1
     positions_count: int = 0      # Number of T1 positions used
     validation_threshold_db: Optional[float] = None  # PSNR threshold used
+    # Optional sidecar binding: compute_positions_hash() of positions.json.
+    # Serialized (and therefore signed) only when set, so legacy manifests keep
+    # their original content hash.
+    positions_sha256: Optional[str] = None
 
 
 @dataclass
@@ -53,6 +57,8 @@ class VideoMetadata:
     qp_value: Optional[int] = None
     provenance_uri: Optional[str] = None
     provenance_root_hash: Optional[str] = None
+    # Optional binding to the stego output bytes (SHA-256). Serialized only when set.
+    stego_file_hash: Optional[str] = None
 
 
 @dataclass
@@ -113,6 +119,16 @@ class StegoManifest:
             video["provenance_uri"] = self.video.provenance_uri
         if self.video.provenance_root_hash is not None:
             video["provenance_root_hash"] = self.video.provenance_root_hash
+        if self.video.stego_file_hash is not None:
+            video["stego_file_hash"] = self.video.stego_file_hash
+        embedding = {
+            "strategy": self.embedding.strategy,
+            "max_modifications_per_block": self.embedding.max_modifications_per_block,
+            "positions_count": self.embedding.positions_count,
+            "validation_threshold_db": self.embedding.validation_threshold_db,
+        }
+        if self.embedding.positions_sha256 is not None:
+            embedding["positions_sha256"] = self.embedding.positions_sha256
         return {
             "version": self.version,
             "created": self.created,
@@ -124,12 +140,7 @@ class StegoManifest:
                 "chaos_original_bits": self.payload.chaos_original_bits,
                 "chaos_expansion_factor": self.payload.chaos_expansion_factor,
             },
-            "embedding": {
-                "strategy": self.embedding.strategy,
-                "max_modifications_per_block": self.embedding.max_modifications_per_block,
-                "positions_count": self.embedding.positions_count,
-                "validation_threshold_db": self.embedding.validation_threshold_db,
-            },
+            "embedding": embedding,
             "video": video,
             "proof": {
                 "proof_system": self.proof.proof_system,
@@ -162,6 +173,7 @@ class StegoManifest:
                 max_modifications_per_block=data["embedding"]["max_modifications_per_block"],
                 positions_count=data["embedding"]["positions_count"],
                 validation_threshold_db=data["embedding"].get("validation_threshold_db"),
+                positions_sha256=data["embedding"].get("positions_sha256"),
             ),
             video=VideoMetadata(
                 file_path=data["video"]["file_path"],
@@ -175,6 +187,7 @@ class StegoManifest:
                 qp_value=data["video"].get("qp_value"),
                 provenance_uri=data["video"].get("provenance_uri"),
                 provenance_root_hash=data["video"].get("provenance_root_hash"),
+                stego_file_hash=data["video"].get("stego_file_hash"),
             ),
             proof=ProofMetadata(
                 proof_system=data["proof"].get("proof_system", "groth16"),
@@ -245,6 +258,17 @@ class StegoManifest:
         self.signature = base64.b64encode(raw_signature).decode("ascii")
         self.signer = signer_id or "default"
         self.signature_scheme = "ed25519"
+
+
+def compute_positions_hash(positions) -> str:
+    """Compute a canonical SHA-256 over embedding positions (positions.json content).
+
+    The hash is taken over the parsed integer triples, so whitespace/indentation
+    differences in positions.json do not matter but any value change does.
+    """
+    rows = [[int(v) for v in row] for row in positions]
+    content = json.dumps(rows, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(content.encode("ascii")).hexdigest()
 
 
 def compute_file_hash(file_path: str) -> str:

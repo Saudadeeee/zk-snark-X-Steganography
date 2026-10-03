@@ -64,17 +64,37 @@ def verify_provenance_root(
     *,
     media_path: str | Path | None = None,
 ) -> bool:
-    """Verify a manifest/media pair against a previously published root."""
+    """Verify a manifest/media pair against a previously published root.
+
+    Fail-closed rules:
+    - the canonical manifest hash must equal ``root.manifest_root_hash``;
+    - when ``media_path`` is given, ``root.media_hash`` must be present and equal
+      the SHA-256 of that file (a root without a media hash cannot vouch for media);
+    - when ``media_path`` is omitted, only the manifest is checked.
+
+    Security note: this is an integrity check against a root the caller already
+    trusts (e.g. one embedded in the fragile plane or published out of band). A
+    root taken from an unsigned sidecar is NOT authentication: anyone can
+    recompute these hashes for a forged manifest/media pair.
+    """
     if isinstance(root, dict):
-        root = ProvenanceRoot(
-            manifest_root_hash=str(root["manifest_root_hash"]),
-            manifest_uri=root.get("manifest_uri"),
-            media_hash=root.get("media_hash"),
-            algorithm=root.get("algorithm", "sha256-canonical-json-v1"),
-        )
+        try:
+            root = ProvenanceRoot(
+                manifest_root_hash=str(root["manifest_root_hash"]),
+                manifest_uri=root.get("manifest_uri"),
+                media_hash=root.get("media_hash"),
+                algorithm=root.get("algorithm", "sha256-canonical-json-v1"),
+            )
+        except (KeyError, TypeError, AttributeError):
+            return False
+    if root.algorithm != "sha256-canonical-json-v1":
+        return False
     rebuilt = build_provenance_root(manifest, manifest_uri=root.manifest_uri, media_path=media_path)
-    if rebuilt.manifest_root_hash != root.manifest_root_hash:
+    if rebuilt.manifest_root_hash != str(root.manifest_root_hash).lower():
         return False
-    if root.media_hash is not None and rebuilt.media_hash != root.media_hash:
-        return False
+    if media_path is not None:
+        if not isinstance(root.media_hash, str) or not root.media_hash:
+            return False
+        if rebuilt.media_hash != root.media_hash.lower():
+            return False
     return True
