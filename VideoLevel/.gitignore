@@ -44,7 +44,7 @@ data/raw/*.y4m
 *.zkey
 *.ptau
 *.r1cs
-circuits/build/payload_verify_js/
+circuits/build/*_js/
 node_modules/
 
 # Logs
@@ -54,6 +54,7 @@ node_modules/
 *.json
 !circuits/package.json
 !circuits/package-lock.json
+!src/poseidon_constants.json
 !benchmark/results/realtime_camera_*.json
 !benchmark/results/*_new.json
 !benchmark/results/*_new.pdf

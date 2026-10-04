@@ -26,10 +26,10 @@ DEMO = ROOT / "demo" / "terminal_demo.py"
 TIMEOUT_SECONDS = 1800
 NATIVE_TOOLS = ("zkstego_blind_bits", "zkstego_inspect")
 CIRCUIT_FILES = (
-    "circuits/build/proving_key.zkey",
-    "circuits/build/verification_key.json",
-    "circuits/build/payload_verify_js/payload_verify.wasm",
-    "circuits/build/payload_verify_js/generate_witness.js",
+    "circuits/build/camera_video.zkey",
+    "circuits/build/camera_video_vkey.json",
+    "circuits/build/camera_video_js/camera_video.wasm",
+    "circuits/build/camera_video_js/generate_witness.js",
     "circuits/node_modules/snarkjs/build/cli.cjs",
 )
 RUN_FOLDER = re.compile(r"Artifacts \+ transcript \+ report: (.+)$", re.MULTILINE)

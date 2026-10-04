@@ -292,7 +292,7 @@ def run_crypto_benchmark(out_path: Path, trials: int = 100) -> dict[str, Any]:
         "proposal_mapping": {
             "this_work": "Native H.264 CAVLC stream modification, channel protocol v3: the frame carries no MAC (the v2 16-byte HMAC tag was removed); the payload's Groth16 proof authenticates it and HMAC-SHA-256 is used only as a keyed PRF for the sign schedule and whitening. No payload confidentiality.",
             "hmac_row_scope": "Primitive reference only: Python cryptography full 32-byte HMAC output. Protocol v3 has no native frame tag; end-to-end video cost is reported separately by the media and E2E benchmarks.",
-            "zkp_scope": "Groth16/PLONK tests prove a payload commitment statement separately; the current video benchmark does not prove camera origin or bind the entire video stream."
+            "zkp_scope": "Groth16/PLONK prove camera_video: a camera registered in a Poseidon Merkle registry vouches for a binding of the masked video digest and the message (measured in zkp_new.json / e2e_new.json)."
         },
         "results": results,
         "non_equivalence_note": "MACs, digital signatures and AEAD have different security properties. The measured X25519+AEAD scheme and the Ed25519+AEAD composition are not claimed to be standardized signcryption. No literature-only timing values are included.",

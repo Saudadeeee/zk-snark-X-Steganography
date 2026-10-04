@@ -395,6 +395,9 @@ int run(const std::vector<std::string>& argv) {
                      "      prints the payload hex; a wrong key fails the frame version/length checks\n"
                      "The frame has no MAC: '-auth' names a keyed command, and the payload's\n"
                      "Groth16 proof (verified by the service) is what authenticates it.\n"
+                     "  video-digest <input.h264> <frame-bits> <max-bits-per-IDR>\n"
+                     "      stdin: key line; prints the video binding digest: SHA-256 of every\n"
+                     "      NAL's RBSP with exactly the keyed frame-carrier sign bits cleared\n"
                      "  measure-live-capacity-stdin <max-bits-per-IDR>\n"
                      "      stdin: raw Annex-B; stdout: ZKSTEG_CAPACITY_METRICS JSON\n"
                      "  embed-live-auth-stdin <max-bits-per-IDR>\n"
@@ -428,6 +431,18 @@ int run(const std::vector<std::string>& argv) {
             const auto payload = zkstego::extract_cavlc_stream_file(
                 read_binary(argv[2]), key.value(), maximum_payload, maximum_bits);
             std::cout << bytes_to_hex(payload) << '\n';
+            return 0;
+        }
+        if (operation == "video-digest" && argc == 5) {
+            const auto key = read_key_stdin_line();
+            const auto frame_bits = parse_bit_count(argv[3]);
+            const auto maximum_bits = parse_bit_count(argv[4]);
+            if (maximum_bits == 0U) throw std::invalid_argument("max-bits-per-IDR must be positive");
+            const auto result = zkstego::cavlc_video_binding_digest(
+                read_binary(argv[2]), key.value(), frame_bits, maximum_bits);
+            const std::vector<std::uint8_t> digest(result.digest.begin(), result.digest.end());
+            std::cout << "ZKSTEGO_VIDEO_DIGEST " << bytes_to_hex(digest) << " carrier_segments="
+                      << result.carrier_segments << " nal_units=" << result.nal_units << '\n';
             return 0;
         }
         if (operation == "measure-live-capacity-stdin" && argc == 3) {

@@ -580,7 +580,8 @@ def frame_field(bit_index: int, message_bytes: int) -> str:
         return "do dai payload (2 byte)"
     offset = byte - 3
     if offset < 4:
-        return f"payload: message_length byte {offset}"
+        return ("payload: format (0x01)", "payload: che do binding (0 = video)",
+                "payload: message_length byte 0", "payload: message_length byte 1")[offset]
     offset -= 4
     if offset < message_bytes:
         return f"payload: message byte {offset}"

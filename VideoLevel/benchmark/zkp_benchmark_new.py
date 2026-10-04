@@ -1,4 +1,4 @@
-"""Compare actual Groth16 and PLONK proofs for the same Circom R1CS statement."""
+"""Compare actual Groth16 and PLONK proofs for the camera_video R1CS (registry membership + binding)."""
 
 from __future__ import annotations
 
@@ -16,7 +16,9 @@ from typing import Any
 
 import psutil
 
-from src.zk_proof import ZKSnarkBridge, proof_to_bytes
+from src.camera_registry import CameraRegistry, camera_public_key, new_camera_secret
+from src.video_binding import MODE_VIDEO, binding_digest
+from src.zk_proof import CameraProofBridge, proof_to_bytes
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +26,11 @@ CIRCUITS = ROOT / "circuits"
 BUILD = CIRCUITS / "build"
 NODE = shutil.which("node") or "node"
 SNARKJS = CIRCUITS / "node_modules" / "snarkjs" / "build" / "cli.cjs"
+R1CS = BUILD / "camera_video.r1cs"
+GROTH16_ZKEY = BUILD / "camera_video.zkey"
+GROTH16_VKEY = BUILD / "camera_video_vkey.json"
+PUBLIC_PTAU = BUILD / "powersOfTau28_hez_final_16.ptau"
+PUBLIC_PTAU_POWER = 16
 
 
 def _measured(args: list[str], *, cwd: Path, timeout: int = 7200) -> dict[str, Any]:
@@ -58,10 +65,8 @@ def _run_cli(*args: str, timeout: int = 7200) -> dict[str, Any]:
 
 
 def _require_artifacts() -> None:
-    required = (SNARKJS, BUILD / "payload_verify.r1cs",
-                BUILD / "payload_verify_js" / "payload_verify.wasm",
-                BUILD / "payload_verify_js" / "generate_witness.js",
-                BUILD / "proving_key.zkey", BUILD / "verification_key.json")
+    required = (SNARKJS, R1CS, BUILD / "camera_video_js" / "camera_video.wasm",
+                BUILD / "camera_video_js" / "generate_witness.js", GROTH16_ZKEY, GROTH16_VKEY)
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise RuntimeError("missing actual proving artifacts: " + ", ".join(missing))
@@ -93,35 +98,31 @@ def _verify_expected_invalid(vkey: Path, public: Path, proof: Path, mode: str) -
     return _measured([NODE, str(SNARKJS), mode, "verify", str(vkey), str(public), str(proof)], cwd=CIRCUITS)
 
 
-def run_zkp_benchmark(output_root: Path, trials: int = 1, plonk_trials: int | None = None,
-                      existing_setup_dir: Path | None = None,
-                      existing_setup_elapsed_ms: float | None = None) -> dict[str, Any]:
+def run_zkp_benchmark(output_root: Path, trials: int = 1, plonk_trials: int | None = None) -> dict[str, Any]:
     _require_artifacts()
     output_root = output_root.resolve()
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:6]
-    if existing_setup_dir is None:
-        out_dir = (output_root / "zkp_new" / run_id).resolve()
-        out_dir.mkdir(parents=True, exist_ok=False)
-    else:
-        out_dir = existing_setup_dir.resolve()
-        if not out_dir.is_dir():
-            raise RuntimeError(f"precomputed PLONK setup directory not found: {out_dir}")
-    bridge = ZKSnarkBridge(str(CIRCUITS))
-    payload = b"zkp-benchmark-new-common-statement-v1"
-    secret = bytes(range(32))
+    out_dir = (output_root / "zkp_new" / run_id).resolve()
+    out_dir.mkdir(parents=True, exist_ok=False)
+    bridge = CameraProofBridge(CIRCUITS)
+    camera_secrets = [new_camera_secret() for _ in range(8)]
+    registry = CameraRegistry([camera_public_key(secret) for secret in camera_secrets])
+    message = b"zkp-benchmark-common-statement"
+    binding = binding_digest(MODE_VIDEO, bytes(range(32)), message)
+    circuit_input = bridge.circuit_input(camera_secrets[5], registry, binding)
     results: list[dict[str, Any]] = []
 
     for trial in range(trials):
         witness_start = time.perf_counter_ns()
-        witness = bridge._compute_witness(bridge._build_circuit_input(payload, secret))
+        witness = bridge._compute_witness(circuit_input)
         witness_ms = (time.perf_counter_ns() - witness_start) / 1e6
         work = witness.parent
         proof_path, public_path = work / "groth16_proof.json", work / "groth16_public.json"
         tampered_path = work / "groth16_public_tampered.json"
         try:
-            prove = _run_cli("groth16", "prove", str(BUILD / "proving_key.zkey"),
+            prove = _run_cli("groth16", "prove", str(GROTH16_ZKEY),
                              str(witness), str(proof_path), str(public_path), timeout=7200)
-            verify = _verify_with_cli(BUILD / "verification_key.json", public_path, proof_path, "groth16")
+            verify = _verify_with_cli(GROTH16_VKEY, public_path, proof_path, "groth16")
             verification_output = (verify["stdout"] + verify["stderr"]).decode(errors="replace").lower()
             # snarkjs exits 0 and prints "OK!" only for a valid proof.
             groth_ok = verify["returncode"] == 0 and "ok!" in verification_output
@@ -130,7 +131,7 @@ def run_zkp_benchmark(output_root: Path, trials: int = 1, plonk_trials: int | No
             tampered_public = list(groth_public)
             tampered_public[-1] = str(int(tampered_public[-1]) + 1)
             tampered_path.write_text(json.dumps(tampered_public), encoding="utf-8")
-            negative = _verify_expected_invalid(BUILD / "verification_key.json", tampered_path, proof_path, "groth16")
+            negative = _verify_expected_invalid(GROTH16_VKEY, tampered_path, proof_path, "groth16")
             negative_output = (negative["stdout"] + negative["stderr"]).decode(errors="replace").lower()
             # A crash must not count as a rejection: require snarkjs' own invalid-proof verdict.
             groth_tamper = negative["returncode"] != 0 and "invalid proof" in negative_output
@@ -146,55 +147,44 @@ def run_zkp_benchmark(output_root: Path, trials: int = 1, plonk_trials: int | No
                 "compact_proof_bytes": len(proof_to_bytes(groth_proof)),
                 "public_signals_json_bytes": public_path.stat().st_size,
                 "proof_valid": groth_ok, "tampered_public_input_rejected": groth_tamper,
-                "trusted_setup": "existing circuit-specific setup; ceremony provenance must be verified independently",
-                "artifact": "circuits/build/proving_key.zkey",
+                "trusted_setup": "Hermez public Phase 1 + local multi-contribution Phase 2 + beacon (src/zk_setup.py; demo)",
+                "artifact": "circuits/build/camera_video.zkey",
             })
         finally:
             witness.unlink(missing_ok=True)
             proof_path.unlink(missing_ok=True)
             public_path.unlink(missing_ok=True)
             tampered_path.unlink(missing_ok=True)
-            (work / "input_live.json").unlink(missing_ok=True)
+            (work / "input.json").unlink(missing_ok=True)
             try:
                 work.rmdir()
             except OSError:
                 pass
 
-    # Read the actual constraint count from the R1CS instead of trusting the
-    # stale bridge constant; choose a sufficiently large local universal SRS.
-    r1cs_info = _run_cli("r1cs", "info", str(BUILD / "payload_verify.r1cs"))
+    # Read the actual constraint count from the R1CS; PLONK's domain is larger than the
+    # R1CS (selectors, permutation), so allow a 4x margin when choosing the universal SRS.
+    r1cs_info = _run_cli("r1cs", "info", str(R1CS))
     info_text = (r1cs_info["stdout"] + r1cs_info["stderr"]).decode(errors="replace")
     count_match = re.search(r"(?:# of Constraints|Constraints)\s*[:=]\s*(\d+)", info_text, re.IGNORECASE)
     if not count_match:
-        count_match = re.search(r"Constraints:\s*(\d+)", info_text, re.IGNORECASE)
-    if not count_match:
         raise RuntimeError("could not read circuit constraint count from snarkjs r1cs info: " + info_text[-1500:])
     actual_constraints = int(count_match.group(1))
-    # snarkjs' PLONK arithmetization adds selector/permutation constraints; its
-    # reported domain for the R1CS (62,553 rows when measured; 63,321 since the
-    # 2026-10-03 bit constraints) was 221,039, so allow a 4x margin.
-    power = max(18, math.ceil(math.log2(4 * actual_constraints)))
-    plonk_zkey = out_dir / "payload_verify_plonk.zkey"
-    plonk_vkey = out_dir / "payload_verify_plonk_vkey.json"
-    if existing_setup_dir is None:
-        ptau, ceremony = _build_local_ptau(out_dir, power)
-        setup = _run_cli("plonk", "setup", str(BUILD / "payload_verify.r1cs"),
-                         str(ptau), str(plonk_zkey), timeout=7200)
-        vkey = _run_cli("zkey", "export", "verificationkey", str(plonk_zkey), str(plonk_vkey))
+    power = max(12, math.ceil(math.log2(4 * actual_constraints)))
+    if power <= PUBLIC_PTAU_POWER and PUBLIC_PTAU.is_file():
+        # PLONK's universal SRS: the public Hermez transcript, no circuit-specific ceremony.
+        ptau, ceremony, ptau_source = PUBLIC_PTAU, [], "public Hermez Powers of Tau 2^16"
     else:
-        ptau = out_dir / f"pot{power}_final.ptau"
-        ceremony = []
-        setup = {"wall_ms": existing_setup_elapsed_ms, "peak_rss_bytes_sampled": None,
-                 "reused_existing_artifact": True,
-                 "timing_basis": "file creation to final write timestamps; whole-second approximate"}
-        vkey = {"wall_ms": None}
-        if not plonk_zkey.is_file() or not plonk_vkey.is_file() or not ptau.is_file():
-            raise RuntimeError("precomputed PLONK zkey, verification key or Powers-of-Tau file is missing")
+        ptau, ceremony = _build_local_ptau(out_dir, power)
+        ptau_source = f"local Powers of Tau 2^{power}"
+    plonk_zkey = out_dir / "camera_video_plonk.zkey"
+    plonk_vkey = out_dir / "camera_video_plonk_vkey.json"
+    setup = _run_cli("plonk", "setup", str(R1CS), str(ptau), str(plonk_zkey), timeout=7200)
+    vkey = _run_cli("zkey", "export", "verificationkey", str(plonk_zkey), str(plonk_vkey))
     plonk_trial_count = trials if plonk_trials is None else plonk_trials
     plonk_records: list[dict[str, Any]] = []
     for trial in range(plonk_trial_count):
         witness_start = time.perf_counter_ns()
-        witness = bridge._compute_witness(bridge._build_circuit_input(payload, secret))
+        witness = bridge._compute_witness(circuit_input)
         witness_ms = (time.perf_counter_ns() - witness_start) / 1e6
         work = witness.parent
         proof_path, public_path = work / "plonk_proof.json", work / "plonk_public.json"
@@ -234,8 +224,7 @@ def run_zkp_benchmark(output_root: Path, trials: int = 1, plonk_trials: int | No
             proof_path.unlink(missing_ok=True)
             public_path.unlink(missing_ok=True)
             (work / "plonk_public_tampered.json").unlink(missing_ok=True)
-            for path in (work / "input_live.json",):
-                path.unlink(missing_ok=True)
+            (work / "input.json").unlink(missing_ok=True)
             try:
                 work.rmdir()
             except OSError:
@@ -247,25 +236,28 @@ def run_zkp_benchmark(output_root: Path, trials: int = 1, plonk_trials: int | No
     record = {
         "schema": "zkstego-zkp-benchmark-new-v1", "run_id": run_id,
         "created_utc": datetime.now(timezone.utc).isoformat(),
-        "statement": "Same existing Circom payload_verify R1CS, same payload and 32-byte secret; proves SHA256(SHA256(payload)||secret) commitment and payload length.",
-        "circuit_constraints": actual_constraints,
-        "payload_bytes": len(payload), "trials_per_system": {"groth16": trials, "plonk": plonk_trial_count},
+        "statement": ("Same camera_video R1CS and witness: a camera registered in a depth-16 Poseidon Merkle "
+                      "tree (root public) vouches for a 256-bit binding of video digest and message (two public "
+                      "128-bit inputs); the camera secret and its leaf stay private."),
+        "circuit_constraints": actual_constraints, "public_inputs": 3, "registry_size": len(registry.public_keys),
+        "trials_per_system": {"groth16": trials, "plonk": plonk_trial_count},
         "methodology": "Measured actual Node/snarkjs witness/prove/verify commands; PLONK uses a locally generated, adequately sized Powers-of-Tau transcript and setup time is reported separately. Wall times include Node process startup. Peak process RSS sampled every 10ms and may undercount short peaks. No literature-only estimates.",
-        "groth16_proving_key_sha256": __import__("hashlib").sha256((BUILD / "proving_key.zkey").read_bytes()).hexdigest(),
-        "powers_of_tau_power": power,
+        "groth16_proving_key_sha256": __import__("hashlib").sha256(GROTH16_ZKEY.read_bytes()).hexdigest(),
+        "groth16_proving_key_bytes": GROTH16_ZKEY.stat().st_size,
+        "powers_of_tau_power": PUBLIC_PTAU_POWER if ptau == PUBLIC_PTAU else power,
+        "powers_of_tau_source": ptau_source,
         "powers_of_tau_commands": [{"wall_ms": item["wall_ms"], "peak_rss_bytes_sampled": item["peak_rss_bytes_sampled"]} for item in ceremony],
         "powers_of_tau_final_sha256": __import__("hashlib").sha256(ptau.read_bytes()).hexdigest(),
         "powers_of_tau_final_bytes": ptau.stat().st_size,
         "plonk_setup_ms": setup["wall_ms"], "plonk_setup_peak_rss_bytes_sampled": setup["peak_rss_bytes_sampled"],
-        "plonk_setup_reused_from_existing_run": existing_setup_dir is not None,
-        "plonk_setup_timing_basis": setup.get("timing_basis", "perf_counter around snarkjs command"),
+        "plonk_setup_timing_basis": "perf_counter around snarkjs command",
         "plonk_proving_key_bytes": plonk_zkey.stat().st_size,
         "plonk_vkey_export_ms": vkey["wall_ms"],
         "results": results,
         "limitations": [
             "Only Groth16 and PLONK are implemented for this exact R1CS in this run; no STARK/Halo2/Bulletproof timings are invented.",
-            "Proof demonstrates the circuit statement only; it does not prove camera origin or bind the complete video bitstream.",
-            "Existing Groth16 setup provenance is not independently certified by this benchmark.",
+            "The proof shows registry membership and the binding; the binding covers the masked video digest and the message (src/video_binding.py).",
+            "The Groth16 Phase 2 ran on one machine (demo ceremony); a deployment needs independent contributors.",
             "Groth16 compact 129-byte proof serialization is project-specific; raw JSON bytes are also reported for transport context.",
         ],
     }

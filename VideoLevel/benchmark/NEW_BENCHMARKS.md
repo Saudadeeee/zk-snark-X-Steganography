@@ -34,25 +34,27 @@ A fresh clone with one clip produces 3 media cases instead of 27.
 Baseline/CAVLC, QP 22, all-intra, no B-frames, one thread, one slice per IDR,
 first 30 frames at 352×288, 640×480 and 1280×960 (the larger two are scaled from
 CIF: scaling evidence, not native high-resolution scenes). Each case uses a fresh
-32-byte key, proves `SHA256(SHA256(message) ‖ secret)` with Groth16 and embeds
-`pack(message, 129-byte proof)` with the protocol defaults (v3 frame, 64 bits per
-IDR). A case passes only if the native capacity scan, native embed, FFmpeg strict
-decode (`-xerror`), blind extraction of the exact payload, mandatory Groth16
-verify of the extracted proof, wrong-key rejection all succeed **and** no sign
-changed outside the keyed schedule (checked position by position with
-`zkstego_inspect --segments`).
+32-byte stego key; one camera of an 8-camera Poseidon registry proves (Groth16,
+`circuits/camera_video.circom`) that it is registered and binds the cover's video
+digest and the message; the 201-byte payload `[0x01][mode][len][message][129-byte
+proof]` is embedded with the protocol defaults (v3 frame, 64 bits per IDR). A case
+passes only if the native capacity scan, native embed, FFmpeg strict decode
+(`-xerror`), blind extraction of the exact payload, a **video-bound** proof that
+verifies against the registry root with the digest recomputed from the stego file,
+wrong-key rejection all succeed **and** no sign changed outside the keyed schedule
+(checked position by position with `zkstego_inspect --segments`).
 
 **End-to-end** (`e2e_benchmark_new.py`). Five full runs on a 300-frame CIF clip:
-prove → embed → strict decode → extract → Groth16 verify, each with a new key and
-message, plus host facts (CPU, cores, RAM, OS, FFmpeg/Node/snarkjs versions,
-commit, native binary hashes). The attack matrix feeds edited streams and
-mismatched payloads through the HTTP verify-job decision.
+cover digest → prove → embed → strict decode → extract → verify (stego digest +
+Groth16), each with a new key and message, plus host facts (CPU, cores, RAM, OS,
+FFmpeg/Node/snarkjs versions, commit, native binary hashes). The 11-case attack
+matrix feeds edited streams and mismatched payloads through the HTTP verify-job
+decision.
 
-**Proof systems** (`zkp_benchmark_new.py`). Groth16 and PLONK on the same R1CS
-and witness, with a positive and a tampered-public-input verify each. PLONK uses
-a locally generated 2^18 Powers-of-Tau and its setup is timed separately. The
-suite runs Groth16 five times and PLONK once (one PLONK proof takes ~14 min and
-~20 GB RAM on this circuit; the PLONK proving key is ~22 GB on disk).
+**Proof systems** (`zkp_benchmark_new.py`). Groth16 and PLONK on the same
+`camera_video` R1CS (8,737 constraints, 3 public inputs) and witness, with a
+positive and a tampered-public-input verify each. PLONK uses the public Hermez
+Powers of Tau (2^16) as its universal SRS; its setup is timed separately.
 
 **Crypto primitives** (`crypto_benchmark_new.py`). Real `cryptography` calls for
 HMAC-SHA-256, Ed25519, RSA-PSS, AES-256-GCM, ChaCha20-Poly1305, RSA-OAEP+AES-GCM,
@@ -60,34 +62,32 @@ X25519+HKDF+ChaCha20-Poly1305 and an encrypt-then-sign composition. Their
 properties are not equivalent; none is presented as formal signcryption. The
 HMAC row is the full 32-byte primitive; since protocol v3 the native frame has no MAC.
 
-## Recorded run (2026-10-04, i7-12700H, Windows 11, channel protocol v3)
+## Recorded run (2026-10-04, i7-12700H, Windows 11, protocol v3 + camera proof)
 
-Media run `20261004T124108Z_792a81`, E2E `e2e_new.json`, ZKP `zkp_new.json`:
+Media run `20261004T142448Z_1db00a`, E2E `e2e_new.json`, ZKP `zkp_new.json`:
 
-- **Functional:** conversion 9/9, media 27/27, E2E 5/5, attacks 10/10 as
-  expected; zero signs changed outside the schedule in every case.
-- **Payload:** 201 B (4 B length + 68 B message + 129 B proof) → v3 frame of
-  204 B = 1,632 bits → 26 IDRs at 64 bits each (v2 needed 1,760 bits / 28 IDRs
-  with its 16-byte HMAC tag); about half of the scheduled signs actually flip
-  (whitened bits).
-- **Native cost scales with parsed IDRs.** Median capacity scan per IDR: 48 ms
-  (352×288), 172 ms (640×480), 666 ms (1280×960); median embed per carrying IDR:
-  56 / 194 / 791 ms. The embed parses only the IDRs that carry bits and copies
-  the rest. This, not Groth16, bounds per-frame realtime processing.
-- **Groth16 (E2E median):** prove 3.14 s, verify 0.91 s (both include Node.js
-  start-up); native embed 0.51 s and extract 0.52 s for 300 CIF frames. ZKP
-  suite: Groth16 prove 3.5–3.9 s, PLONK prove 1,496 s on the same R1CS.
-- **Quality:** lowest cover→stego PSNR-Y per case 44.89–55.79 dB, 0/27 below the
-  40 dB reference; 26/30 frames change in every case.
-- **Size:** stego − cover is 0 B except one case (+1 B): flipping a sign can add or
-  remove an emulation-prevention byte; the CAVLC code length never changes.
-- **Sign statistics:** |z| ≤ 0.25 for the share of negative trailing ones — not
-  distinguishable at the 5 % level (first-order indicator only).
-- **Attacks:** a wrong key, a dropped IDR and a re-encode find no frame
-  (`payload_not_found`); a flipped scheduled sign, a swapped message and a proof
-  made with another secret are rejected by Groth16 (`proof_invalid`). Accepted
-  by design (known limits): a flipped unscheduled sign, truncation after the
-  payload, and replaying the payload into another video with the same key.
+- **Functional:** conversion 9/9, media 27/27 (every proof video-bound), E2E 5/5,
+  attacks 11/11 as expected; zero signs changed outside the schedule.
+- **Payload:** 201 B (4 B header + 68 B message + 129 B proof) → 1,632 frame bits →
+  26 IDRs at 64 bits each; about half of the scheduled signs actually flip.
+- **Camera proof (E2E median, 300 CIF frames):** cover digest 0.51 s, Groth16
+  prove 1.77 s, embed 0.50 s, extract 0.54 s, verify (stego digest + Groth16)
+  1.45 s. ZKP suite: Groth16 prove 1.52–1.60 s / verify 0.91–1.01 s, proof 129 B;
+  PLONK prove 21.5–23.3 s / verify 0.90–0.94 s, proof ~2.25 KB JSON, setup 3.2 s.
+  The previous SHA-256 circuit (63,321 constraints) needed 3.5–4.4 s to prove.
+- **Native cost scales with parsed IDRs.** Median capacity scan per IDR: 52 ms
+  (352×288), 220 ms (640×480), 770 ms (1280×960); embed per carrying IDR 61 / 245 /
+  891 ms. The video digest parses the same 26 carrier IDRs (1.6 / 6.4 / 22.6 s at the
+  three sizes), so parsing, not Groth16, bounds throughput.
+- **Quality:** lowest cover→stego PSNR-Y per case 44.03–58.68 dB, 0/27 below the
+  40 dB reference; 26/30 frames change in every case; stego size equals cover size.
+- **Sign statistics:** |z| ≤ 0.22 for the share of negative trailing ones.
+- **Attacks (all rejected except the untouched baseline):** wrong stego key, a
+  dropped IDR and a re-encode find no frame; a flipped scheduled sign gives a
+  malformed or invalid proof; a flipped non-carrier sign in a carrier IDR, a flipped
+  sign in a later frame, truncation, a swapped message, a camera outside the trusted
+  registry and the payload replayed into another video all fail Groth16
+  (`proof_invalid`).
 
 ## Physical camera
 

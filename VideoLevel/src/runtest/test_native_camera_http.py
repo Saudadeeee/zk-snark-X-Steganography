@@ -27,7 +27,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from benchmark.camera_channel_latency import measure_annex_b_channel_latency
 from benchmark.realtime_camera_recorder import build_camera_capture_command
 from src.runtest._helpers import run_test, section, summarise
-from src.zk_proof import ZKSnarkBridge, pack, proof_to_bytes, unpack
+from src.camera_proof import build_payload, verify_payload
+from src.camera_registry import CameraRegistry, camera_public_key, new_camera_secret
+from src.video_binding import MODE_MESSAGE_ONLY
+from src.zk_proof import CameraProofBridge, proof_to_bytes, unpack_payload
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CLI = ROOT / "native" / "build" / "Release" / "zkstego_blind_bits.exe"
@@ -362,11 +365,15 @@ def t_physical_camera_tcp_websocket_live_round_trip():
     assert cli.is_file(), f"native CLI missing: {cli}"
     key = bytes(range(32, 64))
     payload = b"live-camera-proof"
-    proof_bridge = ZKSnarkBridge(str(ROOT / "circuits"))
+    proof_bridge = CameraProofBridge(ROOT / "circuits")
+    camera_secret = new_camera_secret()
+    registry = CameraRegistry([camera_public_key(new_camera_secret()), camera_public_key(camera_secret)])
     proof_started = time.perf_counter()
-    proof_dict, _public_signals = proof_bridge.generate_proof_for_payload(payload, key)
+    # A live stream embeds its proof before the rest of the video exists, so it can only
+    # bind the message (mode 1); file workflows bind the whole video (mode 0).
+    signed = build_payload(proof_bridge, registry, camera_secret, payload, mode=MODE_MESSAGE_ONLY)
     proof_generation_ms = (time.perf_counter() - proof_started) * 1000.0
-    proof_payload = pack(payload, proof_to_bytes(proof_dict))
+    proof_dict, proof_payload = signed.proof, signed.payload
     token = "live-camera-websocket-token-for-tests-only"
     headers = {"Authorization": f"Bearer {token}"}
     temporary_work_dir = tempfile.TemporaryDirectory(prefix="zkstego-live-camera-ws-")
@@ -539,28 +546,29 @@ def t_physical_camera_tcp_websocket_live_round_trip():
         extraction = extract_from_stream(key)
         assert extraction.get("type") == "payload", extraction
         extracted_proof_payload = base64.b64decode(extraction["payload_b64"], validate=True)
-        extracted_message, extracted_proof_bytes = unpack(extracted_proof_payload)
-        assert extracted_message == payload
+        unpacked = unpack_payload(extracted_proof_payload)
+        extracted_message, extracted_proof_bytes = unpacked.message, unpacked.proof_bytes
+        assert extracted_message == payload and unpacked.mode == MODE_MESSAGE_ONLY
         assert extracted_proof_bytes == proof_to_bytes(proof_dict)
         stream_metrics = terminal.get("native_metrics")
         assert isinstance(stream_metrics, dict), terminal
         assert stream_metrics["bits_embedded"] == (len(extracted_proof_payload) + 3) * 8
         assert stream_metrics["candidate_capacity_bits"] >= stream_metrics["bits_embedded"]
         verify_started = time.perf_counter()
-        extracted_proof = proof_bridge.bytes_to_proof(extracted_proof_bytes)
-        proof_valid = proof_bridge.verify_proof_for_payload(extracted_proof, extracted_message, key)
+        proof_valid = verify_payload(proof_bridge, registry.root, extracted_proof_payload,
+                                     require_video_binding=False).valid
         proof_verification_ms = (time.perf_counter() - verify_started) * 1000.0
         assert proof_valid, "Groth16 proof recovered from camera video did not verify"
-        wrong_key = bytes([0x93]) * 32
-        wrong_key_proof_rejected = not proof_bridge.verify_proof_for_payload(
-            extracted_proof, extracted_message, wrong_key,
-        )
-        changed_message = extracted_message + b"!"
-        changed_message_proof_rejected = not proof_bridge.verify_proof_for_payload(
-            extracted_proof, changed_message, key,
-        )
-        assert wrong_key_proof_rejected, "Groth16 proof unexpectedly verified against a different key"
+        other_registry = CameraRegistry([camera_public_key(new_camera_secret())])
+        other_registry_proof_rejected = not verify_payload(
+            proof_bridge, other_registry.root, extracted_proof_payload, require_video_binding=False).valid
+        changed = extracted_proof_payload[:4] + extracted_message + b"!" + extracted_proof_bytes
+        changed = changed[:2] + (len(extracted_message) + 1).to_bytes(2, "big") + changed[4:]
+        changed_message_proof_rejected = not verify_payload(
+            proof_bridge, registry.root, changed, require_video_binding=False).valid
+        assert other_registry_proof_rejected, "Groth16 proof unexpectedly verified against another registry"
         assert changed_message_proof_rejected, "Groth16 proof unexpectedly verified against a changed message"
+        wrong_key = bytes([0x93]) * 32
         wrong_key_result = extract_from_stream(wrong_key)
         assert wrong_key_result.get("type") == "error" and wrong_key_result.get("code") == "payload_not_found", wrong_key_result
 
@@ -645,7 +653,7 @@ def t_physical_camera_tcp_websocket_live_round_trip():
                 "wrong_key_rejected": wrong_key_result.get("type") == "error",
                 "groth16_proof_bytes": len(extracted_proof_bytes),
                 "groth16_proof_verified": proof_valid,
-                "groth16_wrong_key_rejected": wrong_key_proof_rejected,
+                "groth16_other_registry_rejected": other_registry_proof_rejected,
                 "groth16_changed_message_rejected": changed_message_proof_rejected,
                 "proof_generation_ms_off_capture_path": round(proof_generation_ms, 3),
                 "proof_verification_ms_after_extraction": round(proof_verification_ms, 3),

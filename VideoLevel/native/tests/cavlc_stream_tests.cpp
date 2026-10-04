@@ -602,6 +602,38 @@ int main() {
     CHECK(altered_payload != file_payload);
     CHECK(static_cast<std::uint8_t>(altered_payload[0] ^ file_payload[0]) == 0x80U);
 
+    // Video binding digest: embedding (and any edit of a carrier sign, which the
+    // payload's proof catches instead) keeps it; flipping any other candidate
+    // sign, its parameters, another key and a truncated file change it.
+    const auto digest_of = [&](const std::vector<std::uint8_t>& video, const std::vector<std::uint8_t>& key,
+                               const std::size_t bits, const std::size_t cap) {
+        return zkstego::cavlc_video_binding_digest(video, key, bits, cap).digest;
+    };
+    const auto cover_digest = zkstego::cavlc_video_binding_digest(fixture_bytes, blind_key, frame_bit_count, kFileBitsPerIdr);
+    CHECK(digest_of(file_stego, blind_key, frame_bit_count, kFileBitsPerIdr) == cover_digest.digest);
+    CHECK(cover_digest.carrier_segments == 1U && cover_digest.nal_units == cover_file_units.size());
+    CHECK(digest_of(flip_frame_bit(24U), blind_key, frame_bit_count, kFileBitsPerIdr) == cover_digest.digest);
+    const auto unscheduled = std::find_if(cover_segments.front().candidates.begin(), cover_segments.front().candidates.end(),
+        [&](const auto& candidate) {
+            return std::find(placements.begin(), placements.end(),
+                std::make_pair(cover_segments.front().idr_nal_index, candidate.rbsp_bit_offset)) == placements.end();
+        });
+    CHECK(unscheduled != cover_segments.front().candidates.end());
+    const auto unscheduled_bit = file_bit(stego_file_units, cover_segments.front().idr_nal_index, unscheduled->rbsp_bit_offset);
+    const auto flipped_unscheduled = zkstego::patch_annex_b_rbsp_plan(file_stego, {
+        {cover_segments.front().idr_nal_index,
+         {{unscheduled->rbsp_bit_offset, {static_cast<std::uint8_t>(1U - unscheduled_bit)}}}},
+    });
+    CHECK(digest_of(flipped_unscheduled, blind_key, frame_bit_count, kFileBitsPerIdr) != cover_digest.digest);
+    CHECK(digest_of(fixture_bytes, blind_key, frame_bit_count + 8U, kFileBitsPerIdr) != cover_digest.digest);
+    CHECK(digest_of(fixture_bytes, wrong_key, frame_bit_count, kFileBitsPerIdr) != cover_digest.digest);
+    const std::vector<std::uint8_t> truncated_stego(file_stego.begin(), file_stego.begin() +
+        static_cast<std::ptrdiff_t>(file_stego.size() / 2U));
+    CHECK(digest_of(truncated_stego, blind_key, frame_bit_count, kFileBitsPerIdr) != cover_digest.digest);
+    CHECK(throws_invalid_argument([&] {
+        static_cast<void>(zkstego::cavlc_video_binding_digest(fixture_bytes, blind_key, 0U, kFileBitsPerIdr));
+    }));
+
     // Realtime protocol contract: each IDR is selected independently, and a
     // stateful blind decoder reconstructs the frame across IDRs.
     const auto stream_fixture_units = zkstego::split_annex_b(fixture_bytes);

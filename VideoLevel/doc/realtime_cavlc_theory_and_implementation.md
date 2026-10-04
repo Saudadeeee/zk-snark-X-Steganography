@@ -5,8 +5,10 @@
 > `zkstego_demo_trace` were merged into `zkstego_inspect` (`--summary`, `--macroblock`,
 > `--segments`), and the channel moved to protocol v2 (HKDF subkeys, whitening). On
 > 2026-10-04 protocol v3 removed the 16-byte HMAC frame tag (frame `[0x03][len][payload]`,
-> no `frame_key`); the Groth16 proof now authenticates the payload. Older sections keep
-> the tool names, frame layout and figures as they were measured.
+> no `frame_key`); the Groth16 proof now authenticates the payload. Also on 2026-10-04
+> `payload_verify.circom` was replaced by `camera_video.circom` (registry membership +
+> video binding; `src/camera_proof.py`). Older sections keep the tool names, circuit,
+> frame layout and figures as they were measured.
 
 ## Purpose and current status
 

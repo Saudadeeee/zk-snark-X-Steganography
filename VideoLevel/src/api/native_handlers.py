@@ -29,7 +29,10 @@ from fastapi.responses import JSONResponse
 from starlette.websockets import WebSocketDisconnect
 
 from src.api.app import ApiSettings, bearer_token_matches, client_host, create_app
-from src.zk_proof import PROOF_SIZE_BYTES, ZKSnarkBridge, bytes_to_proof, unpack
+from src.camera_proof import Verdict, check_proof, parse_payload
+from src.camera_registry import CameraRegistry
+from src.native_blind_contract import FRAME_HEADER_BYTES
+from src.zk_proof import CameraPayload, CameraProofBridge
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,8 +41,8 @@ DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 15.0
 
 # (stego_video_path, secret_key, maximum_payload_bytes) -> extracted (unverified) payload bytes.
 PayloadExtractor = Callable[[str, bytes, int], bytes]
-# (proof_dict, message, secret_key) -> True only when the Groth16 proof verifies.
-ProofVerifier = Callable[[dict, bytes, bytes], bool]
+# (unpacked payload, decompressed proof, stego_video_path, stego key) -> camera-proof verdict.
+ProofChecker = Callable[[CameraPayload, dict, str, bytes], Verdict]
 
 
 class _StreamIdleTimeout(Exception):
@@ -51,13 +54,16 @@ class NativePayloadNotFound(RuntimeError):
 
 
 def make_proof_verify_handler(
-    extract_payload: PayloadExtractor, verify_proof: ProofVerifier,
+    extract_payload: PayloadExtractor, check: ProofChecker,
 ) -> Callable[..., dict[str, Any]]:
-    """Blind-extract ``pack(message, proof)`` and accept it only if its Groth16 proof verifies.
+    """Blind-extract a camera payload and accept it only if its Groth16 proof verifies.
 
-    Returns ``{"valid": True, "message_b64", "payload_bytes"}`` for a verified proof and
-    ``{"valid": False, "reason"}`` when no payload frame, a malformed blob or an
-    invalid proof is found. Infrastructure errors (timeouts, missing Node.js/circuits)
+    The stego key only extracts; the proof is checked against the trusted camera
+    registry root and, for video-bound payloads, the digest of the uploaded video.
+    Returns ``{"valid": True, "message_b64", "payload_bytes", "video_bound"}`` for a
+    verified proof and ``{"valid": False, "reason"}`` otherwise (payload_not_found,
+    malformed_proof_payload, video_binding_required, video_digest_unavailable,
+    proof_invalid). Infrastructure errors (timeouts, missing Node.js/circuits/registry)
     propagate, so the job service marks the job "failed" rather than "rejected".
     """
 
@@ -66,19 +72,17 @@ def make_proof_verify_handler(
             blob = extract_payload(stego_video_path, secret_key, maximum_payload_bytes)
         except NativePayloadNotFound:
             return {"valid": False, "reason": "payload_not_found"}
-        try:
-            message, proof_bytes = unpack(blob)
-            if not message or len(blob) != 4 + len(message) + PROOF_SIZE_BYTES:
-                raise ValueError("proof payload length mismatch")
-            proof = bytes_to_proof(proof_bytes)
-        except ValueError:
+        parsed = parse_payload(blob)
+        if parsed is None:
             return {"valid": False, "reason": "malformed_proof_payload"}
-        if verify_proof(proof, message, secret_key) is not True:
-            return {"valid": False, "reason": "proof_invalid"}
+        verdict = check(*parsed, stego_video_path, secret_key)
+        if not verdict.valid:
+            return {"valid": False, "reason": verdict.reason or "proof_invalid"}
         return {
             "valid": True,
-            "message_b64": base64.b64encode(message).decode("ascii"),
+            "message_b64": base64.b64encode(verdict.message or b"").decode("ascii"),
             "payload_bytes": len(blob),
+            "video_bound": verdict.video_bound,
         }
 
     return verify_handler
@@ -100,15 +104,16 @@ def create_native_app(
     stream_timeout_seconds: float = 3600.0,
     stream_idle_timeout_seconds: float | None = None,
     payload_extractor: PayloadExtractor | None = None,
-    proof_verifier: ProofVerifier | None = None,
+    proof_checker: ProofChecker | None = None,
 ) -> FastAPI:
     """Create bounded HTTP-job and WebSocket-stream services backed by native keyed CAVLC.
 
     ``stream_idle_timeout_seconds`` (default ``ZK_STEGO_STREAM_IDLE_TIMEOUT_SECONDS`` or 15 s)
     bounds how long a stream may hold a capacity slot without sending a frame.
-    ``/api/v1/jobs/verify`` blind-extracts with the native CLI and verifies the Groth16 proof
-    against ``settings.circuits_dir`` (``ZK_STEGO_CIRCUITS_DIR``); ``payload_extractor`` and
-    ``proof_verifier`` replace those two steps (tests inject them for determinism).
+    ``/api/v1/jobs/verify`` blind-extracts with the native CLI and verifies the camera proof
+    with the keys in ``settings.circuits_dir`` (``ZK_STEGO_CIRCUITS_DIR``) against the root of
+    ``settings.camera_registry_path`` (``ZK_STEGO_CAMERA_REGISTRY``); ``payload_extractor`` and
+    ``proof_checker`` replace those two steps (tests inject them for determinism).
     """
     if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be finite and positive")
@@ -169,7 +174,7 @@ def create_native_app(
         # NOTE: computed here, not reported by the native CLI. One v3 frame is
         # version(1) + length(2) + payload, i.e. (len + 3) bytes. The "bits_embedded"
         # key is kept for API compatibility; "bits_embedded_source" says how it was derived.
-        computed_frame_bits = (len(message) + 3) * 8
+        computed_frame_bits = (len(message) + FRAME_HEADER_BYTES) * 8
         return {
             "valid": True,
             "bits_embedded": computed_frame_bits,
@@ -190,12 +195,17 @@ def create_native_app(
             raise RuntimeError("native CAVLC extractor exceeded requested payload bound")
         return payload
 
-    def groth16_verify(proof: dict, message: bytes, secret_key: bytes) -> bool:
-        bridge = ZKSnarkBridge(str(settings.circuits_dir))
-        # A missing verification key is a deployment fault ("failed"), not an invalid proof.
-        if not (bridge.build_dir / bridge.VKEY_FILE).is_file():
+    def camera_check(payload: CameraPayload, proof: dict, stego_video_path: str, secret_key: bytes) -> Verdict:
+        # A missing registry or verification key is a deployment fault ("failed"), not an invalid proof.
+        if settings.camera_registry_path is None:
+            raise RuntimeError("camera registry is not configured")
+        registry = CameraRegistry.load(settings.camera_registry_path)
+        bridge = CameraProofBridge(settings.circuits_dir)
+        if not bridge.vkey_path.is_file():
             raise RuntimeError("Groth16 verification key is not available")
-        return bridge.verify_proof_for_payload(proof, message, secret_key)
+        return check_proof(bridge, registry.root, payload, proof, native_cli=executable, stego=stego_video_path,
+                           stego_key=secret_key, max_bits_per_idr=maximum_bits_per_idr,
+                           require_video_binding=settings.require_video_binding)
 
     def extract_handler(
         *, stego_video_path: str, output_path: str, secret_key: bytes, maximum_payload_bytes: int,
@@ -214,7 +224,7 @@ def create_native_app(
         settings,
         embed_handler=embed_handler,
         verify_handler=make_proof_verify_handler(
-            payload_extractor or native_extract_payload, proof_verifier or groth16_verify,
+            payload_extractor or native_extract_payload, proof_checker or camera_check,
         ),
         extract_handler=extract_handler,
     )

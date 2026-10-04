@@ -38,7 +38,7 @@ def _max_bits_environment(max_bits: int) -> Iterator[None]:
 
 
 def run_all(session, tools, source: Path, stego: Path, key: bytes, payload: bytes, message: bytes,
-            max_bits: int) -> None:
+            max_bits: int, camera_registry: Path) -> None:
     from fastapi.testclient import TestClient
 
     from src.api.app import ApiSettings
@@ -46,7 +46,8 @@ def run_all(session, tools, source: Path, stego: Path, key: bytes, payload: byte
 
     token = secrets.token_urlsafe(32)  # 43 chars; the service refuses tokens shorter than 32
     settings = ApiSettings(api_token=token, work_dir=session.folder / "service_work",
-                           circuits_dir=ROOT / "circuits", max_workers=1, max_queued_jobs=2)
+                           circuits_dir=ROOT / "circuits", camera_registry_path=camera_registry,
+                           max_workers=1, max_queued_jobs=2)
     with _max_bits_environment(max_bits):
         app = create_native_app(settings, cli_path=tools.native)
     headers = {"Authorization": f"Bearer {token}"}
@@ -116,8 +117,8 @@ def _http_jobs(session, client, headers: dict, source: Path, stego: Path, key: b
                   _download(client, headers, extracted["job_id"]) == payload)
     verified = _submit(session, client, headers, "verify_job", "/api/v1/jobs/verify", extract_fields, stego_file)
     result = verified.get("result") or {}
-    session.check("HTTP verify job succeeded (blind extract + Groth16 verify)",
-                  verified["status"] == "succeeded" and result.get("valid") is True)
+    session.check("HTTP verify job succeeded (blind extract + video digest + Groth16 verify vs registry root)",
+                  verified["status"] == "succeeded" and result.get("valid") is True and result.get("video_bound") is True)
     session.check("verify job tra dung message da duoc chung minh",
                   base64.b64decode(result.get("message_b64", "")) == message)
     wrong_key = bytes([key[0] ^ 1]) + key[1:]

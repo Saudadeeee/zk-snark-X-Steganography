@@ -1,7 +1,7 @@
 # Completion Plan and Evidence Audit
 
 > **Update 2026-10-02.** The test counts below are from 2026-09-24. The current
-> suite has 12 phases plus the hardware phase H1; `run_all.py` passed 139/139 on
+> suite has 12 phases plus the hardware phase H1; `run_all.py` passed 142/142 on
 > 2026-10-04 (see README), after native channel protocol v2 (HKDF subkeys, bit
 > whitening), protocol v3 (no HMAC frame tag; the Groth16 proof authenticates) and the
 > bit-constrained circuit (63,321 constraints, new local keys).

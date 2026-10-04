@@ -6,7 +6,6 @@ Every helper runs through ``session.run`` so each subprocess leaves
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,17 +65,3 @@ def native_extract(session, tools: Tools, video: Path, key: bytes, max_bits: int
                        data=(key.hex() + "\n").encode(), allow_failure=allow_failure)
 
 
-def verify_groth16(session, proof: dict, public: list, label: str) -> bool:
-    """snarkjs groth16 verify; an infrastructure error is never counted as a valid rejection."""
-    session.save(label + "_proof.json", proof)
-    session.save(label + "_public.json", public)
-    cli = ROOT / "circuits/node_modules/snarkjs/build/cli.cjs"
-    result = session.run(label, ["node", cli, "groth16", "verify", ROOT / "circuits/build/verification_key.json",
-                                 session.folder / (label + "_public.json"), session.folder / (label + "_proof.json")],
-                         allow_failure=True)
-    output = re.sub(r"\x1b\[[0-9;]*m", "", (result.stdout + result.stderr).decode("utf-8", errors="replace"))
-    if result.returncode == 0 and re.search(r"\bOK!", output):
-        return True
-    if "Invalid proof" in output:
-        return False
-    raise RuntimeError(f"{label}: verifier infrastructure error, khong duoc tinh la reject hop le:\n{output[-2000:]}")

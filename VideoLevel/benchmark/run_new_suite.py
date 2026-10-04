@@ -29,8 +29,7 @@ def main() -> int:
     print("E2E", json.dumps(e2e["summary"], sort_keys=True), flush=True)
     crypto = run_crypto_benchmark(RESULTS / "security_new.json")
     print("SECURITY", len(crypto["results"]), "measured rows", flush=True)
-    # PLONK proving takes minutes per proof on this circuit; one trial keeps the suite bounded.
-    zkp = run_zkp_benchmark(RESULTS, trials=5, plonk_trials=1)
+    zkp = run_zkp_benchmark(RESULTS, trials=5, plonk_trials=3)
     zkp_ok = all(row["proof_valid"] and row["tampered_public_input_rejected"] for row in zkp["results"])
     print("ZKP", len(zkp["results"]), "proof runs, all valid" if zkp_ok else "proof runs, FAILURES", flush=True)
     print("REPORT", build_report(RESULTS).relative_to(ROOT).as_posix(), flush=True)

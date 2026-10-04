@@ -1,9 +1,9 @@
 {
   "schema": "zkstego-e2e-benchmark-new-v1",
-  "run_id": "20261004T131325Z_405f6d",
-  "created_utc": "2026-10-04T13:15:16.546363+00:00",
+  "run_id": "20261004T142215Z_6d009e",
+  "created_utc": "2026-10-04T14:24:42.586015+00:00",
   "environment": {
-    "measured_at_utc": "2026-10-04T13:15:16.596521+00:00",
+    "measured_at_utc": "2026-10-04T14:24:42.634208+00:00",
     "os": "Windows-11-10.0.26100-SP0",
     "cpu": "12th Gen Intel(R) Core(TM) i7-12700H",
     "physical_cores": 14,
@@ -13,10 +13,10 @@
     "ffmpeg": "ffmpeg version 8.0.1-essentials_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers",
     "node": "v22.20.0",
     "snarkjs": "0.7.6",
-    "git_commit": "9e01db5",
+    "git_commit": "ebfe5b0",
     "git_tracked_changes": true,
-    "native_blind_bits_sha256": "1dc90d15c7ebdfa05c48b039fd0ea1629dfbb80ba98eab9600e5592cba5133eb",
-    "native_inspect_sha256": "2f3e057db6d0b6d76f0a2862a84456648027a340d4e1d98b87e1d0823f15e74a"
+    "native_blind_bits_sha256": "a9091c70098d185de7f44aeeecbd50c4ff9b4661ba7c5026d3b5e56a1496508d",
+    "native_inspect_sha256": "2d1c0dbfabaeb43bb664904e64b67e76f316a0747e708652899d2947a12b9911"
   },
   "cover": {
     "source": "foreman_cif_300f.y4m",
@@ -36,7 +36,8 @@
     "capacity_payload_bytes_at_cap": 2397,
     "max_message_bytes_at_cap": 2264,
     "frame_overhead_bytes": 3,
-    "payload_layout": "[len 4B][message][Groth16 proof 129B] inside [0x03][len 2B][payload] (no MAC)"
+    "payload_layout": "[0x01][mode][len 2B][message][Groth16 proof 129B] inside [0x03][len 2B][payload] (no MAC)",
+    "registry_cameras": 8
   },
   "trials": [
     {
@@ -45,31 +46,33 @@
       "payload_bytes": 204,
       "frame_bits": 1656,
       "stages": {
-        "prove_ms": 3109.6577999996953,
-        "embed_ms": 495.4026,
-        "strict_decode_ms": 123.98099998245016,
-        "extract_ms": 526.4390999800526,
-        "groth16_verify_ms": 881.6418999922462
+        "video_digest_ms": 509.1495000233408,
+        "prove_ms": 1747.3137000051793,
+        "embed_ms": 492.9805,
+        "strict_decode_ms": 153.62199998344295,
+        "extract_ms": 544.1057999851182,
+        "groth16_verify_ms": 1445.1085999899078
       },
-      "sender_total_ms": 3605.060399999695,
-      "receiver_total_ms": 1408.0809999722987,
-      "embed_peak_rss_mb": 14.696448,
-      "embed_cpu_seconds": 0.46875,
+      "sender_total_ms": 2749.44370002852,
+      "receiver_total_ms": 1989.214399975026,
+      "embed_peak_rss_mb": 14.741504,
+      "embed_cpu_seconds": 0.453125,
       "stego_bytes": 3402313,
       "strict_decode_ok": true,
       "extracted": true,
+      "video_bound": true,
       "groth16_verified": true,
       "sign_statistics": {
         "candidate_signs": 188556,
         "scheduled_positions": 1656,
-        "changed_signs": 818,
+        "changed_signs": 828,
         "changed_outside_schedule": 0,
-        "changed_fraction_of_scheduled": 0.4939613526570048,
+        "changed_fraction_of_scheduled": 0.5,
         "idr_segments_with_changes": 26,
         "negative_sign_fraction_cover": 0.4939222300006364,
-        "negative_sign_fraction_stego": 0.4938691953584081,
-        "negative_sign_fraction_delta": -5.303464222827792e-05,
-        "two_proportion_z": -0.032570707140819465
+        "negative_sign_fraction_stego": 0.4941343685695496,
+        "negative_sign_fraction_delta": 0.0002121385689132227,
+        "two_proportion_z": 0.1302824113077687
       },
       "passed": true,
       "error": null
@@ -80,31 +83,33 @@
       "payload_bytes": 204,
       "frame_bits": 1656,
       "stages": {
-        "prove_ms": 3143.5993000050075,
-        "embed_ms": 491.3352,
-        "strict_decode_ms": 121.31320001208223,
-        "extract_ms": 522.0128999790177,
-        "groth16_verify_ms": 908.5371000110172
+        "video_digest_ms": 513.9874999877065,
+        "prove_ms": 1774.2423999879975,
+        "embed_ms": 499.6994,
+        "strict_decode_ms": 144.7430000116583,
+        "extract_ms": 527.4314999987837,
+        "groth16_verify_ms": 1464.6577000094112
       },
-      "sender_total_ms": 3634.9345000050075,
-      "receiver_total_ms": 1430.5499999900348,
-      "embed_peak_rss_mb": 14.589952,
-      "embed_cpu_seconds": 0.453125,
+      "sender_total_ms": 2787.929299975704,
+      "receiver_total_ms": 1992.089200008195,
+      "embed_peak_rss_mb": 14.680064,
+      "embed_cpu_seconds": 0.46875,
       "stego_bytes": 3402313,
       "strict_decode_ok": true,
       "extracted": true,
+      "video_bound": true,
       "groth16_verified": true,
       "sign_statistics": {
         "candidate_signs": 188556,
         "scheduled_positions": 1656,
-        "changed_signs": 792,
+        "changed_signs": 838,
         "changed_outside_schedule": 0,
-        "changed_fraction_of_scheduled": 0.4782608695652174,
+        "changed_fraction_of_scheduled": 0.5060386473429952,
         "idr_segments_with_changes": 26,
         "negative_sign_fraction_cover": 0.4939222300006364,
-        "negative_sign_fraction_stego": 0.4939540507859734,
-        "negative_sign_fraction_delta": 3.182078533697785e-05,
-        "two_proportion_z": 0.019542404106634777
+        "negative_sign_fraction_stego": 0.49359341521882094,
+        "negative_sign_fraction_delta": -0.0003288147818154563,
+        "two_proportion_z": -0.20193907196115
       },
       "passed": true,
       "error": null
@@ -115,31 +120,33 @@
       "payload_bytes": 204,
       "frame_bits": 1656,
       "stages": {
-        "prove_ms": 3228.702099993825,
-        "embed_ms": 506.0189,
-        "strict_decode_ms": 126.13079999573529,
-        "extract_ms": 544.9714999995194,
-        "groth16_verify_ms": 953.2574000186287
+        "video_digest_ms": 502.0068000012543,
+        "prove_ms": 1794.3812999874353,
+        "embed_ms": 502.6089,
+        "strict_decode_ms": 149.1962999862153,
+        "extract_ms": 528.6974999762606,
+        "groth16_verify_ms": 1447.5130999926478
       },
-      "sender_total_ms": 3734.720999993825,
-      "receiver_total_ms": 1498.2289000181481,
-      "embed_peak_rss_mb": 14.839808,
-      "embed_cpu_seconds": 0.484375,
+      "sender_total_ms": 2798.99699998869,
+      "receiver_total_ms": 1976.2105999689084,
+      "embed_peak_rss_mb": 14.721024,
+      "embed_cpu_seconds": 0.453125,
       "stego_bytes": 3402313,
       "strict_decode_ok": true,
       "extracted": true,
+      "video_bound": true,
       "groth16_verified": true,
       "sign_statistics": {
         "candidate_signs": 188556,
         "scheduled_positions": 1656,
-        "changed_signs": 843,
+        "changed_signs": 808,
         "changed_outside_schedule": 0,
-        "changed_fraction_of_scheduled": 0.5090579710144928,
+        "changed_fraction_of_scheduled": 0.48792270531400966,
         "idr_segments_with_changes": 26,
         "negative_sign_fraction_cover": 0.4939222300006364,
-        "negative_sign_fraction_stego": 0.4940654235346528,
-        "negative_sign_fraction_delta": 0.0001431935340164281,
-        "two_proportion_z": 0.08794070026588016
+        "negative_sign_fraction_stego": 0.4941449754979953,
+        "negative_sign_fraction_delta": 0.00022274549735890048,
+        "two_proportion_z": 0.13679651454862637
       },
       "passed": true,
       "error": null
@@ -150,31 +157,33 @@
       "payload_bytes": 204,
       "frame_bits": 1656,
       "stages": {
-        "prove_ms": 3185.855400020955,
-        "embed_ms": 506.0095,
-        "strict_decode_ms": 145.05689998622984,
-        "extract_ms": 524.4366000115406,
-        "groth16_verify_ms": 906.9676999934018
+        "video_digest_ms": 511.3693999883253,
+        "prove_ms": 1751.423799985787,
+        "embed_ms": 500.5437,
+        "strict_decode_ms": 150.2228000026662,
+        "extract_ms": 559.5647000009194,
+        "groth16_verify_ms": 1468.115099996794
       },
-      "sender_total_ms": 3691.8649000209552,
-      "receiver_total_ms": 1431.4043000049423,
-      "embed_peak_rss_mb": 14.62272,
-      "embed_cpu_seconds": 0.46875,
+      "sender_total_ms": 2763.3368999741124,
+      "receiver_total_ms": 2027.6797999977134,
+      "embed_peak_rss_mb": 14.78656,
+      "embed_cpu_seconds": 0.484375,
       "stego_bytes": 3402313,
       "strict_decode_ok": true,
       "extracted": true,
+      "video_bound": true,
       "groth16_verified": true,
       "sign_statistics": {
         "candidate_signs": 188556,
         "scheduled_positions": 1656,
-        "changed_signs": 831,
+        "changed_signs": 860,
         "changed_outside_schedule": 0,
-        "changed_fraction_of_scheduled": 0.5018115942028986,
+        "changed_fraction_of_scheduled": 0.5193236714975845,
         "idr_segments_with_changes": 26,
         "negative_sign_fraction_cover": 0.4939222300006364,
-        "negative_sign_fraction_stego": 0.49368357411060904,
-        "negative_sign_fraction_delta": -0.00023865589002736165,
-        "two_proportion_z": -0.14656851685835737
+        "negative_sign_fraction_stego": 0.4940176923566474,
+        "negative_sign_fraction_delta": 9.546235601098907e-05,
+        "two_proportion_z": 0.058627167196938806
       },
       "passed": true,
       "error": null
@@ -185,91 +194,100 @@
       "payload_bytes": 204,
       "frame_bits": 1656,
       "stages": {
-        "prove_ms": 3121.3866000180133,
-        "embed_ms": 504.9723,
-        "strict_decode_ms": 121.00250000366941,
-        "extract_ms": 523.3045000059064,
-        "groth16_verify_ms": 904.1314000205602
+        "video_digest_ms": 516.7037000064738,
+        "prove_ms": 1774.085599987302,
+        "embed_ms": 487.7454,
+        "strict_decode_ms": 157.33729998464696,
+        "extract_ms": 534.678400028497,
+        "groth16_verify_ms": 1431.716499995673
       },
-      "sender_total_ms": 3626.358900018013,
-      "receiver_total_ms": 1427.4359000264667,
-      "embed_peak_rss_mb": 14.618624,
+      "sender_total_ms": 2778.5346999937756,
+      "receiver_total_ms": 1966.39490002417,
+      "embed_peak_rss_mb": 14.585856,
       "embed_cpu_seconds": 0.46875,
       "stego_bytes": 3402313,
       "strict_decode_ok": true,
       "extracted": true,
+      "video_bound": true,
       "groth16_verified": true,
       "sign_statistics": {
         "candidate_signs": 188556,
         "scheduled_positions": 1656,
-        "changed_signs": 818,
+        "changed_signs": 815,
         "changed_outside_schedule": 0,
-        "changed_fraction_of_scheduled": 0.4939613526570048,
+        "changed_fraction_of_scheduled": 0.4921497584541063,
         "idr_segments_with_changes": 26,
         "negative_sign_fraction_cover": 0.4939222300006364,
-        "negative_sign_fraction_stego": 0.4939222300006364,
-        "negative_sign_fraction_delta": 0.0,
-        "two_proportion_z": 0.0
+        "negative_sign_fraction_stego": 0.49398056810708757,
+        "negative_sign_fraction_delta": 5.833810645117232e-05,
+        "two_proportion_z": 0.035827729354894124
       },
       "passed": true,
       "error": null
     }
   ],
   "stage_summary_ms": {
+    "video_digest_ms": {
+      "mean": 510.64338000142016,
+      "median": 511.3693999883253,
+      "min": 502.0068000012543,
+      "max": 516.7037000064738,
+      "stdev": 5.595978769524828
+    },
     "prove_ms": {
-      "mean": 3157.8402400074992,
-      "median": 3143.5993000050075,
-      "min": 3109.6577999996953,
-      "max": 3228.702099993825,
-      "stdev": 49.14130685341105
+      "mean": 1768.2893599907402,
+      "median": 1774.085599987302,
+      "min": 1747.3137000051793,
+      "max": 1794.3812999874353,
+      "stdev": 19.1979806373507
     },
     "embed_ms": {
-      "mean": 500.7477,
-      "median": 504.9723,
-      "min": 491.3352,
-      "max": 506.0189,
-      "stdev": 6.90080763570468
+      "mean": 496.71558000000005,
+      "median": 499.6994,
+      "min": 487.7454,
+      "max": 502.6089,
+      "stdev": 6.178670103428404
     },
     "strict_decode_ms": {
-      "mean": 127.49687999603339,
-      "median": 123.98099998245016,
-      "min": 121.00250000366941,
-      "max": 145.05689998622984,
-      "stdev": 10.037389582485616
+      "mean": 151.02427999372594,
+      "median": 150.2228000026662,
+      "min": 144.7430000116583,
+      "max": 157.33729998464696,
+      "stdev": 4.744489694577152
     },
     "extract_ms": {
-      "mean": 528.2329199952073,
-      "median": 524.4366000115406,
-      "min": 522.0128999790177,
-      "max": 544.9714999995194,
-      "stdev": 9.497208390083044
+      "mean": 538.8955799979158,
+      "median": 534.678400028497,
+      "min": 527.4314999987837,
+      "max": 559.5647000009194,
+      "stdev": 13.300089165703536
     },
     "groth16_verify_ms": {
-      "mean": 910.9071000071708,
-      "median": 906.9676999934018,
-      "min": 881.6418999922462,
-      "max": 953.2574000186287,
-      "stdev": 26.062644367623363
+      "mean": 1451.4221999968868,
+      "median": 1447.5130999926478,
+      "min": 1431.716499995673,
+      "max": 1468.115099996794,
+      "stdev": 14.977387884887813
     }
   },
   "sender_total_ms": {
-    "mean": 3658.587940007499,
-    "median": 3634.9345000050075,
-    "min": 3605.060399999695,
-    "max": 3734.720999993825,
-    "stdev": 53.3080497497823
+    "mean": 2775.6483199921604,
+    "median": 2778.5346999937756,
+    "min": 2749.44370002852,
+    "max": 2798.99699998869,
+    "stdev": 19.637767736875414
   },
   "receiver_total_ms": {
-    "mean": 1439.1400200023782,
-    "median": 1430.5499999900348,
-    "min": 1408.0809999722987,
-    "max": 1498.2289000181481,
-    "stdev": 34.375771623516506
+    "mean": 1990.3177799948025,
+    "median": 1989.214399975026,
+    "min": 1966.39490002417,
+    "max": 2027.6797999977134,
+    "stdev": 23.30017504978277
   },
   "attacks": [
     {
       "case": "baseline",
-      "description": "Stego gốc, đúng khóa",
+      "description": "Stego gốc, đúng khóa, đúng sổ đăng ký",
       "expected": "accepted",
       "outcome": "accepted",
       "reason": null,
@@ -280,7 +298,7 @@
     },
     {
       "case": "wrong_key",
-      "description": "Stego gốc, khóa sai (32 byte ngẫu nhiên)",
+      "description": "Stego gốc, khóa giấu tin sai",
       "expected": "rejected",
       "outcome": "rejected",
       "reason": "payload_not_found",
@@ -294,6 +312,17 @@
       "description": "Lật 1 bit dấu nằm trong lịch nhúng (giữa khung)",
       "expected": "rejected",
       "outcome": "rejected",
+      "reason": "malformed_proof_payload",
+      "detail": "payload frame found, but the Groth16 check failed",
+      "strict_decode_ok": true,
+      "as_expected": true,
+      "stream_bytes": 3402313
+    },
+    {
+      "case": "flip_unscheduled_carrier_sign",
+      "description": "Lật 1 bit dấu ứng viên ngoài lịch, ngay trong IDR mang khung",
+      "expected": "rejected",
+      "outcome": "rejected",
       "reason": "proof_invalid",
       "detail": "payload frame found, but the Groth16 check failed",
       "strict_decode_ok": true,
@@ -301,12 +330,12 @@
       "stream_bytes": 3402313
     },
     {
-      "case": "flip_unscheduled_sign",
-      "description": "Lật 1 bit dấu KHÔNG nằm trong lịch",
-      "expected": "accepted",
-      "outcome": "accepted",
-      "reason": null,
-      "detail": "message 68 B, proof verified",
+      "case": "flip_later_frame_sign",
+      "description": "Lật 1 bit dấu ở IDR cuối (ngoài vùng nhúng)",
+      "expected": "rejected",
+      "outcome": "rejected",
+      "reason": "proof_invalid",
+      "detail": "payload frame found, but the Groth16 check failed",
       "strict_decode_ok": true,
       "as_expected": true,
       "stream_bytes": 3402313
@@ -324,11 +353,11 @@
     },
     {
       "case": "truncate_half",
-      "description": "Cắt còn 50% đầu stream",
-      "expected": "accepted",
-      "outcome": "accepted",
-      "reason": null,
-      "detail": "message 68 B, proof verified",
+      "description": "Cắt còn 50% đầu stream (payload vẫn nguyên)",
+      "expected": "rejected",
+      "outcome": "rejected",
+      "reason": "proof_invalid",
+      "detail": "payload frame found, but the Groth16 check failed",
       "strict_decode_ok": false,
       "as_expected": true,
       "stream_bytes": 1701156
@@ -342,11 +371,11 @@
       "detail": "error: CAVLC stream version is invalid",
       "strict_decode_ok": true,
       "as_expected": true,
-      "stream_bytes": 3402666
+      "stream_bytes": 3402698
     },
     {
       "case": "message_swap",
-      "description": "Người có khóa thay message, giữ proof cũ",
+      "description": "Người có khóa giấu tin thay message, giữ proof cũ",
       "expected": "rejected",
       "outcome": "rejected",
       "reason": "proof_invalid",
@@ -356,8 +385,8 @@
       "stream_bytes": 3402313
     },
     {
-      "case": "foreign_secret_proof",
-      "description": "Proof tạo bằng secret khác, nhúng bằng khóa đúng",
+      "case": "unregistered_camera",
+      "description": "Camera ngoài sổ đăng ký tin cậy tự tạo proof hợp lệ với cây của nó",
       "expected": "rejected",
       "outcome": "rejected",
       "reason": "proof_invalid",
@@ -368,23 +397,22 @@
     },
     {
       "case": "replay_other_video",
-      "description": "Giới hạn đã biết: chép payload sang video khác (akiyo_cif.y4m) cùng khóa",
-      "expected": "accepted",
-      "outcome": "accepted",
-      "reason": null,
-      "detail": "message 68 B, proof verified",
+      "description": "Chép payload sang video khác (akiyo_cif.y4m) cùng khóa",
+      "expected": "rejected",
+      "outcome": "rejected",
+      "reason": "proof_invalid",
+      "detail": "payload frame found, but the Groth16 check failed",
       "strict_decode_ok": true,
       "as_expected": true,
-      "stream_bytes": 4769837,
-      "known_limitation": true
+      "stream_bytes": 4769837
     }
   ],
   "summary": {
     "trials": 5,
     "trials_passed": 5,
-    "attacks": 10,
-    "attacks_as_expected": 10,
+    "attacks": 11,
+    "attacks_as_expected": 11,
     "all_passed": true
   },
-  "methodology": "Wall times of real calls on this host: Groth16 prove/verify include Node.js start-up; embed/extract are the native CLI processes; strict decode is FFmpeg -xerror. Attack outcomes use the HTTP verify job decision (payload_not_found / malformed_proof_payload / proof_invalid / accepted). Stream-level edits keep the file otherwise byte-identical; a scheduled-sign flip is checked to land on its candidate before it is evaluated."
+  "methodology": "Wall times of real calls on this host. Sender: native video digest of the cover, Groth16 prove (Node.js start-up included), native embed. Receiver: native extract, then the verify decision (native digest of the stego + Groth16 verify against the trusted registry root). Attack outcomes use the HTTP verify-job decision (payload_not_found / malformed_proof_payload / proof_invalid / accepted). Stream edits keep the file otherwise byte-identical; every sign flip is checked to land on its candidate before it is evaluated."
 }

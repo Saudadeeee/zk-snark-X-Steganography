@@ -1,45 +1,41 @@
 """
-zk_proof.py — ZK-SNARK proof generation, verification and binary format.
+zk_proof.py — camera-proof payload format and Groth16 bridge.
 
-Combines:
-  - Groth16 proof binary serialization (BN128, 129-byte compressed form)
-  - Payload blob packing: [4B length][message][129B proof]
-  - Python bridge to snarkjs / Node.js for proof generation and verification
+Statement (``circuits/camera_video.circom``): "a camera registered under
+``root`` vouches for this binding", where the binding commits to the video
+digest and the message (``src/video_binding.py``). The verifier needs only the
+registry root and the verification key, never the camera secret, and learns
+nothing about which registered camera produced the proof.
 
 Public API:
-    # Binary format
-    PROOF_SIZE_BYTES          — 129
-    proof_to_bytes(proof_dict)  → bytes
-    bytes_to_proof(data)        → dict
-    pack(message, proof_bytes)  → bytes
-    unpack(blob)                → (message, proof_bytes)
-    blob_bit_length(message)    → int
+    # Proof binary form (BN254, 129-byte point compression)
+    PROOF_SIZE_BYTES, proof_to_bytes(proof_dict), bytes_to_proof(data)
 
-    # ZK operations
-    ZKSnarkBridge(circuits_dir)
-        .generate_proof_for_payload(payload, secret_key) → (proof_dict, public_dict)
-        .verify(proof_dict, public_dict)                 → bool
-        .proof_to_bytes(proof_dict)                      → bytes
-        .bytes_to_proof(data)                            → dict
+    # Payload carried in the stego channel
+    pack_payload(mode, message, proof_bytes)   -> bytes
+    unpack_payload(blob)                       -> CameraPayload
+    payload_size(message_bytes)                -> int
 
-Requires:
-    Node.js + snarkjs in circuits/node_modules
-    circuits/build/payload_verify.wasm
-    circuits/build/proving_key.zkey
-    circuits/build/verification_key.json
+    # Groth16 (snarkjs)
+    CameraProofBridge(circuits_dir)
+        .prove(secret, registry, camera_index, binding) -> proof_dict
+        .verify(proof_dict, root, binding)              -> bool
 """
 
-import hashlib
+from __future__ import annotations
+
 import json
 import logging
 import shutil
-import struct
 import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
+
+from src.camera_registry import CameraRegistry, camera_public_key
+from src.video_binding import MODE_MESSAGE_ONLY, MODE_VIDEO, binding_public_inputs
 
 logger = logging.getLogger(__name__)
 
@@ -52,14 +48,14 @@ _SUBPROCESS_TEXT = {"text": True, "encoding": "utf-8", "errors": "replace"}
 
 
 # =============================================================================
-# Binary format  (formerly zk_payload_format.py)
+# Binary proof format
 # =============================================================================
 
-# Groth16 BN128 Point Compression
-# 4 field elements (X coords) × 32 bytes + 1 byte for 3 signs = 129 bytes
+# Groth16 BN128 point compression: 4 x-coordinates x 32 bytes + 1 byte of y signs.
 PROOF_SIZE_BYTES = 129
 
 _P = 21888242871839275222246405745257275088696311157297823662689037894645226208583
+
 
 def _fq2_add(a, b): return (a[0]+b[0])%_P, (a[1]+b[1])%_P
 def _fq2_mul(a, b): return (a[0]*b[0] - a[1]*b[1])%_P, (a[0]*b[1] + a[1]*b[0])%_P
@@ -136,14 +132,14 @@ def bytes_to_proof(data: bytes) -> dict:
     inv82 = pow(82, _P - 2, _P)
     b0, b1 = (27 * inv82) % _P, (-3 * inv82) % _P
     x0, x1 = _field_element(parts[1]), _field_element(parts[2])
-    
+
     X2 = _fq2_mul((x0, x1), (x0, x1))
     X3 = _fq2_mul(X2, (x0, x1))
     A, B = _fq2_add(X3, (b0, b1))
 
     R = pow((A*A + B*B) % _P, (_P + 1) // 4, _P)
     inv2 = pow(2, _P - 2, _P)
-    
+
     cand_c2 = ((R + A) * inv2) % _P
     c = pow(cand_c2, (_P + 1) // 4, _P)
     if pow(c, 2, _P) != cand_c2:
@@ -176,66 +172,79 @@ def bytes_to_proof(data: bytes) -> dict:
     }
 
 
-def pack(message_bytes: bytes, proof_bytes: bytes) -> bytes:
-    """
-    Pack message + proof → single blob:
-      [4 bytes big-endian: len(message)][message][proof (129 bytes)]
-    """
+# =============================================================================
+# Payload carried in the stego channel
+# =============================================================================
+
+PAYLOAD_FORMAT = 0x01
+PAYLOAD_HEADER_BYTES = 4  # format, binding mode, message length (BE16)
+MAX_MESSAGE_BYTES = 0xFFFF
+
+
+@dataclass(frozen=True)
+class CameraPayload:
+    mode: int
+    message: bytes
+    proof_bytes: bytes
+
+
+def payload_size(message_bytes: int) -> int:
+    return PAYLOAD_HEADER_BYTES + message_bytes + PROOF_SIZE_BYTES
+
+
+def pack_payload(mode: int, message: bytes, proof_bytes: bytes) -> bytes:
+    """``[format 0x01][mode][message_len BE16][message][proof 129 B]``."""
+    if mode not in (MODE_VIDEO, MODE_MESSAGE_ONLY):
+        raise ValueError("binding mode must be 0 (video) or 1 (message only)")
+    if len(message) > MAX_MESSAGE_BYTES:
+        raise ValueError("message exceeds 65535 bytes")
     if len(proof_bytes) != PROOF_SIZE_BYTES:
         raise ValueError(f"proof_bytes must be {PROOF_SIZE_BYTES} bytes, got {len(proof_bytes)}")
-    return struct.pack(">I", len(message_bytes)) + message_bytes + proof_bytes
+    return bytes((PAYLOAD_FORMAT, mode)) + len(message).to_bytes(2, "big") + message + proof_bytes
 
 
-def unpack(blob: bytes) -> Tuple[bytes, bytes]:
-    """Unpack blob → (message_bytes, proof_bytes). Raises ValueError on bad data."""
-    if len(blob) < 4:
-        raise ValueError(f"Blob too short: {len(blob)} bytes")
-    msg_len = struct.unpack(">I", blob[:4])[0]
-    expected = 4 + msg_len + PROOF_SIZE_BYTES
-    if len(blob) < expected:
-        raise ValueError(f"Blob too short: expected {expected}, got {len(blob)}")
-    return blob[4: 4 + msg_len], blob[4 + msg_len: 4 + msg_len + PROOF_SIZE_BYTES]
-
-
-def blob_bit_length(message_bytes: bytes) -> int:
-    """Return total blob length in bits for a given message."""
-    return (4 + len(message_bytes) + PROOF_SIZE_BYTES) * 8
+def unpack_payload(blob: bytes) -> CameraPayload:
+    """Strict inverse of :func:`pack_payload`; raises ValueError on any other layout."""
+    if len(blob) < PAYLOAD_HEADER_BYTES or blob[0] != PAYLOAD_FORMAT:
+        raise ValueError("payload format is not a camera proof payload")
+    if blob[1] not in (MODE_VIDEO, MODE_MESSAGE_ONLY):
+        raise ValueError("payload binding mode is invalid")
+    message_length = int.from_bytes(blob[2:4], "big")
+    if len(blob) != payload_size(message_length):
+        raise ValueError("payload length does not match its message length")
+    message = blob[PAYLOAD_HEADER_BYTES:PAYLOAD_HEADER_BYTES + message_length]
+    return CameraPayload(blob[1], message, blob[PAYLOAD_HEADER_BYTES + message_length:])
 
 
 # =============================================================================
-# ZK bridge  (formerly zk_snark_bridge.py)
+# Groth16 bridge (snarkjs)
 # =============================================================================
 
 
-class ZKSnarkBridge:
-    """
-    Bridge between Python steganography pipeline and snarkjs Groth16.
+class CameraProofBridge:
+    """Groth16 prove/verify for ``camera_video.circom`` through snarkjs."""
 
-    Circuit: PayloadVerify
-      Public:  payload_hash[256], commitment[256], payload_length
-      Private: secret[256]
-      Proves:  every payload_hash/commitment/secret signal is a bit (0/1),
-               commitment == SHA256(payload_hash_bytes || secret_bytes),
-               0 < payload_length < 1,000,000
-    """
-
+    CIRCUIT = "camera_video"
     GENERATE_WITNESS_JS = "generate_witness.js"
-    WASM_FILE  = "payload_verify.wasm"
-    ZKEY_FILE  = "proving_key.zkey"
-    VKEY_FILE  = "verification_key.json"
-    CONSTRAINT_COUNT = 63321
 
-    def __init__(self, circuits_dir: str):
+    def __init__(self, circuits_dir: str | Path):
         self.circuits_dir = Path(circuits_dir).resolve()
-        self.build_dir    = self.circuits_dir / "build"
-        self.js_dir       = self.build_dir / "payload_verify_js"
+        self.build_dir = self.circuits_dir / "build"
+        self.js_dir = self.build_dir / f"{self.CIRCUIT}_js"
+        self.wasm_path = self.js_dir / f"{self.CIRCUIT}.wasm"
+        self.zkey_path = self.build_dir / f"{self.CIRCUIT}.zkey"
+        self.vkey_path = self.build_dir / f"{self.CIRCUIT}_vkey.json"
         self._remove_stale_temp_dirs()
+
+    def required_files(self) -> list[Path]:
+        return [self.wasm_path, self.js_dir / self.GENERATE_WITNESS_JS, self.zkey_path, self.vkey_path,
+                self.circuits_dir / _SNARKJS_LOCAL_CLI]
 
     def _remove_stale_temp_dirs(self, max_age_seconds: float = 3600.0) -> None:
         """Delete witness/verify temp dirs left by a killed process.
 
         Normal runs clean up in ``finally``; a hard kill between witness and
-        proof generation leaves a witness file that encodes the secret bits.
+        proof generation leaves a witness file that encodes the camera secret.
         Only directories older than ``max_age_seconds`` are removed so a
         concurrent prover's live directory is never touched.
         """
@@ -250,160 +259,77 @@ class ZKSnarkBridge:
                 except OSError:
                     continue
 
-    def get_constraint_count(self) -> int:
-        """Return the number of arithmetic constraints in the circuit."""
-        return self.CONSTRAINT_COUNT
-
-    # ------------------------------------------------------------------ #
-    # Public API
-    # ------------------------------------------------------------------ #
-
-    def generate_proof_for_payload(
-        self, payload_bytes: bytes, secret_key: bytes
-    ) -> Tuple[dict, dict]:
-        """
-        Full pipeline: payload → witness → Groth16 proof.
-
-        Returns:
-            (proof_dict, public_dict) — snarkjs format dicts.
-        """
-        self._check_node_available()
-        logger.info("[ZK] Computing commitment...")
-        circuit_input = self._build_circuit_input(payload_bytes, secret_key)
-        logger.info("[ZK] Computing witness (node.js wasm)...")
-        witness_path = self._compute_witness(circuit_input)
-        logger.info("[ZK] Generating Groth16 proof (snarkjs)...")
-        return self._snarkjs_prove(witness_path)
-
-    def verify(self, proof_dict: dict, public_dict: dict) -> bool:
-        """Verify a Groth16 proof using snarkjs. Returns True if valid."""
-        self._check_node_available()
-        logger.info("[ZK] Verifying Groth16 proof...")
-        return self._snarkjs_verify(proof_dict, public_dict)
-
-    def verify_proof_for_payload(
-        self, proof_dict: dict, payload_bytes: bytes, secret_key: bytes,
-    ) -> bool:
-        """Verify a proof against the public signals derived from payload and key."""
-        if not isinstance(payload_bytes, bytes) or not payload_bytes:
-            raise ValueError("payload_bytes must be non-empty bytes")
-        if not isinstance(secret_key, bytes) or len(secret_key) != 32:
-            raise ValueError("secret_key must be exactly 32 bytes")
-        public_signals = self._build_public_signals(payload_bytes, secret_key)
-        return self.verify(proof_dict, public_signals)
-
-    def proof_to_bytes(self, proof_dict: dict) -> bytes:
-        """Serialize proof dict → 129-byte compressed form."""
-        return proof_to_bytes(proof_dict)
-
-    def bytes_to_proof(self, data: bytes) -> dict:
-        """Deserialize 129-byte compressed form → proof dict."""
-        return bytes_to_proof(data)
-
-    # ------------------------------------------------------------------ #
-    # Internal helpers
-    # ------------------------------------------------------------------ #
-
     @staticmethod
-    def _bytes_to_bits(data: bytes) -> list:
-        """Convert bytes → list of bit strings ['0','1',...] (MSB first)."""
-        bits = []
-        for byte in data:
-            for i in range(7, -1, -1):
-                bits.append(str((byte >> i) & 1))
-        return bits
+    def public_signals(root: int, binding: bytes) -> list[str]:
+        """Public input order of camera_video.circom: [root, bindingHi, bindingLo]."""
+        high, low = binding_public_inputs(binding)
+        return [str(root), str(high), str(low)]
 
-    def _build_circuit_input(self, payload_bytes: bytes, secret_key: bytes) -> dict:
-        if not isinstance(secret_key, bytes) or len(secret_key) != 32:
-            raise ValueError("secret_key must be exactly 32 bytes")
-        payload_hash_bytes = hashlib.sha256(payload_bytes).digest()
-        commitment_bytes   = hashlib.sha256(payload_hash_bytes + secret_key).digest()
-        return {
-            "payload_hash":   self._bytes_to_bits(payload_hash_bytes),
-            "commitment":     self._bytes_to_bits(commitment_bytes),
-            "payload_length": len(payload_bytes),
-            "secret":         self._bytes_to_bits(secret_key),
-        }
+    def circuit_input(self, secret: int, registry: CameraRegistry, binding: bytes) -> dict:
+        index = registry.index_of(camera_public_key(secret))
+        path = registry.path(index)
+        high, low = binding_public_inputs(binding)
+        return {"secret": str(secret), "siblings": [str(v) for v in path.siblings],
+                "pathIndices": [str(v) for v in path.path_indices], "root": str(registry.root),
+                "bindingHi": str(high), "bindingLo": str(low)}
 
-    def _build_public_signals(self, payload_bytes: bytes, secret_key: bytes) -> list:
-        payload_hash_bytes = hashlib.sha256(payload_bytes).digest()
-        commitment_bytes   = hashlib.sha256(payload_hash_bytes + secret_key).digest()
-        return (self._bytes_to_bits(payload_hash_bytes) +
-                self._bytes_to_bits(commitment_bytes) +
-                [str(len(payload_bytes))])
+    def prove(self, secret: int, registry: CameraRegistry, binding: bytes) -> dict:
+        """Groth16 proof that a camera of ``registry`` vouches for ``binding``."""
+        self._check_node_available()
+        circuit_input = self.circuit_input(secret, registry, binding)
+        witness_path = self._compute_witness(circuit_input)
+        proof, public = self._snarkjs_prove(witness_path)
+        if public != self.public_signals(registry.root, binding):
+            raise RuntimeError("snarkjs returned unexpected public signals")
+        return proof
+
+    def verify(self, proof_dict: dict, root: int, binding: bytes) -> bool:
+        """True only if snarkjs accepts the proof for this registry root and binding."""
+        self._check_node_available()
+        return self._snarkjs_verify(proof_dict, self.public_signals(root, binding))
 
     def _compute_witness(self, circuit_input: dict) -> Path:
         temp_dir = Path(tempfile.mkdtemp(prefix="zkp_witness_", dir=str(self.build_dir)))
-        witness_path = temp_dir / "witness_live.wtns"
-        input_path   = temp_dir / "input_live.json"
-        wasm_path    = self.js_dir / self.WASM_FILE
-        gen_js       = self.js_dir / self.GENERATE_WITNESS_JS
-
+        witness_path = temp_dir / "witness.wtns"
+        input_path = temp_dir / "input.json"
         try:
-            with open(input_path, "w") as f:
-                json.dump(circuit_input, f)
-
+            input_path.write_text(json.dumps(circuit_input), encoding="utf-8")
             result = subprocess.run(
-                ["node", str(gen_js), str(wasm_path), str(input_path), str(witness_path)],
+                ["node", str(self.js_dir / self.GENERATE_WITNESS_JS), str(self.wasm_path), str(input_path),
+                 str(witness_path)],
                 capture_output=True, cwd=str(self.circuits_dir), **_SUBPROCESS_TEXT,
             )
             if result.returncode != 0:
-                raise RuntimeError(
-                    f"Witness generation failed:\n{result.stdout}\n{result.stderr}"
-                )
+                raise RuntimeError(f"Witness generation failed:\n{result.stdout}\n{result.stderr}")
             return witness_path
         except BaseException:
             # A failed witness can leave private intermediate data behind.
             shutil.rmtree(temp_dir, ignore_errors=True)
             raise
         finally:
-            # Always delete input file — it contains secret_key in plaintext bits
+            # The input file holds the camera secret in plaintext.
             input_path.unlink(missing_ok=True)
 
-    def _snarkjs_prove(self, witness_path: Path) -> Tuple[dict, dict]:
-        zkey_path  = self.build_dir / self.ZKEY_FILE
+    def _snarkjs_prove(self, witness_path: Path) -> tuple[dict, list]:
         temp_dir = witness_path.parent
-        proof_out  = temp_dir / "proof_live.json"
-        public_out = temp_dir / "public_live.json"
-
+        proof_out, public_out = temp_dir / "proof.json", temp_dir / "public.json"
         try:
             result = self._run_snarkjs(
-                ["groth16", "prove",
-                 str(zkey_path), str(witness_path), str(proof_out), str(public_out)],
-            )
+                ["groth16", "prove", str(self.zkey_path), str(witness_path), str(proof_out), str(public_out)])
             if result.returncode != 0:
-                raise RuntimeError(
-                    f"Proof generation failed:\n{result.stdout}\n{result.stderr}"
-                )
-            with open(proof_out) as f:
-                proof_dict = json.load(f)
-            with open(public_out) as f:
-                public_dict = json.load(f)
-            return proof_dict, public_dict
+                raise RuntimeError(f"Proof generation failed:\n{result.stdout}\n{result.stderr}")
+            return (json.loads(proof_out.read_text(encoding="utf-8")),
+                    json.loads(public_out.read_text(encoding="utf-8")))
         finally:
-            witness_path.unlink(missing_ok=True)
-            proof_out.unlink(missing_ok=True)
-            public_out.unlink(missing_ok=True)
-            try:
-                temp_dir.rmdir()
-            except OSError:
-                pass
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def _snarkjs_verify(self, proof_dict: dict, public_signals) -> bool:
-        vkey_path   = self.build_dir / self.VKEY_FILE
+    def _snarkjs_verify(self, proof_dict: dict, public_signals: list) -> bool:
         temp_dir = Path(tempfile.mkdtemp(prefix="zkp_verify_", dir=str(self.build_dir)))
-        proof_tmp   = temp_dir / "proof_verify_tmp.json"
-        public_tmp  = temp_dir / "public_verify_tmp.json"
-
+        proof_tmp, public_tmp = temp_dir / "proof.json", temp_dir / "public.json"
         try:
-            with open(proof_tmp, "w") as f:
-                json.dump(proof_dict, f)
-            with open(public_tmp, "w") as f:
-                json.dump(public_signals, f)
-
-            result = self._run_snarkjs(
-                ["groth16", "verify", str(vkey_path), str(public_tmp), str(proof_tmp)],
-            )
+            proof_tmp.write_text(json.dumps(proof_dict), encoding="utf-8")
+            public_tmp.write_text(json.dumps(public_signals), encoding="utf-8")
+            result = self._run_snarkjs(["groth16", "verify", str(self.vkey_path), str(public_tmp), str(proof_tmp)])
             # snarkjs exits 0 only for a valid proof and logs "OK!". Require both
             # so a crash, missing file, or unexpected output never verifies.
             stdout_lines = [line.strip() for line in (result.stdout or "").splitlines()]
@@ -414,12 +340,7 @@ class ZKSnarkBridge:
                 logger.error("[ZK] snarkjs exited 0 without reporting OK!; treating proof as invalid")
             return False
         finally:
-            proof_tmp.unlink(missing_ok=True)
-            public_tmp.unlink(missing_ok=True)
-            try:
-                temp_dir.rmdir()
-            except OSError:
-                pass
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     def _run_snarkjs(self, args: list) -> subprocess.CompletedProcess:
         """Run snarkjs, preferring the locally installed CLI without a shell."""
@@ -428,14 +349,8 @@ class ZKSnarkBridge:
             command, use_shell = ["node", str(local_cli), *args], False
         else:
             command, use_shell = ["npx", "snarkjs", *args], _NPX_SHELL
-        return subprocess.run(
-            command, capture_output=True, cwd=str(self.circuits_dir),
-            shell=use_shell, **_SUBPROCESS_TEXT,
-        )
-
-    # ------------------------------------------------------------------ #
-    # Dependency checks
-    # ------------------------------------------------------------------ #
+        return subprocess.run(command, capture_output=True, cwd=str(self.circuits_dir), shell=use_shell,
+                              **_SUBPROCESS_TEXT)
 
     @staticmethod
     def _check_node_available() -> None:

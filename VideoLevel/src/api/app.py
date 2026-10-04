@@ -340,6 +340,10 @@ class ApiSettings:
     api_token: str
     work_dir: Path = Path(".cache/api")
     circuits_dir: Path = Path("circuits")
+    # Trusted camera registry (src/camera_registry.py JSON); the verify job checks proofs against its root.
+    camera_registry_path: Path | None = None
+    # Mode-1 (message-only) proofs are not bound to the video; reject them unless explicitly allowed.
+    require_video_binding: bool = True
     max_upload_bytes: int = 100 * 1024 * 1024
     max_workers: int = 1
     max_queued_jobs: int = 2
@@ -365,6 +369,9 @@ class ApiSettings:
             api_token=token,
             work_dir=Path(os.environ.get("ZK_STEGO_API_WORK_DIR", ".cache/api")),
             circuits_dir=Path(os.environ.get("ZK_STEGO_CIRCUITS_DIR", "circuits")),
+            camera_registry_path=(Path(os.environ["ZK_STEGO_CAMERA_REGISTRY"])
+                                  if os.environ.get("ZK_STEGO_CAMERA_REGISTRY") else None),
+            require_video_binding=os.environ.get("ZK_STEGO_ALLOW_MESSAGE_ONLY_PROOFS") != "1",
             upload_timeout_seconds=_seconds_from_environment("ZK_STEGO_API_UPLOAD_TIMEOUT_SECONDS", 120.0),
             job_retention_seconds=_seconds_from_environment("ZK_STEGO_API_JOB_RETENTION_SECONDS", 24 * 3600.0),
             enable_docs=os.environ.get("ZK_STEGO_API_DOCS") == "1",
@@ -505,7 +512,7 @@ def _safe_embed_result(result: dict[str, Any]) -> dict[str, Any]:
 def _safe_verify_result(result: dict[str, Any]) -> dict[str, Any]:
     """Only a verified proof may carry its (proven) message; a rejection carries a reason code."""
     if result.get("valid") is True:
-        return {key: result[key] for key in ("valid", "message_b64", "payload_bytes") if key in result}
+        return {key: result[key] for key in ("valid", "message_b64", "payload_bytes", "video_bound") if key in result}
     return {"valid": False, **({"reason": str(result["reason"])} if "reason" in result else {})}
 
 

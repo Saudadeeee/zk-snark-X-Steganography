@@ -1,7 +1,7 @@
 # Future plan — VideoLevel
 
 **Ngày lập:** 29/09/2026.  
-**Trạng thái:** Kế hoạch thiết kế và nghiên cứu; các hạng mục tương lai dưới đây chưa được triển khai.  
+**Trạng thái:** Kế hoạch thiết kế và nghiên cứu. Cập nhật 04/10/2026: bước đầu của mục tiêu "video đúng + nguồn camera" đã được triển khai — proof camera (`circuits/camera_video.circom`): camera trong sổ đăng ký Merkle Poseidon xác nhận hash video (đã che bit dấu) và message, bên kiểm chứng không cần secret camera (xem `doc/he_thong_hoat_dong.md` mục 10). Các hạng mục còn lại dưới đây chưa triển khai.  
 **Đích đến:** Một hệ thống xác minh video có Groth16 proof bắt buộc, bảo vệ message, nội dung video và nguồn camera; một lõi xử lý media thống nhất; có thực nghiệm trên thiết bị triển khai.
 
 ## 1. Các quyết định nền tảng
@@ -22,9 +22,9 @@ Các nhận xét này dựa trên source và bằng chứng được lưu trong 
 
 | Thành phần | Hiện có | Khoảng cách với mục tiêu mới |
 | --- | --- | --- |
-| `native/src/cavlc_stream.cpp` | Parse CAVLC theo profile giới hạn, tìm sign-bit carrier, nhúng/trích payload, HMAC framing | Chưa cung cấp giao thức bảo vệ cả video và xác minh nguồn camera bằng Groth16 |
-| `src/api/native_handlers.py` | API/stream gọi Native CLI; từ 03/10/2026 job verify trích mù rồi bắt buộc Groth16 verify (`succeeded`/`rejected`) | Chưa kiểm binding video/nguồn vì circuit hiện tại chưa có |
-| `src/zk_proof.py`, `circuits/payload_verify.circom` | Groth16 cho quan hệ hash payload và secret; bridge sang snarkjs | Chưa có video commitment, camera credential, session chain hay source attestation |
+| `native/src/cavlc_stream.cpp` | Parse CAVLC theo profile giới hạn, tìm sign-bit carrier, nhúng/trích payload (khung v3 không MAC), hash ràng buộc video (`video-digest`) | Chưa có commitment theo đoạn cho luồng live |
+| `src/api/native_handlers.py` | API/stream gọi Native CLI; job verify trích mù, tính hash video và bắt buộc Groth16 verify với root sổ đăng ký | Luồng live chỉ ràng buộc message (mode 1) |
+| `src/zk_proof.py`, `src/camera_proof.py`, `circuits/camera_video.circom` | Groth16: camera trong sổ đăng ký + ràng buộc hash video và message (04/10/2026) | Chưa có session chain, source attestation phần cứng hay nghi thức setup nhiều bên |
 | (đã gỡ 03/10/2026) `src/embedder.py`, `src/verifier*.py`, `src/bitstream/`, `src/core/` | Pipeline media Python song song | Đã hợp nhất về một lõi native; xem lại trong lịch sử git nếu cần đối chiếu |
 | `src/trust/provenance.py`, `src/trust/c2pa_bridge.py` | Helper hash/anchor manifest kiểu C2PA | Chưa phải triển khai C2PA đầy đủ hay bằng chứng nguồn camera |
 | `src/trust/attestation.py` | `MockTEESigner` dùng HMAC; giao diện attestation | Chưa có hardware attestation hoặc đường sensor-to-signer được bảo vệ |

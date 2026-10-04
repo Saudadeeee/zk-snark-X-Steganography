@@ -18,7 +18,7 @@ Cập nhật: 2026-10-04 (giao thức kênh v3: bỏ thẻ HMAC trong khung). Ph
 7. [Kênh nhúng: dấu của hệ số trailing-one](#7-kênh-nhúng-dấu-của-hệ-số-trailing-one)
 8. [Lịch nhúng có khóa (keyed schedule)](#8-lịch-nhúng-có-khóa-keyed-schedule)
 9. [Khung kênh và trích xuất mù](#9-khung-kênh-và-trích-xuất-mù)
-10. [Payload và proof Groth16](#10-payload-và-proof-groth16)
+10. [Payload và proof Groth16 (camera trong sổ đăng ký + ràng buộc video)](#10-payload-và-proof-groth16-camera-trong-sổ-đăng-ký--ràng-buộc-video)
 11. [Luồng đầu-cuối và giao diện dòng lệnh native](#11-luồng-đầu-cuối-và-giao-diện-dòng-lệnh-native)
 12. [Dịch vụ HTTP/WebSocket](#12-dịch-vụ-httpwebsocket)
 13. [Bộ lập lịch realtime](#13-bộ-lập-lịch-realtime)
@@ -39,13 +39,13 @@ Cập nhật: 2026-10-04 (giao thức kênh v3: bỏ thẻ HMAC trong khung). Ph
         v
  FFmpeg + libx264  --(Baseline, CAVLC, 1 slice/frame, không B-frame)-->  source.h264
                                                                               |
- message + secret 32 byte                                                    |
+ camera (secret s, pk trong sổ đăng ký) + message + hash video cover   |
         |                                                                     |
         v                                                                     v
  circom/snarkjs Groth16 --> proof 129 byte                      parser CAVLC native (C++)
         |                                                      liệt kê ứng viên = dấu trailing-one
         v                                                                     |
- payload = [len 4B][message][proof 129B]                                      |
+ payload = [0x01][mode][len 2B][message][proof 129B]                         |
         |                                                                     |
         v                                                                     v
  khung kênh v3 = [0x03][len 2B][payload]  --XOR keystream--> lịch nhúng HMAC theo khóa
@@ -59,7 +59,7 @@ Cập nhật: 2026-10-04 (giao thức kênh v3: bỏ thẻ HMAC trong khung). Ph
                                                                               |
                                                      đọc bit, kiểm version/độ dài, lấy payload
                                                                               |
-                                                     unpack -> snarkjs verify -> message
+                                   unpack -> hash video nhận được -> snarkjs verify với root -> message
 ```
 
 Ba lớp có trách nhiệm tách biệt:
@@ -68,7 +68,7 @@ Ba lớp có trách nhiệm tách biệt:
 |---|---|---|
 | Media | `native/src/cavlc_stream.cpp` | Bitstream sau khi nhúng vẫn hợp lệ, độ dài mã không đổi, decoder chuẩn giải được |
 | Kênh giấu tin | `native/src/cavlc_stream.cpp`, `src/native_blind_contract.py` | Chỉ người có khóa tìm được vị trí và đọc được khung; kênh không có MAC nên không tự phát hiện bit bị sửa |
-| Proof | `src/zk_proof.py`, `circuits/payload_verify.circom` | Quan hệ `commitment = SHA256(SHA256(message) ‖ secret)` được chứng minh bằng Groth16; đây là lớp duy nhất xác thực payload |
+| Proof | `src/zk_proof.py`, `src/camera_proof.py`, `circuits/camera_video.circom` | Camera trong sổ đăng ký xác nhận đúng video (hash toàn file, trừ bit carrier) và message; lớp duy nhất xác thực payload |
 
 Chỉ có **một lõi media là native C++**; Python điều phối proof, đóng gói, dịch vụ và demo.
 Nhánh Python cũ đã được gỡ ngày 2026-10-03 (mục 14).
@@ -557,53 +557,93 @@ nguyên vẹn. Việc đó thuộc về proof Groth16 (mục 10).
 
 ---
 
-## 10. Payload và proof Groth16
+## 10. Payload và proof Groth16 (camera trong sổ đăng ký + ràng buộc video)
 
-### 10.1. Định dạng payload
+Từ 2026-10-04 proof chứng minh: **"một camera nằm trong sổ đăng ký (gốc Merkle công khai)
+xác nhận đúng video này và message này"**, mà bên kiểm chứng không cần secret của camera và
+không biết camera nào. Hai khóa được tách hẳn:
+
+| Khóa | Ai giữ | Dùng để |
+|---|---|---|
+| Khóa giấu tin K (32 byte) | Người gửi và bên kiểm chứng | Chọn vị trí nhúng và làm trắng bit (mục 8, 9) |
+| Secret camera s (phần tử trường BN254) | Chỉ camera | Tạo proof; sổ đăng ký chỉ lưu pk = Poseidon(s) |
+
+### 10.1. Sổ đăng ký camera
+
+`src/camera_registry.py`: cây Merkle nhị phân độ sâu 16 (tối đa 65 536 camera), nút
+`Poseidon(trái, phải)`, lá trống = 0, lá i = `pk_i = Poseidon(s_i)`. Poseidon cài bằng Python
+(`src/poseidon.py`, hằng số của circomlib) và đã được đối chiếu với vector chuẩn của
+circomlibjs và với witness của chính mạch. Bên kiểm chứng chỉ tin **gốc** (root) của cây.
+
+### 10.2. Hash video và binding
+
+`zkstego_blind_bits video-digest` (bản tham chiếu: `src/video_binding.py`):
 
 ```text
-[message_length : 4 byte big-endian][message][proof nén : 129 byte]
+frame_bits = 8 × (3 + kích thước payload)                 (biết trước khi tạo proof)
+carrier    = đúng frame_bits vị trí dấu mà lịch HMAC theo khóa giấu tin sẽ ghi khung vào
+             (mỗi IDR: min(cap, ứng viên) vị trí đầu của lịch, cho tới hết khung)
+digest     = SHA256("zkstego/video-digest/v1" ‖ u32(frame_bits) ‖ u32(cap) ‖
+                    với mọi NAL theo thứ tự: u32(1 + len(rbsp')) ‖ header ‖ rbsp')
+rbsp'      = RBSP của NAL (đã bỏ EPB), CHỈ các bit carrier được đặt về 0
+binding    = SHA256("zkstego/proof-binding/v1" ‖ mode ‖ digest ‖ SHA256(message))
+bindingHi, bindingLo = hai nửa 128 bit của binding  (public input của mạch)
 ```
 
-Với khung native (19 byte overhead), message tối đa 4096 − 4 − 129 = 3963 byte.
+Nhúng chỉ đổi đúng các bit carrier (và có thể thêm/bớt byte EPB, không ảnh hưởng RBSP), nên
+**digest của cover = digest của stego**. Mọi thay đổi khác — video khác, cắt hay thêm frame,
+sửa một bit ở frame sau, lật một bit dấu không mang khung, mã hóa lại — làm digest đổi và proof
+không còn đúng. Lật một bit carrier thì digest giữ nguyên nhưng payload trích ra đổi, nên proof
+cũng bị từ chối. Vị trí carrier phụ thuộc khóa giấu tin; bên kiểm chứng vốn đã có khóa này để trích. Chế độ `mode = 1`
+(chỉ ràng buộc message, digest = 0) dành cho luồng live, vì khi nhúng proof thì phần còn lại
+của video chưa tồn tại; job verify từ chối chế độ này trừ khi bật
+`ZK_STEGO_ALLOW_MESSAGE_ONLY_PROOFS=1`.
 
-### 10.2. Mạch và quan hệ được chứng minh
-
-`circuits/payload_verify.circom`:
+### 10.3. Mạch `circuits/camera_video.circom`
 
 ```text
-public : payload_hash[256] = SHA256(message) (bit), commitment[256], payload_length
-private: secret[256]
-ràng buộc: commitment = SHA256(payload_hash ‖ secret);  0 < payload_length < 1 000 000
-           mọi tín hiệu của payload_hash, commitment, secret đều là bit: x·(x − 1) = 0
+private: secret s; siblings[16]; pathIndices[16]
+public : root, bindingHi, bindingLo
+ràng buộc: pk = Poseidon(s); đường Merkle (pathIndices là bit) từ pk dẫn tới root;
+           bindingHi, bindingLo nằm trong R1CS (bình phương) để gắn vào proof
 ```
 
-Mạch có 63 321 constraint. Ràng buộc bit được thêm ngày 2026-10-03: thành phần `Sha256`
-của circomlib không tự ép đầu vào là 0/1, nên trước đó prover có thể đưa giá trị trường
-tùy ý vào hàm băm. Proof tạo bằng khóa của mạch cũ không verify được với khóa hiện tại.
+8 737 constraint, 3 public input (mạch SHA-256 cũ: 63 321 constraint, 513 public input).
+Proof tạo cho một binding (video + message) hay một root khác đều không verify được.
 
-Tổng 513 public signal. Hash của message tính **ngoài** mạch; mạch không chứa hash video,
-chỉ số frame hay danh tính camera.
+### 10.4. Payload
 
-### 10.3. Groth16 và nén proof
+```text
+[format 0x01][mode 1B][message_length BE16][message][proof nén 129B]
+```
 
-`src/zk_proof.py` (`ZKSnarkBridge`) gọi snarkjs: tính witness bằng WASM của mạch, rồi
-`groth16 prove` với `proving_key.zkey`. Proof gồm A ∈ G1, B ∈ G2, C ∈ G1 trên BN254.
-Nén còn 129 byte: tọa độ x của A, B (2 phần tử Fp2), C, mỗi phần 32 byte, cộng 1 byte
-cờ chứa 3 bit chẵn/lẻ của y. Khi giải nén, `bytes_to_proof` kiểm tra tọa độ < p và điểm
-nằm trên đường cong; dữ liệu hỏng → `ValueError` → verifier trả `valid = False`.
+Khung kênh thêm 3 byte, nên message tối đa 4096 − 4 − 129 = 3963 byte.
 
-Xác minh: `snarkjs groth16 verify`; chỉ chấp nhận khi **mã thoát 0 và có dòng `OK!`**.
-Khóa proving/verification hiện là thiết lập giáo dục cục bộ (`circuits/build/DEMO_SETUP_ONLY.txt`),
-không phải trusted ceremony cho triển khai.
+### 10.5. Groth16, nén proof và setup
 
-### 10.4. Proof chứng minh gì, không chứng minh gì
+`src/zk_proof.py` (`CameraProofBridge`) gọi snarkjs: witness bằng WASM của mạch, rồi
+`groth16 prove` với `camera_video.zkey`. Proof gồm A ∈ G1, B ∈ G2, C ∈ G1 trên BN254, nén
+còn 129 byte (tọa độ x của A, B (2 phần tử Fp2), C, mỗi phần 32 byte, cộng 1 byte cờ y).
+`bytes_to_proof` kiểm tra tọa độ < p và điểm nằm trên đường cong. Xác minh chỉ chấp nhận khi
+`snarkjs groth16 verify` **thoát mã 0 và in `OK!`**.
 
-- Chứng minh: người tạo proof biết `secret` sao cho commitment khớp message.
-- Verifier phải biết `secret` để tự tính lại commitment, nên trong cấu hình hiện tại ai
-  có khóa cũng tạo được proof.
-- **Không** ràng buộc proof với video, frame, thời điểm hay camera; một payload có thể
-  bị chép sang video khác dùng cùng khóa. Hướng khắc phục nằm trong `future_plan.md`.
+Setup (`py -3.12 -m src.zk_setup`): Phase 1 là Powers of Tau công khai của Hermez (2^16);
+Phase 2 gồm 2 lượt đóng góp (entropy qua stdin), một beacon ngẫu nhiên công khai, rồi
+`snarkjs zkey verify`; transcript ở `circuits/build/camera_video_setup.json`. Vì cả hai lượt
+chạy trên một máy nên đây là nghi thức **demo**; triển khai thật cần nhiều bên độc lập (chỉ
+cần một bên trung thực là khóa an toàn).
+
+Luồng: phía gửi tính digest của cover → binding → proof → payload → nhúng
+(`src/camera_proof.build_payload`); phía nhận trích → tính digest của file nhận được →
+binding → verify với root tin cậy (`src/camera_proof.verify_payload`, job verify).
+
+### 10.6. Proof chứng minh gì, không chứng minh gì
+
+- Chứng minh: một camera có khóa trong sổ đăng ký đã xác nhận đúng video (mọi bit, các bit carrier
+  được bảo vệ gián tiếp qua payload) và message; không lộ camera nào; bên kiểm chứng không làm giả
+  được proof.
+- Không chứng minh: camera thật sự quay cảnh đó (ví dụ quay lại màn hình); setup Groth16 Phase 2
+  là demo (beacon cục bộ, không phải beacon công khai).
 
 ---
 
@@ -612,8 +652,8 @@ không phải trusted ceremony cho triển khai.
 ### 11.1. Gửi
 
 1. Encode video về Baseline/CAVLC (mục 2).
-2. `ZKSnarkBridge.generate_proof_for_payload(message, secret)` → proof → `proof_to_bytes` (129 B).
-3. `pack(message, proof_bytes)` → payload.
+2. `src.camera_proof.build_payload(bridge, registry, camera_secret, message, native_cli=..., cover=...)`:
+   `video-digest` của cover → binding → Groth16 proof → `pack_payload` (payload).
 4. `zkstego_blind_bits embed-stream-auth-stdin in.h264 out.h264 <max_bits_per_IDR>`,
    stdin: dòng 1 = khóa 64 ký tự hex, dòng 2 = payload hex.
 
@@ -621,14 +661,16 @@ không phải trusted ceremony cho triển khai.
 
 1. `zkstego_blind_bits extract-stream-auth stego.h264 - <max_payload> <max_bits_per_IDR>`,
    stdin: khóa hex. stdout: payload hex (chưa xác thực; verify Groth16 ở bước sau).
-2. `unpack` → (message, proof 129 B) → `bytes_to_proof`.
-3. `verify_proof_for_payload(proof, message, secret)` → chỉ khi đúng mới dùng message.
+2. `src.camera_proof.verify_payload(bridge, root, payload, native_cli=..., stego=...)`: `unpack_payload`
+   → `bytes_to_proof` → `video-digest` của chính file nhận được → binding → Groth16 verify với
+   root tin cậy → chỉ khi đúng (và `video_bound`) mới dùng message. Không cần secret camera.
 
 ### 11.3. Các lệnh của `zkstego_blind_bits`
 
 | Lệnh | Mục đích |
 |---|---|
 | `embed-stream-auth-stdin`, `extract-stream-auth` | Khung kênh v3 (hậu tố `-auth` nghĩa là "có khóa"; khung không có MAC), lịch theo đoạn IDR, đọc/ghi file |
+| `video-digest` | Hash ràng buộc video (stego key qua stdin để xác định bit carrier); cover và stego cho cùng giá trị |
 | `measure-live-capacity-stdin` | Đọc Annex-B từ stdin, in JSON dung lượng ứng viên |
 | `embed-live-auth-stdin`, `extract-live-auth-stdin` | Như chế độ đoạn nhưng video vào/ra qua stdin/stdout (dùng cho WebSocket) |
 
@@ -649,7 +691,7 @@ Một ứng dụng: `src.api.native_handlers:create_native_app` dựng trên lõ
 | `GET /health` | Công khai |
 | `POST /api/v1/jobs/embed` | Upload `.h264` + `message_b64` + `secret_key_b64` → job id |
 | `POST /api/v1/jobs/extract` | Upload stego + khóa → job id (native) |
-| `POST /api/v1/jobs/verify` | Trích mù → unpack → **Groth16 verify bắt buộc**. `succeeded` kèm message chỉ khi proof đúng; ngược lại `rejected` với lý do `payload_not_authenticated` / `malformed_proof_payload` / `proof_invalid`; lỗi hạ tầng → `failed` |
+| `POST /api/v1/jobs/verify` | Trích mù → unpack → hash video của file tải lên → **Groth16 verify bắt buộc** với root của sổ đăng ký (`ZK_STEGO_CAMERA_REGISTRY`). `succeeded` kèm message và `video_bound` chỉ khi proof đúng; ngược lại `rejected` với lý do `payload_not_found` / `malformed_proof_payload` / `video_binding_required` / `video_digest_unavailable` / `proof_invalid`; lỗi hạ tầng (thiếu sổ đăng ký, khóa, Node.js) → `failed` |
 | `GET /api/v1/jobs/{id}` | Trạng thái job |
 | `GET /api/v1/jobs/{id}/artifact` | Tải kết quả **một lần**, hết hạn sau 10 phút |
 | `WS /api/v1/stream` | Khung JSON start, rồi các chunk Annex-B nhị phân |
@@ -710,16 +752,16 @@ Các bước (số thứ tự in trên terminal):
 | Preflight | Công cụ, artifact mạch, phạm vi demo | Thiếu gì thì dừng |
 | Chọn video, encode | Header Y4M, lệnh FFmpeg | — |
 | Bên trong FFmpeg/libx264 | Từng thành phần pipeline từ log verbose; thống kê x264; ASCII và số của frame chưa nén; PSNR do nén | — |
-| Message → proof | Public/private input, witness, proof JSON, cấu trúc 129 byte | public signals khớp |
 | Parser native | Bảng NAL, slice IDR, số ứng viên mỗi IDR | — |
 | Cắt NAL, EBSP→RBSP, header qua FFmpeg | Byte NAL header theo bit, ví dụ EPB, chuỗi cấu hình x264 trong SEI, toàn bộ SPS/PPS/slice header do `trace_headers` giải | độ rộng, QP, vị trí bắt đầu slice data khớp native |
+| Camera + hash video + proof | Sổ đăng ký 4 camera, mở đường Merkle 16 tầng từ pk tới root; bảng từng NAL của hash video (EBSP/RBSP, số bit carrier bị xóa, SHA256(rbsp′)); binding, witness, proof JSON, cấu trúc 129 byte | Poseidon từng tầng ra đúng root; digest Python = digest native |
 | Dung lượng theo đoạn, lịch | Dẫn xuất khóa HKDF (giá trị khóa con chỉ hiện trên terminal), khung v3, giới hạn bit/IDR, bảng IDR nào mang khoảng bit khung nào, score HMAC, bit khung ⊕ keystream = bit nhúng, bit cũ/mới | lịch Python (`segment_schedule`) khớp encoder native |
 | Nhúng native | Bản đồ MB, khối ví dụ trước/sau | danh tính ứng viên, bit, metadata không đổi |
 | FFmpeg decode | ASCII trước/sau, bản đồ ΔY, PSNR Y/U/V | số frame, ánh xạ 1 slice/frame |
 | Giải phẫu một khối | Xem 15.2 | khớp FFmpeg và native ở từng bước |
-| Bit nhúng nằm ở đâu | Định danh ứng viên, score HMAC, thứ hạng → chỉ số bit trong khung → trường mang bit (version/độ dài/message/A.x/B.x/C.x/tag) → byte RBSP → byte EBSP (đếm EPB) → offset trong file, hex trước/sau, vị trí MB trên frame ASCII | bit trong file source khớp trace; bit trong stego = bit khung XOR bit keystream |
-| Verifier | Trích xuất mù, kiểm header khung, Groth16 bắt buộc; bên nhận tự dựng lại cùng lịch | proof hợp lệ, message khớp |
-| Ca từ chối | Đổi message, proof sai, thiếu proof, sai khóa, lật một bit mang dữ liệu ngay trong byte file | đều bị từ chối đúng lý do |
+| Bit nhúng nằm ở đâu | Định danh ứng viên, score HMAC, thứ hạng → chỉ số bit trong khung → trường mang bit (version/độ dài/header payload/message/A.x/B.x/C.x/cờ dấu) → byte RBSP → byte EBSP (đếm EPB) → offset trong file, hex trước/sau, vị trí MB trên frame ASCII | bit trong file source khớp trace; bit trong stego = bit khung XOR bit keystream |
+| Verifier | Trích xuất mù, kiểm header khung, hash video tính lại từ stego, Groth16 bắt buộc với root sổ đăng ký; bên nhận tự dựng lại cùng lịch | digest stego = digest cover, proof hợp lệ, message khớp |
+| Ca từ chối | Đổi message, proof sai, thiếu proof, sai khóa, lật một bit carrier ngay trong byte file, lật một bit dấu không mang khung (payload giữ nguyên, digest đổi), cắt frame cuối, replay nguyên payload sang clip khác, camera ngoài sổ đăng ký | đều bị từ chối đúng lý do |
 | Job HTTP | Embed (output trùng từng byte với CLI), extract, verify → `succeeded`; verify sai khóa → `rejected`; trạng thái và độ trễ | khớp payload và message |
 | Luồng WebSocket | Gửi Annex-B theo chunk, nhận stego, giải mã và trích lại | stego trùng CLI, payload khớp |
 
@@ -804,10 +846,11 @@ Mã thoát `run_all`: 0 = tất cả qua, 1 = có lỗi, 2 = có ca bị bỏ qu
 ## 17. Bảo mật, giới hạn và việc còn mở
 
 - Kênh native tách khóa con bằng HKDF và làm trắng bit; từ v3 khung không còn MAC nên mọi
-  xác thực payload dựa vào Groth16. Mạch
-  vẫn dùng secret gốc, và verifier phải giữ secret để tính lại commitment.
-- Khung và proof không chứa định danh video hay bộ đếm: có thể phát lại sang video khác
-  cùng khóa. Cần thiết kế commitment theo đoạn (xem `future_plan.md`).
+  xác thực payload dựa vào proof camera (mục 10).
+- Proof ràng buộc toàn bộ video; các bit carrier được bảo vệ qua payload (đổi chúng làm payload
+  đổi). Hash phụ thuộc khóa giấu tin nên chỉ người có khóa mới kiểm chứng được.
+- Luồng live chỉ ràng buộc được message (mode 1). Groth16 Phase 2 là nghi thức demo trên một
+  máy. Proof không chứng minh camera thật sự quay cảnh đó.
 - Parser native chỉ nhận Baseline, CAVLC, progressive, 4:2:0, một slice/frame bắt đầu
   ở MB 0, không I_PCM, không nhiều SPS/PPS khác id.
 - Realtime chưa đạt yêu cầu trên camera thật; chưa có kết quả trên thiết bị edge.
@@ -848,7 +891,8 @@ Kế hoạch xử lý các điểm trên: `future_plan.md`.
 | `native/tools/inspect.cpp` | Công cụ soi duy nhất `zkstego_inspect` (JSON, `--summary`, `--macroblock`, `--segments`) |
 | `native/tests/cavlc_stream_tests.cpp` | CTest native |
 | `src/native_blind_contract.py` | Hợp đồng lịch/khung bằng Python (tham chiếu) |
-| `src/zk_proof.py`, `circuits/payload_verify.circom` | Proof Groth16, nén, xác minh |
+| `src/zk_proof.py`, `src/camera_proof.py`, `circuits/camera_video.circom` | Payload, proof camera (sổ đăng ký + ràng buộc video), nén, xác minh |
+| `src/camera_registry.py`, `src/poseidon.py`, `src/video_binding.py`, `src/zk_setup.py` | Sổ đăng ký Merkle Poseidon, hash video + binding, setup Groth16 |
 | `src/api/app.py`, `src/api/native_handlers.py` | Lõi job dùng chung + dịch vụ native HTTP/WebSocket (embed, extract, verify) |
 | `src/realtime_cavlc.py` | Bộ lập lịch realtime |
 | `src/h264_tables.py` | Bảng VLC CAVLC chuẩn (cho phần giải thích của demo) |

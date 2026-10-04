@@ -35,7 +35,10 @@ from src.key_policy import (
 )
 from src.manifest import StegoManifest
 from src.runtest._helpers import SKIP, run_test, section, summarise
-from src.zk_proof import ZKSnarkBridge, pack, proof_to_bytes
+from src.camera_proof import Verdict, build_payload
+from src.camera_registry import CameraRegistry, camera_public_key, new_camera_secret
+from src.video_binding import MODE_MESSAGE_ONLY, MODE_VIDEO
+from src.zk_proof import CameraProofBridge, pack_payload, proof_to_bytes
 
 # Tokens shorter than 32 characters are refused at startup.
 TOKEN = "phase7-test-token-0123456789abcdef"
@@ -788,11 +791,11 @@ _WELL_FORMED_PROOF = {
 }
 
 
-def _native_verify_app(temp_dir: str, extractor, verifier):
+def _native_verify_app(temp_dir: str, extractor, checker, **settings):
     # The injected extractor replaces the native CLI call; any existing file satisfies cli_path.
     return create_native_app(
-        ApiSettings(api_token=TOKEN, work_dir=Path(temp_dir)),
-        cli_path=sys.executable, payload_extractor=extractor, proof_verifier=verifier,
+        ApiSettings(api_token=TOKEN, work_dir=Path(temp_dir), **settings),
+        cli_path=sys.executable, payload_extractor=extractor, proof_checker=checker,
     )
 
 
@@ -805,7 +808,7 @@ def _run_verify_job(app, key: bytes = b"v" * 32) -> dict:
 
 def t_native_verify_job_succeeds_only_for_verified_proof():
     key, message = b"v" * 32, b"proven-message"
-    blob = pack(message, proof_to_bytes(_WELL_FORMED_PROOF))
+    blob = pack_payload(MODE_VIDEO, message, proof_to_bytes(_WELL_FORMED_PROOF))
     calls = []
 
     def extractor(stego_video_path, secret_key, maximum_payload_bytes):
@@ -813,26 +816,31 @@ def t_native_verify_job_succeeds_only_for_verified_proof():
         assert secret_key == key and maximum_payload_bytes == 512
         return blob
 
-    def verifier(proof, proven_message, secret_key):
-        calls.append((proof, proven_message, secret_key))
-        return proven_message == message and secret_key == key
+    def checker(payload, proof, stego_video_path, stego_key):
+        calls.append((payload.mode, payload.message, proof, Path(stego_video_path).read_bytes().endswith(b"stego"),
+                      stego_key == key))
+        return Verdict(True, None, payload.mode, payload.message)
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        body = _run_verify_job(_native_verify_app(temp_dir, extractor, verifier), key)
+        body = _run_verify_job(_native_verify_app(temp_dir, extractor, checker), key)
     assert body["status"] == "succeeded", body
     assert body["result"] == {
         "valid": True, "message_b64": base64.b64encode(message).decode("ascii"), "payload_bytes": len(blob),
+        "video_bound": True,
     }, body
-    assert calls == [(_WELL_FORMED_PROOF, message, key)]
+    assert calls == [(MODE_VIDEO, message, _WELL_FORMED_PROOF, True, True)]
 
-    with tempfile.TemporaryDirectory() as temp_dir:  # The verifier says no: rejected, no message.
-        body = _run_verify_job(_native_verify_app(temp_dir, extractor, lambda *_: False), key)
-    assert body["status"] == "rejected" and body["result"] == {"valid": False, "reason": "proof_invalid"}, body
+    for reason in ("proof_invalid", "video_binding_required", "video_digest_unavailable"):
+        with tempfile.TemporaryDirectory() as temp_dir:  # The checker says no: rejected, no message.
+            body = _run_verify_job(_native_verify_app(
+                temp_dir, extractor, lambda *_, reason=reason: Verdict(False, reason, MODE_VIDEO)), key)
+        assert body["status"] == "rejected" and body["result"] == {"valid": False, "reason": reason}, body
 
 
 def t_native_verify_job_rejects_malformed_or_absent_proof_and_fails_on_infrastructure():
     proof_bytes = proof_to_bytes(_WELL_FORMED_PROOF)
     off_curve = bytes([0xFF] * 32) + proof_bytes[32:]
+    good = pack_payload(MODE_VIDEO, b"msg", proof_bytes)
 
     def rejected_extract(*_):
         raise NativePayloadNotFound("native CAVLC operation failed")
@@ -840,59 +848,72 @@ def t_native_verify_job_rejects_malformed_or_absent_proof_and_fails_on_infrastru
     def broken_extract(*_):
         raise RuntimeError("native CAVLC operation timed out")
 
-    def must_not_verify(*_):
-        raise AssertionError("verifier must not run for a malformed payload")
+    def must_not_check(*_):
+        raise AssertionError("the proof checker must not run for a malformed payload")
 
     cases = (
         ("payload_not_found", rejected_extract),
-        ("malformed_proof_payload", lambda *_: b"\x00\x00\x00\x05short"),      # truncated blob
-        ("malformed_proof_payload", lambda *_: pack(b"msg", off_curve)),       # proof not on curve
-        ("malformed_proof_payload", lambda *_: pack(b"msg", proof_bytes) + b"trailing"),
-        ("malformed_proof_payload", lambda *_: pack(b"", proof_bytes)),        # empty message
+        ("malformed_proof_payload", lambda *_: good[:10]),                                   # truncated
+        ("malformed_proof_payload", lambda *_: pack_payload(MODE_VIDEO, b"msg", off_curve)),  # not on curve
+        ("malformed_proof_payload", lambda *_: good + b"trailing"),
+        ("malformed_proof_payload", lambda *_: b"\x02" + good[1:]),                          # unknown format
+        ("malformed_proof_payload", lambda *_: good[:1] + b"\x07" + good[2:]),               # unknown mode
     )
     for reason, extractor in cases:
         with tempfile.TemporaryDirectory() as temp_dir:
-            body = _run_verify_job(_native_verify_app(temp_dir, extractor, must_not_verify))
+            body = _run_verify_job(_native_verify_app(temp_dir, extractor, must_not_check))
         assert body["status"] == "rejected", (reason, body)
         assert body["result"] == {"valid": False, "reason": reason}, (reason, body)
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        body = _run_verify_job(_native_verify_app(temp_dir, broken_extract, must_not_verify))
+        body = _run_verify_job(_native_verify_app(temp_dir, broken_extract, must_not_check))
     assert body["status"] == "failed" and body["error"] == "verify failed: RuntimeError", body
 
-    def verifier_crashes(*_):
+    def checker_crashes(*_):
         raise RuntimeError("Node.js is required")
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        body = _run_verify_job(_native_verify_app(
-            temp_dir, lambda *_: pack(b"msg", proof_bytes), verifier_crashes,
-        ))
+        body = _run_verify_job(_native_verify_app(temp_dir, lambda *_: good, checker_crashes))
     assert body["status"] == "failed", body
     assert "result" not in body
+
+    with tempfile.TemporaryDirectory() as temp_dir:  # No registry configured: a deployment fault.
+        body = _run_verify_job(_native_verify_app(temp_dir, lambda *_: good, None))
+    assert body["status"] == "failed", body
 
 
 def t_native_verify_job_with_real_groth16_proof():
     circuits = Path(__file__).resolve().parents[2] / "circuits"
-    if shutil.which("node") is None or not (circuits / "build" / "verification_key.json").is_file():
-        SKIP("native_verify_job_with_real_groth16_proof", "node or circuits/build missing")
-    key, message = bytes(range(32)), b"real-groth16-verify-job"
-    bridge = ZKSnarkBridge(str(circuits))
-    proof, _public = bridge.generate_proof_for_payload(message, key)
-    good = pack(message, proof_to_bytes(proof))
-    forged = pack(b"real-groth16-verify-jo!", proof_to_bytes(proof))  # Same proof, other message.
+    bridge = CameraProofBridge(circuits)
+    if shutil.which("node") is None or not all(path.is_file() for path in bridge.required_files()):
+        SKIP("native_verify_job_with_real_groth16_proof", "node or camera_video keys missing (py -m src.zk_setup)")
+    camera_secrets = [new_camera_secret() for _ in range(3)]
+    registry = CameraRegistry([camera_public_key(secret) for secret in camera_secrets])
+    other_registry = CameraRegistry([camera_public_key(new_camera_secret())])
+    message = b"real-groth16-verify-job"
+    # Message-only binding: this phase has no native CLI, so no video digest.
+    good = build_payload(bridge, registry, camera_secrets[1], message, mode=MODE_MESSAGE_ONLY).payload
+    forged = good[:4] + b"real-groth16-verify-jo!" + good[4 + len(message):]  # Same proof, other message.
 
-    for blob, expected in ((good, "succeeded"), (forged, "rejected")):
+    cases = ((good, registry, False, "succeeded", None), (forged, registry, False, "rejected", "proof_invalid"),
+             (good, other_registry, False, "rejected", "proof_invalid"),
+             (good, registry, True, "rejected", "video_binding_required"))
+    for blob, trusted, require_video, expected, reason in cases:
         with tempfile.TemporaryDirectory() as temp_dir:
+            registry_path = Path(temp_dir) / "registry.json"
+            trusted.save(registry_path)
             app = create_native_app(
-                ApiSettings(api_token=TOKEN, work_dir=Path(temp_dir), circuits_dir=circuits),
+                ApiSettings(api_token=TOKEN, work_dir=Path(temp_dir), circuits_dir=circuits,
+                            camera_registry_path=registry_path, require_video_binding=require_video),
                 cli_path=sys.executable, payload_extractor=lambda *_, data=blob: data,
             )
-            body = _run_verify_job(app, key)
-        assert body["status"] == expected, body
+            body = _run_verify_job(app)
+        assert body["status"] == expected, (reason, body)
         if expected == "succeeded":
             assert base64.b64decode(body["result"]["message_b64"]) == message
+            assert body["result"]["video_bound"] is False
         else:
-            assert body["result"] == {"valid": False, "reason": "proof_invalid"}, body
+            assert body["result"] == {"valid": False, "reason": reason}, body
 
 
 def main():

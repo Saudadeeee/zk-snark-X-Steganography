@@ -94,8 +94,8 @@ class VerifyDecisionTests(unittest.TestCase):
         self.assertFalse(is_frame_not_found(1, "CAVLC stream version is invalid"))
 
     def test_malformed_payload_is_rejected_before_groth16(self) -> None:
-        for payload_hex in (b"zz", b"00000005abcd"):
-            result = verify_zk_payload(None, payload_hex, KEY)  # type: ignore[arg-type]
+        for payload_hex in (b"zz", b"00000005abcd", b"0100000" + b"5" + b"ab" * 10):
+            result = verify_zk_payload(None, payload_hex, None)
             self.assertFalse(result["verified"])
             self.assertEqual(result["reason"], "malformed_proof_payload")
 

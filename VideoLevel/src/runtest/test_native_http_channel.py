@@ -24,10 +24,14 @@ from starlette.websockets import WebSocketDisconnect
 
 from src.api.app import TERMINAL_JOB_STATUSES, ApiSettings
 from src.api.native_handlers import create_native_app
-from src.runtest._helpers import run_test, section, summarise
+from src.camera_proof import build_payload
+from src.camera_registry import CameraRegistry, camera_public_key, new_camera_secret
+from src.runtest._helpers import SKIP, run_test, section, summarise
+from src.zk_proof import CameraProofBridge
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "data" / "encoded" / "foreman_cif_q18_g1_300f.h264"
+OTHER_FIXTURE = ROOT / "data" / "encoded" / "foreman_cif_q22_g1.h264"
 DEFAULT_CLI = ROOT / "native" / "build" / "Release" / "zkstego_blind_bits.exe"
 
 
@@ -163,6 +167,65 @@ def t_native_http_embed_blind_extract_wrong_key_and_strict_decode():
             assert overlong_key.returncode != 0
             assert b"usage" not in overlong_key.stderr.lower(), overlong_key.stderr
             assert not (Path(temp_dir) / "overlong-key.h264").exists()
+
+
+def _embed_job(client: TestClient, headers: dict, cover: bytes, payload: bytes, key: bytes) -> bytes:
+    embedded = client.post(
+        "/api/v1/jobs/embed", headers=headers,
+        data={"message_b64": base64.b64encode(payload).decode("ascii"), "secret_key_b64": base64.b64encode(key).decode("ascii")},
+        files={"video": ("cover.h264", cover, "video/h264")},
+    )
+    assert embedded.status_code == 202, embedded.text
+    job = _wait_terminal(client, embedded.json()["job_id"], headers)
+    assert job["status"] == "succeeded", job
+    artifact = client.get(f"/api/v1/jobs/{job['job_id']}/artifact", headers=headers)
+    assert artifact.status_code == 200, artifact.text
+    return artifact.content
+
+
+def _verify_job(client: TestClient, headers: dict, stego: bytes, key: bytes) -> dict:
+    response = client.post(
+        "/api/v1/jobs/verify", headers=headers,
+        data={"secret_key_b64": base64.b64encode(key).decode("ascii"), "maximum_payload_bytes": "512"},
+        files={"stego_video": ("stego.h264", stego, "video/h264")},
+    )
+    assert response.status_code == 202, response.text
+    return _wait_terminal(client, response.json()["job_id"], headers)
+
+
+def t_native_verify_job_accepts_video_bound_camera_proof_and_rejects_replay():
+    cli = Path(os.environ.get("ZK_STEGO_NATIVE_CLI", DEFAULT_CLI))
+    bridge = CameraProofBridge(ROOT / "circuits")
+    if not all(path.is_file() for path in bridge.required_files()):
+        SKIP("native_verify_job_accepts_video_bound_camera_proof", "camera_video keys missing (py -m src.zk_setup)")
+    camera_secrets = [new_camera_secret() for _ in range(3)]
+    registry = CameraRegistry([camera_public_key(secret) for secret in camera_secrets])
+    key, message = bytes(range(32)), b"camera-1 recorded this video"
+    signed = build_payload(bridge, registry, camera_secrets[1], message, native_cli=cli, cover=FIXTURE, stego_key=key)
+    token = "integration-test-token-0123456789abcdef"
+    headers = {"Authorization": f"Bearer {token}"}
+    with tempfile.TemporaryDirectory() as temp_dir:
+        registry_path = Path(temp_dir) / "registry.json"
+        registry.save(registry_path)
+        app = create_native_app(
+            ApiSettings(api_token=token, work_dir=Path(temp_dir), max_workers=1, max_queued_jobs=1,
+                        circuits_dir=ROOT / "circuits", camera_registry_path=registry_path),
+            cli_path=cli,
+        )
+        with TestClient(app) as client:
+            stego = _embed_job(client, headers, FIXTURE.read_bytes(), signed.payload, key)
+            accepted = _verify_job(client, headers, stego, key)
+            assert accepted["status"] == "succeeded", accepted
+            assert accepted["result"]["video_bound"] is True, accepted
+            assert base64.b64decode(accepted["result"]["message_b64"]) == message
+            # The same payload replayed into another video no longer verifies.
+            replayed = _embed_job(client, headers, OTHER_FIXTURE.read_bytes(), signed.payload, key)
+            rejected = _verify_job(client, headers, replayed, key)
+            assert rejected["status"] == "rejected", rejected
+            assert rejected["result"] == {"valid": False, "reason": "proof_invalid"}, rejected
+            # Cutting the stego after the payload changes the digest too.
+            truncated = _verify_job(client, headers, stego[: len(stego) * 3 // 4], key)
+            assert truncated["status"] == "rejected" and truncated["result"]["reason"] == "proof_invalid", truncated
 
 
 def t_native_incremental_stdin_stdout_stream_round_trip():
@@ -669,6 +732,8 @@ def main():
     section("Native CAVLC channel fixture E2E")
     results = [
         run_test("native_http_embed_blind_extract_wrong_key_and_strict_decode", t_native_http_embed_blind_extract_wrong_key_and_strict_decode),
+        run_test("native_verify_job_accepts_video_bound_camera_proof_and_rejects_replay",
+                 t_native_verify_job_accepts_video_bound_camera_proof_and_rejects_replay),
         run_test("native_incremental_stdin_stdout_stream_round_trip", t_native_incremental_stdin_stdout_stream_round_trip),
         run_test("native_full_stream_capacity_scan", t_native_full_stream_capacity_scan),
         run_test("native_authenticated_websocket_live_round_trip", t_native_authenticated_websocket_live_round_trip),

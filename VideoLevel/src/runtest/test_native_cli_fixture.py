@@ -5,6 +5,9 @@
 2. The Python ``segment_schedule`` reproduces the native encoder exactly from
    ``zkstego_inspect --segments``: every placed stego sign equals
    ``frame_bit XOR keystream_bit`` and every other candidate sign is unchanged.
+3. ``zkstego_blind_bits video-digest`` equals the Python reference
+   (``src/video_binding.py``), is the same for the cover and the stego video,
+   and changes with its parameters and with any other video.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ from src.native_blind_contract import (
     whitening_keystream_bits,
 )
 from src.runtest._helpers import SKIP, run_test, section, summarise
+from src.video_binding import native_video_digest, video_digest
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -182,11 +186,38 @@ def t_python_segment_schedule_matches_native_encoder() -> None:
     )
 
 
+def t_video_digest_matches_reference_and_survives_embedding() -> None:
+    cli, inspect = _tool("ZK_STEGO_NATIVE_CLI", DEFAULT_CLI), _tool("ZK_STEGO_NATIVE_INSPECT", DEFAULT_INSPECT)
+    if not cli.is_file() or not inspect.is_file() or not FIXTURE.is_file():
+        SKIP("video_digest_matches_reference", "native tools or fixture missing")
+    frame_bits = len(bytes_to_bits(pack_frame(PAYLOAD)))
+    segments = json.loads(subprocess.run([str(inspect), str(FIXTURE), "--segments", str(MAX_BITS_PER_IDR)],
+                                         capture_output=True, check=True, timeout=300).stdout)
+    native = native_video_digest(cli, FIXTURE, SECRET_KEY, frame_bits, MAX_BITS_PER_IDR)
+    assert native == video_digest(FIXTURE.read_bytes(), segments, SECRET_KEY, frame_bits, MAX_BITS_PER_IDR)
+    assert native != native_video_digest(cli, FIXTURE, SECRET_KEY, frame_bits + 8, MAX_BITS_PER_IDR)
+    assert native != native_video_digest(cli, FIXTURE, SECRET_KEY, frame_bits, MAX_BITS_PER_IDR // 2)
+    assert native != native_video_digest(cli, FIXTURE, WRONG_KEY, frame_bits, MAX_BITS_PER_IDR)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        stego = Path(temp_dir) / "stego.h264"
+        _embed(cli, FIXTURE, stego)
+        assert native_video_digest(cli, stego, SECRET_KEY, frame_bits, MAX_BITS_PER_IDR) == native, \
+            "embedding changed the digest"
+        data = stego.read_bytes()
+        truncated = Path(temp_dir) / "truncated.h264"
+        truncated.write_bytes(data[: len(data) * 3 // 4])
+        assert native_video_digest(cli, truncated, SECRET_KEY, frame_bits, MAX_BITS_PER_IDR) != native, \
+            "truncation kept the digest"
+    print(f"VIDEO_DIGEST frame_bits={frame_bits} digest={native.hex()[:16]}... cover==stego")
+
+
 def main() -> None:
     section("Native keyed CAVLC segment protocol fixture E2E")
     results = [
         run_test("native_cli_stream_fixture_e2e", t_native_cli_stream_embed_extract_and_strict_decode),
         run_test("python_segment_schedule_matches_native", t_python_segment_schedule_matches_native_encoder),
+        run_test("video_digest_matches_reference_and_survives_embedding",
+                 t_video_digest_matches_reference_and_survives_embedding),
     ]
     sys.exit(summarise(results, "Native CLI fixture E2E"))
 

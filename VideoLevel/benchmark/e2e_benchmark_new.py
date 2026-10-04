@@ -29,6 +29,7 @@ from benchmark.media_benchmark_new import (
     MESSAGE,
     PER_IDR_MAX_BITS,
     QP,
+    CameraContext,
     _encode_args,
     _inspect_binary,
     _native_binary,
@@ -37,6 +38,7 @@ from benchmark.media_benchmark_new import (
     _run_measured,
     _sha256_file,
     _tool,
+    camera_context,
     extract_payload,
     inspect_segments,
     is_frame_not_found,
@@ -45,8 +47,8 @@ from benchmark.media_benchmark_new import (
     verify_zk_payload,
 )
 from src.native_blind_contract import FRAME_VERSION, segment_schedule
-from src.zk_proof import PROOF_SIZE_BYTES, ZKSnarkBridge, pack, proof_to_bytes
-
+from src.video_binding import MODE_VIDEO
+from src.zk_proof import PAYLOAD_HEADER_BYTES, PROOF_SIZE_BYTES, pack_payload
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "benchmark" / "results"
@@ -104,14 +106,14 @@ def collect_environment() -> dict[str, Any]:
 
 # ------------------------------------------------------------ verify decision
 
-def verify_decision(native: Path, bridge: ZKSnarkBridge, stego: Path, key: bytes) -> dict[str, Any]:
+def verify_decision(native: Path, ctx: CameraContext, stego: Path, key: bytes) -> dict[str, Any]:
     """Same outcome classes as the HTTP verify job: accepted or the rejection reason."""
     code, payload_hex, stderr, extract_ms = extract_payload(native, stego, key)
     if code != 0:
         reason = "payload_not_found" if is_frame_not_found(code, stderr) else "stream_rejected_by_parser"
         return {"outcome": "rejected", "reason": reason, "extract_ms": extract_ms,
                 "detail": stderr.strip().splitlines()[-1][:200] if stderr.strip() else f"exit {code}"}
-    verification = verify_zk_payload(bridge, payload_hex, key)
+    verification = verify_zk_payload(ctx, payload_hex, stego, key)
     if not verification["verified"]:
         return {"outcome": "rejected", "reason": verification["reason"], "extract_ms": extract_ms,
                 "detail": "payload frame found, but the Groth16 check failed"}
@@ -198,11 +200,11 @@ def _stats(values: list[float]) -> dict[str, float | None]:
 
 # ------------------------------------------------------------------- trials
 
-def _trial(index: int, native: Path, inspect: Path, bridge: ZKSnarkBridge, cover: Path,
+def _trial(index: int, native: Path, inspect: Path, ctx: CameraContext, cover: Path,
            work: Path, cover_segments: dict[str, Any]) -> dict[str, Any]:
     key = os.urandom(32)
     message = f"{MESSAGE.decode('utf-8')} #{index + 1}".encode("utf-8")
-    zk = make_zk_payload(bridge, message, key)
+    zk = make_zk_payload(ctx, message, cover, key)
     stego = work / f"trial_{index + 1}.h264"
     embed = _embed(native, cover, stego, key, zk["payload"])
     started = time.perf_counter()
@@ -210,22 +212,24 @@ def _trial(index: int, native: Path, inspect: Path, bridge: ZKSnarkBridge, cover
     strict_ms = (time.perf_counter() - started) * 1000.0
     code, payload_hex, stderr, extract_ms = extract_payload(native, stego, key)
     extracted = code == 0 and payload_hex.decode("ascii", errors="ignore") == zk["payload"].hex()
-    verification = (verify_zk_payload(bridge, payload_hex, key) if extracted
-                    else {"verified": False, "verify_ms": None, "message": None})
+    verification = (verify_zk_payload(ctx, payload_hex, stego, key) if extracted
+                    else {"verified": False, "verify_ms": None, "message": None, "video_bound": False})
     signs = sign_statistics(cover_segments, inspect_segments(inspect, stego), key, zk["frame_bits"])
-    stages = {"prove_ms": zk["prove_ms"], "embed_ms": embed["wall_ms"], "strict_decode_ms": strict_ms,
-              "extract_ms": extract_ms, "groth16_verify_ms": verification["verify_ms"]}
+    stages = {"video_digest_ms": zk["digest_ms"], "prove_ms": zk["prove_ms"], "embed_ms": embed["wall_ms"],
+              "strict_decode_ms": strict_ms, "extract_ms": extract_ms, "groth16_verify_ms": verification["verify_ms"]}
     return {
         "trial": index + 1, "message_bytes": len(message), "payload_bytes": len(zk["payload"]),
         "frame_bits": zk["frame_bits"], "stages": stages,
-        "sender_total_ms": zk["prove_ms"] + embed["wall_ms"],
+        "sender_total_ms": zk["digest_ms"] + zk["prove_ms"] + embed["wall_ms"],
         "receiver_total_ms": extract_ms + (verification["verify_ms"] or 0.0),
         "embed_peak_rss_mb": embed["peak_rss_bytes_sampled"] / 1e6,
         "embed_cpu_seconds": embed["cpu_seconds_sampled"],
         "stego_bytes": stego.stat().st_size, "strict_decode_ok": decoded,
-        "extracted": extracted, "groth16_verified": bool(verification["verified"] and verification["message"] == message),
+        "extracted": extracted, "video_bound": bool(verification["video_bound"]),
+        "groth16_verified": bool(verification["verified"] and verification["message"] == message),
         "sign_statistics": signs,
-        "passed": bool(decoded and extracted and verification["verified"] and signs["changed_outside_schedule"] == 0),
+        "passed": bool(decoded and extracted and verification["verified"] and verification["video_bound"]
+                       and signs["changed_outside_schedule"] == 0),
         "error": None if extracted else stderr[-300:],
     }
 
@@ -240,9 +244,9 @@ def _attack(name: str, description: str, expected: str, stream: Path | None,
             "stream_bytes": stream.stat().st_size if stream and stream.exists() else None}
 
 
-def run_attack_matrix(native: Path, inspect: Path, bridge: ZKSnarkBridge, cover: Path, work: Path) -> list[dict[str, Any]]:
+def run_attack_matrix(native: Path, inspect: Path, ctx: CameraContext, cover: Path, work: Path) -> list[dict[str, Any]]:
     key, other_key = os.urandom(32), os.urandom(32)
-    zk = make_zk_payload(bridge, MESSAGE, key)
+    zk = make_zk_payload(ctx, MESSAGE, cover, key)
     stego = work / "attack_base.h264"
     _embed(native, cover, stego, key, zk["payload"])
     data = stego.read_bytes()
@@ -252,41 +256,49 @@ def run_attack_matrix(native: Path, inspect: Path, bridge: ZKSnarkBridge, cover:
     nals = _nal_table(inspect, stego)
     rows: list[dict[str, Any]] = []
 
-    def case(name: str, description: str, expected: str, path: Path) -> None:
+    def case(name: str, description: str, expected: str, path: Path, *, known_limitation: bool = False) -> None:
         rows.append(_attack(name, description, expected, path,
-                            verify_decision(native, bridge, path, key), _strict_decode_ok(path)))
+                            verify_decision(native, ctx, path, key), _strict_decode_ok(path)))
+        if known_limitation:
+            rows[-1]["known_limitation"] = True
 
-    case("baseline", "Stego gốc, đúng khóa", "accepted", stego)
+    def flipped_copy(name: str, item: dict[str, Any]) -> Path:
+        path = work / f"attack_{name}.h264"
+        path.write_bytes(flip_sign_bit(data, nals, item["nal_index"], item["rbsp_bit_offset"]))
+        if _sign_at(inspect, path, item["nal_index"], item["rbsp_bit_offset"]) == item["bit"]:
+            raise RuntimeError(f"{name}: the sign flip did not land on its candidate")
+        return path
 
-    decision = verify_decision(native, bridge, stego, other_key)
-    rows.append(_attack("wrong_key", "Stego gốc, khóa sai (32 byte ngẫu nhiên)", "rejected", stego, decision, True))
+    case("baseline", "Stego gốc, đúng khóa, đúng sổ đăng ký", "accepted", stego)
+
+    decision = verify_decision(native, ctx, stego, other_key)
+    rows.append(_attack("wrong_key", "Stego gốc, khóa giấu tin sai", "rejected", stego, decision, True))
 
     target = placements[len(placements) // 2].candidate
-    flipped = work / "attack_flip_scheduled.h264"
-    flipped.write_bytes(flip_sign_bit(data, nals, target.nal_index, target.rbsp_bit_offset))
-    if _sign_at(inspect, flipped, target.nal_index, target.rbsp_bit_offset) == target.bit:
-        raise RuntimeError("scheduled sign flip did not land on the candidate")
-    case("flip_scheduled_sign", "Lật 1 bit dấu nằm trong lịch nhúng (giữa khung)", "rejected", flipped)
+    case("flip_scheduled_sign", "Lật 1 bit dấu nằm trong lịch nhúng (giữa khung)", "rejected",
+         flipped_copy("flip_scheduled", {"nal_index": target.nal_index, "rbsp_bit_offset": target.rbsp_bit_offset,
+                                         "bit": target.bit}))
 
-    outside = next(item for segment in segments["segments"] for item in segment["candidates"]
-                   if (item["nal_index"], item["rbsp_bit_offset"]) not in scheduled)
-    untouched = work / "attack_flip_unscheduled.h264"
-    untouched.write_bytes(flip_sign_bit(data, nals, outside["nal_index"], outside["rbsp_bit_offset"]))
-    if _sign_at(inspect, untouched, outside["nal_index"], outside["rbsp_bit_offset"]) == outside["bit"]:
-        raise RuntimeError("unscheduled sign flip did not land on the candidate")
-    case("flip_unscheduled_sign", "Lật 1 bit dấu KHÔNG nằm trong lịch", "accepted", untouched)
+    carrier_nals = {p.candidate.nal_index for p in placements}
+    inside = next(item for segment in segments["segments"] for item in segment["candidates"]
+                  if item["nal_index"] in carrier_nals and (item["nal_index"], item["rbsp_bit_offset"]) not in scheduled)
+    case("flip_unscheduled_carrier_sign", "Lật 1 bit dấu ứng viên ngoài lịch, ngay trong IDR mang khung",
+         "rejected", flipped_copy("flip_unscheduled", inside))
+
+    later = segments["segments"][-1]["candidates"][0]
+    case("flip_later_frame_sign", "Lật 1 bit dấu ở IDR cuối (ngoài vùng nhúng)", "rejected",
+         flipped_copy("flip_later_frame", later))
 
     first_idr = min(p.candidate.nal_index for p in placements)
     idr = nals[first_idr]
-    end = idr["offset"] + idr["start_code_bytes"] + 1 + idr["ebsp_bytes"]
+    end_offset = idr["offset"] + idr["start_code_bytes"] + 1 + idr["ebsp_bytes"]
     dropped = work / "attack_drop_first_idr.h264"
-    dropped.write_bytes(data[:idr["offset"]] + data[end:])
+    dropped.write_bytes(data[:idr["offset"]] + data[end_offset:])
     case("drop_first_idr", "Xóa IDR mang bit đầu tiên của khung", "rejected", dropped)
 
     truncated = work / "attack_truncate_half.h264"
     truncated.write_bytes(data[: len(data) // 2])
-    case("truncate_half", "Cắt còn 50% đầu stream", "accepted" if _fits_in_first_half(placements, nals, len(data)) else "rejected",
-         truncated)
+    case("truncate_half", "Cắt còn 50% đầu stream (payload vẫn nguyên)", "rejected", truncated)
 
     transcoded = work / "attack_transcode.h264"
     meta = _probe(stego)
@@ -300,58 +312,44 @@ def run_attack_matrix(native: Path, inspect: Path, bridge: ZKSnarkBridge, cover:
 
     swapped = work / "attack_message_swap.h264"
     other_message = "attacker-chosen message, proof reused".encode("utf-8")
-    _embed(native, cover, swapped, key, pack(other_message, proof_to_bytes(_proof_only(bridge, MESSAGE, key))))
-    case("message_swap", "Người có khóa thay message, giữ proof cũ", "rejected", swapped)
+    _embed(native, cover, swapped, key, pack_payload(MODE_VIDEO, other_message, zk["payload"][-PROOF_SIZE_BYTES:]))
+    case("message_swap", "Người có khóa giấu tin thay message, giữ proof cũ", "rejected", swapped)
 
-    foreign = work / "attack_foreign_secret_proof.h264"
-    _embed(native, cover, foreign, key, pack(MESSAGE, proof_to_bytes(_proof_only(bridge, MESSAGE, other_key))))
-    case("foreign_secret_proof", "Proof tạo bằng secret khác, nhúng bằng khóa đúng", "rejected", foreign)
+    outsider = camera_context(native)  # its own registry: not the root the verifier trusts
+    foreign = work / "attack_unregistered_camera.h264"
+    _embed(native, cover, foreign, key, make_zk_payload(outsider, MESSAGE, cover, key)["payload"])
+    case("unregistered_camera", "Camera ngoài sổ đăng ký tin cậy tự tạo proof hợp lệ với cây của nó", "rejected", foreign)
 
     if REPLAY_SOURCE.is_file():
         other_cover, _meta = _cover(work, REPLAY_SOURCE)
-        code, payload_hex, stderr, _ms = extract_payload(native, stego, key)
-        if code:
-            raise RuntimeError(f"replay extraction failed: {stderr[-300:]}")
         replayed = work / "attack_replay_other_video.h264"
-        _embed(native, other_cover, replayed, key, bytes.fromhex(payload_hex.decode("ascii")))
-        case("replay_other_video", f"Giới hạn đã biết: chép payload sang video khác ({REPLAY_SOURCE.name}) cùng khóa",
-             "accepted", replayed)
-        rows[-1]["known_limitation"] = True
+        _embed(native, other_cover, replayed, key, zk["payload"])
+        case("replay_other_video", f"Chép payload sang video khác ({REPLAY_SOURCE.name}) cùng khóa", "rejected", replayed)
     return rows
-
-
-def _proof_only(bridge: ZKSnarkBridge, message: bytes, key: bytes) -> dict[str, Any]:
-    proof, _public = bridge.generate_proof_for_payload(message, key)
-    return proof
-
-
-def _fits_in_first_half(placements: list[Any], nals: dict[int, dict[str, Any]], size: int) -> bool:
-    last = nals[max(p.candidate.nal_index for p in placements)]
-    return last["offset"] + last["start_code_bytes"] + 1 + last["ebsp_bytes"] <= size // 2
 
 
 # --------------------------------------------------------------------- main
 
 def run_e2e_benchmark(output_root: Path = RESULTS, trials: int = 5) -> dict[str, Any]:
     native, inspect = _native_binary(), _inspect_binary()
-    bridge = ZKSnarkBridge(str(ROOT / "circuits"))
+    ctx = camera_context(native)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:6]
     work = Path(tempfile.mkdtemp(prefix="zkstego_e2e_"))
     try:
         cover, cover_meta = _cover(work)
         cover_segments = inspect_segments(inspect, cover)
-        trial_rows = [_trial(index, native, inspect, bridge, cover, work, cover_segments) for index in range(trials)]
+        trial_rows = [_trial(index, native, inspect, ctx, cover, work, cover_segments) for index in range(trials)]
         for row in trial_rows:
             print(f"[{'passed' if row['passed'] else 'failed'}] e2e trial {row['trial']}: "
                   f"prove {row['stages']['prove_ms']:.0f} ms, embed {row['stages']['embed_ms']:.0f} ms, "
                   f"extract {row['stages']['extract_ms']:.0f} ms", flush=True)
-        attacks = run_attack_matrix(native, inspect, bridge, cover, work)
+        attacks = run_attack_matrix(native, inspect, ctx, cover, work)
         for row in attacks:
             print(f"[{'ok' if row['as_expected'] else 'UNEXPECTED'}] attack {row['case']}: {row['outcome']} ({row['reason']})",
                   flush=True)
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    stage_names = ("prove_ms", "embed_ms", "strict_decode_ms", "extract_ms", "groth16_verify_ms")
+    stage_names = ("video_digest_ms", "prove_ms", "embed_ms", "strict_decode_ms", "extract_ms", "groth16_verify_ms")
     record = {
         "schema": "zkstego-e2e-benchmark-new-v1", "run_id": run_id,
         "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -363,9 +361,10 @@ def run_e2e_benchmark(output_root: Path = RESULTS, trials: int = 5) -> dict[str,
                      "capacity_bits_at_cap": cover_segments["candidate_capacity_bits"],
                      "capacity_payload_bytes_at_cap": max(0, cover_segments["candidate_capacity_bits"] // 8 - FRAME_OVERHEAD),
                      "max_message_bytes_at_cap": max(0, cover_segments["candidate_capacity_bits"] // 8 - FRAME_OVERHEAD
-                                                     - 4 - PROOF_SIZE_BYTES),
+                                                     - PAYLOAD_HEADER_BYTES - PROOF_SIZE_BYTES),
                      "frame_overhead_bytes": FRAME_OVERHEAD,
-                     "payload_layout": "[len 4B][message][Groth16 proof 129B] inside [0x03][len 2B][payload] (no MAC)"},
+                     "payload_layout": "[0x01][mode][len 2B][message][Groth16 proof 129B] inside [0x03][len 2B][payload] (no MAC)",
+                     "registry_cameras": len(ctx.registry.public_keys)},
         "trials": trial_rows,
         "stage_summary_ms": {name: _stats([row["stages"][name] for row in trial_rows if row["stages"][name] is not None])
                              for name in stage_names},
@@ -375,11 +374,12 @@ def run_e2e_benchmark(output_root: Path = RESULTS, trials: int = 5) -> dict[str,
         "summary": {"trials": len(trial_rows), "trials_passed": sum(row["passed"] for row in trial_rows),
                     "attacks": len(attacks), "attacks_as_expected": sum(row["as_expected"] for row in attacks),
                     "all_passed": all(row["passed"] for row in trial_rows) and all(row["as_expected"] for row in attacks)},
-        "methodology": ("Wall times of real calls on this host: Groth16 prove/verify include Node.js start-up; embed/extract "
-                        "are the native CLI processes; strict decode is FFmpeg -xerror. Attack outcomes use the HTTP verify "
-                        "job decision (payload_not_found / malformed_proof_payload / proof_invalid / accepted). "
-                        "Stream-level edits keep the file otherwise byte-identical; a scheduled-sign flip is checked to land "
-                        "on its candidate before it is evaluated."),
+        "methodology": ("Wall times of real calls on this host. Sender: native video digest of the cover, Groth16 prove "
+                        "(Node.js start-up included), native embed. Receiver: native extract, then the verify decision "
+                        "(native digest of the stego + Groth16 verify against the trusted registry root). Attack outcomes use "
+                        "the HTTP verify-job decision (payload_not_found / malformed_proof_payload / proof_invalid / accepted). "
+                        "Stream edits keep the file otherwise byte-identical; every sign flip is checked to land on its "
+                        "candidate before it is evaluated."),
     }
     output_root.mkdir(parents=True, exist_ok=True)
     (output_root / "e2e_new.json").write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")

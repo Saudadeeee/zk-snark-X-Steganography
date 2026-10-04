@@ -1,6 +1,5 @@
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
-const { createHash } = require("node:crypto");
 const { existsSync, mkdtempSync, readFileSync, rmSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
@@ -8,7 +7,7 @@ const test = require("node:test");
 
 const circuitsDir = join(__dirname, "..");
 const circuits = [
-  "payload_verify.circom",
+  "camera_video.circom",
   "fingerprint_verify.circom",
   "detector_receipt.circom",
 ];
@@ -29,22 +28,20 @@ async function witnessCalculator(name) {
   return builder(readFileSync(join(jsDir, `${name}.wasm`)));
 }
 
-function bytesToBits(bytes) {
-  const bits = [];
-  for (const byte of bytes) {
-    for (let i = 7; i >= 0; i--) bits.push(String((byte >> i) & 1));
-  }
-  return bits;
-}
+// Fixed vector shared with src/runtest/test_zk_proof.py: camera secret 1 opened
+// along 16 levels whose siblings are 0 and whose path indices are 0, i.e.
+// ROOT = Poseidon(...Poseidon(Poseidon(1), 0)..., 0), computed by src/poseidon.py.
+const DEPTH = 16;
+const ROOT = "13540250208624962443651359021534662279818360331845733678151493660599986427279";
 
-function payloadInput(payload, secret) {
-  const payloadHash = createHash("sha256").update(payload).digest();
-  const commitment = createHash("sha256").update(Buffer.concat([payloadHash, secret])).digest();
+function cameraInput() {
   return {
-    payload_hash: bytesToBits(payloadHash),
-    commitment: bytesToBits(commitment),
-    payload_length: String(payload.length),
-    secret: bytesToBits(secret),
+    secret: "1",
+    siblings: Array(DEPTH).fill("0"),
+    pathIndices: Array(DEPTH).fill("0"),
+    root: ROOT,
+    bindingHi: "123",
+    bindingLo: "456",
   };
 }
 
@@ -62,26 +59,23 @@ test("all committed Circom circuits compile", () => {
   }
 });
 
-test("payload_verify accepts an honest witness", async () => {
-  const wc = await witnessCalculator("payload_verify");
-  const input = payloadInput(Buffer.from("hello zk stego"), Buffer.alloc(32, 7));
-  const witness = await wc.calculateWitness(input, true);
+test("camera_video accepts the camera that opens the registry path", async () => {
+  const wc = await witnessCalculator("camera_video");
+  const witness = await wc.calculateWitness(cameraInput(), true);
   assert.equal(witness[0], 1n);
 });
 
-test("payload_verify rejects non-boolean secret bits", async () => {
-  const wc = await witnessCalculator("payload_verify");
-  const input = payloadInput(Buffer.from("hello zk stego"), Buffer.alloc(32, 7));
-  input.secret[0] = "2";
-  const line = sourceLine("payload_verify.circom", "secret[i] * (secret[i] - 1) === 0");
+test("camera_video rejects another camera secret", async () => {
+  const wc = await witnessCalculator("camera_video");
+  const input = { ...cameraInput(), secret: "2" };
+  const line = sourceLine("camera_video.circom", "membership.root === root;");
   await assert.rejects(wc.calculateWitness(input, true), new RegExp(`Assert Failed[\\s\\S]*line: ${line}\\b`));
 });
 
-test("payload_verify rejects non-boolean payload_hash bits", async () => {
-  const wc = await witnessCalculator("payload_verify");
-  const input = payloadInput(Buffer.from("hello zk stego"), Buffer.alloc(32, 7));
-  input.payload_hash[5] = "3";
-  const line = sourceLine("payload_verify.circom", "payload_hash[i] * (payload_hash[i] - 1) === 0");
+test("camera_video rejects a non-boolean path index", async () => {
+  const wc = await witnessCalculator("camera_video");
+  const input = { ...cameraInput(), pathIndices: ["2", ...Array(DEPTH - 1).fill("0")] };
+  const line = sourceLine("camera_video.circom", "pathIndices[i] * (pathIndices[i] - 1) === 0;");
   await assert.rejects(wc.calculateWitness(input, true), new RegExp(`Assert Failed[\\s\\S]*line: ${line}\\b`));
 });
 

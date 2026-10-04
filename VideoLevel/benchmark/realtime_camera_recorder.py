@@ -26,7 +26,7 @@ REQUIRED_TRUE_FIELDS = (
     "correct_key_payload_match",
     "wrong_key_rejected",
     "groth16_proof_verified",
-    "groth16_wrong_key_rejected",
+    "groth16_other_registry_rejected",
     "groth16_changed_message_rejected",
     "first_output_before_camera_eof",
 )

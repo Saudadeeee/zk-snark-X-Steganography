@@ -16,53 +16,68 @@
 \newcommand{\HMAC}{\mathsf{HMAC}}
 \newcommand{\Expand}{\mathsf{HKDF\text{-}Expand}}
 \newcommand{\SHA}{\mathsf{SHA256}}
+\newcommand{\Pos}{\mathsf{Poseidon}}
 \newcommand{\id}{\mathsf{id}}
 \newcommand{\cat}{\parallel}
 \title{Theoretical Foundation of ZK-SNARK Video Steganography}
 \author{VideoLevel technical design note}
-\date{19 September 2026 (revised 3 October 2026)}
+\date{19 September 2026 (revised 5 October 2026)}
 \begin{document}
 \maketitle
 \begin{abstract}
 This design note formalizes the construction currently implemented by
 VideoLevel. A message $m$ and a compressed Groth16 proof $\pi$ are packed into a
-payload, wrapped in an HMAC-authenticated frame, whitened with an HMAC
-keystream and written into the first trailing-one sign bit of selected CAVLC
-residual blocks of H.264 IDR slices. Positions are chosen by a keyed
-pseudorandom schedule, so extraction is blind: it needs neither the cover video
-nor a sidecar. The note states each security property together with the
-assumption it rests on, and lists the properties the construction does not
-provide.
+payload, wrapped in a plain length-prefixed frame (channel protocol~v3, no MAC),
+whitened with an HMAC keystream and written into the first trailing-one sign bit
+of selected CAVLC residual blocks of H.264 IDR slices. Positions are chosen by a
+keyed pseudorandom schedule, so extraction is blind: it needs neither the cover
+video nor a sidecar. The proof states that \emph{a camera registered under a
+public Poseidon Merkle root vouches for exactly this video and this message}; the
+verifier needs the root, the verification key and the stego key, but no camera
+secret, and does not learn which camera produced the proof. The note states each
+security property together with the assumption it rests on, and lists the
+properties the construction does not provide.
 \end{abstract}
 
-\paragraph{Update 03/10/2026.}
-This revision replaces the earlier description. The key schedule is now
-protocol~v2 (HKDF-separated subkeys, per-segment HMAC ordering, frame
-whitening); the circuit constrains every hash and secret signal to be boolean;
-verification is blind extraction followed by mandatory Groth16 verification.
-The former Python pipeline (Python CAVLC parser, position safety filter, chaos
-maps for bit/position scrambling, \texttt{positions.json} sidecars, strict mode
-that re-parsed the original cover, and the SEC1--SEC10 benchmark suite) has been
-removed and is \emph{not} part of the system described here. In particular, no
-chaos-map theory applies to the current construction. Streams produced by
-protocol~v1 cannot be read by v2.
+\paragraph{Update 05/10/2026.}
+This revision replaces the 03/10/2026 description in two places.
+(i)~\emph{Channel protocol v3} (2026-10-04): the frame no longer carries the
+16-byte HMAC tag of protocol~v2 and the subkey $K_f$ is gone; the frame is
+authenticated only through the Groth16 proof. HKDF labels, whitening and the
+per-IDR schedule are unchanged. (ii)~\emph{Camera proof}: the former circuit
+\texttt{payload\_verify.circom} (63\,321 constraints, 513 public signals,
+statement $c=\SHA(\SHA(m)\cat K)$, so the verifier had to hold the same secret)
+has been replaced by \texttt{camera\_video.circom} (8\,737 constraints, 3 public
+inputs): registry membership of a camera key plus a binding to a digest of the
+video and to the message. The former Python pipeline (Python CAVLC parser,
+position safety filter, chaos maps, \texttt{positions.json} sidecars, strict
+mode that re-parsed the cover, the SEC1--SEC10 suite) was removed on
+2026-10-03 and is \emph{not} part of the system described here. Streams
+produced by protocol~v1 or v2 cannot be read by v3, and proofs made with the
+previous circuit keys do not verify.
 
 \section{Notation and trust boundary}
 Bytes are big-endian and bit strings are MSB-first. $\mathsf{u}k(x)$ denotes
 the $k$-bit big-endian encoding of an integer $x$, $X[a{:}b]$ the byte slice
 $a,\ldots,b-1$, and $\HMAC(k,x)$ always means HMAC-SHA256. Let $V$ be a
-Baseline-profile H.264 Annex-B elementary stream, $m$ a non-empty byte
-string, and $K\in\{0,1\}^{256}$ a 32-byte secret shared by embedder and
-receiver. Let $\beta\ge 1$ be the per-segment bit budget
-(\texttt{max\_bits\_per\_IDR}) and $L_{\max}$ the configured maximum payload
-size (4096 bytes in the native CLI; the frame format allows up to $2^{16}-1$).
-Both $\beta$ and $L_{\max}$ are public parameters that embedder and receiver
-must agree on.
+Baseline-profile H.264 Annex-B elementary stream and $m$ a non-empty byte
+string. Two unrelated secrets are involved:
+\begin{itemize}
+\item the \emph{stego key} $K\in\{0,1\}^{256}$, shared by embedder and
+verifier; it selects carrier positions and whitens the frame;
+\item the \emph{camera secret} $s\in\mathbb{F}_r$ (BN254 scalar field), held
+only by the camera; the public registry stores $\mathsf{pk}=\Pos(s)$.
+\end{itemize}
+Let $\beta\ge 1$ be the per-segment bit budget (\texttt{max\_bits\_per\_IDR},
+default 64) and $L_{\max}$ the configured maximum payload size (4096 bytes in
+the native CLI; the frame format allows up to $2^{16}-1$). Both are public
+parameters that embedder and receiver must agree on.
 
 The embedder outputs a stego stream $V'$ only; no sidecar is produced. The
-receiver holds $V'$, $K$, $\beta$, $L_{\max}$ and the Groth16 verification key
-$\mathsf{vk}$. The secret $K$ and message $m$ must never be written to job
-status records, logs or benchmark artifacts.
+verifier holds $V'$, $K$, $\beta$, $L_{\max}$, the Groth16 verification key
+$\mathsf{vk}$ and a trusted registry root $\rho$; it never holds $s$. Neither
+$K$, $s$ nor $m$ may be written to job status records, logs or benchmark
+artifacts.
 
 \section{Carrier: trailing-one sign bits}
 CAVLC codes each $4\times4$ (or DC) residual block as the syntax element
@@ -92,8 +107,8 @@ leaves $\mathrm{TotalCoeff}$, $\mathrm{TrailingOnes}$, every codeword length
 and every $nC$ value unchanged. Hence the RBSP length, all RBSP bit offsets,
 the parse of every later syntax element, and $C(\sigma)$ itself are identical
 in cover and stego. (Emulation-prevention bytes are re-inserted when RBSP is
-converted back to EBSP, so EBSP byte offsets may shift; identities use RBSP
-offsets.)
+converted back to EBSP, so EBSP byte offsets may shift; identities and the
+video digest use RBSP.)
 \end{property}
 
 Property~\ref{prop:flip} follows from the CAVLC syntax and is checked
@@ -104,16 +119,18 @@ propagated through intra prediction and deblocking); imperceptibility is an
 empirical property measured by decoded PSNR/SSIM, not a theorem. Only IDR
 slices carry bits; non-IDR NAL units are copied unchanged.
 
-\section{Key schedule (protocol v2)}
+\section{Key schedule (protocol v3)}
 \begin{definition}[Subkeys]
 With HKDF-SHA256 (RFC~5869),
 \begin{align*}
 \mathrm{PRK} &= \HMAC(\texttt{"zkstego-cavlc-v2-salt"},\,K),\\
 K_s &= \Expand(\mathrm{PRK},\texttt{"zkstego/cavlc/v2/schedule"},32),\\
-K_f &= \Expand(\mathrm{PRK},\texttt{"zkstego/cavlc/v2/frame-tag"},32),\\
 K_w &= \Expand(\mathrm{PRK},\texttt{"zkstego/cavlc/v2/whitening"},32).
 \end{align*}
 \end{definition}
+The labels keep the \texttt{v2} string of the previous protocol, so schedule
+and whitening are bit-identical to v2; only the frame changed. HMAC serves
+here purely as a keyed pseudorandom function, not as an authenticator.
 
 \begin{definition}[Segment schedule]
 Let $V'$ be split into segments $\sigma_0,\sigma_1,\ldots$, one per IDR NAL,
@@ -134,14 +151,14 @@ $\sum_j q_j<|F|$, where $|F|$ is the frame length in bits.
 The identity contains no sign value and $C(\sigma_j)$ is sign-invariant
 (Property~\ref{prop:flip}), so a receiver with $K$ and $\beta$ reproduces
 $p_0,p_1,\ldots$ exactly from $V'$. A mismatched $\beta$ yields a different
-schedule and extraction fails.
+schedule and extraction fails. We write
+$\Gamma(V,K,\beta,|F|)=\{p_0,\ldots,p_{|F|-1}\}$ for the \emph{carrier set}.
 
-\section{Authenticated, whitened frame}\label{sec:frame}
+\section{Whitened frame}\label{sec:frame}
 \begin{definition}[Frame and embedded bits]
 For a payload $P$ with $|P|\le L_{\max}$,
 \[
-F=\texttt{0x02}\cat\mathsf{u16}(|P|)\cat P\cat
-\HMAC\bigl(K_f,\ \texttt{0x02}\cat\mathsf{u16}(|P|)\cat P\bigr)[0{:}16].
+F=\texttt{0x03}\cat\mathsf{u16}(|P|)\cat P .
 \]
 The whitening keystream is
 $S=\HMAC(K_w,\mathsf{u64}(0))\cat\HMAC(K_w,\mathsf{u64}(1))\cat\cdots$
@@ -150,70 +167,125 @@ and the embedded bit at $p_i$ is
 e_i=F_i\oplus S_i,\qquad\text{sign}(p_i)=\begin{cases}+&e_i=0\\-&e_i=1.\end{cases}
 \]
 \end{definition}
-The frame overhead is $1+2+16=19$ bytes, so $|F|=8(|P|+19)$ bits.
+The frame overhead is 3 bytes, so $|F|=8(|P|+3)$ bits. Protocol~v2 also appended the tag
+$\HMAC(K_f,\cdot)[0{:}16]$; removing it saves 128 bits (two IDRs at
+$\beta=64$) because the mandatory Groth16 check already rejects any modified
+message or proof.
 
 \paragraph{Blind extraction.}
 (1) Parse the IDR segments of $V'$ and enumerate $C(\sigma_j)$.
-(2) Derive $K_s,K_f,K_w$ and the schedule.
+(2) Derive $K_s,K_w$ and the schedule.
 (3) Read and de-whiten the first 24 bits; reject unless the version is
-\texttt{0x02} and $\mathsf{u16}$ length $\le L_{\max}$.
-(4) Read the remaining $8(|P|+16)$ bits, de-whiten, recompute the tag and
-compare in constant time; reject on mismatch or if the stream ends early.
-With a wrong key the de-whitened version byte is essentially random, so most
-wrong keys are rejected at step~(3) and the rest at step~(4).
+\texttt{0x03} and the $\mathsf{u16}$ length is $\le L_{\max}$.
+(4) Read and de-whiten the remaining $8|P|$ bits; reject if the stream ends
+early. The output $P$ is an \emph{unauthenticated candidate}: the extract
+command and the extract job return it with \texttt{"verified": false}.
+With a wrong key the de-whitened header is essentially random, so a wrong key
+passes step~(3) with probability about
+$2^{-8}\cdot(L_{\max}+1)/2^{16}\approx2.4\cdot10^{-4}$ for $L_{\max}=4096$; the
+remaining cases fail proof decompression or Groth16 verification.
 
-\section{Payload and zero-knowledge relation}
+\section{Video digest and binding}\label{sec:binding}
+\begin{definition}[Video digest]
+Let $\phi=|F|$ (known before proving, since $|P|$ depends only on $|m|$). For
+every NAL unit $u$ of $V$ in order, let $h_u$ be its header byte and $r'_u$ its
+RBSP (emulation-prevention bytes removed) in which exactly the bits at
+positions of $\Gamma(V,K,\beta,\phi)$ are cleared to $0$. Then
+\begin{align*}
+D(V)=\SHA\Bigl(&\texttt{"zkstego/video-digest/v1"}\cat\mathsf{u32}(\phi)\cat
+\mathsf{u32}(\beta)\\
+&\cat\mathop{\big\Vert}_{u}\bigl(\mathsf{u32}(1+|r'_u|)\cat h_u\cat r'_u\bigr)\Bigr).
+\end{align*}
+\end{definition}
+
+\begin{property}[Digest invariance]\label{prop:digest}
+$D(V')=D(V)$ for a stego stream $V'$ produced from cover $V$ with $K$ and
+$\beta$: embedding changes only bits in $\Gamma$, $\Gamma$ is identical for $V$
+and $V'$ (Property~\ref{prop:flip}), and EPB changes do not affect RBSP. The
+implementation (\texttt{zkstego\_blind\_bits video-digest}, reference
+\texttt{src/video\_binding.py}) checks native $=$ Python and cover $=$ stego.
+\end{property}
+
+\begin{definition}[Binding]
+For mode $\mu\in\{0,1\}$ and digest $D$ (with $D=0^{256}$ when $\mu=1$),
+\[
+b=\SHA\bigl(\texttt{"zkstego/proof-binding/v1"}\cat\mathsf{u8}(\mu)\cat D\cat
+\SHA(m)\bigr),
+\]
+split as $b_{\mathrm{hi}}=b[0{:}16]$ and $b_{\mathrm{lo}}=b[16{:}32]$, read as two 128-bit integers, which fit in $\mathbb{F}_r$ without reduction.
+Mode $0$ binds the video; mode $1$ (message only) exists for live streams,
+whose remaining frames do not exist when the proof is embedded.
+\end{definition}
+
+\section{Payload, registry and zero-knowledge relation}
 \begin{definition}[Payload]
-$P=\mathsf{u32}(|m|)\cat m\cat\pi$, where $\pi$ is a Groth16 proof over BN254
-compressed to 129 bytes (the $x$-coordinates of $A\in G_1$, $B\in G_2$ (two
-$\mathbb{F}_p$ elements), $C\in G_1$, 32 bytes each, plus one byte holding
-the three $y$-parity bits).
+$P=\texttt{0x01}\cat\mathsf{u8}(\mu)\cat\mathsf{u16}(|m|)\cat m\cat\pi$, where
+$\pi$ is a Groth16 proof over BN254 compressed to 129 bytes (the
+$x$-coordinates of $A\in G_1$, $B\in G_2$ (two $\mathbb{F}_p$ elements),
+$C\in G_1$, 32 bytes each, plus one byte holding the three $y$-parity bits).
 \end{definition}
 The length field gives an unambiguous message/proof split. With
 $L_{\max}=4096$ the largest message is $4096-4-129=3963$ bytes. Decompression
 rejects coordinates $\ge p$ and points not on the curve.
 
-\begin{definition}[Relation]
-The circuit \texttt{payload\_verify.circom} (63\,321 constraints, 513 public
-signals) defines
-\[
-\mathcal{R}=\Bigl\{\,(h,c,\ell;\,s)\ :\ c=\SHA(h\cat s),\
-h,c,s\in\{0,1\}^{256},\ 0<\ell<10^6\Bigr\},
-\]
-where the booleanity of every bit of $h$, $c$ and $s$ is enforced by
-$x(x-1)=0$ constraints. The prover uses $h=\SHA(m)$, computed \emph{outside}
-the circuit, $s=K$ and $\ell=|m|$; the public statement is $(h,c,\ell)$ and
-the witness is $s$.
+\begin{definition}[Registry]
+The registry is a binary Merkle tree of depth $16$ (at most $65\,536$ cameras)
+with nodes $\Pos(\ell,r)$, empty leaves $0$ and leaf $i$ equal to
+$\mathsf{pk}_i=\Pos(s_i)$ (\texttt{src/camera\_registry.py}; Poseidon with the
+circomlib constants, cross-checked against circomlibjs vectors and the circuit
+witness). Its root $\rho$ is public; the verifier trusts only $\rho$.
 \end{definition}
 
-The booleanity constraints are necessary for soundness: circomlib's
-\texttt{Sha256} gadget does not constrain its inputs to bits, so without them
-a prover could feed arbitrary field elements into the hash. Note that $\ell$
-is only range-checked inside the circuit; the circuit does not relate $\ell$ to
-$h$. The link between $\ell$, $h$ and $m$ is established by the verifier
-recomputing both from $m$.
+\begin{definition}[Relation]
+The circuit \texttt{camera\_video.circom} (8\,737 constraints, public inputs
+$\rho,b_{\mathrm{hi}},b_{\mathrm{lo}}$) defines
+\[
+\mathcal{R}=\Bigl\{\,(\rho,b_{\mathrm{hi}},b_{\mathrm{lo}};\,s,\mathbf{z},\mathbf{d})\ :\
+\mathsf{MerkleRoot}\bigl(\Pos(s),\mathbf{z},\mathbf{d}\bigr)=\rho,\
+d_i\in\{0,1\}\Bigr\},
+\]
+where $\mathbf{z}=(z_0,\ldots,z_{15})$ are the siblings and
+$\mathbf{d}=(d_0,\ldots,d_{15})$ the path indices; at level $i$ the running node
+and $z_i$ are ordered by $d_i$ and hashed with $\Pos(2)$.
+\end{definition}
+
+Booleanity $d_i(d_i-1)=0$ is necessary for soundness: without it the selection
+$\ell=x+d(z-x)$ could mix the two children and open non-members.
+$b_{\mathrm{hi}},b_{\mathrm{lo}}$ appear in no other constraint; they are squared
+inside the circuit so that they are explicitly part of the R1CS (as in
+Semaphore). In Groth16 every public input enters the verification equation, so a
+proof is tied to the exact triple $(\rho,b_{\mathrm{hi}},b_{\mathrm{lo}})$.
 
 \paragraph{Verification.}
-The receiver accepts $(m,\pi)$ if and only if all of the following hold:
-blind extraction returns a frame with a valid tag; $P$ unpacks into
-$\mathsf{u32}(|m|)\cat m\cat\pi$ with a valid 129-byte encoding; and
+The verifier accepts $(m,\pi)$ for a received stream $V'$ if and only if all of
+the following hold: blind extraction returns a frame; $P$ unpacks with format
+byte \texttt{0x01}, $\mu\in\{0,1\}$ and a valid 129-byte encoding; $\mu=0$
+(mode~1 is rejected unless \texttt{ZK\_STEGO\_ALLOW\_MESSAGE\_ONLY\_PROOFS=1});
+and
 \[
-\mathsf{Groth16.Verify}\bigl(\mathsf{vk},\,(h,c,\ell),\,\pi\bigr)=1
-\quad\text{with}\quad h=\SHA(m),\ c=\SHA(h\cat K),\ \ell=|m|
+\mathsf{Groth16.Verify}\bigl(\mathsf{vk},\,(\rho,b_{\mathrm{hi}},b_{\mathrm{lo}}),\,\pi\bigr)=1,
 \]
-recomputed by the receiver (public signals supplied by the sender are never
-used). The HTTP verify job reports \texttt{rejected} with reason
-\texttt{payload\_not\_authenticated}, \texttt{malformed\_proof\_payload} or
-\texttt{proof\_invalid} when the corresponding step fails.
+where $\rho$ is the trusted root and $b$ is recomputed by the verifier from
+$D(V')$ (with $\phi=8(|P|+3)$) and $m$; public signals supplied by the sender are
+never used. snarkjs must exit with code~0 and print \texttt{OK!}. The HTTP verify
+job reports \texttt{succeeded} with $m$ and \texttt{video\_bound} only in that
+case; otherwise \texttt{rejected} with reason \texttt{payload\_not\_found},
+\texttt{malformed\_proof\_payload}, \texttt{video\_binding\_required},
+\texttt{video\_digest\_unavailable} or \texttt{proof\_invalid}, and
+\texttt{failed} on infrastructure errors (no registry configured, missing key,
+Node.js unavailable).
 
 \section{Security properties}
 \begin{assumption}[Standard primitives]\label{ass:prf}
 (A1) HMAC-SHA256 is a pseudorandom function (PRF) when keyed with a uniformly
-random 32-byte key; consequently HKDF-SHA256 is a secure KDF and
-$K_s,K_f,K_w$ are computationally independent pseudorandom keys when $K$ is
-uniform. (A2) SHA-256 is collision resistant. (A3) Groth16 is
-knowledge-sound and zero-knowledge in the generic-group/algebraic model,
-\emph{provided} the setup was generated honestly and its trapdoor destroyed.
+random 32-byte key; consequently HKDF-SHA256 is a secure KDF and $K_s,K_w$ are
+computationally independent pseudorandom keys when $K$ is uniform. (A2) SHA-256
+is collision resistant. (A3) Poseidon over BN254 is collision and preimage
+resistant. (A4) Groth16 is knowledge-sound and zero-knowledge in the
+generic-group/algebraic model, and a proof for one statement cannot be turned
+into a proof for a different statement without a witness (Groth16 proofs are
+only re-randomizable for the same public inputs), \emph{provided} the setup was
+generated honestly and its trapdoor destroyed.
 \end{assumption}
 
 The following properties hold under Assumption~\ref{ass:prf}; they are
@@ -226,14 +298,6 @@ independently of the cover (by A1 applied to $K_s$, given distinct
 identities). Hence the selected positions are pseudorandom to such a party.
 \end{property}
 
-\begin{property}[Frame authenticity]
-A party without $K$ that may observe valid frames and makes at most $Q$
-verification attempts produces a new frame with a valid tag with probability
-at most $\mathrm{Adv}^{\mathrm{prf}}_{\HMAC}+Q\,2^{-128}$, since the tag is a
-128-bit truncation of a PRF output. A valid tag therefore shows that the frame
-was produced by a holder of $K$ (or of $K_f$) and was not modified.
-\end{property}
-
 \begin{property}[No fixed-header bias]
 For a single frame per key, $S$ is indistinguishable from uniform by A1 applied
 to $K_w$, so the embedded bits $e_i$ are pseudorandom even though $F$ has a
@@ -243,76 +307,122 @@ signs therefore carry no fixed header pattern.
 
 \begin{property}[Subkey separation]
 Disclosure of one subkey (e.g.\ $K_s$) reveals neither $K$ nor the other
-subkeys, by A1 applied to $\mathrm{PRK}$ and the HKDF-Expand outputs.
+subkey, by A1 applied to $\mathrm{PRK}$ and the HKDF-Expand outputs.
 \end{property}
 
-\begin{property}[What the proof shows]
-If $\mathsf{Verify}$ accepts, then by A3 the prover knew $s$ with
-$\SHA(\SHA(m)\cat s)=c=\SHA(\SHA(m)\cat K)$, and by A2 $s=K$ except with
-negligible probability. Groth16 zero-knowledge means $\pi$ reveals nothing
-about $s$ beyond this statement.
+\begin{property}[Registered source]
+If $\mathsf{Verify}$ accepts, then by A4 the prover knew $(s,\mathbf{z},\mathbf{d})$
+with $\mathsf{MerkleRoot}(\Pos(s),\mathbf{z},\mathbf{d})=\rho$, and by A3
+$\Pos(s)$ is a leaf of the trusted registry, i.e.\ the prover holds the secret of
+a registered camera. A camera outside the registry (even with a valid proof
+for its own tree) is rejected because its root differs from $\rho$.
 \end{property}
+
+\begin{property}[Video and message binding]
+Let $\pi$ verify for $(\rho,b)$ with $b$ derived from $(D(V'),m)$. For another
+stream $V''$ or message $m''$ with $D(V'')\ne D(V')$ or $m''\ne m$, the
+recomputed binding differs except with negligible probability (A2), so by A4
+$\pi$ does not verify for it and a new proof needs a registered secret. This
+covers replaying the payload into another video, truncation, dropping or
+adding frames, editing a later frame, flipping a non-carrier sign and
+re-encoding. Flipping a carrier bit leaves $D$ unchanged
+(Property~\ref{prop:digest}) but changes the extracted frame, hence $m$ or $\pi$,
+and is rejected as well.
+\end{property}
+
+\begin{property}[Camera privacy]
+By the zero-knowledge property of A4, $\pi$ reveals nothing about $s$ or the
+leaf index beyond membership in the tree with root $\rho$; the verifier does
+not learn which registered camera produced the proof, and never needs $s$.
+\end{property}
+
+These outcomes are exercised by an 11-case attack matrix (benchmark run of
+2026-10-04, all as expected): the untouched stego is accepted; wrong stego
+key, a dropped carrier IDR and a re-encode find no frame
+(\texttt{payload\_not\_found}); a flipped scheduled sign gives a malformed
+proof; a flipped non-carrier sign in a carrier IDR, a flipped sign in a later
+frame, truncation to half, a swapped message, a camera outside the registry
+and the payload replayed into another video all fail Groth16
+(\texttt{proof\_invalid}).
 
 \subsection*{Properties not provided}
 \begin{itemize}
-\item \textbf{No binding to video, segment or session.} Neither $F$ nor
-$\mathcal{R}$ contains a video hash, segment index, timestamp, nonce or camera
-identity. A payload extracted from one stream can be re-embedded into another
-stream under the same $K$ and will verify (replay).
-\item \textbf{No public verifiability.} The verifier needs $K$ both to extract
-(schedule, whitening, tag) and to recompute $c=\SHA(h\cat K)$. Anyone able to
-verify can also produce a valid proof, so in the current configuration $\pi$
-attests knowledge of the same shared secret that the HMAC tag already attests;
-it is not evidence towards third parties.
+\item \textbf{Live streams bind only the message.} A live stream embeds its
+proof before the rest of the video exists, so it uses mode~1 ($D=0^{256}$); such
+a payload could be replayed into another stream under the same $K$. The verify
+job therefore rejects mode~1 unless explicitly allowed.
+\item \textbf{Verification needs the stego key.} No camera secret is needed, but
+$K$ is required to extract and to locate the carrier bits that $D$ clears;
+the digest is therefore key-dependent and verification is not public for
+parties without $K$. A holder of $K$ can extract and re-embed but cannot forge
+a proof for a new video or message without a registered $s$.
+\item \textbf{No channel integrity by itself.} Since v3 the frame has no MAC; an
+extracted payload is only a candidate until the proof verifies.
 \item \textbf{No nonce in whitening.} $S$ depends only on $K$. Embedding two
 frames under the same $K$ reuses the keystream; the guarantee above is per
 single frame per key. Positions remain hidden, which limits but does not
 remove this leakage. Whitening is not an IND-CPA encryption of $m$.
 \item \textbf{No undetectability proof.} Pseudorandom positions and bits do not
 imply that the sign changes are statistically undetectable relative to
-natural cover statistics; detectability must be measured.
-\item \textbf{Trusted setup.} The current proving/verification keys are a
-local educational setup (\texttt{DEMO\_SETUP\_ONLY.txt}); whoever holds the
-trapdoor can forge proofs. A3 does not hold for it in a deployment sense.
+natural cover statistics; detectability must be measured (ML steganalysis has
+not been measured).
+\item \textbf{Trusted setup.} Phase~1 is the public Hermez Powers of Tau
+($2^{16}$, BLAKE2b hash pinned); Phase~2 consists of two contributions, a random
+beacon generated locally and \texttt{snarkjs zkey verify}, all run on one
+machine. This is a demo ceremony: whoever controlled that machine could know
+the trapdoor and forge proofs, so A4 does not hold in a deployment sense until
+independent parties contribute (one honest contributor suffices).
+\item \textbf{No proof of a real scene.} The proof shows that a registered camera
+key vouched for the bytes, not that the sensor captured a real scene (e.g.\
+re-filming a screen), nor that the key is protected by hardware.
 \item \textbf{Robustness.} The channel is fragile by design: any re-encode,
-transcode or bit error in a selected sign breaks the tag.
+transcode or bit error in a selected sign destroys the frame or the proof.
 \end{itemize}
 
 \section{Algorithms}
-\subsection*{Embedding}
+\subsection*{Embedding (\texttt{src.camera\_proof.build\_payload} + native embed)}
 \begin{enumerate}
 \item Validate $|K|=32$, $0<|m|$, $4+|m|+129\le L_{\max}$; load circuit
-artifacts.
-\item Compute $h=\SHA(m)$, $c=\SHA(h\cat K)$ and $\ell=|m|$. Run Groth16,
-$\pi\leftarrow\mathsf{Prove}(\mathsf{pk};(h,c,\ell);K)$, and compress $\pi$ to
-129 bytes.
-\item Derive $K_s,K_f,K_w$; form $P$ and $F$; for each IDR segment in order,
-schedule $q_j$ positions and set $\text{sign}(p_i)$ from $e_i$ until all
-$|F|$ bits are placed.
-\item Re-insert emulation prevention and emit $V'$; later NAL units are copied.
+artifacts and the registry path of the camera.
+\item Compute $\phi=8(4+|m|+129+3)$, the digest $D(V)$ of the cover with $K$ and
+$\beta$, and the binding $b$ for mode~$0$.
+\item Run Groth16 with private $(s,\mathbf{z},\mathbf{d})$ and public
+$(\rho,b_{\mathrm{hi}},b_{\mathrm{lo}})$; compress $\pi$ to 129 bytes; form $P$.
+\item Derive $K_s,K_w$; form $F$; for each IDR segment in order, schedule $q_j$
+positions and set $\text{sign}(p_i)$ from $e_i$ until all $|F|$ bits are placed.
+\item Re-insert emulation prevention and emit $V'$; other NAL units are copied.
 \end{enumerate}
-\subsection*{Verification}
+\subsection*{Verification (\texttt{src.camera\_proof.verify\_payload}, verify job)}
 \begin{enumerate}
-\item Blind extraction (Section~
-ef{sec:frame}) with $K,\beta,L_{\max}$; reject on version,
-length, capacity or tag failure.
+\item Blind extraction (Section~\ref{sec:frame}) with $K,\beta,L_{\max}$; reject
+on version, length or capacity failure.
 \item Unpack $P$, decompress $\pi$, reject malformed encodings before pairing
-checks.
-\item Recompute $(h,c,\ell)$ from $(m,K)$ and run Groth16 verification;
-accept only on success.
+checks; reject mode~1 unless allowed.
+\item Recompute $D(V')$ and $b$ (Section~\ref{sec:binding}) and run Groth16
+verification against the trusted $\rho$; accept only on success.
 \end{enumerate}
 
 \section{Capacity and evaluation quantities}
 The capacity of a stream is $\sum_j\min(\beta,|C(\sigma_j)|)$ bits and a
-message of $|m|$ bytes needs $|F|=8(|m|+4+129+19)=8(|m|+152)$ bits. For
-example, an 8-frame CIF all-intra clip at QP~22 has 3660 candidates; a 19-byte
-message needs 1368 bits (a 171-byte frame), about 37\% of the candidates.
-Evaluations should report candidate counts, scheduled bits, decoded quality
-(full-video and minimum modified-frame PSNR, SSIM), verification outcome and
-latency per stage separately; measured values are artifact-specific, not
-guarantees. The strongest regime is all-intra Baseline CAVLC; with GOP${}>1$,
-P-frames referencing modified IDR frames inherit the distortion and need
-separate measurement.
+message of $|m|$ bytes needs $|F|=8(|m|+4+129+3)=8(|m|+136)$ bits. In the
+recorded benchmark run (2026-10-04) a 68-byte message gives a 201-byte payload
+and $|F|=1632$ bits, which occupy $\lceil1632/64\rceil=26$ IDRs at $\beta=64$;
+about half of the scheduled signs actually flip. The 300-frame all-intra CIF
+clip used for end-to-end timing has 188\,556 candidates and 19\,200 bits of
+capacity at $\beta=64$.
+
+Evaluations should report candidate counts, scheduled bits, decoded quality,
+verification outcome and latency per stage separately; measured values are
+artifact-specific, not guarantees. The 2026-10-04 run (9 clips $\times$ 3
+resolutions, QP~22, all-intra Baseline CAVLC, 30 frames) passed 27/27 media
+cases with video-bound proofs and no sign changed outside the schedule; the
+lowest cover-to-stego PSNR-Y per case was 44.03--58.68\,dB (0/27 below 40\,dB);
+the share of negative trailing ones moved by $|z|\le0.22$; Groth16 proving took
+1.5--1.8\,s and verification 0.9--1.0\,s for the 129-byte proof (PLONK on the
+same R1CS: about 22\,s to prove). Native parsing, not Groth16, bounds
+throughput: the digest parses every carrier IDR. The strongest regime is
+all-intra Baseline CAVLC; with GOP${}>1$, P-frames referencing modified IDR
+frames inherit the distortion and need separate measurement.
 
 \section{Operational surface}
 The HTTP service exposes public \texttt{/health} and bearer-token-protected
@@ -320,8 +430,13 @@ embed, extract, verify, status and one-time artifact download jobs plus a
 WebSocket stream endpoint. The token (\texttt{ZK\_STEGO\_API\_TOKEN}, at least
 32 characters) is checked before the body is read; repeated authentication
 failures are rate-limited; uploads, concurrency and job queues are bounded.
-Status records never contain $K$, $m$ or stack traces. Native processes are run
-without a shell and with timeouts.
+The verify job needs the trusted registry (\texttt{ZK\_STEGO\_CAMERA\_REGISTRY})
+and fails without it; extract results and live payloads carry
+\texttt{"verified": false}; job states are \texttt{queued}, \texttt{running},
+\texttt{succeeded}, \texttt{rejected} (proof not verified, never success) and
+\texttt{failed}. Status records never contain $K$, $s$, $m$ or stack traces.
+Native processes receive keys on stdin and are run without a shell and with
+timeouts.
 
 The signed-manifest and expiring-certificate modules (Ed25519) remain in the
 repository as auxiliary trust interfaces but are not part of the embedding or
@@ -331,14 +446,17 @@ expiry needs an online lease, trusted time or hardware-enforced key.
 
 \section{Limitations and target design}
 The native parser accepts only Baseline CAVLC, progressive 4:2:0, one slice
-per frame starting at macroblock~0, no I\_PCM, and a single SPS/PPS id.
-Realtime throughput on a physical camera has not met the 30-FPS gate.
+per frame starting at macroblock~0, no I\_PCM, and a single SPS/PPS id; only
+IDR frames carry data. Realtime operation is not accepted: the corrected
+physical-camera run (2026-09-24, protocol~v1, before the 2026-10-02 native
+speed-up) reached 7.608 source FPS against a 30-FPS gate and has not been
+re-measured.
 
-\texttt{future\_plan.md} describes a target design that is \textbf{not
-implemented}: a relation over a media root, session and segment index,
-previous-record digest, policy digest and a camera/registry credential; a
-public, sign-independent carrier schedule so that verification no longer needs
-a shared secret; segment chaining with a final seal; and removal of HMAC from
-the acceptance condition once those components pass their gates. None of the
-properties of that design should be attributed to the current construction.
+\texttt{future\_plan.md} describes the remaining target design, which is
+\textbf{not implemented}: per-segment commitments and session chaining with a
+final seal so that live streams bind more than the message; hardware-backed
+capture attestation; a multi-party Groth16 ceremony; and a public,
+sign-independent carrier schedule so that verification no longer needs the
+stego key. None of these properties should be attributed to the current
+construction.
 \end{document}

@@ -34,7 +34,7 @@
 \usepackage{url}
 \usepackage{fancyhdr}
 \makeatletter
-\g@addto@macro\UrlBreaks{\do\-\do\:}
+\g@addto@macro\UrlBreaks{\do\-\do\:\do\_}
 \makeatother
 \newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
 
@@ -83,27 +83,30 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{Cẩm nang source VideoLevel}
-\fancyhead[R]{Một lõi native CAVLC, giao thức kênh v2}
+\fancyhead[R]{Lõi native CAVLC, kênh v3, proof camera}
 \fancyfoot[C]{\thepage}
 \setlength{\headheight}{14pt}
 
 \title{Cẩm nang đọc source và lần theo pipeline VideoLevel\\
 \large Từ điểm vào demo, CLI và API đến các hàm native C++}
 \author{Tài liệu kỹ thuật tiếng Việt}
-\date{3 tháng 10 năm 2026}
+\date{05/10/2026}
 
 \begin{document}
 \maketitle
 
 \noindent\fcolorbox{CoreBlue}{SoftBlue}{\parbox{\dimexpr\linewidth-2\fboxsep-2\fboxrule\relax}{%
-\textbf{Cập nhật 03/10/2026.} Tài liệu được viết lại theo cây mã nguồn hiện tại.
-Repository chỉ còn \textbf{một lõi media} là thư viện C++
-\path{native/src/cavlc_stream.cpp}; nhánh Python full-video cũ đã bị gỡ.
-Kênh dùng \textbf{giao thức v2} (khóa con HKDF, frame version \texttt{0x02}, làm trắng
-bit bằng keystream XOR) và \textbf{một giao thức duy nhất theo đoạn IDR}. Demo chỉ
-còn \path{demo/terminal_demo.py}; endpoint \path{/api/v1/jobs/verify} đã chạy thật
-(trích mù + Groth16 bắt buộc). Nguồn đối chiếu: \path{doc/he_thong_hoat_dong.md},
-\path{README.md}, \path{demo/README.md} và chính mã nguồn.}}
+\textbf{Cập nhật 05/10/2026.} Tài liệu được viết lại theo cây mã nguồn hiện tại.
+Repository chỉ có \textbf{một lõi media} là thư viện C++
+\path{native/src/cavlc_stream.cpp}. Kênh dùng \textbf{giao thức v3} (04/10/2026):
+khung \texttt{[0x03][độ dài 2 byte][payload]} \textbf{không có MAC}, hai khóa con HKDF
+(lịch và làm trắng), một giao thức duy nhất theo đoạn IDR. Proof Groth16 dùng mạch
+mới \path{circuits/camera_video.circom}: \emph{một camera trong sổ đăng ký (gốc Merkle
+Poseidon) xác nhận đúng video này và message này}; bên kiểm chứng chỉ cần root,
+verification key và khóa giấu tin, không cần secret camera. Endpoint
+\path{/api/v1/jobs/verify} là nơi duy nhất xác thực payload (trích mù $\to$ hash video
+$\to$ Groth16 bắt buộc). Nguồn đối chiếu: \path{doc/he_thong_hoat_dong.md},
+\path{README.md}, \path{benchmark/NEW_BENCHMARKS.md} và chính mã nguồn.}}
 
 \tableofcontents
 \clearpage
@@ -112,41 +115,55 @@ còn \path{demo/terminal_demo.py}; endpoint \path{/api/v1/jobs/verify} đã ch�
 
 Tài liệu này là bản đồ đọc code của repository VideoLevel. Mục tiêu là giúp người
 đọc lần theo một dữ liệu cụ thể qua từng lớp: điểm vào (demo, CLI, API), bộ sinh
-proof Groth16, CLI native, thư viện C++ phân tích CAVLC, lịch nhúng có khóa, khung
-xác thực, rồi ngược lại ở phía bên nhận. Mỗi phần nêu file, hàm, đầu vào, đầu ra,
-tác dụng lên pipeline và bước kế tiếp dùng kết quả đó. Mọi tên file và tên hàm
-trong tài liệu đã được đối chiếu với mã nguồn ngày 03/10/2026. Đây là hướng dẫn
-source, không phải đặc tả cho mọi profile H.264.
+sổ đăng ký camera, hash video, proof Groth16, CLI native, thư viện C++ phân tích
+CAVLC, lịch nhúng có khóa, khung kênh, rồi ngược lại ở phía bên nhận. Mỗi phần nêu
+file, hàm, đầu vào, đầu ra, tác dụng lên pipeline và bước kế tiếp dùng kết quả đó.
+Mọi tên file và tên hàm trong tài liệu đã được đối chiếu với mã nguồn ngày
+05/10/2026. Đây là hướng dẫn source, không phải đặc tả cho mọi profile H.264.
 
 Điểm quan trọng đầu tiên: chỉ có \textbf{một} đường xử lý video. Demo, HTTP job và
 WebSocket đều gọi cùng tiến trình \path{zkstego_blind_bits}, và tiến trình này gọi
-cùng các hàm trong \path{native/src/cavlc_stream.cpp}. Python chỉ điều phối: sinh
-proof, đóng gói payload, quản lý job/stream và giải thích trong demo. Python có một
-bản tham chiếu byte-for-byte của lịch và khung (\path{src/native_blind_contract.py})
-để kiểm thử chéo, nhưng bản này không nhúng hay trích video.
+cùng các hàm trong \path{native/src/cavlc_stream.cpp}; kể cả hash ràng buộc video
+(lệnh \path{video-digest}) cũng do native tính. Python chỉ điều phối: dựng sổ đăng ký,
+tính binding, sinh/verify proof, đóng gói payload, quản lý job/stream và giải thích
+trong demo. Python có bản tham chiếu byte-for-byte của lịch và khung
+(\path{src/native_blind_contract.py}) và của hash video (\path{src/video_binding.py})
+để kiểm thử chéo, nhưng các bản này không nhúng hay trích video.
 
 \subsection{Ba lớp kết quả cần phân biệt}
 
 \begin{itemize}
   \item \textbf{Thành công cú pháp video:} FFmpeg đọc và giải mã stream mà không
   báo lỗi nghiêm ngặt. Điều này chưa đo PSNR, SSIM hay chất lượng cảm nhận.
-  \item \textbf{Thành công khôi phục payload:} extractor native lấy đúng các byte
-  đã đóng gói từ dấu hệ số CAVLC và tag HMAC của khung khớp. Điều này cần đúng khóa
-  32 byte và đúng giới hạn \texttt{max\_bits\_per\_IDR}.
-  \item \textbf{Thành công mệnh đề ZK:} \path{snarkjs groth16 verify} trả mã thoát 0
-  \emph{và} in \texttt{OK!} trên đúng public signals. Kết quả này không tự chứng
-  minh nguồn gốc camera, danh tính người ký hay rằng video không bị xử lý ở nơi khác.
+  \item \textbf{Tìm thấy khung kênh:} extractor native đọc bit dấu theo lịch có khóa,
+  bỏ làm trắng, và byte version (\texttt{0x03}) cùng trường độ dài hợp lệ. Điều này
+  cần đúng khóa giấu tin 32 byte và đúng \texttt{max\_bits\_per\_IDR}. Khung v3 không
+  có MAC, nên payload lúc này chỉ là \emph{ứng viên} (\texttt{"verified": false}).
+  \item \textbf{Thành công mệnh đề ZK:} payload unpack đúng, hash video tính lại từ
+  chính file nhận được, và \path{snarkjs groth16 verify} trả mã thoát 0 \emph{và} in
+  \texttt{OK!} trên public signals \texttt{[root, bindingHi, bindingLo]}. Kết quả này
+  chứng minh một camera trong sổ đăng ký đã xác nhận đúng video và message; nó không
+  chứng minh camera thật sự quay cảnh đó (ví dụ quay lại màn hình).
 \end{itemize}
 
-\subsection{Một khác biệt kiến trúc ảnh hưởng đến giao thức}
+\subsection{Hai khóa tách biệt}
 
-Video stego mang thông điệp và proof, nhưng verifier vẫn cần khóa 32 byte: khóa
-sinh lại các khóa con để tái tạo lịch, bỏ làm trắng, kiểm HMAC, và để
-\path{ZKSnarkBridge._build_public_signals()} tính lại commitment. Nếu verifier đã
-được cấp khóa an toàn từ trước thì kênh media chỉ cần truyền video; nếu chưa, cần
-một kênh cấp khóa riêng. Endpoint \path{/api/v1/jobs/verify} hiện thực hiện đầy đủ
-trích mù $\to$ unpack $\to$ Groth16 verify ở phía server và chỉ trả message khi
-proof hợp lệ.
+\begin{longtable}{P{.27\textwidth}P{.25\textwidth}P{.39\textwidth}}
+\toprule\textbf{Khóa} & \textbf{Ai giữ} & \textbf{Dùng để} \\
+\midrule\endfirsthead
+\toprule\textbf{Khóa} & \textbf{Ai giữ} & \textbf{Dùng để} \\
+\midrule\endhead
+Khóa giấu tin $K$ (32 byte) & Người gửi và bên kiểm chứng & Chọn vị trí nhúng, làm trắng bit, xác định các bit carrier trong hash video. \\
+Secret camera $s$ (phần tử trường BN254) & Chỉ camera & Tạo proof; sổ đăng ký chỉ lưu $pk=\operatorname{Poseidon}(s)$. \\
+\bottomrule\end{longtable}
+
+Verifier vẫn cần $K$ vì $K$ sinh lại các khóa con để tái tạo lịch và bỏ làm trắng, và
+vì hash video phụ thuộc vị trí carrier do $K$ quyết định. Nếu verifier đã được cấp
+khóa an toàn từ trước thì kênh media chỉ cần truyền video; nếu chưa, cần một kênh cấp
+khóa riêng. Verifier \textbf{không} cần secret camera và không biết camera nào trong
+sổ đăng ký đã tạo proof; nó chỉ tin gốc Merkle (root) và verification key.
+Endpoint \path{/api/v1/jobs/verify} thực hiện trích mù $\to$ unpack $\to$ hash video
+của file tải lên $\to$ Groth16 verify với root, và chỉ trả message khi proof hợp lệ.
 
 \section{Sơ đồ hoạt động tổng thể}
 
@@ -154,28 +171,29 @@ proof hợp lệ.
 \centering
 \resizebox{\textwidth}{!}{%
 \begin{tikzpicture}[node distance=9mm and 8mm]
-  \node[flowbox] (inputs) {Video H.264 Baseline/CAVLC\\message $m$\\khóa 32 byte $k$};
-  \node[flowwide,right=of inputs] (proof) {\path{src/zk_proof.py}\\Groth16 proof cho message\\proof nén còn 129 byte};
-  \node[flowwide,right=of proof] (pack) {\path{pack()}\\$[\text{len}_{32BE}][m][proof]$\\ví dụ: 150 byte};
-  \node[flowwide,right=of pack] (native) {\path{zkstego_blind_bits}\\HKDF, khung v2 + làm trắng,\\lịch HMAC theo đoạn IDR, patch dấu};
+  \node[flowbox] (inputs) {Video H.264 Baseline/CAVLC\\message $m$, khóa giấu tin $K$\\secret camera $s$, sổ đăng ký};
+  \node[flowwide,right=of inputs] (proof) {\path{camera_proof.build_payload()}\\\path{video-digest} của cover $\to$ binding\\Groth16, proof nén 129 byte};
+  \node[flowwide,right=of proof] (pack) {\path{pack_payload()}\\$[\texttt{01}][mode][\text{len}_{16}][m][proof]$\\ví dụ: 150 byte};
+  \node[flowwide,right=of pack] (native) {\path{zkstego_blind_bits}\\HKDF, khung v3 + làm trắng,\\lịch HMAC theo đoạn IDR, patch dấu};
   \node[flowbox,right=of native] (video) {Video stego\\NAL H.264 đầu ra};
   \draw[flowarrow] (inputs) -- (proof);
   \draw[flowarrow] (proof) -- (pack);
   \draw[flowarrow] (pack) -- (native);
   \draw[flowarrow] (native) -- (video);
 
-  \node[flowwide,below=23mm of native] (extract) {\path{zkstego_blind_bits}\\video stego + khóa $k$\\cùng lịch, bỏ làm trắng, kiểm HMAC};
-  \node[flowwide,left=of extract] (unpack) {\path{unpack()}\\tách message và proof 129 byte};
-  \node[flowwide,left=of unpack] (verify) {\path{verify_proof_for_payload()}\\dựng public signals\\snarkjs: exit 0 + \texttt{OK!}};
+  \node[flowwide,below=23mm of native] (extract) {\path{zkstego_blind_bits}\\video stego + khóa $K$\\cùng lịch, bỏ làm trắng, kiểm version/độ dài};
+  \node[flowwide,left=of extract] (unpack) {\path{unpack_payload()}\\tách mode, message, proof 129 byte\\\path{bytes_to_proof()}};
+  \node[flowwide,left=of unpack] (verify) {\path{camera_proof.verify_payload()}\\\path{video-digest} của stego $\to$ binding\\snarkjs với root: exit 0 + \texttt{OK!}};
   \node[flowbox,left=of verify] (result) {Verifier\\\texttt{succeeded} / \texttt{rejected}\\message chỉ khi hợp lệ};
   \draw[flowarrow] (video.south) -- ++(0,-8mm) -| (extract.north);
   \draw[flowarrow] (extract) -- node[above,font=\scriptsize]{payload byte[]} (unpack);
   \draw[flowarrow] (unpack) -- node[above,font=\scriptsize]{message, proof} (verify);
   \draw[flowarrow] (verify) -- (result);
-  \draw[flowarrow,draw=CoreOrange] (inputs.west) -- ++(-5mm,0) |- node[pos=.75,below,font=\scriptsize]{khóa $k$ được cấp trước hoặc truyền ngoài video} ($(extract.south)+(0,-8mm)$) -- (extract.south);
+  \draw[flowarrow,draw=CoreOrange] (inputs.west) -- ++(-5mm,0) |- node[pos=.75,below,font=\scriptsize]{khóa $K$ được cấp trước hoặc truyền ngoài video; verifier có thêm root + verification key, không có $s$} ($(extract.south)+(0,-8mm)$) -- (extract.south);
 \end{tikzpicture}%
 }
-\caption{Luồng proof-bearing. Khóa là input ngoài video ở cả pha nhúng lẫn trích mù.}
+\caption{Luồng proof-bearing. Khóa giấu tin là input ngoài video ở cả pha nhúng lẫn
+trích mù; secret camera chỉ ở phía camera.}
 \label{fig:overall}
 \end{figure}
 
@@ -189,8 +207,9 @@ proof hợp lệ.
 \toprule\textbf{Điểm vào} & \textbf{Hàm Python/C++ đầu tiên} & \textbf{Gặp lõi native ở đâu} \\
 \midrule\endhead
 Demo & \path{demo/terminal_demo.py::main()} $\to$ \path{walkthrough()} & \path{demo/native_io.py::native_embed()} / \path{native_extract()} chạy \path{zkstego_blind_bits}; \path{trace_video()} / \path{inspect_segments()} chạy \path{zkstego_inspect}. \\
-CLI & \path{native/tools/blind_bits.cpp::wmain()/main()} $\to$ \path{run()} & Gọi trực tiếp \path{embed_authenticated_cavlc_stream_file()}, \path{extract_authenticated_cavlc_stream_file()} hoặc các hàm live trong cùng file. \\
-API HTTP & \path{src/api/app.py::start_embed()/start_extract()/start_verify()} & Handler do \path{src/api/native_handlers.py::create_native_app()} inject; \path{invoke()} chạy CLI với khóa qua stdin. \\
+CLI & \path{native/tools/blind_bits.cpp::wmain()/main()} $\to$ \path{run()} & Gọi trực tiếp \path{embed_cavlc_stream_file()}, \path{extract_cavlc_stream_file()}, \path{cavlc_video_binding_digest()} hoặc các hàm live trong cùng file. \\
+Proof camera & \path{src/camera_proof.py::build_payload()} / \path{verify_payload()} & \path{video_binding.native_video_digest()} chạy \path{zkstego_blind_bits video-digest} (khóa qua stdin). \\
+API HTTP & \path{src/api/app.py::start_embed()/start_extract()/start_verify()} & Handler do \path{src/api/native_handlers.py::create_native_app()} inject; \path{invoke()} chạy CLI với khóa qua stdin; job verify gọi thêm \path{camera_proof.check_proof()}. \\
 API WebSocket & \path{native_handlers.py::native_stream()} & Mở tiến trình con \path{embed-live-auth-stdin} hoặc \path{extract-live-auth-stdin}. \\
 Soi/kiểm toán & \path{native/tools/inspect.cpp::run()} & Chỉ đọc: \path{decode_baseline_i_idr_slices()}, \path{analyze_cavlc_stream_file()}. \\
 \bottomrule
@@ -208,21 +227,23 @@ terminal. Bảng dưới liệt kê đúng thứ tự gọi trong mã.
 \endfirsthead
 \toprule\textbf{\#} & \textbf{Hàm được gọi} & \textbf{Input chính} & \textbf{Output chuyển tiếp} \\
 \midrule\endhead
-1 & \path{setup()} (chỉ khi \path{--setup}) & Toolchain CMake, npm, Circom & Binary native, artifact circuit, khóa Groth16 \emph{demo} \\
+1 & \path{setup()} (chỉ khi \path{--setup}) & Toolchain CMake, npm, Circom, PTAU Hermez & Binary native, artifact mạch, khóa Groth16 \emph{demo} qua \path{src.zk_setup} \\
 2 & \path{preflight()} & PATH, \path{circuits/build} & \path{Tools}, \path{MeasuredBridge}; dừng nếu thiếu artifact \\
 3 & \path{video_prepare()} (\path{choose_input()}) & File \path{.y4m}/video, \path{--frames}, \path{--gop}, \path{--qp} & \path{source.h264} Baseline/CAVLC, \path{encode.stderr} \\
-4 & \path{make_proof()} & Message UTF-8, khóa ngẫu nhiên 32 byte & message bytes, khóa, proof 129 byte, public signals \\
+4 & \path{choose_message()}; \path{secrets.token_bytes(32)} & Message UTF-8 & message bytes; khóa giấu tin ngẫu nhiên 32 byte \\
 5 & \path{trace_video()} + \path{show_video_trace()} & \path{source.h264} & \path{trace_before.json} (NAL, slice, ứng viên) \\
 6 & \path{deep_trace.nal_anatomy()}, \path{library_header_trace()} & Trace + FFmpeg \path{trace_headers} & Đối chiếu header (bỏ khi \path{--brief}) \\
-7 & \path{pack_and_select()} & message, proof, khóa, \path{--segments} & payload, \path{EmbedPlan}, \path{schedule.json} \\
-8 & \path{native_embed()} & cover, payload, khóa, \texttt{max\_bits} & \path{stego.h264} \\
-9 & \path{trace_video()} + \path{audit_embedding()} & \path{stego.h264} & \path{trace_after.json}, ứng viên mẫu \\
-10 & \path{visual_quality()} & source, stego & PSNR Y/U/V, bản đồ $\Delta$Y \\
-11 & \path{deep_trace.block_anatomy()}, \path{embedded_bit_location()} & Ứng viên mẫu, ảnh chưa deblock & Giải phẫu một khối, vị trí byte trong file \\
-12 & \path{verify_message()} & \path{stego.h264}, khóa & message khôi phục + proof đã verify \\
-13 & \path{negative_cases.run_all()} & stego, khóa sai, proof sửa & Các ca từ chối \\
-14 & \path{service_steps.run_all()} & cùng input & Job HTTP và WebSocket (bỏ khi \path{--no-service}) \\
-15 & \path{Session.finish()} & Trạng thái & \path{transcript.txt}, \path{report.json} \\
+7 & \path{choose_cap()} & source, trace, độ dài message & \texttt{max\_bits}, JSON \texttt{segments-1} \\
+8 & \path{make_camera_proof()} & source, message, khóa, \texttt{max\_bits} & Sổ đăng ký 4 camera, digest cover, binding, proof 129 byte, \path{DemoCamera}, \path{camera_registry.json} \\
+9 & \path{pack_and_select()} & message, proof, khóa, đoạn & payload, \path{EmbedPlan}, \path{schedule.json} \\
+10 & \path{native_embed()} & cover, payload, khóa, \texttt{max\_bits} & \path{stego.h264} \\
+11 & \path{trace_video()} + \path{audit_embedding()} & \path{stego.h264} & \path{trace_after.json}, ứng viên mẫu \\
+12 & \path{visual_quality()} & source, stego & PSNR Y/U/V, bản đồ $\Delta$Y \\
+13 & \path{deep_trace.block_anatomy()}, \path{embedded_bit_location()} & Ứng viên mẫu, ảnh chưa deblock & Giải phẫu một khối, vị trí byte trong file \\
+14 & \path{verify_message()} & \path{stego.h264}, khóa, root & digest stego = digest cover; \path{verify_payload()} hợp lệ, \texttt{video\_bound} \\
+15 & \path{negative_cases.run_all()} & stego, khóa sai, proof sửa, video cắt & Các ca từ chối đúng lý do \\
+16 & \path{service_steps.run_all()} & cùng input + \path{camera_registry.json} & Job HTTP và WebSocket (bỏ khi \path{--no-service}) \\
+17 & \path{Session.finish()} & Trạng thái & \path{transcript.txt}, \path{report.json} \\
 \bottomrule
 \end{longtable}
 
@@ -236,13 +257,17 @@ terminal. Bảng dưới liệt kê đúng thứ tự gọi trong mã.
 \toprule\textbf{Đường dẫn} & \textbf{Vai trò và ảnh hưởng đến pipeline} \\
 \midrule\endhead
 \path{native/include/zkstego/cavlc_stream.hpp} & Kiểu dữ liệu và interface công khai: SPS/PPS/slice, macroblock, ứng viên, HKDF, lịch, khung, stream encoder/decoder, reader Annex-B tăng dần. \\
-\path{native/src/cavlc_stream.cpp} & Lõi media duy nhất: parser Annex-B/SPS/PPS/IDR/CAVLC, ứng viên dấu, khóa con HKDF, lịch HMAC, khung v2, làm trắng, patch RBSP, chế độ file và chế độ stream. \\
-\path{native/tools/blind_bits.cpp} & CLI \path{zkstego_blind_bits}: đọc khóa/payload qua stdin, dispatch 5 lệnh, ghi H.264 hoặc payload hex. \\
+\path{native/src/cavlc_stream.cpp} & Lõi media duy nhất: parser Annex-B/SPS/PPS/IDR/CAVLC, ứng viên dấu, khóa con HKDF, lịch HMAC, khung v3, làm trắng, patch RBSP, chế độ file và chế độ stream, hash ràng buộc video. \\
+\path{native/tools/blind_bits.cpp} & CLI \path{zkstego_blind_bits}: đọc khóa/payload qua stdin, dispatch 6 lệnh, ghi H.264, payload hex hoặc dòng \texttt{ZKSTEGO\_VIDEO\_DIGEST}. \\
 \path{native/tools/inspect.cpp} & Công cụ soi duy nhất \path{zkstego_inspect}: JSON (mặc định), \path{--summary}, \path{--macroblock}, \path{--segments}. \\
 \path{native/tools/cli_io.hpp} & I/O dùng chung cho hai tool: đối số UTF-8 trên Windows, đọc file có giới hạn, ghi file mới không ghi đè. \\
 \path{native/tests/cavlc_stream_tests.cpp} & CTest native (\path{zkstego_cavlc_stream_tests}). \\
-\path{src/zk_proof.py} & Định dạng payload, nén proof 129 byte, \path{ZKSnarkBridge} gọi Node/snarkjs để prove/verify. \\
-\path{circuits/payload_verify.circom} & Mạch \path{PayloadVerify}: commitment SHA-256, ràng buộc bit, giới hạn độ dài (63\,321 constraint). \\
+\path{src/zk_proof.py} & Định dạng payload (\path{pack_payload()}, \path{unpack_payload()}), nén proof 129 byte, \path{CameraProofBridge} gọi Node/snarkjs để prove/verify. \\
+\path{src/camera_proof.py} & Phía gửi \path{build_payload()} và phía nhận \path{verify_payload()}, \path{check_proof()}, \path{parse_payload()}, \path{Verdict}. \\
+\path{src/video_binding.py} & Bản tham chiếu hash video (\path{video_digest()}), \path{native_video_digest()} gọi CLI, \path{binding_digest()}, \path{binding_public_inputs()}. \\
+\path{src/camera_registry.py}, \path{src/poseidon.py} & Sổ đăng ký camera: cây Merkle Poseidon độ sâu 16 (\path{CameraRegistry}); Poseidon Python với hằng số circomlib (\path{src/poseidon_constants.json}). \\
+\path{circuits/camera_video.circom} & Mạch \path{CameraVideo(16)} + \path{MerkleInclusion}: 8\,737 constraint, 3 public input \texttt{[root, bindingHi, bindingLo]}. \\
+\path{src/zk_setup.py} & Setup Groth16: Phase 1 Hermez Powers of Tau $2^{16}$, Phase 2 nhiều lượt đóng góp + beacon + \path{snarkjs zkey verify}. \\
 \path{src/native_blind_contract.py} & Bản tham chiếu Python của HKDF, lịch, khung, làm trắng và \path{segment_schedule()}; dùng cho test chéo và phần giải thích của demo. \\
 \path{src/api/app.py} & Lõi job chung: settings, xác thực trước body, giới hạn thử sai, hàng đợi, lưu trữ job, endpoint. \\
 \path{src/api/native_handlers.py} & Ứng dụng native: handler embed/extract/verify gọi CLI, verify Groth16 bắt buộc, WebSocket \path{/api/v1/stream}. \\
@@ -289,7 +314,9 @@ chạy là \path{demo/runs/terminal_<YYYYmmdd_HHMMSS>_<6 hex>/}.
 \path{inspect_segments()} & \path{zkstego_inspect <video> --segments MAX} $\to$ JSON \texttt{segments-1}. \\
 \path{native_embed()} & \path{embed-stream-auth-stdin}; stdin = khóa hex + payload hex. \\
 \path{native_extract()} & \path{extract-stream-auth <video> - 4096 MAX}; stdin = khóa hex. \\
-\path{verify_groth16()} & Gọi \path{snarkjs groth16 verify}; chỉ \texttt{True} khi exit 0 và có \texttt{OK!}; lỗi hạ tầng ném \texttt{RuntimeError}, không bị tính là ``từ chối hợp lệ''. \\
+\multicolumn{2}{l}{\textit{Ngoài \path{native_io.py}: hash video và verify}} \\
+\path{src.video_binding.native_video_digest()} & \path{video-digest <video> FRAME_BITS MAX}; stdin = khóa hex; demo gọi cho cover (trước khi prove) và cho stego (khi verify). \\
+\path{src.camera_proof.verify_payload()} & Groth16 qua \path{CameraProofBridge.verify()}; chỉ hợp lệ khi snarkjs exit 0 và có \texttt{OK!}; lỗi hạ tầng ném \texttt{RuntimeError}, không bị tính là ``từ chối hợp lệ''. \\
 \multicolumn{2}{l}{\textit{\path{demo/segment_plan.py} --- dung lượng và lịch theo đoạn}} \\
 \path{resolve_max_bits()} & Mặc định 64 bit/IDR; nếu không truyền cờ và clip quá ngắn thì nâng lên giá trị nhỏ nhất đủ dung lượng. \\
 \path{segment_capacity()}, \path{show_allocation()} & Tính $\sum \min(\text{max\_bits}, \text{ứng viên})$; in đoạn nào mang khoảng bit nào của khung. \\
@@ -300,75 +327,155 @@ chạy là \path{demo/runs/terminal_<YYYYmmdd_HHMMSS>_<6 hex>/}.
 \path{block_anatomy()} & Gọi \path{zkstego_inspect --macroblock}, \path{decoder_mb_maps()}, rồi các hàm \path{h264_explain} (\path{parse_i_macroblock_header()}, \path{segment_cavlc_block()}, \path{dequantize()}, \path{inverse_transform()}, \path{predict_intra4x4()}\ldots) để tái tạo pixel từng mẫu. \\
 \path{embedded_bit_location()}, \path{file_offset_of_rbsp_bit()} & Từ thứ hạng HMAC $\to$ chỉ số bit khung $\to$ trường payload $\to$ byte RBSP/EBSP $\to$ offset trong file. \\
 \multicolumn{2}{l}{\textit{\path{demo/negative_cases.py} và \path{demo/service_steps.py}}} \\
-\path{negative_cases.run_all()} & Đổi message, proof sai, thiếu proof, sai khóa, lật một bit mang dữ liệu; kiểm thông báo lỗi bằng \path{is_authentication_failure()}. \\
+\path{negative_cases.run_all()} & Đổi message, proof sai, thiếu proof, sai khóa, lật một bit carrier của message (\path{_flip_one_carrier_bit()}), cắt NAL cuối (\path{_cut_last_frame()}), camera ngoài sổ đăng ký (\path{_unregistered_camera()}); lỗi native nhận diện bằng \path{is_frame_not_found()}, còn lại kiểm \texttt{reason} của \path{verify_payload()}. \\
 \path{service_steps.run_all()} & Dựng \path{create_native_app()} trong \path{TestClient}; \path{_http_jobs()} (embed/extract/verify) và \path{_websocket_stream()}. \\
 \bottomrule\end{longtable}
 
 \section{Pha prover: từ message đến payload mang proof}
 
-\subsection{Circuit hiện đang chứng minh điều gì}
+\subsection{Mệnh đề mà proof chứng minh}
 
-Trong \path{src/zk_proof.py}, message là bytes $m$ và khóa 32 byte là $k$.
-\path{ZKSnarkBridge._build_circuit_input()} tính
-\[
- h=\operatorname{SHA256}(m), \qquad c=\operatorname{SHA256}(h\Vert k).
-\]
-Template \path{PayloadVerify} trong \path{circuits/payload_verify.circom} nhận
-$h[256]$, $c[256]$ và \texttt{payload\_length} làm public signals (tổng 513), còn
-$k[256]$ là private witness. Ràng buộc gồm: $c = \operatorname{SHA256}(h\Vert k)$;
-$0 < \texttt{payload\_length} < 10^6$; và từ 03/10/2026 mọi tín hiệu của $h$, $c$,
-$k$ phải là bit, $x(x-1)=0$, vì thành phần \texttt{Sha256} của circomlib không tự ép
-đầu vào về 0/1. Mạch có 63\,321 constraint
-(\path{ZKSnarkBridge.CONSTRAINT_COUNT}). Proof tạo bằng khóa của mạch cũ không verify
-được với khóa hiện tại. Circuit không nhận pixel/frame H.264, không chứa hash video
-hay danh tính camera.
+Mạch \path{circuits/camera_video.circom} (template \path{CameraVideo(16)}) chứng minh:
+\emph{``một camera có khóa trong sổ đăng ký (gốc Merkle công khai) xác nhận đúng binding
+này''}, trong đó binding cam kết hash của video và hash của message.
 
-\begin{longtable}{P{.29\textwidth}P{.3\textwidth}P{.32\textwidth}}
+\begin{lstlisting}[numbers=none]
+private: secret s; siblings[16]; pathIndices[16]
+public : root, bindingHi, bindingLo                      (3 public inputs)
+pk = Poseidon(s)                                          (Poseidon(1))
+MerkleInclusion(16): pathIndices[i]*(pathIndices[i]-1) = 0
+                     node[i+1] = Poseidon(left[i], right[i])
+                     membership.root === root
+bindingHiSquare <== bindingHi*bindingHi; bindingLoSquare <== bindingLo*bindingLo
+\end{lstlisting}
+
+Mạch có 8\,737 constraint. Hai tín hiệu bình phương chỉ để gắn \texttt{bindingHi},
+\texttt{bindingLo} vào R1CS một cách tường minh (kiểu Semaphore). Proof tạo cho một
+binding (video + message) hay một root khác đều không verify được. Verifier không cần
+$s$ và không biết lá nào (camera nào) đã được dùng.
+
+\paragraph{Ghi chú lịch sử.} Trước 04/10/2026 repository dùng mạch SHA-256
+\path{payload_verify.circom} (63\,321 constraint, 513 public input), trong đó verifier
+phải biết secret để tính lại commitment và proof không ràng buộc video. Mạch đó đã bị
+gỡ; proof tạo bằng khóa của mạch cũ không verify được với khóa hiện tại.
+
+\subsection{Sổ đăng ký camera}
+
+\path{src/camera_registry.py} dựng cây Merkle nhị phân độ sâu 16 (\path{TREE_DEPTH},
+tối đa 65\,536 camera), nút $\operatorname{Poseidon}(\text{trái},\text{phải})$, lá trống
+bằng 0, lá $i$ là $pk_i=\operatorname{Poseidon}(s_i)$. Poseidon cài bằng Python
+(\path{src/poseidon.py}, hằng số circomlib trong \path{src/poseidon_constants.json}) và
+được phase 1 đối chiếu với vector của circomlibjs và với witness của chính mạch.
+
+\begin{longtable}{P{.33\textwidth}P{.58\textwidth}}
+\toprule\textbf{Hàm/lớp} & \textbf{Vai trò} \\
+\midrule\endfirsthead
+\toprule\textbf{Hàm/lớp} & \textbf{Vai trò} \\
+\midrule\endhead
+\path{new_camera_secret()} & Phần tử trường BN254 ngẫu nhiên khác 0. \\
+\path{camera_public_key(s)} & $\operatorname{Poseidon}([s])$, giá trị đăng ký vào cây. \\
+\path{CameraRegistry(public_keys)} & Dựng mọi tầng của cây; từ chối khóa trùng, khóa ngoài trường hoặc vượt $2^{16}$ lá; thuộc tính \texttt{root}. \\
+\path{index_of()}, \path{path(index)} & Vị trí lá và \path{MerklePath} (\texttt{siblings}, \texttt{path\_indices}) làm private input. \\
+\path{to_json()/from_json()}, \path{save()/load()} & Schema \texttt{zkstego-camera-registry-1}; \path{from_json()} kiểm root khớp các khóa công khai. \\
+\path{save_camera_secret()}, \path{load_camera_secret()} & File secret mới, chỉ chủ sở hữu đọc được, không ghi đè; schema \texttt{zkstego-camera-secret-1}. \\
+\bottomrule\end{longtable}
+
+\subsection{Hash video và binding}
+
+\begin{lstlisting}[numbers=none]
+frame_bits = 8 * (3 + payload_size(len(m)))        # camera_proof.frame_bits_for_message()
+carrier    = the frame_bits sign positions the keyed schedule (stego key K) will write
+             (per IDR: first min(cap, candidates) schedule positions, until the frame ends)
+digest     = SHA256("zkstego/video-digest/v1" || u32be(frame_bits) || u32be(cap) ||
+                    for every NAL in file order: u32be(1 + len(rbsp')) || header || rbsp')
+rbsp'      = NAL RBSP (EPB removed) with ONLY the carrier sign bits cleared to 0
+binding    = SHA256("zkstego/proof-binding/v1" || mode || digest || SHA256(m))
+bindingHi, bindingLo = big-endian halves of binding (two 128-bit field elements)
+\end{lstlisting}
+
+Bản chạy thật là \path{cavlc_video_binding_digest()} trong
+\path{native/src/cavlc_stream.cpp} (lệnh CLI \path{video-digest}); nó duyệt file bằng
+\path{visit_cavlc_stream_file()}, dựng từng đoạn bằng \path{prepare_cavlc_stream_segment()}
+và chọn vị trí bằng \path{select_with_schedule_key()}, đúng như encoder. Bản tham chiếu
+Python \path{video_binding.video_digest()} dùng \path{segment_schedule()} trên JSON
+\texttt{segments-1}. \path{native_video_digest()} chạy CLI với khóa qua stdin và đọc dòng
+\texttt{ZKSTEGO\_VIDEO\_DIGEST <hex> carrier\_segments=N nal\_units=M}.
+
+Nhúng chỉ đổi đúng các bit carrier (và có thể thêm/bớt byte EPB, không chạm RBSP), nên
+\textbf{digest của cover bằng digest của stego}. Mọi thay đổi khác (video khác, cắt hay
+thêm frame, sửa một bit ở frame sau, lật một dấu không mang khung, mã hóa lại) làm digest
+đổi và proof sai. Lật một bit carrier thì digest giữ nguyên nhưng payload trích ra đổi,
+nên proof cũng bị từ chối. Vị trí carrier phụ thuộc khóa giấu tin, vì vậy lệnh
+\path{video-digest} \emph{cần} khóa (một dòng hex trên stdin).
+
+\path{binding_digest()} nhận \texttt{mode}: 0 = ràng buộc video (luồng file); 1 = chỉ
+ràng buộc message, digest bắt buộc là 32 byte 0, dành cho luồng live vì khi nhúng proof
+thì phần còn lại của video chưa tồn tại. Job verify từ chối mode 1 với lý do
+\texttt{video\_binding\_required}, trừ khi bật \path{ZK_STEGO_ALLOW_MESSAGE_ONLY_PROOFS=1}.
+
+\subsection{Hàm theo thứ tự gọi ở phía gửi}
+
+\begin{longtable}{P{.31\textwidth}P{.3\textwidth}P{.3\textwidth}}
 \toprule
 \textbf{Hàm} & \textbf{Input $\to$ output} & \textbf{Tác dụng kế tiếp} \\
 \midrule
 \endfirsthead
 \toprule\textbf{Hàm} & \textbf{Input $\to$ output} & \textbf{Tác dụng kế tiếp} \\
 \midrule\endhead
-\path{_build_circuit_input(m,k)} & $m$, $k$ $\to$ dict bit của $h,c,k$ và length & Witness generator của Node đọc JSON này. \\
-\path{_compute_witness(input)} & Circuit input $\to$ file witness tạm & Chạy WASM của mạch; file input chứa khóa bị xóa sau khi có witness. \\
-\path{_snarkjs_prove(witness)} & Witness + \path{proving_key.zkey} $\to$ (proof, public) & Hai dict snarkjs cho bước nén và log. \\
-\path{generate_proof_for_payload(m,k)} & $m$, $k$ $\to$ (proof, public) & Wrapper đầy đủ; demo gọi qua \path{MeasuredBridge} để đo thời gian. \\
+\path{frame_bits_for_message(n)} & $n$ $\to$ $8(3+4+n+129)$ & Biết số bit khung trước khi có proof (proof luôn 129 byte). \\
+\path{native_video_digest(cli, cover, K, frame_bits, cap)} & cover, $K$ $\to$ digest 32 byte & Đầu vào của binding. \\
+\path{binding_digest(mode, digest, m)} & $\to$ binding 32 byte & \path{binding_public_inputs()} tách hai nửa 128 bit. \\
+\path{CameraProofBridge.circuit_input()} & $s$, sổ đăng ký, binding $\to$ dict & \texttt{secret}, \texttt{siblings}, \texttt{pathIndices}, \texttt{root}, \texttt{bindingHi}, \texttt{bindingLo}. \\
+\path{_compute_witness(input)} & input $\to$ file witness tạm & WASM của mạch; \path{input.json} chứa secret camera bị xóa trong \texttt{finally}; thư mục \path{zkp_witness_*} còn sót do tiến trình bị giết được \path{_remove_stale_temp_dirs()} dọn sau 1 giờ. \\
+\path{_snarkjs_prove(witness)} & witness + \path{camera_video.zkey} $\to$ (proof, public) & Thư mục tạm bị xóa sau khi đọc kết quả. \\
+\path{prove(s, registry, binding)} & $\to$ proof dict & Kiểm public signals trả về đúng \path{public_signals(root, binding)}. \\
 \path{proof_to_bytes(proof)} & A, B, C $\to$ 129 byte & Nén proof để nhúng. \\
-\path{pack(m, proofBytes)} & $m$, proof $\to [\text{len}_{32BE}][m][proof]$ & Blob opaque đưa cho CLI native. \\
-\path{_build_public_signals(m,k)} & $m$, $k$ $\to$ 513 chuỗi & Verifier tự dựng lại public input. \\
-\path{verify_proof_for_payload()} & proof, $m$, $k$ $\to$ bool & Dựng public signals rồi \path{verify()} $\to$ \path{_snarkjs_verify()}. \\
+\path{pack_payload(mode, m, proofBytes)} & $\to [\texttt{01}][mode][\text{len}_{16BE}][m][proof]$ & Blob opaque đưa cho CLI native. \\
+\path{build_payload(...)} & bridge, sổ đăng ký, $s$, $m$, cover, $K$ $\to$ \path{SignedPayload} & Gói toàn bộ chuỗi trên; trả payload, mode, digest, binding, proof. \\
 \bottomrule
 \end{longtable}
 
 \subsection{Ví dụ byte-for-byte với demo}
 
-Với \path{--auto} và không truyền \path{--message}, \path{make_proof()} dùng message
-\texttt{Xin chao ZK video}, UTF-8 dài 17 byte. \path{pack()} ghép:
+Với \path{--auto} và không truyền \path{--message}, \path{choose_message()} dùng message
+\texttt{Xin chao ZK video}, UTF-8 dài 17 byte. \path{pack_payload(MODE_VIDEO, ...)} ghép:
 \begin{lstlisting}[numbers=none]
-00 00 00 11 | 58 69 6e 20 63 68 61 6f 20 5a 4b 20 76 69 64 65 6f | <129 proof bytes>
-  length=17                       message UTF-8
+01 | 00 | 00 11 | 58 69 6e 20 63 68 61 6f 20 5a 4b 20 76 69 64 65 6f | <129 proof bytes>
+fmt  mode len=17                    message UTF-8
 \end{lstlisting}
-Tổng payload là $4+17+129=150$ byte. Khung native v2 thêm $1+2+16=19$ byte, nên khung
-dài 169 byte, tức 1\,352 bit phải nhúng. Message tối đa là $4096-4-129=3963$ byte vì
-lệnh stdin nhận payload tối đa 4096 byte.
+Tổng payload là $4+17+129=150$ byte. Khung native v3 chỉ thêm 3 byte header, nên khung
+dài 153 byte, tức 1\,224 bit phải nhúng. Trong lần chạy E2E ngày 04/10/2026, payload
+201 byte (message 68 byte) cho khung 204 byte = 1\,632 bit, chiếm 26 IDR ở 64 bit/IDR.
+Message tối đa là $4096-4-129=3963$ byte vì lệnh stdin nhận payload tối đa 4096 byte.
 
 \subsection{Mã hóa/nén proof}
 
-\path{proof_to_bytes()} ghi tọa độ $x$ của A, hai phần tử $\mathbb{F}_{p^2}$ của
+\path{proof_to_bytes()} ghi tọa độ $x$ của A, hai phần tử $\mathbb{F}_{p}$ của
 B.x và C.x (mỗi phần 32 byte big-endian), cộng một byte cờ chứa 3 bit chẵn/lẻ của
 $y$: $4\times32+1=129$ byte. \path{bytes_to_proof()} làm chiều ngược: kiểm tọa độ
 $<p$, giải phương trình đường cong BN254 để dựng lại $y$, kiểm điểm nằm trên đường
-cong; dữ liệu hỏng ném \texttt{ValueError}. Không được cắt/gắn proof tùy ý: mọi byte
-đều đi vào phép giải nén.
+cong; dữ liệu hỏng ném \texttt{ValueError}. \path{unpack_payload()} đòi đúng byte
+format \texttt{0x01}, mode 0 hoặc 1 và độ dài \emph{chính xác} $4+|m|+129$; mọi bố cục
+khác ném \texttt{ValueError}.
 
-\subsection{Xác minh Groth16}
+\subsection{Xác minh Groth16 và setup}
 
-\path{_snarkjs_verify()} ghi proof/public tạm rồi chạy
-\path{snarkjs groth16 verify}. Kết quả chỉ là \texttt{True} khi \textbf{mã thoát 0
+\path{CameraProofBridge.verify(proof, root, binding)} dựng
+\path{public_signals()} $=$ \texttt{[root, bindingHi, bindingLo]} rồi
+\path{_snarkjs_verify()} ghi proof/public tạm và chạy \path{snarkjs groth16 verify}
+với \path{camera_video_vkey.json}. Kết quả chỉ là \texttt{True} khi \textbf{mã thoát 0
 và stdout có dòng kết thúc bằng \texttt{OK!}}; exit 0 mà không có \texttt{OK!} bị coi
-là không hợp lệ. Khóa proving/verification là thiết lập giáo dục cục bộ
-(\path{circuits/build/DEMO_SETUP_ONLY.txt}), không phải trusted ceremony.
+là không hợp lệ.
+
+Setup: \path{py -3.12 -m src.zk_setup}. \path{compile_circuit()} biên dịch mạch;
+\path{run_setup()} kiểm BLAKE2b đã ghim của \path{powersOfTau28_hez_final_16.ptau}
+(Phase 1 công khai của Hermez), chạy \path{groth16 setup}, mỗi lượt
+\path{zkey contribute} nhận entropy qua stdin (không qua argv), thêm
+\path{zkey beacon} với giá trị ngẫu nhiên sinh cục bộ, đòi \path{zkey verify} in
+\texttt{ZKey Ok!}, rồi xuất \path{camera_video.zkey}, \path{camera_video_vkey.json} và
+transcript \path{circuits/build/camera_video_setup.json}. Mặc định có 2 lượt đóng góp
+chạy trên một máy, nên đây là nghi thức \textbf{demo}; triển khai thật cần các bên độc
+lập (chỉ cần một bên trung thực là khóa an toàn).
 
 \section{Đường native: đọc H.264 và liệt kê ứng viên dấu CAVLC}
 
@@ -414,7 +521,7 @@ sau.
 \path{CavlcDecodedIMacroblock} & Địa chỉ MB, header, \texttt{luma\_dc}, 16 khối luma, 2 chroma DC, 8 chroma AC. \\
 \path{CavlcDecodedIdrSlice} & NAL index, SPS/PPS/slice header, danh sách MB, offset trailing bits; đầu vào của bộ thu ứng viên. \\
 \path{CavlcSignCandidate} & (NAL index, địa chỉ MB, \path{CavlcResidualCategory}, chỉ số khối, offset bit RBSP). \\
-\shortstack[l]{\texttt{AuthenticatedCavlc}\\\texttt{StreamSegment}} & Byte output, \texttt{candidate\_capacity}, \texttt{bits\_embedded}, \texttt{session\_complete}; trả về sau mỗi đoạn. \\
+\path{CavlcStreamSegment} & Byte output, \texttt{candidate\_capacity}, \texttt{bits\_embedded}, \texttt{session\_complete}; trả về sau mỗi đoạn. \\
 \shortstack[l]{\texttt{CavlcStreamSegment}\\\texttt{Candidates}} & Với mỗi đoạn IDR: chỉ số NAL trong file, chỉ số NAL trong input phân tích, danh sách ứng viên. \\
 \bottomrule
 \end{longtable}
@@ -458,22 +565,23 @@ không phải tọa độ pixel. Trong giao thức theo đoạn, \texttt{nal\_in
 \emph{input phân tích của đoạn} (SPS+PPS+IDR), không phải chỉ số NAL trong file; demo
 dùng \path{segment_plan.file_candidate()} để đổi sang chỉ số trong file.
 
-\section{Kênh xác thực v2: khóa con, lịch, khung và làm trắng}
+\section{Kênh giấu tin v3: khóa con, lịch, khung và làm trắng}
 
 \subsection{Khóa con HKDF}
 
-Secret 32 byte không bao giờ được dùng trực tiếp làm khóa HMAC. Hàm nội bộ
+Khóa giấu tin 32 byte không bao giờ được dùng trực tiếp làm khóa HMAC. Hàm nội bộ
 \path{derive_cavlc_subkey()} gọi \path{hkdf_sha256_extract()} và
 \path{hkdf_sha256_expand()} (RFC 5869); hàm công khai \path{hkdf_sha256()} dùng cho
-test vector:
+test vector. Từ giao thức v3 chỉ còn \textbf{hai} khóa con; nhãn HKDF giữ nguyên như
+v2 nên lịch và dòng làm trắng không đổi:
 \begin{lstlisting}[numbers=none]
 PRK           = HMAC-SHA256(key = "zkstego-cavlc-v2-salt", msg = secret)
 schedule_key  = HKDF-Expand(PRK, "zkstego/cavlc/v2/schedule",  32)
-frame_key     = HKDF-Expand(PRK, "zkstego/cavlc/v2/frame-tag", 32)
 whitening_key = HKDF-Expand(PRK, "zkstego/cavlc/v2/whitening", 32)
 \end{lstlisting}
-Lộ một khóa con không làm lộ secret hay các khóa con khác. Encoder/decoder xóa
-secret của caller ngay sau khi dẫn xuất và chỉ giữ khóa con.
+Lộ một khóa con không làm lộ secret hay khóa con còn lại. Encoder/decoder xóa secret
+của caller ngay sau khi dẫn xuất và chỉ giữ khóa con. HMAC ở đây chỉ đóng vai hàm giả
+ngẫu nhiên có khóa (chọn vị trí, sinh keystream), không còn dùng để xác thực.
 
 \subsection{Lịch có khóa}
 
@@ -488,13 +596,13 @@ rồi
 $N$ lớn hơn số ứng viên, hàm ném \path{blind schedule capacity is insufficient}.
 Các hàm công khai \path{score_keyed_cavlc_sign_candidate()} và
 \path{select_keyed_cavlc_sign_candidates()} nhận secret gốc, tự dẫn xuất
-\texttt{schedule\_key} rồi gọi cùng logic.
+\texttt{schedule\_key} rồi gọi cùng logic. Cũng hàm này chọn các bit carrier mà
+\path{cavlc_video_binding_digest()} xóa về 0 khi tính hash video.
 
-\subsection{Khung xác thực và làm trắng}
+\subsection{Khung kênh và làm trắng}
 
 \begin{lstlisting}[numbers=none]
-frame        = [0x02][payload_len BE16][payload][tag 16 bytes]
-tag          = HMAC-SHA256(frame_key, version || len || payload)[0:16]
+frame        = [0x03][payload_len BE16][payload]                 (no MAC, 3-byte header)
 keystream    = HMAC(whitening_key, uint64_be(0)) || HMAC(whitening_key, uint64_be(1)) || ...
 embedded[i]  = frame_bit[i] XOR keystream_bit[i]     (i global over all segments, MSB-first)
 \end{lstlisting}
@@ -504,17 +612,23 @@ embedded[i]  = frame_bit[i] XOR keystream_bit[i]     (i global over all segments
 \midrule\endfirsthead
 \toprule\textbf{Hàm} & \textbf{Vai trò} \\
 \midrule\endhead
-\path{pack_frame_with_key()} & Ghép version \texttt{0x02}, độ dài BE16, payload, 16 byte đầu của \path{authenticated_frame_tag()}. Payload tối đa 65\,535 byte theo định dạng. \\
-\path{unpack_frame_with_key()} & Kiểm version, độ dài $\le$ giới hạn và đúng kích thước, so tag theo thời gian hằng; ném lỗi \texttt{frame version/length/tag}. \\
+\path{pack_frame()} (nội bộ) & Ghép version \texttt{0x03} (\path{kCavlcFrameVersion}), độ dài BE16 và payload. Payload tối đa 65\,535 byte theo định dạng. \\
+\path{unpack_frame()} (nội bộ) & Kiểm version và độ dài $\le$ giới hạn, đúng kích thước; ném \texttt{CAVLC frame version is invalid} hoặc \texttt{CAVLC frame length is invalid}. \\
 \path{bytes_to_msb_bits()}, \path{msb_bits_to_bytes()} & Quy ước bit MSB trước cho cả hai phía. \\
 \path{whitening_block()} & Khối keystream thứ $j$ = HMAC(\texttt{whitening\_key}, \texttt{uint64\_be}($j$)). \\
 \path{whiten_cavlc_frame_bits()} & XOR bit với keystream bắt đầu từ chỉ số bit toàn cục; gọi lại lần nữa để bỏ làm trắng. \\
-\path{pack_authenticated_cavlc_frame()}, \path{unpack_authenticated_cavlc_frame()}, \path{cavlc_whitening_keystream()} & Bản công khai nhận secret gốc; dùng trong CTest và để so với bản Python. \\
+\path{pack_cavlc_frame()}, \path{unpack_cavlc_frame()}, \path{cavlc_whitening_keystream()} & Bản công khai; dùng trong CTest và để so với bản Python. \\
 \bottomrule\end{longtable}
 
 Làm trắng cần thiết vì byte version cố định, trường độ dài nhỏ và cấu trúc proof làm
-thống kê dấu tại các vị trí được chọn bị lệch. Giao thức v2 không đọc được file stego
-do phiên bản trước tạo ra.
+thống kê dấu tại các vị trí được chọn bị lệch. Khung v3 \textbf{không có MAC}: khi
+Groth16 verify đã là bắt buộc, một thẻ xác thực khung chỉ trùng việc (sửa message hay
+proof thì proof sai), và bỏ nó tiết kiệm 128 bit. Khóa sai vẫn bị loại rẻ: byte version
+sau khi bỏ làm trắng gần như ngẫu nhiên, lọt qua cả kiểm version lẫn độ dài với xác suất
+cỡ $\frac{1}{256}\cdot\frac{\text{giới hạn}}{65\,536}$; phần còn sót hỏng ở bước giải
+nén proof hoặc bị Groth16 từ chối. Hệ quả: kênh không tự phát hiện bit payload bị sửa,
+nên payload trích ra chỉ là ứng viên cho tới khi proof verify. Giao thức v3 không đọc
+được stego v2/v1 (byte version khác).
 
 \subsection{Giao thức theo đoạn IDR}
 
@@ -531,14 +645,15 @@ ngữ cảnh SPS/PPS đã thấy + đúng một IDR; mỗi đoạn mang tối đ
 \path{update_parameter_set_context()} & Giữ đúng một SPS và một PPS; cùng id thì thay, khác id cùng loại thì từ chối. \\
 \path{assemble_cavlc_stream_segment()} & Ghép ngữ cảnh SPS/PPS + một IDR thành một đoạn Annex-B. \\
 \path{prepare_cavlc_stream_segment()} (nội bộ) & Kiểm đoạn có đúng một IDR và không có P-slice; dựng input phân tích; giải mã slice; thu ứng viên. \\
-\path{AuthenticatedCavlc}\allowbreak\path{StreamEncoder} (constructor) & Dẫn xuất ba khóa con, đóng khung, đổi sang bit, làm trắng toàn bộ một lần; chỉ giữ \texttt{schedule\_key} và bit khung đã làm trắng. \\
-\path{AuthenticatedCavlc}\allowbreak\path{StreamEncoder::}\allowbreak\path{process_segment()} & Chọn $\min(\text{max\_bits}, \text{ứng viên})$ vị trí theo lịch; chỉ patch phần bit khung còn lại; vị trí thừa ở đoạn cuối giữ dấu gốc; gọi \path{patch_annex_b_rbsp_plan()} rồi \path{remove_stream_context_prefix()}. \\
+\path{CavlcStreamEncoder} (constructor) & Dẫn xuất hai khóa con, đóng khung, đổi sang bit, làm trắng toàn bộ một lần; chỉ giữ \texttt{schedule\_key} và bit khung đã làm trắng. \\
+\path{CavlcStreamEncoder::}\allowbreak\path{process_segment()} & Chọn $\min(\text{max\_bits}, \text{ứng viên})$ vị trí theo lịch; chỉ patch phần bit khung còn lại; vị trí thừa ở đoạn cuối giữ dấu gốc; gọi \path{patch_annex_b_rbsp_plan()} rồi \path{remove_stream_context_prefix()}. \\
 \path{complete()}, \path{remaining_bits()} & Caller biết khi nào khung đã nhúng hết. \\
-\path{AuthenticatedCavlc}\allowbreak\path{StreamDecoder::}\allowbreak\path{consume_segment()} & \path{extract_keyed_bits_from_candidates()} đọc bit dấu theo lịch; bỏ làm trắng với chỉ số toàn cục; sau 24 bit kiểm version và độ dài; đủ bit thì \path{unpack_frame_with_key()}. Mọi lỗi chuyển decoder sang \path{failed()} (fail-closed). \\
-\path{authenticated_payload()} & Trả payload chỉ khi tag đã khớp; nếu chưa: \texttt{authenticated CAVLC stream is incomplete}. \\
-\path{embed_authenticated_cavlc_stream_file()} & Chế độ file: \path{visit_cavlc_stream_file()} duyệt NAL; IDR còn cần bit thì qua encoder và \path{single_idr_payload()}; NAL khác và IDR sau khi xong được sao chép nguyên. \\
-\path{extract_authenticated_cavlc_stream_file()} & Chế độ file phía nhận: đưa từng đoạn vào decoder, dừng khi xong. \\
+\path{CavlcStreamDecoder::}\allowbreak\path{consume_segment()} & \path{extract_keyed_bits_from_candidates()} đọc bit dấu theo lịch; bỏ làm trắng với chỉ số toàn cục; sau 24 bit kiểm version và độ dài; đủ bit thì \path{unpack_frame()}. Mọi lỗi chuyển decoder sang \path{failed()} (fail-closed). \\
+\path{CavlcStreamDecoder::payload()} & Trả payload khi khung đã đủ bit và đúng định dạng; nếu chưa: \texttt{CAVLC stream is incomplete}. Payload này chưa được xác thực. \\
+\path{embed_cavlc_stream_file()} & Chế độ file: \path{visit_cavlc_stream_file()} duyệt NAL; IDR còn cần bit thì qua encoder và \path{single_idr_payload()}; NAL khác và IDR sau khi xong được sao chép nguyên. \\
+\path{extract_cavlc_stream_file()} & Chế độ file phía nhận: đưa từng đoạn vào decoder, dừng khi xong. \\
 \path{analyze_cavlc_stream_file()} & Góc nhìn kiểm toán: ứng viên của từng đoạn đúng như codec thu được; nguồn của \path{zkstego_inspect --segments}. \\
+\path{cavlc_video_binding_digest()} & Hash ràng buộc video: cùng cách duyệt và cùng lịch như encoder để xác định đúng \texttt{frame\_bit\_count} bit carrier, xóa chúng về 0 trong RBSP rồi băm mọi NAL; trả \path{CavlcVideoBindingDigest} (digest, \texttt{carrier\_segments}, \texttt{nal\_units}). \\
 \bottomrule\end{longtable}
 
 \subsection{Thông báo lỗi native}
@@ -550,19 +665,18 @@ Mọi lỗi của CLI in \texttt{error: \ldots} ra stderr và thoát mã 2.
 \midrule\endfirsthead
 \toprule\textbf{Thông báo} & \textbf{Khi nào / hàm phát sinh} \\
 \midrule\endhead
-\texttt{authenticated CAVLC stream version is invalid} & Decoder: byte đầu sau khi bỏ làm trắng khác \texttt{0x02}, thường do sai khóa. \\
-\texttt{authenticated CAVLC stream length exceeds configured maximum} & Decoder: trường độ dài vượt giới hạn payload. \\
-\texttt{authenticated CAVLC frame tag is invalid} & \path{unpack_frame_with_key()}: đủ bit nhưng HMAC sai (sai khóa hoặc bit bị sửa). \\
-\texttt{authenticated CAVLC frame version/length is invalid} & \path{unpack_frame_with_key()} khi khung sai định dạng. \\
+\texttt{CAVLC stream version is invalid} & Decoder: byte đầu sau khi bỏ làm trắng khác \texttt{0x03}, thường do sai khóa hoặc stego v2. \\
+\texttt{CAVLC stream length exceeds configured maximum} & Decoder: trường độ dài vượt giới hạn payload. \\
+\texttt{CAVLC frame version is invalid}, \texttt{CAVLC frame length is invalid} & \path{unpack_frame()} khi khung sai định dạng. \\
 \texttt{blind schedule capacity is insufficient} & Lịch cần nhiều bit hơn số ứng viên. \\
-\texttt{IDR stream capacity is insufficient for authenticated payload} & Embed chế độ file: hết IDR trước khi nhúng đủ khung. \\
-\texttt{IDR stream ended before authenticated payload capacity was met} & Embed live (\path{embed-live-auth-stdin}). \\
-\texttt{IDR stream ended before authenticated payload was complete} & Extract chế độ file. \\
-\texttt{input stream ended before authenticated payload was complete} & Extract live (\path{extract-live-auth-stdin}). \\
+\texttt{IDR stream capacity is insufficient for payload} & Embed chế độ file, hoặc \path{video-digest} khi video không đủ chỗ cho khung. \\
+\texttt{IDR stream ended before payload capacity was met} & Embed live (\path{embed-live-auth-stdin}). \\
+\texttt{IDR stream ended before payload was complete} & Extract chế độ file. \\
+\texttt{input stream ended before payload was complete} & Extract live (\path{extract-live-auth-stdin}). \\
 \bottomrule\end{longtable}
 
-HMAC hợp lệ chỉ chứng minh payload đến từ người có khóa và không bị sửa; nó
-\textbf{không} thay cho việc kiểm proof Groth16.
+Tìm thấy khung chỉ có nghĩa là có dữ liệu ở đúng vị trí theo khóa; nó \textbf{không}
+chứng minh payload nguyên vẹn. Việc đó thuộc về proof Groth16 (job verify).
 
 \section{CLI native và công cụ soi}
 
@@ -570,18 +684,20 @@ HMAC hợp lệ chỉ chứng minh payload đến từ người có khóa và kh
 
 \path{native/tools/blind_bits.cpp}: \path{wmain()} (Windows, đối số wide) hoặc
 \path{main()} gọi \path{zkstego::cli::utf8_arguments()} rồi \path{run()}. Hàm
-\path{run()} dispatch đúng năm lệnh:
+\path{run()} dispatch đúng sáu lệnh. Hậu tố \texttt{-auth} được giữ cho tương thích và
+nay chỉ có nghĩa ``có khóa''; khung không có MAC.
 
 \begin{longtable}{P{.3\textwidth}P{.3\textwidth}P{.31\textwidth}}
 \toprule\textbf{Lệnh và đối số} & \textbf{stdin / stdout} & \textbf{Hàm lõi được gọi} \\
 \midrule\endfirsthead
 \toprule\textbf{Lệnh và đối số} & \textbf{stdin / stdout} & \textbf{Hàm lõi được gọi} \\
 \midrule\endhead
-\path{embed-stream-auth-stdin} \texttt{in out max\_bits} & stdin: dòng khóa hex, dòng payload hex; ghi file mới & \path{embed_authenticated_cavlc_stream_file()} \\
-\path{extract-stream-auth} \texttt{in key|- max\_payload max\_bits} & khóa từ file quyền hạn chế hoặc stdin (\texttt{-}); stdout: payload hex & \path{extract_authenticated_cavlc_stream_file()} \\
+\path{embed-stream-auth-stdin} \texttt{in out max\_bits} & stdin: dòng khóa hex, dòng payload hex; ghi file mới & \path{embed_cavlc_stream_file()} \\
+\path{extract-stream-auth} \texttt{in key|- max\_payload max\_bits} & khóa từ file quyền hạn chế hoặc stdin (\texttt{-}); stdout: payload hex (chưa xác thực) & \path{extract_cavlc_stream_file()} \\
+\path{video-digest} \texttt{in frame\_bits max\_bits} & stdin: dòng khóa hex (cần để định vị bit carrier); stdout: \texttt{ZKSTEGO\_VIDEO\_DIGEST <hex> carrier\_segments=N nal\_units=M} & \path{cavlc_video_binding_digest()} \\
 \path{measure-live-capacity-stdin} \texttt{max\_bits} & stdin: Annex-B; stdout: \texttt{ZKSTEG\_CAPACITY\_METRICS} JSON & \path{run_live_capacity_measure()} \\
-\path{embed-live-auth-stdin} \texttt{max\_bits} & stdin: khóa, payload, rồi Annex-B; stdout: H.264; stderr: \texttt{ZKSTEG\_STREAM\_METRICS} & \path{run_live_authenticated_embed()} \\
-\path{extract-live-auth-stdin} \texttt{max\_payload max\_bits} & stdin: khóa, rồi Annex-B; stdout: payload hex & \path{run_live_authenticated_extract()} \\
+\path{embed-live-auth-stdin} \texttt{max\_bits} & stdin: khóa, payload, rồi Annex-B; stdout: H.264; stderr: \texttt{ZKSTEG\_STREAM\_METRICS} & \path{run_live_embed()} \\
+\path{extract-live-auth-stdin} \texttt{max\_payload max\_bits} & stdin: khóa, rồi Annex-B; stdout: payload hex & \path{run_live_extract()} \\
 \bottomrule\end{longtable}
 
 \begin{longtable}{P{.36\textwidth}P{.55\textwidth}}
@@ -594,8 +710,8 @@ HMAC hợp lệ chỉ chứng minh payload đến từ người có khóa và kh
 \path{parse_bit_count()} & Từ chối số âm, tràn, ký tự thừa; các lệnh tự kiểm \texttt{max\_bits} $>0$. \\
 \path{set_standard_streams_to_binary()} & Bắt buộc trên Windows để stdin/stdout không đổi byte H.264. \\
 \path{is_bare_start_code()}, \path{parse_single_stream_nal()} & Bỏ NAL rỗng ở chế độ live; tách đúng một NAL từ reader. \\
-\path{run_live_authenticated_embed()} & Mỗi IDR: \path{assemble_cavlc_stream_segment()} $\to$ \path{encoder.process_segment()} $\to$ ghi lại đúng IDR đã patch; SPS/PPS/NAL khác chuyển nguyên; đo p50/p95 thời gian mỗi đoạn. \\
-\path{run_live_authenticated_extract()} & Mỗi IDR: \path{decoder.consume_segment()}; trả ngay khi \path{complete()}. \\
+\path{run_live_embed()} & Mỗi IDR: \path{assemble_cavlc_stream_segment()} $\to$ \path{encoder.process_segment()} $\to$ ghi lại đúng IDR đã patch; SPS/PPS/NAL khác chuyển nguyên; đo p50/p95 thời gian mỗi đoạn. \\
+\path{run_live_extract()} & Mỗi IDR: \path{decoder.consume_segment()}; trả ngay khi \path{complete()}. \\
 \bottomrule\end{longtable}
 
 \path{native/tools/cli_io.hpp} cung cấp \path{utf8_arguments()}, \path{os_path()},
@@ -628,13 +744,17 @@ stego.
 \midrule\endhead
 \path{derive_channel_keys()}, \path{hkdf_sha256()} & \path{derive_cavlc_subkey()}, \path{hkdf_sha256()} \\
 \path{NativeCavlcCandidate.serialize()}, \path{score_candidate()}, \path{select_candidates()} & \path{serialize_cavlc_sign_candidate()}, \path{score_keyed_cavlc_sign_candidate()}, \path{select_keyed_cavlc_sign_candidates()} \\
-\path{pack_authenticated_frame()}, \path{unpack_authenticated_frame()} & \path{pack_authenticated_cavlc_frame()}, \path{unpack_authenticated_cavlc_frame()} \\
+\path{pack_frame()}, \path{unpack_frame()} (\path{FRAME_VERSION} = 3, \path{FRAME_HEADER_BYTES} = 3) & \path{pack_cavlc_frame()}, \path{unpack_cavlc_frame()} \\
 \path{whitening_keystream_bits()}, \path{whiten_bits()} (= \path{unwhiten_bits}) & \path{cavlc_whitening_keystream()}, \path{whiten_cavlc_frame_bits()} \\
-\path{embedded_frame_bits()}, \path{recover_authenticated_payload()} & Bit khung đã làm trắng / chiều ngược \\
+\path{embedded_frame_bits()}, \path{recover_payload()} & Bit khung đã làm trắng / chiều ngược \\
 \path{segment_schedule()} & Lịch của \path{process_segment()} qua mọi đoạn \\
+\path{src/video_binding.py::video_digest()} & \path{cavlc_video_binding_digest()} (lệnh \path{video-digest}) \\
 \bottomrule\end{longtable}
 
 \section{Verifier: từ video stego đến quyết định}
+
+Bên kiểm chứng chỉ cần: video stego, khóa giấu tin $K$, gốc sổ đăng ký (root) mà nó
+tin, và \path{camera_video_vkey.json}. Không cần video gốc, file phụ hay secret camera.
 
 \subsection{Trích mù native}
 
@@ -644,33 +764,48 @@ stego.
   \item duyệt NAL, cập nhật ngữ cảnh SPS/PPS, ghép mỗi IDR thành một đoạn;
   \item giải mã lại CAVLC, thu ứng viên (giống phía gửi vì lật dấu không đổi cấu trúc);
   \item dẫn xuất khóa con, xếp lịch HMAC của đoạn, đọc bit dấu tại vị trí đã chọn;
-  \item bỏ làm trắng 24 bit đầu, kiểm version \texttt{0x02} và độ dài, biết tổng số bit cần đọc;
-  \item đọc đủ khung qua các đoạn, kiểm tag HMAC; trả payload hoặc thoát mã 2.
+  \item bỏ làm trắng 24 bit đầu, kiểm version \texttt{0x03} và độ dài, biết tổng số bit cần đọc;
+  \item đọc đủ khung qua các đoạn, kiểm định dạng; in payload hex hoặc thoát mã 2.
 \end{enumerate}
+Payload in ra lúc này \textbf{chưa được xác thực}; chỉ bước Groth16 dưới đây mới quyết định.
 
-\subsection{Unpack và verify Groth16}
+\subsection{Unpack, hash video và verify Groth16}
 
-\path{unpack(blob)} đọc độ dài message big-endian và kiểm blob đủ $4+|m|+129$ byte
-rồi tách $(m, \text{proof})$. Các caller hiện tại còn đòi độ dài \emph{chính xác}
-(không dư byte): \path{verify_message()} trong demo và
-\path{make_proof_verify_handler()} trong API. Tiếp theo \path{bytes_to_proof()}
-dựng lại điểm Groth16, \path{_build_public_signals(m, k)} tính hash, commitment và
-length, rồi snarkjs verify. Message chỉ được dùng sau khi proof hợp lệ.
+\path{src/camera_proof.py::verify_payload()} nhận bridge, root, payload, CLI native, file stego,
+khóa $K$ và \texttt{max\_bits\_per\_idr}:
+\begin{enumerate}
+  \item \path{parse_payload()}: \path{unpack_payload()} (đúng format, mode, độ dài chính
+  xác) rồi \path{bytes_to_proof()}; lỗi $\to$ \texttt{malformed\_proof\_payload}.
+  \item \path{check_proof()}: mode 1 bị từ chối với \path{video_binding_required}
+  khi \path{require_video_binding} (mặc định); mode 0 thì
+  \path{native_video_digest()} tính lại digest từ \emph{chính file nhận được} với
+  \path{frame_bits_for_message(len(m))}; lệnh lỗi $\to$
+  \texttt{video\_digest\_unavailable}.
+  \item \path{binding_digest(mode, digest, m)} rồi \path{CameraProofBridge.verify()} với
+  (proof, root, binding); sai $\to$ \texttt{proof\_invalid}.
+  \item Hợp lệ $\to$ \path{Verdict} có \texttt{valid=True}, mode và message; thuộc tính
+  \texttt{video\_bound} đúng khi mode = 0. Message chỉ được dùng sau bước này.
+\end{enumerate}
+Demo (\path{verify_message()}) còn kiểm thêm digest của stego bằng digest của cover và
+dựng lại lịch từ stego bằng \path{segment_schedule()}; đó là kiểm toán giáo dục, không
+phải input của quyết định.
 
 \subsection{Verifier phía API}
 
-\path{native_handlers.make_proof_verify_handler()} trả về:
+\path{native_handlers.make_proof_verify_handler(extract_payload, check)} trả về:
 
 \begin{longtable}{P{.36\textwidth}P{.55\textwidth}}
 \toprule\textbf{Kết quả} & \textbf{Điều kiện} \\
 \midrule\endfirsthead
 \toprule\textbf{Kết quả} & \textbf{Điều kiện} \\
 \midrule\endhead
-\texttt{valid: true}, \texttt{message\_b64} & Trích được payload, unpack đúng, proof verify. Job $\to$ \texttt{succeeded}. \\
-\texttt{reason: payload\_not\_authenticated} & CLI thoát khác 0 (\path{NativePayloadNotAuthenticated}). Job $\to$ \texttt{rejected}. \\
-\texttt{reason: malformed\_proof\_payload} & \path{unpack()} / \path{bytes_to_proof()} ném \texttt{ValueError} hoặc độ dài lệch. \\
-\texttt{reason: proof\_invalid} & Groth16 trả \texttt{False}. \\
-Ngoại lệ hạ tầng & Timeout, thiếu Node.js hoặc verification key $\to$ job \texttt{failed}, không phải \texttt{rejected}. \\
+\texttt{valid: true}, \texttt{message\_b64}, \texttt{payload\_bytes}, \texttt{video\_bound} & Trích được payload, unpack đúng, digest tính được, proof verify với root. Job $\to$ \texttt{succeeded}. \\
+\texttt{reason: payload\_not\_found} & CLI thoát khác 0 (\path{NativePayloadNotFound}): không có khung v3 dưới khóa này (sai khóa, video đã mã hóa lại, mất IDR mang bit). Job $\to$ \texttt{rejected}. \\
+\texttt{reason: malformed\_proof\_payload} & \path{parse_payload()} trả \texttt{None}. \\
+\texttt{reason: video\_binding\_required} & Payload mode 1 khi chưa bật \path{ZK_STEGO_ALLOW_MESSAGE_ONLY_PROOFS=1}. \\
+\texttt{reason: video\_digest\_unavailable} & Lệnh \path{video-digest} thất bại trên file tải lên. \\
+\texttt{reason: proof\_invalid} & Groth16 trả \texttt{False} (message bị đổi, video bị sửa/cắt, payload chép sang video khác, camera ngoài sổ đăng ký\ldots). \\
+Ngoại lệ hạ tầng & Timeout, thiếu Node.js, verification key hoặc sổ đăng ký (\path{ZK_STEGO_CAMERA_REGISTRY}) $\to$ job \texttt{failed}, không phải \texttt{rejected}. \\
 \bottomrule\end{longtable}
 
 \section{API: hàm nào nhận request, hàm nào chạy job}
@@ -685,7 +820,7 @@ endpoint; endpoint có handler \texttt{None} trả 501. Ứng dụng native inje
 \midrule\endfirsthead
 \toprule\textbf{Hàm/lớp} & \textbf{Input $\to$ output} & \textbf{Ảnh hưởng} \\
 \midrule\endhead
-\path{ApiSettings.from_environment()} & env $\to$ settings & \path{ZK_STEGO_API_TOKEN} bắt buộc, tối thiểu 32 ký tự (\path{MIN_API_TOKEN_LENGTH}); work dir, circuits dir, timeout upload, thời gian giữ job, \path{ZK_STEGO_API_DOCS}. \\
+\path{ApiSettings.from_environment()} & env $\to$ settings & \path{ZK_STEGO_API_TOKEN} bắt buộc, tối thiểu 32 ký tự (\path{MIN_API_TOKEN_LENGTH}); work dir, circuits dir (\path{ZK_STEGO_CIRCUITS_DIR}), sổ đăng ký camera (\path{ZK_STEGO_CAMERA_REGISTRY}), \texttt{require\_video\_binding} (tắt chỉ khi \path{ZK_STEGO_ALLOW_MESSAGE_ONLY_PROOFS=1}), timeout upload, thời gian giữ job, \path{ZK_STEGO_API_DOCS}. \\
 \path{RequestBodyGuard.__call__()} & ASGI scope $\to$ request được bảo vệ & Kiểm Bearer token \textbf{trước khi đọc body}, giới hạn kích thước/thời gian upload, tối đa 4 upload đồng thời. \\
 \path{AuthFailureLimiter} & IP $\to$ \path{retry_after()} & 10 lần sai trong 60 s $\to$ 429 kèm \texttt{Retry-After}; dùng chung cho HTTP và WebSocket. \\
 \path{bearer_token_matches()}, \path{require_token()} & header $\to$ pass/401 & So token; \path{require_token()} là lớp phòng thủ thứ hai. \\
@@ -694,10 +829,10 @@ endpoint; endpoint có handler \texttt{None} trả 501. Ứng dụng native inje
 \path{_decode_key()}, \path{_decode_message()} & base64 $\to$ bytes & Kiểm định dạng trước khi xếp job. \\
 \path{_save_upload()} & UploadFile $\to$ file & Ghi có giới hạn; lỗi thì dọn. \\
 \path{reserve_capacity()} & semaphore $\to$ slot/503 & Mặc định 1 worker + 2 job chờ. \\
-\path{submit()} & job id, operation, callable & Chạy nền; job \texttt{verify} có \texttt{valid} khác \texttt{True} $\to$ \texttt{rejected}; ngoại lệ $\to$ \texttt{failed}. \\
-\path{start_embed()} & \texttt{video},\texttt{message\_b64}, \texttt{secret\_key\_b64} & Gọi \texttt{embed\_handler}. \\
-\path{start_extract()} & \texttt{stego\_video}, khóa, \texttt{maximum\_payload\_bytes} (1..4096) & Gọi \texttt{extract\_handler}; artifact \path{payload.bin}. \\
-\path{start_verify()} & \texttt{stego\_video}, khóa, \texttt{maximum\_payload\_bytes} & Gọi \texttt{verify\_handler}; không cần video gốc. \\
+\path{submit()}, \path{outcome()} & job id, operation, callable & Chạy nền; job \texttt{verify} có \texttt{valid} khác \texttt{True} $\to$ \texttt{rejected}; ngoại lệ $\to$ \texttt{failed}. Trạng thái: \texttt{queued}, \texttt{running}, \texttt{succeeded}, \texttt{rejected}, \texttt{failed}. \\
+\path{start_embed()} & \texttt{video}, \texttt{message\_b64}, \texttt{secret\_key\_b64} & Gọi \texttt{embed\_handler}; \texttt{message\_b64} là blob opaque (demo gửi payload mang proof đã đóng gói), server không tạo proof. \\
+\path{start_extract()} & \texttt{stego\_video}, khóa, \texttt{maximum\_payload\_bytes} (1..4096) & Gọi \texttt{extract\_handler}; artifact \path{payload.bin}; kết quả mang \texttt{"verified": false} (\path{_safe_extract_result()}). \\
+\path{start_verify()} & \texttt{stego\_video}, khóa, \texttt{maximum\_payload\_bytes} & Gọi \texttt{verify\_handler}; không cần video gốc; \path{_safe_verify_result()} chỉ trả message khi proof đúng. \\
 \path{get_job()}, \path{download_artifact()} & job id $\to$ trạng thái/file & Artifact tải \textbf{một lần}, hết hạn sau 10 phút. \\
 \path{startup()}, \path{shutdown()}, \path{recover_interrupted_jobs()}, \path{purge_expired_jobs()} & vòng đời & Khôi phục job dang dở, dọn job quá hạn (mặc định 24 h). \\
 \bottomrule\end{longtable}
@@ -710,14 +845,18 @@ nghĩa:
 
 \begin{itemize}
   \item \path{invoke()}: chạy CLI không qua shell, có timeout; stdin = khóa hex +
-  phần đuôi; mã thoát khác 0 $\to$ \path{NativePayloadNotAuthenticated}.
+  phần đuôi; mã thoát khác 0 $\to$ \path{NativePayloadNotFound}.
   \item \path{embed_handler()}: \path{embed-stream-auth-stdin}; \texttt{bits\_embedded}
-  được \emph{tính} là $(|m|+19)\times 8$ (\texttt{bits\_embedded\_source} =
-  \texttt{computed\_frame\_size}), không do CLI báo.
+  được \emph{tính} là $(|m|+3)\times 8$ (\path{FRAME_HEADER_BYTES} = 3,
+  \texttt{bits\_embedded\_source} = \texttt{computed\_frame\_size}), không do CLI báo.
   \item \path{native_extract_payload()} và \path{extract_handler()}:
   \path{extract-stream-auth ... -}, kiểm hex và giới hạn payload, ghi file mới.
-  \item \path{groth16_verify()}: \path{ZKSnarkBridge(settings.circuits_dir)}; thiếu
-  verification key là lỗi triển khai (\texttt{failed}).
+  \item \path{camera_check()}: nạp \path{CameraRegistry.load()} từ
+  \texttt{settings.camera\_registry\_path} và \path{CameraProofBridge(settings.circuits_dir)},
+  rồi gọi \path{camera_proof.check_proof()} với CLI native, file tải lên và khóa. Thiếu
+  sổ đăng ký hoặc verification key là lỗi triển khai (\texttt{failed}).
+  \item \path{make_proof_verify_handler(native_extract_payload, camera_check)}: handler
+  của job verify; test có thể inject \texttt{payload\_extractor}, \texttt{proof\_checker}.
   \item \path{native_stream()}: WebSocket \path{/api/v1/stream}.
 \end{itemize}
 
@@ -729,9 +868,11 @@ client -> {"operation":"embed","secret_key_b64":...,"message_b64":...}
 server -> {"type":"ready","operation":...}
 client -> binary Annex-B chunks ..., then {"type":"end"}
 server -> embed: binary H.264 chunks, then {"type":"complete",...}
-          extract: {"type":"payload","payload_b64":...}
-          error:   {"type":"error","code":"payload_not_authenticated" | "stream_idle_timeout" | ...}
+          extract: {"type":"payload","payload_b64":...,"verified":false}
+          error:   {"type":"error","code":"payload_not_found" | "stream_idle_timeout" | ...}
 \end{lstlisting}
+Payload của luồng live chưa được xác thực; luồng live chỉ có thể mang proof mode 1
+(chỉ ràng buộc message) vì phần sau của video chưa tồn tại lúc nhúng.
 Server giới hạn byte/chunk, đặt high/low water mark stdin của tiến trình con
 (64/16 KiB), đọc stderr liên tục và đóng luồng sau
 \path{ZK_STEGO_STREAM_IDLE_TIMEOUT_SECONDS} (15 s) không có dữ liệu. Đây là dịch vụ
@@ -747,8 +888,9 @@ epoch tăng đơn điệu, bỏ đoạn cũ nhất khi đầy; \path{process_nex
 \path{_proof_for()} (cache tối đa 4 epoch), gọi callback patch, đo độ trễ;
 \path{report()} tính số đoạn bị bỏ, \texttt{failed\_segments}, p95 và
 \texttt{accepted}. Đây là abstraction được test riêng; WebSocket native tự quản lý
-tiến trình con và backpressure, không gọi scheduler này. Đo trên camera thật hiện
-\textbf{chưa} đạt cổng 30 FPS.
+tiến trình con và backpressure, không gọi scheduler này. Đo trên camera thật
+\textbf{chưa} đạt cổng 30 FPS: lần chạy hiệu chỉnh ngày 24/09/2026 (giao thức v1, trước
+khi tăng tốc native ngày 02/10/2026) đạt 7,608 FPS và chưa được đo lại.
 
 \subsection{Chứng chỉ khóa và manifest}
 
@@ -787,12 +929,12 @@ ctest --test-dir native/build -C Release --output-on-failure
 \midrule\endfirsthead
 \toprule\textbf{Phase} & \textbf{File} & \textbf{Nội dung} \\
 \midrule\endhead
-1 & \path{test_zk_proof.py} & Proof Groth16: định dạng, nén, verify, fail-closed \\
-2 & \path{test_native_blind_contract.py} & C++ và Python khớp HKDF, lịch, khung, làm trắng, lịch theo đoạn \\
-3 & \path{test_native_cli_fixture.py} & CLI nhúng/trích trên fixture, decode nghiêm ngặt, sai khóa \\
+1 & \path{test_zk_proof.py} & Định dạng proof/payload, vector Poseidon, sổ đăng ký, binding, đối chiếu witness của mạch, Groth16 thật \\
+2 & \path{test_native_blind_contract.py} & C++ và Python khớp HKDF, lịch, khung v3, làm trắng, lịch theo đoạn \\
+3 & \path{test_native_cli_fixture.py} & CLI nhúng/trích trên fixture, decode nghiêm ngặt, sai khóa; \path{video-digest} native = Python, cover = stego \\
 4 & \path{test_h264_tables.py} & Bảng VLC (prefix-free, Kraft, giá trị chuẩn) \\
 5 & \path{test_service_api.py} & Lõi job, xác thực trước body, giới hạn thử sai, job verify \\
-6 & \path{test_native_http_channel.py} & Job HTTP và WebSocket qua Uvicorn thật \\
+6 & \path{test_native_http_channel.py} & Job HTTP và WebSocket qua Uvicorn thật; proof ràng buộc video được chấp nhận, chép sang video khác và cắt ngắn bị từ chối \\
 7 & \path{test_manifest_security.py} & Ký manifest và ràng buộc liên quan \\
 8 & \path{test_realtime_scheduler.py} & Bộ lập lịch realtime \\
 9 & \path{test_benchmark_recorder.py} & Fail-closed của bộ ghi benchmark camera \\
@@ -803,8 +945,26 @@ H1 & \path{test_native_camera_http.py} & Camera thật, chỉ khi \path{--hardwa
 \bottomrule\end{longtable}
 
 Mã thoát của \path{run_all.py}: 0 = tất cả qua, 1 = có lỗi, 2 = có phase thiếu bằng
-chứng (bị bỏ qua). Theo \path{README.md}, lần chạy ngày 03/10/2026 đạt 126/126 qua
-12 phase và CTest native 1/1; phase camera H1 không nằm trong con số này.
+chứng (bị bỏ qua). Lần chạy ngày 04/10/2026 đạt \textbf{142/142} qua 12 phase và
+CTest native 1/1; phase camera H1 không nằm trong con số này.
+
+\subsection{Số liệu hiện tại để đối chiếu}
+
+Lần đo ghi nhận ngày 04/10/2026 (i7-12700H, Windows 11, giao thức v3 + proof camera;
+chi tiết trong \path{benchmark/NEW_BENCHMARKS.md} và \path{benchmark/results/e2e_new.json}):
+
+\begin{longtable}{P{.3\textwidth}P{.61\textwidth}}
+\toprule\textbf{Hạng mục} & \textbf{Kết quả} \\
+\midrule\endfirsthead
+\toprule\textbf{Hạng mục} & \textbf{Kết quả} \\
+\midrule\endhead
+Media & Run \texttt{20261004T142448Z\_1db00a}: chuyển đổi 9/9, media 27/27 (9 clip CIF $\times$ 352$\times$288, 640$\times$480, 1280$\times$960; QP 22, all-intra, 30 frame đầu; mọi proof ràng buộc video; sổ đăng ký 8 camera); không dấu nào ngoài lịch bị đổi. \\
+E2E (clip CIF 300 frame, trung vị, 5/5) & Digest cover 0,51 s; Groth16 prove 1,77 s; nhúng 0,50 s; decode nghiêm ngặt 0,15 s; trích 0,53 s; verify (digest stego + Groth16) 1,45 s; tổng phía gửi 2,78 s, phía nhận 1,99 s. \\
+Tấn công & 11/11 đúng kỳ vọng: sai khóa và mã hóa lại $\to$ \texttt{payload\_not\_found}; lật dấu carrier $\to$ \texttt{malformed\_proof\_payload}; lật dấu không mang khung, sửa frame sau, cắt nửa video, đổi message, camera ngoài sổ đăng ký, chép payload sang video khác $\to$ \texttt{proof\_invalid}. \\
+ZKP & Groth16 prove 1,5--1,8 s, verify 0,9--1,0 s, proof 129 byte; PLONK prove khoảng 22 s, proof khoảng 2,25 KB JSON. \\
+Chi phí native & Trung vị quét dung lượng mỗi IDR 52 / 220 / 770 ms, nhúng mỗi IDR mang bit 61 / 245 / 891 ms, hash video (26 IDR carrier) 1,6 / 6,4 / 22,6 s ở ba độ phân giải; parse, không phải Groth16, giới hạn thông lượng. \\
+Chất lượng & PSNR-Y cover$\to$stego thấp nhất mỗi ca 44,03--58,68 dB, 0/27 dưới 40 dB; kích thước stego bằng cover. \\
+\bottomrule\end{longtable}
 
 \section{Demo đã chạy: artifact và cách suy luận}
 
@@ -818,9 +978,11 @@ chứng (bị bỏ qua). Theo \path{README.md}, lần chạy ngày 03/10/2026 đ
 \path{trace_before.json}, \path{trace_after.json} & NAL, slice, ứng viên, bit dấu, hệ số & Chỉ đúng các bit đã lập lịch đổi; cấu trúc giữ nguyên. \\
 \path{segments_before.json}, \path{segments_after.json} & Ứng viên từng đoạn (\texttt{segments-1}) & Bên nhận dựng lại cùng lịch từ stego. \\
 \path{schedule.json} & Bit khung, keystream, bit nhúng, cũ/mới từng vị trí & Kiểm lịch HMAC và làm trắng. \\
-\path{proof.json}, \path{proof.bin}, \path{public_signals.json} & Proof và 513 public signal & Kiểm nén/giải nén proof. \\
+\path{proof.json}, \path{proof.bin}, \path{public_signals.json} & Proof và 3 public signal \texttt{[root, bindingHi, bindingLo]} & Kiểm nén/giải nén proof. \\
+\path{camera_registry.json} & Sổ đăng ký 4 camera demo (khóa công khai, root) & Root mà verifier và job verify của demo tin. \\
 \path{mb_detail_before.json}, \path{mb_detail_after.json} & Output \path{--macroblock} & Giải phẫu khối mẫu. \\
-\path{native_embed.*}, \path{native_extract.*}, \path{reject_*.*} & stdout/stderr từng tiến trình & Mã thoát 2 và thông báo lỗi đúng lý do. \\
+\path{invalid_proof.h264}, \path{missing_proof.h264}, \path{tampered_carrier.h264}, \path{cut_last_frame.h264} & Video của các ca từ chối & Mỗi ca bị từ chối đúng lý do (\texttt{proof\_invalid}, \texttt{malformed\_proof\_payload}, khung không tìm thấy). \\
+\path{native_embed.*}, \path{native_extract.*}, \path{reject_wrong_key.*} & stdout/stderr từng tiến trình & Mã thoát 2 và thông báo lỗi đúng lý do. \\
 \bottomrule\end{longtable}
 
 PASS của demo là bằng chứng chức năng trên một clip/một lần chạy, không phải benchmark:
@@ -834,15 +996,28 @@ nó không đo chất lượng cảm nhận trên tập lớn và không chứng
   I\_PCM, không nhiều SPS/PPS khác id.
   \item \textbf{Chỉ IDR mang bit.} Với GOP $>1$, P-frame được sao chép nguyên.
   \item \textbf{Mù không có nghĩa không cần khóa.} Extractor không cần video gốc
-  nhưng cần khóa và cùng \texttt{max\_bits\_per\_IDR}.
-  \item \textbf{Groth16, HMAC và bearer token khác nhiệm vụ.} Proof kiểm quan hệ
-  circuit; HMAC kiểm khung theo khóa chung; token xác thực caller của API.
-  \item \textbf{Không chống phát lại.} Khung và proof không chứa định danh video hay
-  bộ đếm; payload có thể bị chép sang video khác dùng cùng khóa
-  (xem \path{future_plan.md}).
-  \item \textbf{Ai có khóa cũng tạo được proof}, vì verifier phải biết secret để tính
-  lại commitment.
+  nhưng cần khóa giấu tin và cùng \texttt{max\_bits\_per\_IDR}. Hash video cũng phụ
+  thuộc khóa này (vị trí carrier), nên chỉ người có khóa mới kiểm chứng được.
+  \item \textbf{Groth16, HMAC và bearer token khác nhiệm vụ.} Proof là thứ duy nhất
+  xác thực payload; HMAC chỉ là hàm giả ngẫu nhiên có khóa để chọn vị trí và làm trắng;
+  token xác thực caller của API. Payload từ lệnh/job extract và từ luồng live mang
+  \texttt{"verified": false}.
+  \item \textbf{Luồng live chỉ ràng buộc message} (mode 1), vì phần sau của video chưa
+  tồn tại khi nhúng proof; job verify từ chối mode 1 trừ khi bật cấu hình.
+  \item \textbf{Setup Groth16 Phase 2 là nghi thức demo} trên một máy (beacon sinh cục
+  bộ); triển khai thật cần nhiều bên độc lập.
+  \item \textbf{Proof không chứng minh camera thật sự quay cảnh đó} (ví dụ quay lại
+  màn hình); nó chỉ chứng minh một camera trong sổ đăng ký đã xác nhận đúng video và
+  message.
+  \item \textbf{Keystream làm trắng không có nonce}: cùng khóa thì dùng lại cùng dòng
+  keystream; chưa có chứng minh hay đo đạc khả năng chống steganalysis.
+  \item \textbf{Mong manh theo thiết kế.} Mọi lần mã hóa lại đều phá kênh; realtime trên
+  camera thật chưa đạt cổng 30 FPS (xem \path{future_plan.md}).
 \end{enumerate}
+
+Các tấn công đã được kiểm và bị từ chối: chép payload sang video khác, cắt video, sửa
+frame sau, lật dấu không mang khung, mã hóa lại, đổi message, camera ngoài sổ đăng ký,
+sai khóa.
 
 \section{Lộ trình đọc source cho người mới tiếp nhận}
 
@@ -852,15 +1027,18 @@ nó không đo chất lượng cảm nhận trên tập lớn và không chứng
   \item Đọc \path{terminal_demo.py::walkthrough()} theo bảng ở Mục~\ref{sec:flow}, rồi
   \path{demo/native_io.py} để thấy Python chỉ gọi tiến trình native.
   \item Đọc \path{native/tools/blind_bits.cpp::run()}, sau đó
-  \path{embed_authenticated_cavlc_stream_file()} và
-  \path{extract_authenticated_cavlc_stream_file()}.
-  \item Đọc thư viện theo chuỗi \path{split_annex_b()} $\to$ \path{decode_baseline_i_idr_slices()}
-  $\to$ \path{collect_cavlc_trailing_one_sign_candidates()} $\to$
-  \path{prepare_cavlc_stream_segment()} $\to$ \path{select_with_schedule_key()} $\to$
-  \path{AuthenticatedCavlcStreamEncoder/Decoder}.
-  \item Đối chiếu với \path{src/native_blind_contract.py} và
-  \path{test_native_blind_contract.py}.
-  \item Đọc proof path: \path{src/zk_proof.py} và \path{circuits/payload_verify.circom}.
+  \path{embed_cavlc_stream_file()}, \path{extract_cavlc_stream_file()} và
+  \path{cavlc_video_binding_digest()}.
+  \item Đọc thư viện theo chuỗi \path{split_annex_b()} $\to$
+  \path{decode_baseline_i_idr_slices()} $\to$
+  \path{collect_cavlc_trailing_one_sign_candidates()} $\to$
+  \path{prepare_cavlc_stream_segment()} $\to$\newline
+  \path{select_with_schedule_key()} $\to$ \path{CavlcStreamEncoder} /
+  \path{CavlcStreamDecoder}.
+  \item Đối chiếu với \path{src/native_blind_contract.py}, \path{src/video_binding.py}
+  và \path{test_native_blind_contract.py}.
+  \item Đọc proof path: \path{src/camera_registry.py}, \path{circuits/camera_video.circom},
+  \path{src/zk_proof.py}, \path{src/camera_proof.py} và \path{src/zk_setup.py}.
   \item Đọc boundary dịch vụ: \path{native_handlers.create_native_app()},
   \path{make_proof_verify_handler()}, \path{native_stream()} và \path{app.create_app()}.
 \end{enumerate}
@@ -874,13 +1052,14 @@ nó không đo chất lượng cảm nhận trên tập lớn và không chứng
 \midrule\endhead
 Không thấy IDR / parser từ chối & \path{zkstego_inspect --summary}; \path{split_annex_b()}, \path{parse_baseline_sps()/pps()}, \path{decode_baseline_i_idr_slices()}; kiểm profile và \texttt{slices=1}. \\
 Dung lượng thấp, payload không vừa & \path{zkstego_inspect --segments N}; \path{segment_plan.resolve_max_bits()}; tăng \texttt{max\_bits\_per\_IDR}, số frame hoặc giảm message. \\
-Embed thoát mã 2 & stderr của \path{native_embed}; \path{embed_authenticated_cavlc_stream_file()}, \path{process_segment()}. \\
+Embed thoát mã 2 & stderr của \path{native_embed}; \path{embed_cavlc_stream_file()}, \path{process_segment()}. \\
 FFmpeg từ chối video & Kiểm ranh giới patch/EBSP: \path{patch_annex_b_rbsp_plan()}, \path{rbsp_to_ebsp()}. \\
-Extract báo sai version/tag & Cùng khóa hai phía? Cùng \texttt{max\_bits\_per\_IDR}? Rồi \path{consume_segment()}, \path{unpack_frame_with_key()}. \\
+Extract báo sai version/độ dài & Cùng khóa hai phía? Cùng \texttt{max\_bits\_per\_IDR}? Stego v2? Rồi \path{consume_segment()}, \path{unpack_frame()}. \\
 Lịch Python khác native & \path{segment_schedule()} so với \path{analyze_cavlc_stream_file()}; nhớ \texttt{nal\_index} tính trong input phân tích của đoạn. \\
-Payload trích được nhưng ZK false & Kiểm 4 byte độ dài, proof 129 byte, public signals và \path{verification_key.json}; xem \path{_snarkjs_verify()}. \\
-Job verify \texttt{rejected} & Đọc \texttt{reason}: \texttt{payload\_not\_authenticated}, \texttt{malformed\_proof\_payload}, \texttt{proof\_invalid}. \\
-Job verify \texttt{failed} & Lỗi hạ tầng: Node.js, \path{ZK_STEGO_CIRCUITS_DIR}, verification key, timeout. \\
+Digest cover khác digest stego & Cùng khóa, cùng \texttt{frame\_bits} (\path{frame_bits_for_message()}) và cùng \texttt{cap}? So \path{video_binding.video_digest()} với lệnh \path{video-digest}. \\
+Payload trích được nhưng ZK false & Kiểm header payload 4 byte, proof 129 byte, digest của file nhận, root của sổ đăng ký và \path{camera_video_vkey.json}; xem \path{check_proof()}, \path{_snarkjs_verify()}. \\
+Job verify \texttt{rejected} & Đọc \texttt{reason}: \texttt{payload\_not\_found}, \texttt{malformed\_proof\_payload}, \texttt{video\_binding\_required}, \texttt{video\_digest\_unavailable}, \texttt{proof\_invalid}. \\
+Job verify \texttt{failed} & Lỗi hạ tầng: Node.js, \path{ZK_STEGO_CIRCUITS_DIR}, \path{ZK_STEGO_CAMERA_REGISTRY}, verification key, timeout. \\
 HTTP 401/429 & \path{RequestBodyGuard}, \path{AuthFailureLimiter}; token phải $\ge$ 32 ký tự. \\
 Khóa hết hạn vẫn dùng được & Đường native nhận khóa thô; \path{KeyCertificate.verify()} chưa được gọi ở đó. \\
 \bottomrule
@@ -888,13 +1067,15 @@ Khóa hết hạn vẫn dùng được & Đường native nhận khóa thô; \pa
 
 \section{Kết luận vận hành}
 
-Khi đọc một đường lỗi, lần theo artifact tuần tự: message, proof 129 byte, payload,
-khung v2 (đã làm trắng), lịch theo đoạn, video stego, payload trích được, message và
-proof sau unpack, rồi kết quả Groth16. Điểm nối quan trọng nhất là CLI native nhận
-payload là byte opaque: Python tạo proof và payload; phân tích cú pháp H.264, khóa con,
-lịch, khung, làm trắng, patch và trích mù đều nằm trong C++. Khi sửa một hàm, kiểm
-đúng consumer kế tiếp của nó và chạy test ở boundary tương ứng (CTest cho lõi, phase 2
-cho hợp đồng chéo, phase 3/5/6 cho CLI và dịch vụ).
+Khi đọc một đường lỗi, lần theo artifact tuần tự: message, digest của cover, binding,
+proof 129 byte, payload, khung v3 (đã làm trắng), lịch theo đoạn, video stego, payload
+trích được, message và proof sau unpack, digest của stego, rồi kết quả Groth16 với root.
+Điểm nối quan trọng nhất là CLI native nhận payload là byte opaque: Python dựng sổ đăng
+ký, binding, proof và payload; phân tích cú pháp H.264, khóa con, lịch, khung, làm
+trắng, patch, hash video và trích mù đều nằm trong C++. Khi sửa một hàm, kiểm
+đúng consumer kế tiếp của nó và chạy test ở boundary tương ứng (CTest cho lõi, phase 1
+cho proof, sổ đăng ký và binding, phase 2 cho hợp đồng chéo, phase 3/5/6 cho CLI và
+dịch vụ).
 
 \paragraph{Ghi chú lịch sử.} Trước ngày 03/10/2026, repository còn một nhánh Python
 full-video (\path{src/embedder.py}, \path{src/verifier*.py}, \path{src/core/},

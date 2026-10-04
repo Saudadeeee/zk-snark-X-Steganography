@@ -2272,6 +2272,93 @@ std::vector<CavlcStreamSegmentCandidates> analyze_cavlc_stream_file(
     return segments;
 }
 
+namespace {
+
+std::array<std::uint8_t, 32> sha256_digest(const std::vector<std::uint8_t>& data) {
+    std::array<std::uint8_t, 32> digest{};
+#ifdef _WIN32
+    if (data.size() > std::numeric_limits<ULONG>::max()) throw std::invalid_argument("SHA-256 input is too large");
+    if (BCryptHash(BCRYPT_SHA256_ALG_HANDLE, nullptr, 0, const_cast<PUCHAR>(data.data()),
+            static_cast<ULONG>(data.size()), digest.data(), static_cast<ULONG>(digest.size())) < 0) {
+        throw std::runtime_error("Windows CNG SHA-256 failed");
+    }
+#else
+    unsigned int length = 0;
+    if (EVP_Digest(data.data(), data.size(), digest.data(), &length, EVP_sha256(), nullptr) != 1 ||
+        length != digest.size()) {
+        throw std::runtime_error("OpenSSL SHA-256 failed");
+    }
+#endif
+    return digest;
+}
+
+void append_u32be(std::vector<std::uint8_t>& output, const std::size_t value) {
+    if (value > 0xffffffffU) throw std::invalid_argument("video binding field exceeds 32 bits");
+    for (int shift = 24; shift >= 0; shift -= 8) {
+        output.push_back(static_cast<std::uint8_t>((value >> shift) & 0xffU));
+    }
+}
+
+}  // namespace
+
+CavlcVideoBindingDigest cavlc_video_binding_digest(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    const std::size_t frame_bit_count,
+    const std::size_t maximum_bits_per_segment) {
+    if (frame_bit_count == 0U) throw std::invalid_argument("video binding frame bit count must be positive");
+    if (maximum_bits_per_segment == 0U) {
+        throw std::invalid_argument("maximum stream bits per segment must be positive");
+    }
+    SensitiveBytes schedule_key(derive_cavlc_subkey(secret_key, kScheduleInfo));
+    // Same walk and schedule as the stream encoder: exactly the positions that
+    // carry frame bits (positions past the frame end keep their cover sign).
+    std::unordered_map<std::size_t, std::vector<std::size_t>> cleared_bits;
+    std::vector<AnnexBNalUnit> codec_parameter_sets;
+    std::size_t carried = 0;
+    std::size_t carrier_segments = 0;
+    visit_cavlc_stream_file(annex_b,
+        [&](const std::size_t file_index, const AnnexBNalUnit&, const std::vector<std::uint8_t>* segment,
+            const std::vector<AnnexBNalUnit>&) {
+            if (segment == nullptr) return true;
+            auto prepared = prepare_cavlc_stream_segment(*segment, codec_parameter_sets);
+            codec_parameter_sets = std::move(prepared.parameter_sets);
+            const auto capacity = std::min(maximum_bits_per_segment, prepared.candidates.size());
+            if (capacity == 0U) return true;
+            const auto selected = select_with_schedule_key(prepared.candidates, schedule_key.value(), capacity);
+            const auto taken = std::min(capacity, frame_bit_count - carried);
+            auto& offsets = cleared_bits[file_index];
+            for (std::size_t index = 0; index < taken; ++index) offsets.push_back(selected[index].rbsp_bit_offset);
+            carried += taken;
+            ++carrier_segments;
+            return carried < frame_bit_count;
+        });
+    if (carried < frame_bit_count) throw std::invalid_argument("IDR stream capacity is insufficient for payload");
+
+    constexpr std::string_view kDomain{"zkstego/video-digest/v1"};
+    const auto units = split_annex_b(annex_b);
+    std::vector<std::uint8_t> canonical;
+    canonical.reserve(annex_b.size() + kDomain.size() + 8U + units.size() * 5U);
+    canonical.insert(canonical.end(), kDomain.begin(), kDomain.end());
+    append_u32be(canonical, frame_bit_count);
+    append_u32be(canonical, maximum_bits_per_segment);
+    for (std::size_t index = 0; index < units.size(); ++index) {
+        const auto& unit = units[index];
+        auto rbsp = unit.rbsp();
+        if (const auto cleared = cleared_bits.find(index); cleared != cleared_bits.end()) {
+            for (const auto bit : cleared->second) {
+                if (bit >= rbsp.size() * 8U) throw std::logic_error("video binding candidate is outside its RBSP");
+                rbsp[bit / 8U] = static_cast<std::uint8_t>(rbsp[bit / 8U] & ~(0x80U >> (bit % 8U)));
+            }
+        }
+        append_u32be(canonical, 1U + rbsp.size());
+        canonical.push_back(static_cast<std::uint8_t>(
+            (unit.forbidden_zero_bit << 7U) | (unit.nal_ref_idc << 5U) | unit.nal_unit_type));
+        canonical.insert(canonical.end(), rbsp.begin(), rbsp.end());
+    }
+    return {sha256_digest(canonical), carrier_segments, units.size()};
+}
+
 std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& units) {
     std::size_t total_size = 0;
     for (const auto& unit : units) {

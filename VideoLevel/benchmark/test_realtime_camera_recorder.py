@@ -34,7 +34,7 @@ def valid_metrics() -> dict:
         "correct_key_payload_match": True,
         "wrong_key_rejected": True,
         "groth16_proof_verified": True,
-        "groth16_wrong_key_rejected": True,
+        "groth16_other_registry_rejected": True,
         "groth16_changed_message_rejected": True,
         "first_output_before_camera_eof": True,
         "capture_device_name": "physical-camera-test-device",

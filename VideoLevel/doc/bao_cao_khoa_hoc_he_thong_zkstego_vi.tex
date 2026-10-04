@@ -1,5 +1,5 @@
-% Biên dịch (XeLaTeX, cần fontspec): build ngoài thư mục doc/ rồi chỉ chép PDF vào doc/, ví dụ
-% latexmk -xelatex -interaction=nonstopmode -halt-on-error -outdir=<thư mục tạm> doc/bao_cao_khoa_hoc_he_thong_zkstego_vi.tex
+% Biên dịch (XeLaTeX, cần fontspec), trong thư mục doc/:
+% xelatex -interaction=nonstopmode bao_cao_khoa_hoc_he_thong_zkstego_vi.tex  (chạy hai lần, rồi xóa tệp phụ)
 \documentclass[11pt,a4paper]{article}
 \usepackage[margin=22mm,headheight=16pt]{geometry}
 \usepackage{fontspec}
@@ -32,170 +32,218 @@
 
 \title{\textbf{Hệ thống nhúng payload mang bằng chứng ZK vào video H.264/CAVLC}}
 \author{Tài liệu kỹ thuật dựa trên mã nguồn và artifact benchmark của dự án}
-\date{25 tháng 9 năm 2026 \quad(cập nhật 3 tháng 10 năm 2026)}
+\date{05/10/2026}
 
 \begin{document}
 \maketitle
 
 \noindent\fcolorbox{orange!70!black}{orange!6}{\parbox{\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax}{\small
-\textbf{Cập nhật 03/10/2026.} Báo cáo được sửa để khớp với hệ thống hiện tại:
-(1) chỉ còn \emph{một lõi media native C++}; pipeline Python song song cũ và các benchmark SEC1--SEC10 đã bị gỡ khỏi repository ngày 03/10/2026, kết quả của chúng không còn là bằng chứng;
-(2) kênh nhúng dùng \emph{giao thức v2}: khóa con HKDF-SHA256 cho lịch/tag/làm trắng, khung version \texttt{0x02}, tag HMAC-SHA256 cắt 16 byte, làm trắng bằng keystream HMAC, giao thức theo đoạn IDR có giới hạn bit mỗi IDR;
-(3) mạch Groth16 có ràng buộc bit 0/1 (63,321 constraints, 513 public input) và Groth16 verify là bước bắt buộc sau trích xuất;
-(4) \emph{toàn bộ số đo benchmark trong báo cáo được ghi ngày 24/09/2026 với giao thức v1 và mạch cũ}; chúng được giữ làm mốc tham chiếu và phải đo lại trước khi trích dẫn cho phiên bản hiện tại (mục \ref{sec:bench}).}}
+\textbf{Tóm tắt (trạng thái ngày 05/10/2026).} Hệ thống nhúng một payload chứa proof Groth16 vào bit dấu trailing-one của residual CAVLC trong các IDR H.264 Baseline, và phía nhận trích xuất mù chỉ với khóa giấu tin. Báo cáo mô tả phiên bản hiện tại:
+(1) chỉ còn \emph{một lõi media native C++}; pipeline Python song song cũ và benchmark SEC1--SEC10 đã gỡ ngày 03/10/2026;
+(2) kênh nhúng dùng \emph{giao thức v3} (04/10/2026): khung \texttt{[0x03][len 2 B][payload]} \emph{không có MAC}, hai khóa con HKDF-SHA256 (lịch nhúng và làm trắng bit), lịch theo đoạn IDR với mặc định 64 bit/IDR;
+(3) \emph{proof camera}: mạch \texttt{circuits/camera\_video.circom} (8,737 constraints, 3 public input \texttt{root}, \texttt{bindingHi}, \texttt{bindingLo}) chứng minh một camera nằm trong sổ đăng ký Poseidon Merkle đã xác nhận \emph{đúng video này} (hash toàn video trừ các bit carrier) \emph{và đúng message này}; bên kiểm chứng chỉ cần root của sổ đăng ký, verification key và khóa giấu tin, không cần secret camera và không biết camera nào;
+(4) bằng chứng hiện tại: 142/142 test qua 12 phase và CTest native 1/1; suite benchmark ghi ngày 04/10/2026 (i7-12700H, Windows 11) cho media 27/27, đầu-cuối 5/5 và ma trận 11 kiểu tấn công đều đúng kỳ vọng. Số đo camera vật lý (7.608 FPS) vẫn là số liệu lịch sử của giao thức v1 và không đạt cổng 30 FPS.}}
 
 \section{Kiến trúc hệ thống}
-Hệ thống có ba lớp với trách nhiệm tách biệt. Lớp \emph{proof} (Python + circom/snarkjs) tạo proof Groth16 cho một message và secret. Lớp \emph{kênh xác thực} đóng gói payload vào một khung có tag HMAC và quyết định vị trí nhúng theo khóa. Lớp \emph{media} (native C++, \texttt{native/src/cavlc\_stream.cpp}) phân tích bitstream H.264 Baseline/CAVLC, liệt kê vị trí mang bit và lật dấu hệ số mà không đổi độ dài mã. Phía nhận chỉ cần video stego và khóa: trích xuất mù, kiểm tag HMAC, tách proof rồi bắt buộc xác minh Groth16. Camera không tạo proof cho từng frame; proof được tạo trước, còn video là kênh mang payload.
+Hệ thống có ba lớp với trách nhiệm tách biệt. Lớp \emph{proof} (Python + circom/snarkjs) tạo proof Groth16 cho phát biểu ``một camera trong sổ đăng ký xác nhận video và message này''. Lớp \emph{kênh giấu tin} đóng gói payload vào một khung v3 (không MAC), làm trắng bit và quyết định vị trí nhúng theo khóa giấu tin $K$. Lớp \emph{media} (native C++, \texttt{native/src/cavlc\_stream.cpp}) phân tích bitstream H.264 Baseline/CAVLC, liệt kê vị trí mang bit, lật dấu hệ số mà không đổi độ dài mã và tính hash video. Phía nhận chỉ cần video stego, $K$, root của sổ đăng ký và verification key: trích xuất mù, tính lại hash video từ chính file nhận được, rồi bắt buộc xác minh Groth16. Kênh không tự xác thực payload; chỉ proof làm việc đó.
 
 \begin{figure}[H]\centering
 \resizebox{\textwidth}{!}{\begin{tikzpicture}[
   node distance=7mm and 8mm,
   box/.style={draw,rounded corners,align=center,minimum height=13mm,text width=34mm,fill=blue!5},
   app/.style={box,fill=green!7}, arr/.style={-{Latex[length=2mm]},thick}]
-\node[app] (m) {Message $m$\\ secret $s$ 32 byte};
-\node[app,right=of m] (proof) {Circom witness\\ Groth16 prover\\ proof nén 129 B};
-\node[app,right=of proof] (pack) {Payload\\ $[\mathrm{len}_4][m][\pi_{129}]$};
-\node[box,right=of pack] (frame) {Khung v2: \texttt{0x02}, len,\\ payload, tag HMAC 16 B;\\ XOR keystream};
+\node[app] (m) {Message $m$\\ secret camera $s$\\ đường Merkle tới root};
+\node[app,right=of m] (proof) {Hash video cover $D$\\ binding $\beta$\\ Groth16 prover\\ proof nén 129 B};
+\node[app,right=of proof] (pack) {Payload\\ $[\texttt{01}][\mathrm{mode}]$\\ $[\mathrm{len}_2][m][\pi_{129}]$};
+\node[box,right=of pack] (frame) {Khung v3: \texttt{0x03},\\ len 2 B, payload,\\ không MAC;\\ XOR keystream};
 \node[box,below=17mm of m] (cover) {Cover H.264\\ Annex-B, CAVLC};
 \node[box,right=of cover] (native) {C++ native: parser,\\ ứng viên dấu T1,\\ lịch HMAC theo đoạn};
 \node[box,right=of native] (stego) {Stego H.264\\ (lật dấu, độ dài\\ mã không đổi)};
-\node[box,right=of stego] (extract) {Trích xuất mù\\ chỉ với khóa;\\ kiểm version + tag};
-\node[app,right=of extract] (verify) {Unpack +\\ Groth16 verify\\ \textbf{bắt buộc}};
+\node[box,right=of stego] (extract) {Trích xuất mù\\ chỉ với khóa $K$;\\ kiểm version + độ dài};
+\node[app,right=of extract] (verify) {Unpack, hash video\\ nhận được, Groth16\\ verify với root\\ \textbf{bắt buộc}};
 \draw[arr] (m)--(proof); \draw[arr] (proof)--(pack); \draw[arr] (pack)--(frame);
 \draw[arr] (frame.south) -- ++(0,-5mm) -| (native.north);
+\draw[arr,dashed] (cover.north east)--(proof.south west);
 \draw[arr] (cover)--(native); \draw[arr] (native)--(stego);
 \draw[arr] (stego)--(extract); \draw[arr] (extract)--(verify);
 \end{tikzpicture}}
-\caption{Các khối ứng dụng và video của hệ thống hiện tại. Dữ liệu được nhúng trong residual H.264 của IDR; hệ thống không dùng SEI hay container làm nơi chứa payload.}
+\caption{Các khối ứng dụng và video của hệ thống hiện tại. Mũi tên nét đứt: phía gửi tính hash của cover trước khi tạo proof. Dữ liệu được nhúng trong residual H.264 của IDR; hệ thống không dùng SEI hay container làm nơi chứa payload.}
 \label{fig:architecture}
 \end{figure}
-Hình \ref{fig:architecture} phân biệt proof với carrier: Groth16 tạo bằng chứng một lần cho message, còn C++ chỉ xử lý bitstream và không chạy prover trong vòng lặp camera. Cùng một giao thức theo đoạn được dùng cho file, job HTTP và luồng WebSocket; tag HMAC hợp lệ chỉ chứng minh payload đến từ người có khóa và không bị sửa, \emph{không} thay cho bước Groth16 verify.
+Hình \ref{fig:architecture} phân biệt proof với carrier: Groth16 tạo bằng chứng một lần cho cặp (video, message), còn C++ chỉ xử lý bitstream và không chạy prover trong vòng lặp camera. Hash video bỏ qua đúng các bit carrier nên giá trị tính trên cover và trên stego bằng nhau; mọi thay đổi khác của video làm proof sai (mục \ref{sec:groth16}). Cùng một giao thức theo đoạn được dùng cho file, job HTTP và luồng WebSocket. Tìm thấy khung hợp lệ chỉ có nghĩa là có dữ liệu ở đúng vị trí theo khóa; payload trích ra mang nhãn \texttt{"verified": false} cho tới khi proof được xác minh.
 
 \begin{table}[H]\centering\small
-\caption{Thành phần và hợp đồng dữ liệu chính (mã nguồn tại thời điểm 03/10/2026).}
+\caption{Thành phần và hợp đồng dữ liệu chính (mã nguồn tại thời điểm 05/10/2026).}
 \begin{tabularx}{\textwidth}{p{3.3cm}p{4.0cm}X}
 \toprule Khối & Đầu vào & Đầu ra / trách nhiệm\\\midrule
-Circom/snarkjs (\texttt{src/zk\_proof.py}) & $m$, $s$, artifact mạch & Witness, proof Groth16 BN254, nén 129 byte; verify chỉ chấp nhận khi snarkjs thoát 0 và in \texttt{OK!}.\\
-Payload packer & Message, proof bytes & 4 byte độ dài big-endian, message, proof nén 129 byte.\\
-Khung xác thực v2 & Payload, khóa 32 byte & HKDF tách khóa con; khung \texttt{[0x02][len 2B][payload][tag 16B]}; bit khung XOR keystream.\\
+Sổ đăng ký camera (\texttt{src/camera\_registry.py}) & Khóa công khai $pk_i=\mathrm{Poseidon}(s_i)$ & Cây Merkle Poseidon độ sâu 16 (tối đa 65,536 camera); bên kiểm chứng chỉ tin root.\\
+Hash video (\texttt{video-digest}, \texttt{src/video\_binding.py}) & Video, khóa $K$, số bit khung, cap & SHA-256 của toàn bộ NAL với đúng các bit carrier đặt về 0; cover và stego cho cùng giá trị.\\
+Circom/snarkjs (\texttt{src/zk\_proof.py}, \texttt{src/camera\_proof.py}) & $s$, đường Merkle, root, binding & Proof Groth16 BN254 nén 129 byte; verify chỉ chấp nhận khi snarkjs thoát 0 và in \texttt{OK!}.\\
+Payload packer & Mode, message, proof bytes & \texttt{[0x01][mode][len 2 B][message][proof 129 B]}.\\
+Khung kênh v3 & Payload, khóa $K$ 32 byte & HKDF tách hai khóa con; khung \texttt{[0x03][len 2 B][payload]}, không MAC; bit khung XOR keystream.\\
 Annex-B/NAL reader & Byte stream H.264 & NAL unit, header, EBSP/RBSP; reader tăng dần nhận start code vắt qua chunk.\\
 CAVLC parser + bộ thu ứng viên & IDR I-slice Baseline/CAVLC & Mỗi khối residual một ứng viên: dấu trailing-one đầu tiên, kèm offset bit RBSP.\\
 Lịch + patcher theo đoạn & Ứng viên, bit đã làm trắng, khóa lịch & Chọn tối đa \texttt{max\_bits\_per\_IDR} vị trí mỗi đoạn SPS+PPS+IDR, sửa bit dấu, dựng lại EBSP/Annex-B.\\
-Trích xuất mù + verify & Stego, khóa & Payload đã qua HMAC; job verify unpack rồi Groth16 verify bắt buộc.\\
+Trích xuất mù + verify & Stego, $K$, root, verification key & Payload chưa xác thực; job verify unpack, tính hash video của file nhận rồi Groth16 verify bắt buộc.\\
 \bottomrule
 \end{tabularx}
 \end{table}
-Ngoài các khối trên, \texttt{src/native\_blind\_contract.py} là bản tham chiếu Python của lịch/khung (có test vector chéo ngôn ngữ với C++), không phải một đường media thứ hai.
+Ngoài các khối trên, \texttt{src/native\_blind\_contract.py} là bản tham chiếu Python của lịch/khung và \texttt{src/video\_binding.py} là bản tham chiếu của hash video (cả hai có test đối chiếu với C++), không phải một đường media thứ hai.
 
 \section{Benchmark và kết quả chính}\label{sec:bench}
 Phần này được đưa lên trước phần giải thích mã hóa để người đọc biết ngay điều gì đã chạy được và bằng chứng đang ở trạng thái nào.
 
-\subsection{Phạm vi bằng chứng sau cập nhật 03/10/2026}
+\subsection{Phạm vi bằng chứng (cập nhật 05/10/2026)}
 \begin{table}[H]\centering\small
 \caption{Nguồn bằng chứng và mức độ áp dụng cho phiên bản hiện tại.}
-\begin{tabularx}{\textwidth}{p{4.2cm}p{3.0cm}X}\toprule
+\begin{tabularx}{\textwidth}{p{4.2cm}p{2.4cm}X}\toprule
 Nguồn & Thời điểm & Áp dụng cho bản hiện tại\\\midrule
-Bộ test \texttt{run\_all.py} (12 phase) và CTest native & 03/10/2026 & Có, về chức năng: 126/126 test và CTest 1/1 qua trên host Windows; không gồm phase camera vật lý H1; không phải nghiệm thu edge.\\
-Suite \texttt{\_new}: media run \texttt{20260924T150707Z\_2be60c}, \texttt{zkp\_new.json} & 24/09/2026 & Chưa: đo với giao thức v1 và mạch cũ; phải chạy lại.\\
-Camera E2E \texttt{realtime\_camera\_runs\_20260924.json} (run 24) & 24/09/2026 & Chưa: giao thức v1, mạch cũ, trước bản sửa bộ đọc stdin native.\\
+Bộ test \texttt{run\_all.py} (12 phase) và CTest native & 04/10/2026 & Có, về chức năng: 142/142 test và CTest 1/1 qua trên host Windows; không gồm phase camera vật lý H1; không phải nghiệm thu edge.\\
+Media run \texttt{20261004T142448Z\_1db00a} & 04/10/2026 & Có: giao thức v3, proof camera thật, mọi proof ràng buộc video.\\
+\texttt{e2e\_new.json} (5 lần chạy + ma trận tấn công), \texttt{zkp\_new.json} & 04/10/2026 & Có: cùng giao thức và mạch \texttt{camera\_video}.\\
+Camera vật lý \texttt{realtime\_camera\_runs\_20260924.json} (run 24) & 24/09/2026 & Không: số liệu lịch sử, giao thức v1, mạch cũ, trước bản sửa bộ đọc stdin native; chưa đo lại.\\
 Benchmark SEC1--SEC10 của pipeline Python cũ & trước 03/10/2026 & Không: đã gỡ; chỉ còn trong lịch sử git, không được trích dẫn.\\
 \bottomrule\end{tabularx}
 \end{table}
-Hai thay đổi ngày 03/10/2026 làm số đo cũ không còn đại diện trực tiếp: giao thức v2 thêm HKDF và làm trắng bit (thay đổi chi phí và vị trí nhúng; v2 không đọc được stego v1), và mạch thêm ràng buộc bit (số constraint đổi, proof theo khóa cũ không verify với khóa hiện tại). Các số dưới đây vì vậy là \emph{mốc tham chiếu lịch sử}.
+Host đo: Intel Core i7-12700H (14 nhân vật lý, 20 luồng), 25.4 GB RAM, Windows 11, Python 3.12.10, FFmpeg 8.0.1, Node.js 22.20.0, snarkjs 0.7.6; JSON ghi commit và hash SHA-256 của các tệp native đã dùng.
 
-\subsection{Thiết kế phép đo (suite \texttt{\_new}, 24/09/2026)}
-Tập thử gồm 9 clip Y4M (Akiyo, City, Coastguard, Container, Deadline, Football, Foreman, Foreman 300-frame, Hall Monitor), mỗi clip ở 352$\times$288, 640$\times$480 và 1280$\times$960: 27 cấu hình, chỉ 30 frame đầu mỗi cấu hình. Encoder là FFmpeg 8.0.1/libx264 Constrained Baseline, CAVLC, QP 22, GOP=1/all-intra, không B-frame, một thread và một slice/IDR. Hai cỡ lớn được phóng từ nguồn CIF nên là stress test phân giải, không phải nội dung camera native HD. Chỉ \texttt{foreman\_cif.y4m} được lưu trong repository, nên clone mới tái tạo 3 thay vì 27 cấu hình. Host: Windows, Python 3.12.10; JSON ghi hash của tệp native đã dùng.
+\subsection{Thiết kế phép đo media (suite \texttt{\_new}, 04/10/2026)}
+Tập thử gồm 9 clip Y4M CIF (Akiyo, City, Coastguard, Container, Deadline, Football, Foreman, Foreman 300-frame, Hall Monitor), mỗi clip ở 352$\times$288, 640$\times$480 và 1280$\times$960: 27 cấu hình, chỉ 30 frame đầu mỗi cấu hình. Encoder là FFmpeg/libx264 Constrained Baseline, CAVLC, QP 22, GOP=1/all-intra, không B-frame, một thread và một slice/IDR. Hai cỡ lớn được phóng từ nguồn CIF nên là stress test phân giải, không phải nội dung camera native HD. Chỉ \texttt{foreman\_cif.y4m} được lưu trong repository, nên clone mới tái tạo 3 thay vì 27 cấu hình.
 
-Theo mã \texttt{benchmark/media\_benchmark\_new.py}, mỗi cấu hình nhúng một payload thử 33 byte (không phải proof Groth16) với giới hạn 4096 bit/IDR. Payload nhỏ nên vừa trong IDR đầu: trong run này 29/30 frame của mỗi cấu hình không bị nhúng làm thay đổi. Một cấu hình qua gate khi đo được capacity, embed thành công, FFmpeg strict decode, trích xuất mù đúng khóa và khóa sai bị từ chối; ở run 24/09 điều kiện ``từ chối'' là mã thoát khác 0, còn mã hiện tại chặt hơn (mã thoát 2 kèm thông báo lỗi xác thực).
+Mỗi cấu hình dùng một khóa giấu tin 32 byte mới; một camera trong sổ đăng ký 8 camera tạo proof Groth16 thật ràng buộc hash của cover và message 68 byte. Payload $4+68+129=201$ byte, khung $3+201=204$ byte, tức $8\cdot204=1{,}632$ bit, trải trên $\lceil1632/64\rceil=26$ IDR ở mặc định 64 bit/IDR. Một cấu hình chỉ qua khi đủ mọi điều kiện: quét capacity native, embed native, FFmpeg strict decode (\texttt{-xerror}), trích xuất mù đúng payload, proof \emph{ràng buộc video} verify được với root (hash tính lại từ file stego), khóa sai bị từ chối, và \emph{không có dấu nào đổi ngoài lịch} (kiểm từng vị trí bằng \texttt{zkstego\_inspect --segments}).
 
 \begin{table}[H]\centering\small
-\caption{Số đo đại diện của file pipeline (giao thức v1, 24/09/2026). Median tính trong từng nhóm 9 clip cùng độ phân giải.}
+\caption{Chi phí native và chất lượng theo độ phân giải (run \texttt{20261004T142448Z\_1db00a}). Median trong từng nhóm 9 clip.}
 \begin{tabular}{lrrr}\toprule
 Chỉ số & 352$\times$288 & 640$\times$480 & 1280$\times$960\\\midrule
-Median output FPS & 215.23 & 66.96 & 12.95\\
-Median RSS tiến trình native embed (MiB) & 9.70 & 17.11 & 45.82\\
-Median source-to-stego PSNR-Y (dB) & 43.77 & 45.17 & 46.81\\
+Quét capacity mỗi IDR (ms) & 52 & 220 & 770\\
+Embed mỗi IDR mang khung (ms) & 61 & 245 & 891\\
+Hash video, 26 IDR carrier (s) & 1.6 & 6.4 & 22.6\\
+Output FPS (30 frame / thời gian embed) & 18.94 & 4.71 & 1.30\\
+Peak RSS tiến trình native embed (MiB) & 11.44 & 20.55 & 54.55\\
+PSNR-Y source-to-stego trung bình clip (dB) & 43.73 & 45.08 & 46.59\\
 Số cấu hình qua gate & 9/9 & 9/9 & 9/9\\
 \bottomrule\end{tabular}
 \end{table}
-Output FPS bằng 30 frame chia thời gian embed native; nó không bao gồm capture camera, encode hay thời gian scan capacity. RSS là peak lấy mẫu mỗi 5 ms của tiến trình native embed, không phải toàn bộ ứng dụng và có thể bỏ lỡ spike ngắn. Trung vị giảm từ 215.23 xuống 12.95 FPS khi tăng từ 352$\times$288 lên 1280$\times$960; kết quả không hỗ trợ kết luận đạt realtime 30 FPS ở mọi độ phân giải.
+Chi phí native tăng theo số IDR phải parse và theo số macroblock mỗi IDR. Thời gian embed toàn clip xấp xỉ thời gian quét capacity toàn clip; hash video parse cùng 26 IDR mang khung nên tốn thời gian tương đương embed. Groth16 prove/verify ($\approx$1.5--1.8~s và $\approx$0.9--1.0~s) gần như không đổi theo độ phân giải, nên \emph{parse bitstream, không phải Groth16, là yếu tố giới hạn throughput}. Output FPS chỉ là 30 frame chia thời gian embed của một lần chạy offline; nó không gồm capture camera hay encode và không phải phép đo realtime. RSS lấy mẫu mỗi 5 ms nên có thể hụt spike ngắn.
 
 \begin{figure}[H]\centering
 \begin{tikzpicture}[x=0.92cm,y=0.48cm]
-\draw[->] (0,0)--(9,0) node[right]{FPS};
-\foreach \x/\lab in {0/0,2/50,4/100,6/150,8/200}{
+\draw[->] (0,0)--(9.6,0) node[right]{ms};
+\foreach \x/\lab in {0/0,2/200,4/400,6/600,8/800}{
   \draw (\x,0.08)--(\x,-0.08) node[below]{\scriptsize \lab};}
-\foreach \y/\name/\v/\w in {1/352x288/215.23/8.61,2/640x480/66.96/2.68,3/1280x960/12.95/0.52}{
+\foreach \y/\name/\v/\w in {1/352x288/61/0.61,2/640x480/245/2.45,3/1280x960/891/8.91}{
   \node[left] at (0,\y+0.18){\scriptsize \name};
   \fill[blue!45] (0,\y)--(\w,\y)--(\w,\y+0.35)--(0,\y+0.35)--cycle;
   \node[right] at (\w,\y+0.18){\scriptsize \v};}
 \end{tikzpicture}
-\caption{Median output throughput theo độ phân giải trong 27 case file pipeline (giao thức v1). Cột 352$\times$288 vượt mốc 200 và số 215.23 được ghi cạnh cột.}
+\caption{Median thời gian embed native trên mỗi IDR mang khung theo độ phân giải (27 cấu hình, giao thức v3, 64 bit/IDR).}
 \label{fig:fps-resolution}
 \end{figure}
-Đây là phép đo embed offline trên đoạn H.264 đã encode, không phải đo end-to-end từ cảm biến. Ở 640$\times$480, median 66.96 FPS cao hơn mục tiêu 30 trên clip ngắn; ở 1280$\times$960, median 12.95 FPS thấp hơn mục tiêu. Kết luận hợp lý là throughput phụ thuộc mạnh vào độ phân giải và nội dung, chưa thể tuyên bố realtime tổng thể.
+Đây là phép đo embed offline trên đoạn H.264 đã encode, không phải đo end-to-end từ cảm biến. Ở 352$\times$288 một IDR mất khoảng 61 ms, nghĩa là xử lý tuần tự từng IDR chưa đạt 30 IDR/s; ở 1280$\times$960 khoảng 0.9 s mỗi IDR. Kết quả không hỗ trợ kết luận đạt realtime 30 FPS ở bất kỳ độ phân giải nào trong cấu hình đo.
 
 \begin{table}[H]\centering\small
-\caption{Tóm tắt chất lượng ảnh và kiểm tra chức năng (run \texttt{20260924T150707Z\_2be60c}, giao thức v1).}
+\caption{Tóm tắt chất lượng ảnh và kiểm tra chức năng (run \texttt{20261004T142448Z\_1db00a}, giao thức v3).}
 \begin{tabular}{p{6.2cm}p{3cm}p{4.8cm}}\toprule
 Đại lượng & Kết quả & Cách đọc\\\midrule
-Gate chức năng & 27/27 & Embed, strict decode, trích xuất mù đúng khóa, khóa sai bị từ chối.\\
-Trung bình PSNR-Y source-to-stego & 46.84 dB & Gồm cả nén H.264 lossy và nhúng.\\
-Trung bình SSIM source-to-stego & 0.99025 & Trung bình trên 27 cấu hình.\\
-PSNR-Y thấp nhất trên frame bị sửa (cover-to-stego) & 32.76 dB & Hall Monitor, 1280$\times$960.\\
-Cấu hình có frame sửa dưới 40 dB & 13/27 & 40 dB là mốc tham khảo, không phải gate chức năng.\\
-Capacity scan & median 9.61 s; max 96.25 s & Tách biệt với embed time.\\
+Gate chức năng & 27/27 & Mọi proof ràng buộc video và verify được.\\
+Dấu bị đổi ngoài lịch & 0 & Kiểm từng vị trí trên cả 27 cấu hình.\\
+Trung bình PSNR-Y source-to-stego & 46.70 dB & Gồm cả nén H.264 lossy và nhúng.\\
+Trung bình SSIM source-to-stego & 0.99045 & Trung bình trên 27 cấu hình.\\
+PSNR-Y cover-to-stego thấp nhất mỗi cấu hình & 44.03--58.68 dB & Thấp nhất: Container, 640$\times$480.\\
+Cấu hình có frame dưới 40 dB & 0/27 & 40 dB là mốc tham khảo, không phải gate chức năng.\\
+Frame bị đổi mỗi cấu hình & 26/30 & Đúng 26 IDR mang khung; 4 frame cuối giống hệt cover.\\
+Dấu bị lật / vị trí trong lịch & 776--876 / 1,632 & Khoảng một nửa, do bit làm trắng giả ngẫu nhiên.\\
+Thống kê dấu (tỉ lệ trailing-one âm) & $|z|\le0.22$ & Kiểm định hai tỉ lệ cover so với stego.\\
+Kích thước stego & bằng cover & Không đổi số byte trong mọi cấu hình.\\
+Quét capacity toàn clip & median 5.94 s; max 31.14 s & Tách biệt với thời gian embed.\\
 \bottomrule\end{tabular}
 \end{table}
-PSNR-Y đo sai khác cường độ luma theo dB; SSIM gần 1 khi cấu trúc hai ảnh tương tự. Source-to-stego gộp hai nguồn sai khác (nén và nhúng), còn cover-to-stego đối chiếu bản H.264 sạch với bản stego để cô lập ảnh hưởng nhúng. Vì chỉ một frame mỗi cấu hình bị sửa, PSNR trung bình cả clip che mất frame xấu; cần xem giá trị theo từng frame trong CSV. Run trước đó \texttt{20260924T144703Z\_840091} có 15/27 cấu hình dưới 40 dB (thấp nhất 34.13 dB) và chỉ được giữ để so sánh.
+PSNR-Y đo sai khác cường độ luma theo dB; SSIM gần 1 khi cấu trúc hai ảnh tương tự. Source-to-stego gộp hai nguồn sai khác (nén và nhúng), còn cover-to-stego đối chiếu bản H.264 sạch với bản stego để cô lập ảnh hưởng nhúng. Với 64 bit/IDR, dấu bị lật trải trên 26 frame thay vì dồn vào một frame như các run cũ dùng 4096 bit/IDR; nhờ vậy frame tệ nhất vẫn trên 44 dB. Chỉ số $|z|$ nhỏ là kiểm tra thống kê bậc một, \emph{không} phải thực nghiệm steganalysis.
 
 \begin{figure}[H]\centering
 \begin{tikzpicture}[x=0.72cm,y=0.12cm]
 \draw[->] (0,0)--(13,0) node[right]{dB};
 \foreach \x/\lab in {0/30,2/35,4/40,6/45,8/50,10/55,12/60}{\draw (\x,0.6)--(\x,-0.6) node[below]{\scriptsize \lab};}
 \draw[dashed,red!70!black] (4,-0.4)--(4,3.8) node[above,align=center]{\scriptsize 40 dB mốc tham khảo};
-\node[left] at (0,1){\scriptsize frame sửa thấp nhất};
-\fill[orange!70] (0,1)--(1.104,1)--(1.104,1.7)--(0,1.7)--cycle;
-\node[right] at (1.104,1.35){\scriptsize 32.76};
+\node[left] at (0,1){\scriptsize frame tệ nhất (cover-to-stego)};
+\fill[orange!70] (0,1)--(5.612,1)--(5.612,1.7)--(0,1.7)--cycle;
+\node[right] at (5.612,1.35){\scriptsize 44.03};
 \node[left] at (0,2.5){\scriptsize mean source-to-stego};
-\fill[blue!55] (0,2.5)--(6.736,2.5)--(6.736,3.2)--(0,3.2)--cycle;
-\node[right] at (6.736,2.85){\scriptsize 46.84};
+\fill[blue!55] (0,2.5)--(6.680,2.5)--(6.680,3.2)--(0,3.2)--cycle;
+\node[right] at (6.680,2.85){\scriptsize 46.70};
 \end{tikzpicture}
-\caption{So sánh PSNR-Y trung bình toàn cấu hình với frame bị nhúng có chất lượng thấp nhất (giao thức v1).}
+\caption{PSNR-Y trung bình source-to-stego so với frame bị nhúng tệ nhất trên toàn bộ 27 cấu hình (giao thức v3).}
 \label{fig:quality-gap}
 \end{figure}
-Khoảng cách giữa 46.84 dB và 32.76 dB cho thấy chỉ nhìn trung bình là chưa đủ. Hệ thống qua gate giải mã/khôi phục nhưng chưa đảm bảo ngưỡng chất lượng đồng đều trên từng frame. Với giao thức v2, vị trí nhúng thay đổi (lịch theo khóa con, bit đã làm trắng) nên phân bố chất lượng cần được đo lại chứ không suy ra từ bảng này.
+Hai đại lượng không cùng tham chiếu: 46.70 dB là trung bình gồm cả nén, còn 44.03 dB là frame tệ nhất do riêng bước nhúng. Sai khác do nhúng ở frame xấu nhất vì vậy cùng bậc với sai khác do nén ở QP 22; không cấu hình nào có frame dưới mốc 40 dB, nhưng trung bình cả clip vẫn che frame xấu nên cần xem giá trị theo từng frame trong \texttt{quality\_per\_frame\_new.csv}.
 
-\subsection{Proof system và luồng camera}
+\subsection{Đầu-cuối, ma trận tấn công và proof system}
 \begin{table}[H]\centering\small
-\caption{Groth16 và PLONK trên cùng R1CS, witness và payload; mỗi hệ một trial (\texttt{zkp\_new.json}, 24/09/2026, \emph{mạch cũ 62,553 constraints, trước khi thêm ràng buộc bit} --- số liệu lịch sử).}
-\begin{tabularx}{\textwidth}{p{3cm}p{2.4cm}p{2.4cm}X}\toprule
-Chỉ số & Groth16 BN254 & PLONK KZG & Diễn giải\\\midrule
-Witness & 433.93 ms & 422.59 ms & Có thời gian khởi động Node.\\
-Prove & 2.581 s & 831.695 s & PLONK khoảng 13.86 phút ở phép đo này.\\
-Verify & 848.36 ms & 1,013.60 ms & Một trial mỗi hệ, chưa có khoảng tin cậy.\\
-Peak RSS prover & 1.12 GB & 19.82 GB & Lấy mẫu mỗi 10 ms, có thể hụt peak ngắn.\\
-Proof serialized & 129 B nén / 808 B JSON & 2,251 B JSON & Bộ nén 129 byte chỉ có cho Groth16.\\
-Setup/artifact & setup cục bộ, chưa audit & setup $\approx$668 s; proving key 21.88 GB & PLONK dùng transcript Powers-of-Tau cục bộ, power 18.\\
+\caption{Thời gian từng bước đầu-cuối, median của 5 lần chạy trên clip CIF 300 frame (\texttt{e2e\_new.json}, 04/10/2026). Clip có 300 đoạn IDR, 188,556 dấu ứng viên, dung lượng 19,200 bit ở 64 bit/IDR.}
+\begin{tabular}{llr}\toprule
+Phía & Bước & Median\\\midrule
+Gửi & Hash video của cover & 0.51 s\\
+Gửi & Groth16 prove & 1.77 s\\
+Gửi & Embed native & 0.50 s\\
+--- & FFmpeg strict decode (kiểm tra) & 0.15 s\\
+Nhận & Trích xuất mù & 0.53 s\\
+Nhận & Verify (hash video của stego + Groth16) & 1.45 s\\\midrule
+Tổng & Phía gửi / phía nhận & 2.78 s / 1.99 s\\
+\bottomrule\end{tabular}
+\end{table}
+Mỗi lần chạy dùng khóa và message mới (ví dụ message 71 byte $\Rightarrow$ payload $4+71+129=204$ byte $\Rightarrow$ $8\cdot(3+204)=1{,}656$ bit khung, 26 IDR). Dung lượng của clip ở 64 bit/IDR là $300\cdot64=19{,}200$ bit, tức payload tối đa $19200/8-3=2{,}397$ byte và message tối đa $2397-133=2{,}264$ byte. Cả 5/5 lần chạy qua strict decode, trích xuất đúng và proof ràng buộc video; 0 dấu đổi ngoài lịch.
+
+\begin{table}[H]\centering\small
+\caption{Ma trận tấn công qua quyết định của job verify (\texttt{e2e\_new.json}): 11/11 trường hợp cho đúng kết quả kỳ vọng.}
+\begin{tabularx}{\textwidth}{p{4.0cm}Xp{3.6cm}}\toprule
+Trường hợp & Thao tác & Kết quả (lý do)\\\midrule
+\texttt{baseline} & Stego gốc, đúng khóa, đúng sổ đăng ký & chấp nhận\\
+\texttt{wrong\_key} & Khóa giấu tin sai & từ chối (\texttt{payload\_not\_found})\\
+\texttt{flip\_scheduled\_sign} & Lật 1 dấu nằm trong lịch (giữa khung) & từ chối (\texttt{malformed\_proof\_payload})\\
+\texttt{flip\_unscheduled\_carrier\_sign} & Lật 1 dấu ứng viên ngoài lịch trong IDR mang khung & từ chối (\texttt{proof\_invalid})\\
+\texttt{flip\_later\_frame\_sign} & Lật 1 dấu ở IDR cuối, ngoài vùng nhúng & từ chối (\texttt{proof\_invalid})\\
+\texttt{drop\_first\_idr} & Xóa IDR mang bit đầu của khung & từ chối (\texttt{payload\_not\_found})\\
+\texttt{truncate\_half} & Cắt còn 50\% đầu stream (payload còn nguyên) & từ chối (\texttt{proof\_invalid})\\
+\texttt{transcode} & Giải mã rồi mã hóa lại (libx264, QP 22) & từ chối (\texttt{payload\_not\_found})\\
+\texttt{message\_swap} & Người có khóa giấu tin thay message, giữ proof & từ chối (\texttt{proof\_invalid})\\
+\texttt{unregistered\_camera} & Camera ngoài sổ đăng ký tự tạo proof với cây riêng & từ chối (\texttt{proof\_invalid})\\
+\texttt{replay\_other\_video} & Chép payload sang video khác (Akiyo) cùng khóa & từ chối (\texttt{proof\_invalid})\\
 \bottomrule\end{tabularx}
 \end{table}
-Trong phép đo đơn này, Groth16 có proof nhỏ hơn và prove nhanh hơn đáng kể. Đây không phải so sánh thống kê và không gồm Halo2, STARK/RISC Zero hay Bulletproofs vì chưa có triển khai cùng mạch trong repository. Mạch hiện tại có 63,321 constraints (thêm ràng buộc bit, mục \ref{sec:groth16}); thời gian và bộ nhớ của nó chưa được đo lại. Số liệu SEC5 cũ (trộn một statement ZK-Schnorr khác với giá trị mô phỏng/trích tài liệu) không phải bằng chứng và đã bị loại.
+Ma trận cho thấy phát lại sang video khác, cắt ngắn, sửa frame sau vùng nhúng, lật dấu không mang khung, mã hóa lại, thay message, camera ngoài sổ đăng ký và sai khóa đều bị từ chối. Các trường hợp bị chặn ở bước trích xuất (\texttt{payload\_not\_found}) cho thấy kênh mỏng manh có chủ đích: bất kỳ lần mã hóa lại nào cũng phá payload.
 
 \begin{table}[H]\centering\small
-\caption{Một lần chạy camera E2E 60 giây có payload chứa proof Groth16 thật (run 24, 24/09/2026, giao thức v1, mạch cũ).}
+\caption{Groth16 và PLONK trên cùng R1CS \texttt{camera\_video} (8,737 constraints, 3 public input) và cùng witness; Groth16 5 lần, PLONK 3 lần (\texttt{zkp\_new.json}, 04/10/2026).}
+\begin{tabularx}{\textwidth}{p{3cm}p{3.1cm}p{3.1cm}X}\toprule
+Chỉ số & Groth16 BN254 & PLONK KZG & Diễn giải\\\midrule
+Witness & $\approx$170 ms & $\approx$172 ms & Có thời gian khởi động Node.\\
+Prove & 1.52--1.60 s & 21.5--23.3 s & PLONK chậm hơn khoảng 14 lần.\\
+Verify & 0.91--1.01 s & 0.90--0.94 s & Phần lớn là khởi động Node/snarkjs.\\
+Peak RSS prover & $\approx$0.73 GB & $\approx$0.89--0.91 GB & Lấy mẫu mỗi 10 ms, có thể hụt peak ngắn.\\
+Proof serialized & 129 B nén / $\approx$805 B JSON & $\approx$2,250 B JSON & Bộ nén 129 byte chỉ có cho Groth16.\\
+Setup/artifact & Phase 1 Hermez $2^{16}$ + Phase 2 cục bộ (demo); proving key 4.2 MB & setup 3.2 s; proving key 30.1 MB & PLONK dùng cùng Powers of Tau công khai làm SRS phổ quát.\\
+Public input bị sửa & bị từ chối & bị từ chối & Kiểm tra âm trong mọi lần thử.\\
+\bottomrule\end{tabularx}
+\end{table}
+Groth16 có proof nhỏ nhất và prove nhanh hơn rõ rệt; đó là lý do payload dùng Groth16. Mạch SHA-256 cũ (63,321 constraints, nay là lịch sử) cần 3.5--4.4 s để prove; mạch Poseidon/Merkle hiện tại nhỏ hơn khoảng 7 lần. So sánh không gồm Halo2, STARK/RISC Zero hay Bulletproofs vì chưa có triển khai cùng mạch trong repository (cần toolchain Rust).
+
+\subsection{Camera vật lý (số liệu lịch sử, giao thức v1)}
+\begin{table}[H]\centering\small
+\caption{Một lần chạy camera E2E 60 giây (run 24, 24/09/2026). \emph{Số liệu lịch sử, giao thức v1 và mạch cũ, không phải bằng chứng hiện tại}; chưa đo lại với giao thức v3 và proof camera.}
 \begin{tabular}{p{6cm}p{3cm}p{4.8cm}}\toprule
 Đại lượng & Kết quả & Cách đọc\\\midrule
 Frame ghi/giải mã & 450 / 450 & FFmpeg strict decode thành công.\\
 Throughput & 7.608 FPS active; 7.331 gồm khởi động & Thấp hơn cổng 30 FPS: không đạt.\\
 Proof và payload & Proof 129 B; verify đúng & Proof tạo trước capture, verify sau trích xuất.\\
-Negative checks & Khóa sai và message sửa bị từ chối & Xác nhận đúng payload/statement trong lần chạy.\\
+Negative checks & Khóa sai và message sửa bị từ chối & Xác nhận trong lần chạy đó.\\
 PSNR-YUV420 toàn video / frame sửa thấp nhất & 65.23 / 46.78 dB & Mean SSIM luma 0.999928.\\
 Process-tree peak RSS & 188.84 MB & Gồm API, FFmpeg và native; lấy mẫu mỗi 100 ms.\\
 \bottomrule\end{tabular}
 \end{table}
-Run 24 chứng minh, ở giao thức v1, đường E2E camera (DirectShow 352$\times$288 $\rightarrow$ FFmpeg $\rightarrow$ WebSocket loopback TCP $\rightarrow$ native) đã truyền proof thật, trích xuất mù và verify sau capture. Tạo proof mất 4.016 s ngoài đường capture; verify mất 2.074 s sau trích xuất. Một chẩn đoán riêng trên cùng host cho thấy trong điều kiện đó chính nguồn camera chỉ cấp khoảng 7.5 frame/s, nên con số 7.608 FPS chưa quy được cho transport hay xử lý native. Đây là một run đơn trên host phát triển; nó không chứng minh ổn định lâu dài, realtime 30 FPS hay kết quả trên thiết bị edge.
+Run 24 cho thấy, ở giao thức v1, đường camera (DirectShow 352$\times$288 $\rightarrow$ FFmpeg $\rightarrow$ WebSocket loopback TCP $\rightarrow$ native) đã truyền proof thật, trích xuất mù và verify sau capture. Một chẩn đoán riêng trên cùng host cho thấy trong điều kiện đó chính nguồn camera chỉ cấp khoảng 7.5 frame/s, nên con số 7.608 FPS chưa quy được cho transport hay xử lý native. Đây là một run đơn trên host phát triển; nó không chứng minh ổn định lâu dài, realtime 30 FPS hay kết quả trên thiết bị edge.
 
-\textbf{Ghi chú hiệu năng sau đo.} Ngày 02/10/2026 bộ đọc stdin và bộ đọc bit native được sửa (reader không chờ lấp đầy khối lớn trên pipe live, quét start code tuyến tính). Một lần embed live 1080p all-intra trên host phát triển giảm từ 30.1 s xuống 2.5 s. Đây là phép đo chức năng, không phải benchmark có kiểm soát; con số 7.608 FPS ở trên được đo \emph{trước} bản sửa và chưa được đo lại.
+\textbf{Ghi chú hiệu năng.} Ngày 02/10/2026 bộ đọc stdin và bộ đọc bit native được sửa (reader không chờ lấp đầy khối lớn trên pipe live, quét start code tuyến tính). Một lần embed live 1080p all-intra trên host phát triển giảm từ 30.1 s xuống 2.5 s. Đây là phép đo chức năng, không phải benchmark có kiểm soát; con số 7.608 FPS được đo \emph{trước} bản sửa và chưa được đo lại.
 
 \section{Từ ảnh đến H.264: nhìn thấy từng bước}
 \subsection{RGB, Y, Cb, Cr và lấy mẫu màu}
@@ -404,68 +452,100 @@ patch_annex_b_nal_rbsp(annex_b, nal_index, patches)
 \end{lstlisting}
 Bộ thu ứng viên lấy \emph{một ứng viên mỗi khối}: dấu của trailing-one đầu tiên, thuộc mọi loại khối (LumaDC, Luma4x4, ChromaDC, ChromaAC) trong slice IDR. Mỗi ứng viên có định danh ASCII \texttt{nal\_index:\allowbreak macroblock:\allowbreak category:\allowbreak block\_index:\allowbreak rbsp\_bit\_offset}, ví dụ \texttt{24:326:1:6:67801}. Patcher chuyển EBSP sang RBSP, áp patch độ dài cố định, dựng lại EBSP và Annex-B. Gate strict decode xác nhận decoder chấp nhận stream; nó không thay phép đo PSNR/SSIM.
 
-\section{Lịch nhúng có khóa, khung xác thực và trích xuất mù}\label{sec:channel}
-\subsection{Khóa con HKDF (giao thức v2)}
-Từ giao thức v2 (03/10/2026) secret 32 byte không được dùng trực tiếp làm khóa HMAC. HKDF-SHA256 (RFC 5869) tách nó thành ba khóa con độc lập:
+\section{Lịch nhúng có khóa, khung kênh và trích xuất mù}\label{sec:channel}
+\subsection{Khóa con HKDF (giao thức v3)}
+Khóa giấu tin $K$ 32 byte không được dùng trực tiếp làm khóa HMAC. HKDF-SHA256 (RFC 5869) tách nó thành hai khóa con độc lập:
 \begin{align*}
-\mathrm{PRK} &= \operatorname{HMAC\text{-}SHA256}(\texttt{"zkstego-cavlc-v2-salt"},\ s),\\
+\mathrm{PRK} &= \operatorname{HMAC\text{-}SHA256}(\texttt{"zkstego-cavlc-v2-salt"},\ K),\\
 k_{\mathrm{sch}} &= \operatorname{HKDF\text{-}Expand}(\mathrm{PRK},\ \texttt{"zkstego/cavlc/v2/schedule"},\ 32),\\
-k_{\mathrm{tag}} &= \operatorname{HKDF\text{-}Expand}(\mathrm{PRK},\ \texttt{"zkstego/cavlc/v2/frame-tag"},\ 32),\\
 k_{\mathrm{wh}} &= \operatorname{HKDF\text{-}Expand}(\mathrm{PRK},\ \texttt{"zkstego/cavlc/v2/whitening"},\ 32).
 \end{align*}
-Lộ một khóa con (ví dụ khóa lịch) không làm lộ secret hay các khóa con khác. Encoder native chỉ giữ khóa lịch và các bit khung đã làm trắng; secret của người gọi bị xóa sau HKDF.
+Nhãn HKDF giữ nguyên từ v2 nên lịch nhúng và dòng làm trắng không đổi; khóa con thứ ba dùng cho thẻ khung của v2 không còn tồn tại. Lộ một khóa con (ví dụ khóa lịch) không làm lộ $K$ hay khóa con còn lại. HMAC ở đây chỉ đóng vai hàm giả ngẫu nhiên có khóa (chọn vị trí, sinh keystream), không dùng để xác thực. Encoder native chỉ giữ khóa lịch và các bit khung đã làm trắng; $K$ của người gọi bị xóa sau HKDF. Khóa $K$ hoàn toàn tách biệt với secret camera $s$ dùng để tạo proof (mục \ref{sec:groth16}).
 
-\subsection{Khung xác thực và làm trắng}
-Payload ứng dụng được bọc thành khung
+\subsection{Khung kênh v3 và làm trắng}
+Payload ứng dụng $P$ được bọc thành khung
 \[
-F=[\texttt{0x02}]\,\|\,[\mathrm{len}]_{2\,\mathrm{B,\,BE}}\,\|\,P\,\|\,T,\qquad
-T=\operatorname{HMAC\text{-}SHA256}\big(k_{\mathrm{tag}},\ \texttt{0x02}\,\|\,\mathrm{len}\,\|\,P\big)[0{:}16].
+F=[\texttt{0x03}]\,\|\,[\,|P|\,]_{2\,\mathrm{B,\,BE}}\,\|\,P,\qquad |F|=3+|P|,\qquad \text{số bit khung}=8\,(3+|P|).
 \]
-Overhead khung là 19 byte. Bit nhúng thứ $i$ (MSB trước, đánh số liên tục trên toàn khung kể cả khi trải nhiều IDR) là $b_i = F_i \oplus K_i$, với keystream $K=\operatorname{HMAC}(k_{\mathrm{wh}},\mathrm{u64}_{\mathrm{be}}(0))\,\|\,\operatorname{HMAC}(k_{\mathrm{wh}},\mathrm{u64}_{\mathrm{be}}(1))\,\|\cdots$. Không làm trắng thì byte version cố định, trường độ dài nhỏ và cấu trúc proof làm thống kê dấu tại vị trí được chọn bị lệch; sau XOR, các bit nhúng là giả ngẫu nhiên đối với người không có khóa. Đây là lập luận thiết kế; repository chưa có thực nghiệm steganalysis định lượng cho v2. Payload tối đa 4096 byte ở các lệnh stdin (giới hạn cấu hình; định dạng cho phép 65,535). Giao thức v2 không đọc được stego tạo bởi v1.
+Khung không có MAC; overhead chỉ còn 3 byte. Bit nhúng thứ $i$ (MSB trước, đánh số liên tục trên toàn khung kể cả khi trải nhiều IDR) là
+\[
+b_i = F_i \oplus Z_i,\qquad Z=\operatorname{HMAC}(k_{\mathrm{wh}},\mathrm{u64}_{\mathrm{be}}(0))\,\|\,\operatorname{HMAC}(k_{\mathrm{wh}},\mathrm{u64}_{\mathrm{be}}(1))\,\|\cdots,
+\]
+với $Z$ là keystream làm trắng. Không làm trắng thì byte version cố định, trường độ dài nhỏ và cấu trúc proof làm thống kê dấu tại vị trí được chọn bị lệch; sau XOR, các bit nhúng là giả ngẫu nhiên đối với người không có khóa. Đây là lập luận thiết kế; kiểm tra thống kê bậc một trên 27 cấu hình cho $|z|\le0.22$ (mục \ref{sec:bench}), nhưng repository chưa có thực nghiệm steganalysis. Keystream không có nonce: cùng $K$ dùng cho nhiều video sẽ tái sử dụng cùng keystream. Payload tối đa 4096 byte ở các lệnh stdin (giới hạn cấu hình; định dạng cho phép 65,535).
+
+\textbf{Vì sao bỏ MAC.} Giao thức v2 có thêm 16 byte HMAC trên header và payload. Khi Groth16 verify đã bắt buộc và proof ràng buộc message cùng video, thẻ này trùng việc: sửa message hay proof đều làm proof sai, proof tạo bởi camera ngoài sổ đăng ký bị từ chối. Bỏ thẻ tiết kiệm 128 bit (2 IDR ở 64 bit/IDR). Hệ quả: kênh không tự phát hiện bit payload bị sửa, nên \emph{chỉ} bước verify Groth16 xác thực payload. Giao thức v3 không đọc được stego tạo bởi v2 hoặc v1 (byte version khác).
 
 \subsection{Lịch theo đoạn IDR}
-Chỉ có một giao thức, theo \emph{đoạn}, dùng chung cho file, job HTTP và luồng live. Mỗi đoạn là SPS+PPS+một IDR. Với mỗi ứng viên $c$ của đoạn, score là $\operatorname{HMAC\text{-}SHA256}(k_{\mathrm{sch}}, \mathrm{id}(c))$; ứng viên được sắp tăng dần theo (score, định danh) và lấy $N=\min(\texttt{max\_bits\_per\_IDR}, \text{số ứng viên của đoạn})$ vị trí đầu. Bit khung tiếp theo được gán lần lượt cho các vị trí này (bit 0 $\rightarrow$ dấu $+$, bit 1 $\rightarrow$ dấu $-$), nên khung trải qua nhiều IDR liên tiếp. Định danh ứng viên tính theo đầu vào của đoạn chứ không theo vị trí trong file, để luồng live và file cho cùng lịch. Giới hạn bit mỗi IDR giới hạn số dấu bị lật trong một frame; bên nhận phải dùng cùng \texttt{max\_bits\_per\_IDR}, nếu không lịch lệch và trích sai. Dịch vụ dùng mặc định 64; suite \texttt{\_new} dùng 4096.
+Chỉ có một giao thức, theo \emph{đoạn}, dùng chung cho file, job HTTP và luồng live. Mỗi đoạn là SPS+PPS+một IDR. Với mỗi ứng viên $c$ của đoạn, score là $\operatorname{HMAC\text{-}SHA256}(k_{\mathrm{sch}}, \mathrm{id}(c))$; ứng viên được sắp tăng dần theo (score, định danh) và lấy $N=\min(\texttt{max\_bits\_per\_IDR}, \text{số ứng viên của đoạn})$ vị trí đầu. Bit khung tiếp theo được gán lần lượt cho các vị trí này (bit 0 $\rightarrow$ dấu $+$, bit 1 $\rightarrow$ dấu $-$), nên khung trải qua nhiều IDR liên tiếp. Định danh ứng viên tính theo đầu vào của đoạn chứ không theo vị trí trong file, để luồng live và file cho cùng lịch. Giới hạn bit mỗi IDR giới hạn số dấu bị lật trong một frame; bên nhận phải dùng cùng \texttt{max\_bits\_per\_IDR}, nếu không lịch lệch và trích sai. Dịch vụ, CLI và suite benchmark đều dùng mặc định 64.
 
-Ví dụ dung lượng (demo, 8 frame CIF, QP 22, GOP 1): 3,660 ứng viên; message 19 byte tạo payload $4+19+129=152$ byte, khung $152+19=171$ byte, tức 1,368 bit, dùng khoảng 37\% ứng viên.
+Ví dụ dung lượng (cấu hình benchmark): message 68 byte tạo payload $4+68+129=201$ byte, khung $3+201=204$ byte, tức $8\cdot204=1{,}632$ bit; ở 64 bit/IDR khung cần $\lceil1632/64\rceil=26$ IDR. Vì bit đã làm trắng giả ngẫu nhiên, chỉ khoảng một nửa số vị trí được lịch chọn thực sự đổi dấu.
 
 \subsection{Trích xuất mù}
-``Mù'' nghĩa là bên nhận không cần video gốc hay file phụ (sidecar): (1) parse lại các IDR của stego và liệt kê ứng viên, giống hệt phía gửi; (2) dùng cùng secret sinh lại khóa con, tính score, đọc bit tại các vị trí đã chọn; (3) bỏ làm trắng 24 bit đầu, kiểm version $=2$ và độ dài $\le$ giới hạn để biết tổng số bit cần đọc --- sai khóa làm byte version gần như ngẫu nhiên nên thường bị từ chối ngay; (4) đọc đủ khung, bỏ làm trắng, tính lại tag và so sánh hằng thời gian. Mọi lỗi (tag sai, version sai, độ dài vượt giới hạn, thiếu capacity, hết video trước khi đủ khung, lỗi parse/I/O) đều thoát mã 2. Tính đúng của lịch, khung, làm trắng và lịch theo đoạn giữa C++ và Python được kiểm bằng test phase 2 của bộ \texttt{run\_all.py}.
+``Mù'' nghĩa là bên nhận không cần video gốc hay file phụ (sidecar): (1) parse lại các IDR của stego và liệt kê ứng viên, giống hệt phía gửi vì lật dấu không đổi cấu trúc; (2) dùng cùng $K$ sinh lại khóa con, tính score, đọc bit tại các vị trí đã chọn; (3) bỏ làm trắng 24 bit đầu, kiểm version $=3$ và độ dài $\le$ giới hạn để biết tổng số bit cần đọc --- sai khóa làm byte version gần như ngẫu nhiên nên bị từ chối ngay (lọt qua cả version lẫn độ dài với xác suất cỡ $\tfrac{1}{256}\cdot\tfrac{\text{giới hạn}}{65536}$; phần còn sót bị loại khi giải nén proof hoặc khi verify Groth16); (4) đọc đủ khung và bỏ làm trắng để có payload. Payload này \emph{chưa được xác thực}: CLI và job extract trả nó kèm \texttt{"verified": false}, bên gọi phải unpack và verify Groth16 (job verify làm việc này). Mọi lỗi (version sai, độ dài vượt giới hạn, thiếu capacity, hết video trước khi đủ khung, lỗi parse/I/O) đều thoát mã 2. Tính đúng của lịch, khung, làm trắng và lịch theo đoạn giữa C++ và Python được kiểm bằng phase 2 của bộ \texttt{run\_all.py}.
 
-\section{Groth16: payload, circuit và setup}\label{sec:groth16}
+\section{Groth16: sổ đăng ký camera, ràng buộc video và mạch}\label{sec:groth16}
+Proof chứng minh phát biểu: \emph{``một camera nằm trong sổ đăng ký (root Merkle công khai) xác nhận đúng video này và message này''}, trong khi bên kiểm chứng không cần secret của camera và không biết camera nào. Hai khóa được tách hẳn: khóa giấu tin $K$ (32 byte, người gửi và bên kiểm chứng cùng giữ; chọn vị trí và làm trắng) và secret camera $s$ (phần tử trường BN254, chỉ camera giữ; dùng để tạo proof).
+
+\subsection{Sổ đăng ký camera}
+\texttt{src/camera\_registry.py} dựng cây Merkle nhị phân độ sâu 16 (tối đa $2^{16}=65{,}536$ camera), nút $\mathrm{Poseidon}(\text{trái},\text{phải})$, lá trống bằng 0, lá $i$ là $pk_i=\mathrm{Poseidon}(s_i)$. Poseidon được cài bằng Python (\texttt{src/poseidon.py}, hằng số của circomlib) và đối chiếu với vector chuẩn của circomlibjs cũng như với witness của chính mạch. Bên kiểm chứng chỉ tin \emph{root} của cây; thêm hoặc thu hồi camera nghĩa là công bố root mới.
+
+\subsection{Hash video và binding}
+Lệnh \texttt{zkstego\_blind\_bits video-digest} (bản tham chiếu \texttt{src/video\_binding.py}) nhận video, số bit khung $n_F$ và cap, đọc khóa $K$ từ stdin vì cần định vị các bit carrier. Với $n_F=8\,(3+|P|)$ biết trước khi tạo proof, \emph{carrier} là đúng $n_F$ vị trí dấu mà lịch theo khóa sẽ ghi khung vào (mỗi IDR $\min(\text{cap},|C|)$ vị trí đầu của lịch, cho tới hết khung). Khi đó
+\begin{align*}
+D &= \operatorname{SHA256}\Big(\texttt{"zkstego/video-digest/v1"}\,\|\,\mathrm{u32}(n_F)\,\|\,\mathrm{u32}(\text{cap})\\
+&\qquad\,\|\,\textstyle\big\Vert_{\text{NAL}}\ \mathrm{u32}(1+|r'|)\,\|\,\mathrm{hdr}\,\|\,r'\Big),\\
+\beta &= \operatorname{SHA256}\big(\texttt{"zkstego/proof-binding/v1"}\,\|\,\mathrm{mode}\,\|\,D\,\|\,\operatorname{SHA256}(m)\big),\\
+(\beta_H,\beta_L) &= (\beta[0{:}16],\ \beta[16{:}32]),
+\end{align*}
+trong đó $r'$ là RBSP của từng NAL (đã bỏ byte EPB) với \emph{chỉ} các bit carrier đặt về 0, và $\beta_H,\beta_L$ là hai số nguyên big-endian 128 bit (nhỏ hơn modulus trường BN254). Nhúng chỉ đổi đúng các bit carrier (byte EPB có thể thay đổi nhưng không ảnh hưởng RBSP), nên $D(\text{cover})=D(\text{stego})$. Mọi thay đổi khác --- video khác, cắt hoặc thêm frame, sửa một bit ở frame sau, lật một dấu không mang khung, mã hóa lại --- làm $D$ đổi và proof sai. Lật một bit carrier giữ nguyên $D$ nhưng làm payload trích ra đổi, nên proof cũng bị từ chối. Vì vị trí carrier phụ thuộc $K$, chỉ người có khóa giấu tin mới tính được $D$; bên kiểm chứng vốn đã cần $K$ để trích xuất.
+
+\emph{Chế độ} $\mathrm{mode}=0$ ràng buộc video; $\mathrm{mode}=1$ chỉ ràng buộc message ($D$ là 32 byte 0) và dành cho luồng live, vì khi proof được nhúng thì phần còn lại của video chưa tồn tại. Job verify từ chối $\mathrm{mode}=1$ với lý do \texttt{video\_binding\_required}, trừ khi bật \texttt{ZK\_STEGO\_ALLOW\_MESSAGE\_ONLY\_PROOFS=1}.
+
 \subsection{Payload}
-Payload ứng dụng là $P=[\mathrm{len}(m)]_{4\,\mathrm{B,\,BE}}\,\|\,m\,\|\,\pi$, trong đó $\pi$ là proof Groth16 nén 129 byte. Với giới hạn payload 4096 byte, message tối đa $4096-4-129=3963$ byte.
+Payload ứng dụng là
+\[
+P=[\texttt{0x01}]\,\|\,[\mathrm{mode}]_{1\,\mathrm{B}}\,\|\,[\,|m|\,]_{2\,\mathrm{B,\,BE}}\,\|\,m\,\|\,\pi,\qquad |P|=4+|m|+129,
+\]
+trong đó $\pi$ là proof Groth16 nén 129 byte. Với giới hạn payload 4096 byte, message tối đa $4096-4-129=3963$ byte; khung tương ứng là $3+4096=4099$ byte, tức $32{,}792$ bit.
 
 \subsection{Quan hệ được chứng minh}
-Mạch \texttt{circuits/payload\_verify.circom} (\texttt{PayloadVerify}) có public input \texttt{payload\_hash[256]} $=\operatorname{SHA256}(m)$ dạng bit, \texttt{commitment[256]} và \texttt{payload\_length}; private input là \texttt{secret[256]}. Ràng buộc:
+Mạch \texttt{circuits/camera\_video.circom} (\texttt{CameraVideo(16)}) có public input $x=(\mathrm{root},\beta_H,\beta_L)$ và private witness $w=(s,\sigma_0,\dots,\sigma_{15},\iota_0,\dots,\iota_{15})$ (secret camera, các nút anh em và chỉ số hướng trên đường Merkle). Quan hệ là
 \[
-c=\operatorname{SHA256}\big(\operatorname{SHA256}(m)\,\|\,s\big),\qquad 0<\texttt{payload\_length}<10^6,\qquad x(x-1)=0\ \ \forall x\in\{h,c,s\}.
+\mathcal{R}=\Big\{(x,w)\ :\ \iota_j(\iota_j-1)=0\ \ \forall j,\quad n_0=\mathrm{Poseidon}(s),\quad n_{16}=\mathrm{root}\Big\},
 \]
-Thành phần \texttt{Sha256} của circomlib không tự ép đầu vào là 0/1; trước 03/10/2026 prover có thể đưa phần tử trường tùy ý vào hàm băm. Ràng buộc bit được thêm để đóng lỗ hổng soundness này. Mạch hiện có 63,321 constraints và 513 public input; proof tạo bằng khóa của mạch cũ (62,553 constraints, nay là lịch sử) không verify với khóa hiện tại. Hash của message tính \emph{ngoài} mạch; verifier tự tính lại $h$ từ message nhận được. Mạch không chứa hash video, chỉ số frame hay danh tính camera.
+với $n_{j+1}=\mathrm{Poseidon}(L_j,R_j)$, $L_j=n_j+\iota_j(\sigma_j-n_j)$, $R_j=\sigma_j+\iota_j(n_j-\sigma_j)$. Hai public input $\beta_H,\beta_L$ không tham gia ràng buộc nào khác nên mạch thêm hai ràng buộc $\beta_H^2$, $\beta_L^2$ để gắn chúng tường minh vào R1CS (cách làm của Semaphore). Mạch có 8,737 constraints và 3 public input. Bên kiểm chứng chấp nhận khi và chỉ khi
+\[
+\operatorname{Groth16.Verify}\big(\mathit{vk},\ (\mathrm{root}_{\text{tin cậy}},\ \beta_H,\ \beta_L),\ \pi\big)=1,
+\]
+với $\beta$ được \emph{tính lại} từ message trích ra và từ hash $D$ của chính file video nhận được. Theo tính knowledge soundness của Groth16 và tính không biến đổi được proof sang public input khác (weak simulation-extractability), người không biết $s$ của một lá trong cây không tạo được proof cho binding mới; proof tạo cho một binding (video + message) hay một root khác không verify được. Hash SHA-256 được tính ngoài mạch, nên mạch nhỏ hơn mạch SHA-256 cũ khoảng 7 lần.
 
-Proof chỉ chứng minh người tạo biết $s$ sao cho commitment khớp message. Vì verifier phải biết $s$ để tự tính commitment công khai, trong cấu hình hiện tại ai có khóa cũng tạo được proof. Proof không chứng minh camera cụ thể đã quay video, timestamp là thật hay stream không bị chỉnh sửa; để có các tính chất đó cần commitment ràng buộc dữ liệu video, thiết bị và thời gian (thiết kế trong \texttt{future\_plan.md}, chưa triển khai).
+\textbf{Proof chứng minh:} một camera có khóa trong sổ đăng ký đã xác nhận đúng video (mọi bit; các bit carrier được bảo vệ gián tiếp qua payload) và đúng message; bên kiểm chứng không biết camera nào và không giữ secret nào đủ để làm giả proof. \textbf{Proof không chứng minh:} camera thật sự quay cảnh đó (ví dụ quay lại màn hình), thời điểm quay, hay tính realtime; với luồng live ($\mathrm{mode}=1$) proof chỉ ràng buộc message.
 
-\subsection{Các hàm và artifact}
-\texttt{ZKSnarkBridge} trong \texttt{src/zk\_proof.py} tính witness bằng WASM của mạch rồi gọi \texttt{snarkjs groth16 prove}. Proof gồm $A\in G_1$, $B\in G_2$, $C\in G_1$ trên BN254, nén còn 129 byte (tọa độ $x$ của $A$, $B$ (hai phần tử $\mathbb{F}_{p^2}$), $C$, mỗi phần 32 byte, cộng 1 byte cờ chứa 3 bit chẵn/lẻ của $y$). \texttt{bytes\_to\_proof} kiểm tọa độ $<p$ và điểm nằm trên đường cong; dữ liệu hỏng dẫn tới \texttt{ValueError} và verify trả sai. Verify chỉ chấp nhận khi snarkjs thoát 0 \emph{và} in \texttt{OK!}.
+\subsection{Các hàm, artifact và setup}
+\texttt{CameraProofBridge} trong \texttt{src/zk\_proof.py} tính witness bằng WASM của mạch rồi gọi \texttt{snarkjs groth16 prove} với \texttt{camera\_video.zkey}. Proof gồm $A\in G_1$, $B\in G_2$, $C\in G_1$ trên BN254, nén còn 129 byte (tọa độ $x$ của $A$, $B$ (hai phần tử $\mathbb{F}_{p^2}$), $C$, mỗi phần 32 byte, cộng 1 byte cờ chứa 3 bit chẵn/lẻ của $y$). \texttt{bytes\_to\_proof} kiểm tọa độ $<p$ và điểm nằm trên đường cong; dữ liệu hỏng bị từ chối với lý do \texttt{malformed\_proof\_payload}. Verify chỉ chấp nhận khi snarkjs thoát 0 \emph{và} in \texttt{OK!}.
 
 \begin{lstlisting}[language=Python]
-# Luồng gửi/nhận hiện tại (README, src/zk_proof.py)
-bridge = ZKSnarkBridge("circuits")
-proof, _ = bridge.generate_proof_for_payload(message, secret_key)  # 32-byte key
-payload = pack(message, proof_to_bytes(proof))      # [len4][message][proof 129 B]
-# zkstego_blind_bits embed-stream-auth-stdin in.h264 out.h264 <max_bits_per_IDR>
-# zkstego_blind_bits extract-stream-auth out.h264 - <max_payload> <max_bits_per_IDR>
-recovered_message, proof_bytes = unpack(payload)
-if not bridge.verify_proof_for_payload(bridge.bytes_to_proof(proof_bytes),
-                                       recovered_message, secret_key):
-    raise ValueError("Groth16 proof verification failed")
+# Luồng gửi/nhận hiện tại (README, src/camera_proof.py)
+bridge = CameraProofBridge("circuits")
+signed = build_payload(bridge, registry, camera_secret, message,
+                       native_cli=cli, cover="cover.h264", stego_key=K)  # hash cover -> binding -> prove
+# stdin: K hex, signed.payload hex
+# zkstego_blind_bits embed-stream-auth-stdin cover.h264 stego.h264 64
+# zkstego_blind_bits extract-stream-auth stego.h264 - <max_payload> 64   -> payload (verified: false)
+verdict = verify_payload(bridge, registry.root, payload,
+                         native_cli=cli, stego="stego.h264", stego_key=K)  # hash stego -> binding -> verify
+if not verdict.video_bound:
+    raise ValueError(verdict.reason)   # e.g. proof_invalid
 \end{lstlisting}
-Khóa không bao giờ đi qua tham số dòng lệnh: CLI đọc khóa dạng một dòng 64 ký tự hex (và payload hex) từ stdin. Proving key và verification key hiện là thiết lập giáo dục cục bộ (\texttt{circuits/build/DEMO\_SETUP\_ONLY.txt}), không phải trusted ceremony cho triển khai; setup chạy một lần cho mạch, không lặp lại theo video.
+Khóa không bao giờ đi qua tham số dòng lệnh: CLI đọc khóa dạng một dòng 64 ký tự hex (và payload hex) từ stdin. Hậu tố \texttt{-auth} của tên lệnh được giữ lại nhưng nay mang nghĩa ``có khóa'', không phải có MAC.
+
+Setup (\texttt{py -3.12 -m src.zk\_setup}): Phase 1 là Powers of Tau công khai của Hermez ($2^{16}$, tệp \texttt{powersOfTau28\_hez\_final\_16.ptau}, hash BLAKE2b được ghim); Phase 2 gồm hai lượt đóng góp (entropy qua stdin), một beacon ngẫu nhiên sinh cục bộ, rồi \texttt{snarkjs zkey verify}; transcript ở \texttt{circuits/build/camera\_video\_setup.json}. Vì mọi bước chạy trên một máy nên đây là nghi thức \emph{demo}; triển khai thật cần nhiều bên đóng góp độc lập (chỉ cần một bên trung thực). Setup chạy một lần cho mạch, không lặp lại theo video; proof tạo bằng khóa của mạch cũ không verify với khóa hiện tại.
 
 \section{API và kết nối}
 \subsection{HTTP file jobs}
 \begin{figure}[H]\centering
 \resizebox{\textwidth}{!}{\begin{tikzpicture}[node distance=8mm,box/.style={draw,rounded corners,align=center,text width=36mm,minimum height=18mm,fill=blue!5},arr/.style={-{Latex[length=2mm]},thick}]
-\node[box] (client) {Client\newline multipart: \texttt{.h264}, message, key};
+\node[box] (client) {Client\newline multipart: \texttt{.h264}, payload, khóa $K$};
 \node[box,right=of client] (api) {FastAPI\newline Bearer token trước body; 202 + job id};
 \node[box,right=of api] (worker) {Worker pool có giới hạn\newline embed / extract / verify};
 \node[box,right=of worker] (file) {Artifact một lần\newline stego, payload\newline hoặc kết quả verify};
@@ -476,7 +556,9 @@ Khóa không bao giờ đi qua tham số dòng lệnh: CLI đọc khóa dạng m
 \caption{HTTP file flow. Client upload không phải kết nối camera trực tiếp; job chạy trong worker và artifact được tải khi hoàn tất.}
 \label{fig:http-flow}
 \end{figure}
-Một ứng dụng duy nhất (\texttt{src.api.native\_handlers:create\_native\_app}) dựng trên lõi job dùng chung. Embed gửi multipart \texttt{.h264} cùng message và khóa tới \texttt{/api/v1/jobs/embed}; extract gửi stego và khóa tới \texttt{/api/v1/jobs/extract}; service trả job id, client poll \texttt{/api/v1/jobs/\{id\}} rồi tải artifact một lần (hết hạn sau 10 phút). \texttt{POST /api/v1/jobs/verify} trích xuất mù, unpack rồi \emph{bắt buộc} Groth16 verify: trạng thái \texttt{succeeded} kèm message chỉ khi proof đúng; ngược lại \texttt{rejected} với lý do \texttt{payload\_not\_authenticated}, \texttt{malformed\_proof\_payload} hoặc \texttt{proof\_invalid}; lỗi hạ tầng là \texttt{failed}. Client không được coi \texttt{rejected} là thành công.
+Một ứng dụng duy nhất (\texttt{src.api.native\_handlers:create\_native\_app}) dựng trên lõi job dùng chung. Embed gửi multipart \texttt{.h264} cùng chuỗi byte cần nhúng (\texttt{message\_b64}, thường là payload camera đã ký sẵn ở phía camera) và khóa $K$ tới \texttt{/api/v1/jobs/embed}; extract gửi stego và khóa tới \texttt{/api/v1/jobs/extract} và nhận payload kèm \texttt{"verified": false}; service trả job id, client poll \texttt{/api/v1/jobs/\{id\}} rồi tải artifact một lần (hết hạn sau 10 phút).
+
+\texttt{POST /api/v1/jobs/verify} là job duy nhất xác thực: trích xuất mù $\rightarrow$ unpack $\rightarrow$ hash video của chính file tải lên $\rightarrow$ Groth16 verify \emph{bắt buộc} với root của sổ đăng ký (\texttt{ZK\_STEGO\_CAMERA\_REGISTRY}; thiếu cấu hình này job thất bại). Trạng thái \texttt{succeeded} kèm message và cờ \texttt{video\_bound} chỉ khi proof đúng; ngược lại \texttt{rejected} với lý do \texttt{payload\_not\_found}, \texttt{malformed\_proof\_payload}, \texttt{video\_binding\_required}, \texttt{video\_digest\_unavailable} hoặc \texttt{proof\_invalid}; lỗi hạ tầng (thiếu sổ đăng ký, khóa, Node.js) là \texttt{failed}. Trạng thái job gồm \texttt{queued}, \texttt{running}, \texttt{succeeded}, \texttt{rejected}, \texttt{failed}; client không được coi \texttt{rejected} là thành công.
 
 Bảo vệ: Bearer token (tối thiểu 32 ký tự) được kiểm trước khi đọc body; 10 lần xác thực sai từ một IP trong 60 s trả 429 kèm \texttt{Retry-After}; tối đa 4 upload đồng thời; giới hạn kích thước và thời gian upload; hàng đợi job có giới hạn; job xong bị xóa sau 24 giờ; tiến trình native được gọi không qua shell, có timeout, khóa đi qua stdin.
 
@@ -492,10 +574,10 @@ Bảo vệ: Bearer token (tối thiểu 32 ký tự) được kiểm trước kh
 \draw[arr] (ws)--(py);\draw[arr] (py)--(cpp);
 \draw[arr] (cpp) to[bend left=28] node[above,font=\scriptsize]{stego chunks hoặc payload} (ws);
 \end{tikzpicture}}
-\caption{WebSocket stream là giao thức điều khiển + media chunks; output embed là binary stream, còn extract trả payload qua JSON.}
+\caption{WebSocket stream là giao thức điều khiển + media chunks; output embed là binary stream, còn extract trả payload (chưa xác thực) qua JSON.}
 \label{fig:ws-flow}
 \end{figure}
-Client mở WebSocket có Bearer authorization (handshake thiếu token bị từ chối trước khi accept) rồi gửi JSON control: thao tác, khóa và, khi embed, message; extract gửi giới hạn độ dài payload. Sau phản hồi \texttt{ready}, client gửi từng H.264 chunk dạng binary; adapter chuyển sang stdin của tiến trình C++ (\texttt{embed-\allowbreak live-\allowbreak auth-\allowbreak stdin} / \texttt{extract-\allowbreak live-\allowbreak auth-\allowbreak stdin}) theo backpressure với ngưỡng 64 KiB high-water/16 KiB low-water. Khi embed, output native được gửi lại dạng binary chunks; khi extract, payload trả JSON Base64. Luồng đóng sau 15 s không có dữ liệu.
+Client mở WebSocket có Bearer authorization (handshake thiếu token bị từ chối trước khi accept) rồi gửi JSON control: thao tác, khóa và, khi embed, payload; extract gửi giới hạn độ dài payload. Sau phản hồi \texttt{ready}, client gửi từng H.264 chunk dạng binary; adapter chuyển sang stdin của tiến trình C++ (\texttt{embed-\allowbreak live-\allowbreak auth-\allowbreak stdin} / \texttt{extract-\allowbreak live-\allowbreak auth-\allowbreak stdin}) theo backpressure với ngưỡng 64 KiB high-water/16 KiB low-water. Khi embed, output native được gửi lại dạng binary chunks; khi extract, payload trả JSON Base64 kèm \texttt{"verified": false}. Luồng đóng sau 15 s không có dữ liệu.
 
 \begin{lstlisting}[language=Python]
 # src/api/native_handlers.py - quy trình stream (lược)
@@ -507,37 +589,55 @@ await websocket.send_json({"type": "ready", "operation": operation})
 await process.stdin.drain()       # backpressure
 await websocket.send_bytes(chunk) # embed output
 \end{lstlisting}
-Luồng WebSocket trả payload đã qua HMAC nhưng không tự chạy Groth16; client dùng luồng live phải unpack và verify proof (như listing ở mục \ref{sec:groth16}) hoặc dùng job verify. Luồng này không tạo TLS, camera attestation hay ràng buộc video.
+Luồng WebSocket không tự chạy Groth16; client phải unpack và verify proof (như listing ở mục \ref{sec:groth16}) hoặc dùng job verify. Vì proof của luồng live được tạo trước khi phần còn lại của video tồn tại, nó chỉ có thể ở $\mathrm{mode}=1$ (ràng buộc message), và job verify mặc định từ chối chế độ này. Luồng không tạo TLS hay camera attestation.
 
-\section{Mô hình đe dọa và giới hạn}\label{sec:threats}
+\section{Phân tích bảo mật, mô hình đe dọa và giới hạn}\label{sec:threats}
+\textbf{Mô hình.} Bên kiểm chứng tin root của sổ đăng ký và verification key, và giữ khóa giấu tin $K$; secret camera chỉ nằm trên camera. Kẻ tấn công có thể sửa, cắt, ghép, mã hóa lại stream, chép payload sang video khác, hoặc chính là người có $K$ (ví dụ một bên nhận) muốn thay message.
+
+\begin{table}[H]\centering\small
+\caption{Tính chất bảo mật của hệ thống hiện tại và cơ chế bảo đảm.}
+\begin{tabularx}{\textwidth}{p{4.0cm}X}\toprule
+Tính chất & Cơ chế và bằng chứng\\\midrule
+Xác thực nguồn gốc & Chỉ camera biết $s$ của một lá trong cây có root tin cậy mới tạo được proof; camera ngoài sổ đăng ký bị từ chối (\texttt{unregistered\_camera}).\\
+Ẩn danh trong sổ đăng ký & Đường Merkle và $s$ là witness riêng; bên kiểm chứng không biết lá nào đã được dùng.\\
+Không cần secret ở bên kiểm chứng & Bên kiểm chứng chỉ cần root, verification key và $K$; giữ $K$ không đủ để làm giả proof (\texttt{message\_swap} bị từ chối).\\
+Ràng buộc video & $D$ phủ mọi NAL trừ bit carrier; phát lại sang video khác, cắt ngắn, sửa frame sau, lật dấu ngoài lịch đều làm proof sai (ma trận 11/11).\\
+Toàn vẹn payload & Không có MAC; sửa bit carrier làm payload đổi nên proof sai hoặc hỏng (\texttt{flip\_scheduled\_sign}).\\
+Bí mật vị trí & Lịch HMAC theo khóa con và làm trắng bit; sai khóa không tìm thấy khung (\texttt{wrong\_key}).\\
+\bottomrule\end{tabularx}
+\end{table}
+
 \begin{table}[H]\centering\small
 \caption{Giới hạn bảo mật và phạm vi của hệ thống hiện tại.}
-\begin{tabularx}{\textwidth}{p{3.6cm}X}\toprule
+\begin{tabularx}{\textwidth}{p{4.0cm}X}\toprule
 Giới hạn & Hệ quả\\\midrule
-Không ràng buộc video & Khung và proof không chứa định danh video, phiên hay bộ đếm: payload có thể bị phát lại (replay) sang video khác dùng cùng khóa. Cần commitment theo đoạn (\texttt{future\_plan.md}).\\
-Verifier giữ secret & Commitment công khai được verifier tính lại từ secret, nên verifier phải có secret và ai có khóa cũng tạo được proof hợp lệ; mạch dùng secret gốc dù kênh native đã tách khóa con HKDF.\\
-Trusted setup chỉ cho demo & Proving/verification key là setup giáo dục cục bộ, không có ceremony hay audit provenance.\\
+Luồng live chỉ ràng buộc message & Ở $\mathrm{mode}=1$ proof không phủ video; job verify từ chối trừ khi bật \texttt{ZK\_STEGO\_ALLOW\_MESSAGE\_ONLY\_PROOFS=1}.\\
+Trusted setup chỉ cho demo & Phase 1 là Powers of Tau công khai, nhưng Phase 2 (hai lượt đóng góp và beacon) chạy trên một máy; triển khai cần nhiều bên độc lập.\\
+Không chứng minh cảnh thật & Proof không chứng minh camera thật sự quay cảnh đó (ví dụ quay lại màn hình) hay thời điểm quay.\\
+Kiểm chứng cần khóa giấu tin & $D$ phụ thuộc vị trí carrier, tức phụ thuộc $K$; chỉ người có $K$ mới kiểm chứng được (bên kiểm chứng vốn cần $K$ để trích xuất).\\
+Keystream không nonce & Cùng $K$ cho nhiều video tái sử dụng cùng keystream làm trắng.\\
+Chưa chứng minh tính khó phát hiện & Chỉ có kiểm tra thống kê bậc một ($|z|\le0.22$); chưa đo steganalysis.\\
 Profile H.264 hẹp & Chỉ Baseline/CAVLC, progressive, 4:2:0, một slice/frame bắt đầu ở MB 0, không I\_PCM, một SPS/PPS id; chỉ IDR mang dữ liệu; không CABAC, không B-frame.\\
-Tương thích phiên bản & Giao thức v2 không đọc stego v1; proof theo khóa mạch cũ không verify với khóa hiện tại.\\
-Realtime và edge & Chưa nghiệm thu: camera E2E 7.608 FPS so với cổng 30 FPS (đo trước bản sửa bộ đọc stdin, chưa đo lại); chưa có số đo trên thiết bị edge.\\
-Bằng chứng định lượng & Số đo media/ZKP/camera hiện có thuộc giao thức v1 và mạch cũ; chưa có thực nghiệm steganalysis hay attack matrix cho v2.\\
+Mỏng manh có chủ đích & Mọi lần mã hóa lại phá payload (\texttt{transcode} bị từ chối); hệ thống không chống biến đổi.\\
+Tương thích phiên bản & v3 không đọc stego v2/v1; proof theo khóa mạch cũ không verify với khóa hiện tại.\\
+Realtime và edge & Chưa nghiệm thu: camera E2E 7.608 FPS so với cổng 30 FPS (giao thức v1, đo 24/09/2026, trước bản sửa native 02/10/2026); chưa có số đo trên thiết bị edge.\\
 \bottomrule\end{tabularx}
 \end{table}
 
 \section{Kết luận và giới hạn}
-Hệ thống hiện tại hợp nhất về một lõi media native C++ với giao thức kênh v2 (HKDF, khung version \texttt{0x02} có tag HMAC 16 byte, làm trắng bit, lịch theo đoạn IDR có giới hạn bit mỗi IDR), trích xuất mù chỉ với khóa và Groth16 verify bắt buộc trên mạch đã thêm ràng buộc bit. Về chức năng, phiên bản này có bằng chứng từ bộ test ngày 03/10/2026 (126/126 qua 12 phase, CTest 1/1), không gồm camera vật lý.
+Hệ thống hiện tại hợp nhất về một lõi media native C++ với giao thức kênh v3 (hai khóa con HKDF, khung \texttt{[0x03][len 2 B][payload]} không MAC, làm trắng bit, lịch theo đoạn IDR với 64 bit/IDR), trích xuất mù chỉ với khóa và Groth16 verify bắt buộc trên mạch \texttt{camera\_video} (8,737 constraints, 3 public input). Proof ràng buộc camera trong sổ đăng ký với đúng video và đúng message; bên kiểm chứng chỉ cần root, verification key và khóa giấu tin, không cần secret camera và không biết camera nào. Về chức năng, phiên bản này có bằng chứng từ bộ test ngày 04/10/2026 (142/142 qua 12 phase, CTest 1/1), không gồm camera vật lý.
 
-Số đo định lượng hiện có đều thuộc giao thức v1 và mạch cũ (24/09/2026): file pipeline qua 27/27 cấu hình với strict decode và trích xuất đúng/sai khóa, nhưng 13/27 cấu hình có frame sửa dưới 40 dB (thấp nhất 32.76 dB); camera E2E mang proof thật qua stream nhưng chỉ đạt 7.608 FPS, không đạt cổng 30 FPS. Chưa có cơ sở khẳng định hỗ trợ mọi GOP, P/B-frame, CABAC, đạt realtime ở mọi kích thước, hay chất lượng của giao thức v2.
+Số đo ngày 04/10/2026 cho media 27/27 (mọi proof ràng buộc video, 0 dấu đổi ngoài lịch, frame tệ nhất 44.03 dB, 0/27 dưới 40 dB), đầu-cuối 5/5 (gửi 2.78 s, nhận 1.99 s trên clip CIF 300 frame) và ma trận tấn công 11/11 đúng kỳ vọng, gồm từ chối phát lại sang video khác, cắt ngắn, thay message và camera ngoài sổ đăng ký. Chi phí bị chi phối bởi parse bitstream (khoảng 61 / 245 / 891 ms mỗi IDR mang khung ở ba độ phân giải), không phải Groth16; camera vật lý chỉ có số liệu lịch sử 7.608 FPS (giao thức v1), không đạt cổng 30 FPS. Chưa có cơ sở khẳng định hỗ trợ P/B-frame mang dữ liệu, CABAC, realtime, hay khả năng chống steganalysis.
 
-Ưu tiên tiếp theo: chạy lại suite \texttt{\_new} và camera E2E với giao thức v2 và mạch hiện tại (kể cả đo lại sau bản sửa bộ đọc stdin), lặp camera E2E nhiều lần, áp ngưỡng chất lượng theo từng frame, và thiết kế commitment ràng buộc video/phiên để chặn replay. So sánh với hệ khác cần cùng video, QP, payload, độ phân giải và điều kiện host.
+Ưu tiên tiếp theo: đo lại camera vật lý với giao thức v3 và proof camera, giảm chi phí parse native, ràng buộc video cho luồng live (ví dụ proof theo đoạn), nghi thức Phase 2 nhiều bên độc lập, nonce cho keystream và thực nghiệm steganalysis. So sánh với hệ khác cần cùng video, QP, payload, độ phân giải và điều kiện host.
 
 \section*{Artifact được dùng và kết quả đã loại bỏ}
 \begin{itemize}
-\item Media run \texttt{20260924T150707Z\_2be60c} (giao thức v1): \texttt{video\_pipeline\_new.json}, \texttt{quality\_per\_frame\_new.csv}; báo cáo \texttt{performance\_new.pdf}, \texttt{video\_quality\_new.pdf}.
-\item ZKP (mạch cũ): \texttt{zkp\_new.json}.
-\item Camera (giao thức v1): \texttt{realtime\_camera\_runs\_20260924.json}, run 24.
-\item Quy trình chạy: \texttt{benchmark/NEW\_BENCHMARKS.md}, \texttt{benchmark/DELIVERY\_BENCHMARK.md}; mô tả hệ thống: \texttt{doc/he\_thong\_hoat\_dong.md}; trạng thái nghiệm thu: \texttt{doc/completion\_plan.md}.
-\item \emph{Đã loại bỏ khỏi báo cáo (lịch sử, không phải bằng chứng hiện tại):} pipeline Python cũ (parser CAVLC Python, bộ lọc vị trí, chaos map, file phụ \texttt{positions.json}, verifier cần video gốc hoặc sidecar) và các kết quả SEC1--SEC10 của nó, gồm SEC5 có giá trị mô phỏng và SEC6 lấy từ cache hit. Mã này chỉ còn trong lịch sử git.
+\item Media run \texttt{20261004T142448Z\_1db00a} (giao thức v3, proof camera): \texttt{video\_pipeline\_new.json}, \texttt{quality\_per\_frame\_new.csv}.
+\item Đầu-cuối và ma trận tấn công: \texttt{e2e\_new.json}; proof system: \texttt{zkp\_new.json}; báo cáo tổng hợp \texttt{benchmark\_report\_new.pdf}.
+\item Camera (số liệu lịch sử, giao thức v1): \texttt{realtime\_camera\_runs\_20260924.json}, run 24.
+\item Quy trình chạy: \texttt{benchmark/NEW\_BENCHMARKS.md}; mô tả hệ thống: \texttt{doc/he\_thong\_hoat\_dong.md}; trạng thái nghiệm thu: \texttt{doc/completion\_plan.md}.
+\item \emph{Đã loại bỏ khỏi báo cáo (lịch sử, không phải bằng chứng hiện tại):} pipeline Python cũ và các kết quả SEC1--SEC10 của nó; mạch SHA-256 cũ cùng khung kênh v2 có thẻ MAC; số đo media và ZKP ngày 24/09/2026 của giao thức v1. Mã này chỉ còn trong lịch sử git.
 \end{itemize}
 
 \end{document}

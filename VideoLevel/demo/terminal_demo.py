@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One terminal walkthrough of the real native CAVLC segment protocol + Groth16 pipeline.
+"""One terminal walkthrough of the real native CAVLC segment protocol + camera Groth16 proof.
 
 Run from any directory: python demo/terminal_demo.py --help
 Only ephemeral educational secrets are generated; no production key is loaded.
@@ -19,6 +19,7 @@ import time
 import traceback
 import urllib.request
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -42,16 +43,22 @@ from src.native_blind_contract import (
     unwhiten_bits,
     whitening_keystream_bits,
 )
+from src.camera_proof import frame_bits_for_message, verify_payload
+from src.camera_registry import CameraRegistry, camera_public_key, new_camera_secret
+from src.video_binding import MODE_VIDEO, binding_digest, binding_public_inputs, native_video_digest
+from src.zk_setup import PTAU_BLAKE2B
 from src.zk_proof import (
+    PAYLOAD_HEADER_BYTES,
     PROOF_SIZE_BYTES,
-    ZKSnarkBridge,
+    CameraProofBridge,
     bytes_to_proof,
-    pack,
+    pack_payload,
     proof_to_bytes,
-    unpack,
+    unpack_payload,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import camera_trace  # noqa: E402  (demo-local: Merkle opening + video digest, step by step)
 import deep_trace  # noqa: E402  (demo-local: FFmpeg internals + one-block anatomy)
 from native_io import (  # noqa: E402  (demo-local: native tool calls)
     MAX_PAYLOAD_BYTES,
@@ -61,7 +68,6 @@ from native_io import (  # noqa: E402  (demo-local: native tool calls)
     native_embed,
     native_extract,
     trace_video,
-    verify_groth16,
 )
 import negative_cases  # noqa: E402  (demo-local: rejection cases)
 from segment_plan import (  # noqa: E402  (demo-local: segment schedule helpers)
@@ -79,8 +85,6 @@ ZIGZAG = (0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15)
 NAL_NAMES = {1: "P/non-IDR", 5: "IDR", 6: "SEI", 7: "SPS", 8: "PPS", 9: "AUD"}
 # Pinned phase-2 artifact/digest: https://github.com/iden3/snarkjs#7-prepare-phase-2
 PTAU_URL = "https://circom.info/powersOfTau28_hez_final_16.ptau"
-PTAU_BLAKE2B = ("6a6277a2f74e1073601b4f9fed6e1e55226917efb0f0db8a07d98ab01df1ccf43eb0"
-                "e8c3159432acd4960e2f29fe84a4198501fa54c8dad9e43297453efec125")
 
 
 def prepared_ptau(session: Session, build: Path) -> Path:
@@ -167,10 +171,10 @@ class Session:
         self.transcript.close()
 
 
-class MeasuredBridge(ZKSnarkBridge):
+class MeasuredBridge(CameraProofBridge):
     """Same bridge, with timings around its existing witness/prover operations."""
     def __init__(self, session: Session) -> None:
-        super().__init__(str(ROOT / "circuits"))
+        super().__init__(ROOT / "circuits")
         self.session = session
 
     def _compute_witness(self, circuit_input: dict) -> Path:
@@ -206,43 +210,15 @@ def setup(session: Session) -> None:
         session.run("npm_ci", ["npm.cmd" if os.name == "nt" else "npm", "ci", "--no-audit", "--no-fund"], cwd=circuits)
     build = circuits / "build"
     build.mkdir(exist_ok=True)
-    zkey, vkey = build / "proving_key.zkey", build / "verification_key.json"
-    witness_files = [build / "payload_verify_js" / name for name in
-                     ("generate_witness.js", "witness_calculator.js", "payload_verify.wasm")]
-    if not all(path.is_file() for path in witness_files) or not (build / "payload_verify.r1cs").is_file():
-        session.run("circom_compile", ["circom", "payload_verify.circom", "--r1cs", "--wasm", "--sym", "-o", "build"], cwd=circuits)
-    if zkey.is_file():
-        if not vkey.is_file():
-            session.run("vkey_recover", ["node", cli, "zkey", "export", "verificationkey", zkey, vkey], cwd=circuits)
-        session.say("Da co proving/verification key: giu nguyen; proof verify se kiem tra tuong thich.")
+    bridge = CameraProofBridge(circuits)
+    if bridge.zkey_path.is_file() and bridge.vkey_path.is_file():
+        session.say("Da co proving/verification key cua camera_video: giu nguyen.")
         return
-    if vkey.exists():
-        raise RuntimeError("Chi co verification_key.json, thieu proving_key.zkey. Khoi phuc proving key tu cung setup; --setup khong ghi de khoa cu.")
-    session.say("Tao Groth16 setup cho DEMO tren mot may; KHONG phai trusted ceremony production.")
-    session.say("Power 16, prepared PTAU da pin hash; log nam trong thu muc run.")
-    prefix = ["node", str(cli)]
-    # Use a fresh directory, so an interrupted ceremony is never reused as complete.
-    ceremony = build / ("demo_setup_" + secrets.token_hex(6))
-    ceremony.mkdir()
-    prepared = prepared_ptau(session, build)
-    initial_zkey, final_zkey = ceremony / "initial.zkey", ceremony / "final.zkey"
-    # Contribution entropy goes through stdin (snarkjs prompts for it when -e is absent),
-    # so it never appears in argv / the process list.
-    entropy = (secrets.token_hex(64) + "\n").encode("ascii")
-    steps = [
-        ("groth16_setup", ["groth16", "setup", build / "payload_verify.r1cs", prepared, initial_zkey], None),
-        ("zkey_contribute", ["zkey", "contribute", initial_zkey, final_zkey, "--name=local-demo"], entropy),
-        ("vkey_export", ["zkey", "export", "verificationkey", final_zkey, ceremony / "verification_key.json"], None),
-    ]
-    for name, args, stdin_data in steps:
-        session.say(f"  Dang chay {name}...")
-        session.run(name, prefix + args, data=stdin_data, cwd=circuits)
-    shutil.copyfile(final_zkey, zkey)
-    shutil.copyfile(ceremony / "verification_key.json", vkey)
-    # The intermediate ceremony files (~60-90 MB) are no longer needed once the
-    # final keys are in place; step logs stay in the run folder.
-    shutil.rmtree(ceremony, ignore_errors=True)
-    (build / "DEMO_SETUP_ONLY.txt").write_text("Local educational setup. Not a production trusted ceremony.\n", encoding="utf-8")
+    prepared_ptau(session, build)
+    session.say("Groth16 setup cho camera_video.circom (src/zk_setup.py): Phase 1 = PTAU Hermez cong khai,")
+    session.say("Phase 2 = 2 dong gop (entropy qua stdin) + beacon cong khai, roi 'snarkjs zkey verify'.")
+    session.say("Ca hai dong gop chay tren MOT may: day la nghi thuc DEMO, khong phai production.")
+    session.run("zk_setup", [sys.executable, "-m", "src.zk_setup"], timeout=3600)
 
 
 def preflight(session: Session) -> tuple[Tools, MeasuredBridge]:
@@ -251,20 +227,19 @@ def preflight(session: Session) -> tuple[Tools, MeasuredBridge]:
             raise RuntimeError(f"Thieu {tool} trong PATH.")
     tools = find_tools()
     bridge = MeasuredBridge(session)
-    required = [bridge.js_dir / bridge.WASM_FILE, bridge.js_dir / bridge.GENERATE_WITNESS_JS,
-                bridge.build_dir / bridge.ZKEY_FILE, bridge.build_dir / bridge.VKEY_FILE,
-                ROOT / "circuits/node_modules/snarkjs/build/cli.cjs", bridge.js_dir / "witness_calculator.js"]
+    required = [*bridge.required_files(), bridge.js_dir / "witness_calculator.js"]
     missing = [str(p.relative_to(ROOT)) for p in required if not p.is_file()]
     if missing:
         raise RuntimeError("Thieu artifacts: " + ", ".join(missing) + ". Chay --setup.")
     session.say("Native C++ (zkstego_blind_bits + zkstego_inspect) + FFmpeg + Circom witness + snarkjs: san sang.")
     session.say("Giao thuc kenh: SEGMENT protocol v3. Moi IDR = 1 segment (SPS/PPS + IDR do),")
-    session.say("mang toi da --max-bits-per-idr bit cua khung xac thuc; segment sau tiep tuc tu bit ke tiep.")
+    session.say("mang toi da --max-bits-per-idr bit cua khung; segment sau tiep tuc tu bit ke tiep.")
     session.say("Cung giao thuc voi dich vu HTTP/WebSocket native (embed-stream-auth / embed-live-auth).")
     session.say("Gioi han core: Baseline, CAVLC, progressive, 4:2:0; chi nhung IDR.")
     if session.args.no_service:
         session.say("--no-service: bo qua buoc HTTP jobs va WebSocket stream.")
-    session.report["scope"] = "native keyed segment protocol v3 (no frame MAC) + mandatory Groth16 verification"
+    session.report["scope"] = ("native keyed segment protocol v3 + camera Groth16 proof: registry membership "
+                               "and binding to the video digest (carrier bits cleared) and the message")
     for label, command in (("ffmpeg_version", ["ffmpeg", "-version"]), ("node_version", ["node", "--version"]),
                            ("git_commit", ["git", "rev-parse", "HEAD"])):
         try:
@@ -273,8 +248,8 @@ def preflight(session: Session) -> tuple[Tools, MeasuredBridge]:
             session.report[label] = ["unavailable"]
             continue
         session.report[label] = result.stdout.decode("utf-8", errors="replace").splitlines()[:1]
-    session.report["verification_key_sha256"] = hashlib.sha256(required[3].read_bytes()).hexdigest()
-    session.report["circuit_sha256"] = hashlib.sha256((ROOT / "circuits/payload_verify.circom").read_bytes()).hexdigest()
+    session.report["verification_key_sha256"] = hashlib.sha256(bridge.vkey_path.read_bytes()).hexdigest()
+    session.report["circuit_sha256"] = hashlib.sha256((ROOT / "circuits/camera_video.circom").read_bytes()).hexdigest()
     return tools, bridge
 
 
@@ -346,33 +321,59 @@ def video_prepare(session: Session) -> Path:
     return output
 
 
-def make_proof(session: Session, bridge: MeasuredBridge) -> tuple[bytes, bytes, bytes, list]:
-    session.stage("Message -> public/private inputs -> witness -> Groth16 proof")
+@dataclass(frozen=True)
+class DemoCamera:
+    """The demo's camera registry, the signing camera and what its proof was bound to."""
+    registry: CameraRegistry
+    secret: int
+    index: int
+    video_digest: bytes
+    binding: bytes
+
+
+def choose_message(session: Session) -> bytes:
     message = session.args.message
     if message is None:
         message = "Xin chao ZK video" if session.args.auto else input("Nhap message UTF-8: ")
     encoded = message.encode("utf-8")
-    if not encoded or len(encoded) > 3963:
-        raise RuntimeError("Message phai co 1..3963 UTF-8 bytes (native stdin payload <=4096 bytes).")
-    key = secrets.token_bytes(32)
-    circuit_input = bridge._build_circuit_input(encoded, key)
-    digest = hashlib.sha256(encoded).digest()
-    commitment = hashlib.sha256(digest + key).hexdigest()
-    session.say(f"Message = {message!r}; {len(message)} ky tu, {len(encoded)} UTF-8 bytes")
-    session.say(f"Message hex: {encoded.hex()}")
-    session.say(f"PUBLIC payload_hash[256] = SHA256(message) = {digest.hex()}")
-    session.say(f"PUBLIC commitment[256] = SHA256(hash || secret) = {commitment}")
-    session.say(f"PUBLIC payload_length = {len(encoded)}; tong 513 field elements.")
-    session.say("PRIVATE secret[256]: key ngau nhien chi cho demo nay; MSB-first bits.")
-    session.say(f"  secret hex = {key.hex()}", private=True)
-    session.say(f"  secret bits = {''.join(circuit_input['secret'])}", private=True)
-    session.say("Secret chi hien tren terminal, khong ghi vao transcript/report; witness bi xoa sau prove.")
-    session.say("Message hash tinh NGOAI circuit. Circuit rang buoc commitment va dieu kien length.")
-    session.say("Khong co hash video, frame index, camera identity trong public inputs cua circuit nay.")
+    limit = 4096 - PAYLOAD_HEADER_BYTES - PROOF_SIZE_BYTES
+    if not encoded or len(encoded) > limit:
+        raise RuntimeError(f"Message phai co 1..{limit} UTF-8 bytes (native stdin payload <=4096 bytes).")
+    session.say(f"Message = {message!r}; {len(message)} ky tu, {len(encoded)} UTF-8 bytes; hex {encoded.hex()}")
+    return encoded
+
+
+def make_camera_proof(session: Session, bridge: MeasuredBridge, tools: Tools, source: Path, message: bytes,
+                      key: bytes, max_bits: int, segments: dict) -> tuple[bytes, dict, DemoCamera]:
+    session.stage("Camera trong so dang ky + hash video + Groth16 proof")
+    camera_secrets = [new_camera_secret() for _ in range(4)]
+    index = 2
+    registry = CameraRegistry([camera_public_key(secret) for secret in camera_secrets])
+    secret = camera_secrets[index]
+    session.say("So dang ky: cay Merkle Poseidon do sau 16; la = pk = Poseidon(secret) cua moi camera hop le.")
+    for position, public_key in enumerate(registry.public_keys):
+        session.say(f"  la {position}: pk = {camera_trace.short(public_key)}{'   <- camera nay' if position == index else ''}")
+    session.say(f"  ROOT (cong khai, verifier tin) = {hex(registry.root)}")
+    session.say(f"  secret camera (PRIVATE) = {hex(secret)}", private=True)
+    camera_trace.merkle_walk(session, registry, secret, index)
+    frame_bits = frame_bits_for_message(len(message))
+    session.say(f"Hash video: khung {frame_bits} bit -> {frame_bits} vi tri dau do lich keyed HMAC(schedule_key, ID) chon.")
+    session.say("  RBSP moi NAL (bo EPB); CHI cac bit dau se mang khung bi dat ve 0, moi bit khac deu nam trong hash;")
+    session.say("  digest = SHA256('zkstego/video-digest/v1' || frame_bits || cap || [len || header || rbsp'] moi NAL).")
+    started = time.perf_counter()
+    digest = native_video_digest(tools.native, source, key, frame_bits, max_bits)
+    session.report["timings_seconds"]["video_digest_cover"] = time.perf_counter() - started
+    binding = binding_digest(MODE_VIDEO, digest, message)
+    high, low = binding_public_inputs(binding)
+    session.say(f"  video digest (cover, native) = {digest.hex()}")
+    if not session.args.brief:
+        camera_trace.digest_breakdown(session, source, segments, key, frame_bits, max_bits, digest)
+    session.say("binding = SHA256('zkstego/proof-binding/v1' || 0x00 || digest || SHA256(message))")
+    session.say(f"  = {binding.hex()} -> bindingHi = {hex(high)}, bindingLo = {hex(low)}")
+    session.say("Circuit camera_video: PRIVATE secret + duong Merkle; PUBLIC [root, bindingHi, bindingLo] (3 so).")
+    session.say("Rang buoc: Poseidon(secret) mo duong Merkle toi root; bindingHi/Lo nam trong proof.")
     session.say("Dang tinh witness va proof that...")
-    proof, public = bridge.generate_proof_for_payload(encoded, key)
-    expected = bridge._build_public_signals(encoded, key)
-    session.check("public signals khop message/key", public == expected)
+    proof = bridge.prove(secret, registry, binding)
     proof_bytes = proof_to_bytes(proof)
     session.check("compressed proof = 129 bytes", len(proof_bytes) == PROOF_SIZE_BYTES)
     session.say("Proof JSON (A thuoc G1, B thuoc G2, C thuoc G1, BN254):")
@@ -381,16 +382,17 @@ def make_proof(session: Session, bridge: MeasuredBridge) -> tuple[bytes, bytes, 
     for name, start, end in (("A.x", 0, 32), ("B.x.c0", 32, 64), ("B.x.c1", 64, 96), ("C.x", 96, 128), ("flags", 128, 129)):
         session.say(f"  {name:8} [{start:3}:{end:3}] {proof_bytes[start:end].hex()}")
     session.say(f"flags byte: {proof_bytes[-1]:08b}; chi 3 bit thap duoc dung cho dau y.")
-    session.say("513 public signals = hash bits[0:256], commitment bits[256:512], length[512].")
-    session.say("  hash bits       = " + "".join(expected[:256]))
-    session.say("  commitment bits = " + "".join(expected[256:512]))
+    session.say("Verifier chi can root + verification key (+ stego key de trich); KHONG can secret camera,")
+    session.say("va khong biet la nao (camera nao) da tao proof.")
     session.save("proof.json", proof)
-    session.save("public_signals.json", public)
+    session.save("public_signals.json", CameraProofBridge.public_signals(registry.root, binding))
     (session.folder / "proof.bin").write_bytes(proof_bytes)
-    session.report.update(message_utf8_bytes=len(encoded), message_sha256=digest.hex(), commitment=commitment,
-                          proof_bytes=len(proof_bytes), public_signals=len(public),
-                          constraints_declared_by_bridge=bridge.get_constraint_count())
-    return encoded, key, proof_bytes, public
+    registry.save(session.folder / "camera_registry.json")
+    session.report.update(message_utf8_bytes=len(message), message_sha256=hashlib.sha256(message).hexdigest(),
+                          registry_root=hex(registry.root), registry_cameras=len(registry.public_keys),
+                          video_digest=digest.hex(), binding=binding.hex(), proof_bytes=len(proof_bytes),
+                          public_signals=3)
+    return proof_bytes, proof, DemoCamera(registry, secret, index, digest, binding)
 
 
 def indexed(trace: dict) -> dict[NativeCavlcCandidate, dict]:
@@ -416,10 +418,29 @@ def show_video_trace(session: Session, trace: dict) -> None:
     session.say("'An toan' o day la giu cu phap codec; pixel co the thay doi sau decode.")
 
 
-def pack_and_select(session: Session, tools: Tools, source: Path, trace: dict, message: bytes,
-                    key: bytes, proof: bytes) -> tuple[bytes, EmbedPlan]:
-    session.stage("Payload layout, capacity theo segment va lich nhung")
-    payload = pack(message, proof)
+def choose_cap(session: Session, tools: Tools, source: Path, trace: dict, message: bytes) -> tuple[int, dict]:
+    session.stage("Capacity theo segment: chon so bit moi IDR cho khung cua payload")
+    frame_bit_count = frame_bits_for_message(len(message))
+    probe_cap = session.args.max_bits_per_idr or DEFAULT_MAX_BITS_PER_IDR
+    segments = inspect_segments(session, tools.inspect, source, probe_cap, "segments_before")
+    by_nal = Counter(row["id"][0] for row in trace["candidates"])
+    file_ids = set(indexed(trace))
+    session.check("candidate moi segment = candidate cua IDR do trong trace toan file",
+                  all(row["candidate_count"] == by_nal[row["idr_nal_index"]] for row in segments["segments"])
+                  and all(NativeCavlcCandidate(c["nal_index"], *map(int, c["id"].split(":")[1:4]), c["rbsp_bit_offset"])
+                          in file_ids for row in segments["segments"] for c in row["candidates"]))
+    max_bits = resolve_max_bits(session, segments, frame_bit_count)
+    if max_bits != probe_cap:
+        segments = inspect_segments(session, tools.inspect, source, max_bits, "segments_before")
+    session.say(f"Khung = 3B + payload [format 1B][mode 1B][len 2B][message {len(message)}B][proof 129B] "
+                f"= {frame_bit_count} bit; cap = {max_bits} bit/IDR.")
+    return max_bits, segments
+
+
+def pack_and_select(session: Session, source: Path, message: bytes, key: bytes, proof: bytes,
+                    max_bits: int, segments: dict) -> tuple[bytes, EmbedPlan]:
+    session.stage("Payload layout va lich nhung theo segment")
+    payload = pack_payload(MODE_VIDEO, message, proof)
     session.say("Kenh CAVLC protocol v3: stego key 32B KHONG dung truc tiep lam khoa HMAC; HKDF-SHA256 (RFC 5869) tach 2 khoa:")
     session.say(f"  PRK           = HMAC-SHA256(key = {HKDF_SALT!r}, msg = secret)   (HKDF-Extract)")
     for name, info in (("schedule_key ", SCHEDULE_INFO), ("whitening_key", WHITENING_INFO)):
@@ -433,29 +454,19 @@ def pack_and_select(session: Session, tools: Tools, source: Path, trace: dict, m
     keystream = whitening_keystream_bits(key, len(frame_bits))
     bits = [frame_bit ^ key_bit for frame_bit, key_bit in zip(frame_bits, keystream)]  # bits that go into the file
     embedded_frame = bits_to_bytes(bits)
-    session.say(f"Packed payload: [message_len BE32 = 4B][message = {len(message)}B][proof = 129B] = {len(payload)}B")
+    session.say(f"Payload: [format 0x01][mode 0 = video][message_len BE16][message = {len(message)}B][proof = 129B]"
+                f" = {len(payload)}B")
     session.say(f"Native frame v3: [version = 0x{FRAME_VERSION:02x} 1B][payload_len BE16 = 2B][payload = {len(payload)}B]"
                 " (khong MAC: proof Groth16 trong payload moi la thu xac thuc)")
     session.say("Whitening: keystream = HMAC-SHA256(whitening_key, uint64_be(j)), j = 0,1,2,...; noi lien, MSB-first.")
     session.say("Bit nhung i = frame bit i XOR keystream bit i (i dem TOAN CUC qua moi segment).")
     session.say(f"Header plaintext = {frame[:3].hex()} -> header nhung (sau XOR) = {embedded_frame[:3].hex()}")
     session.say("Header/proof co cau truc nhung bit ghi vao sign da bi keystream lam ngau nhien; sai key -> version ngau nhien.")
-    probe_cap = session.args.max_bits_per_idr or DEFAULT_MAX_BITS_PER_IDR
-    segments = inspect_segments(session, tools.inspect, source, probe_cap, "segments_before")
-    by_nal = Counter(row["id"][0] for row in trace["candidates"])
-    file_ids = set(indexed(trace))
-    session.check("candidate moi segment = candidate cua IDR do trong trace toan file",
-                  all(row["candidate_count"] == by_nal[row["idr_nal_index"]] for row in segments["segments"])
-                  and all(NativeCavlcCandidate(c["nal_index"], *map(int, c["id"].split(":")[1:4]), c["rbsp_bit_offset"])
-                          in file_ids for row in segments["segments"] for c in row["candidates"]))
-    max_bits = resolve_max_bits(session, segments, len(bits))
-    if max_bits != probe_cap:
-        segments = inspect_segments(session, tools.inspect, source, max_bits, "segments_before")
     capacity = segment_capacity(segments, max_bits)
     session.say(f"zkstego_inspect --segments {max_bits}: {segments['idr_segments']} IDR segment, "
                 f"{segments['raw_candidate_signs']} sign candidate, capacity = sum(min({max_bits}, candidates)) = {capacity} bit.")
     session.say(f"Can {len(frame)} bytes = {len(bits)} bits; message toi da theo capacity nay: "
-                f"{max(0, capacity // 8 - FRAME_HEADER_BYTES - 4 - PROOF_SIZE_BYTES)}B.")
+                f"{max(0, capacity // 8 - FRAME_HEADER_BYTES - PAYLOAD_HEADER_BYTES - PROOF_SIZE_BYTES)}B.")
     placements = segment_schedule(segments, key, len(bits), max_bits)
     show_allocation(session, segments, placements, max_bits, len(message))
     session.say("Trong MOI segment: ID = analysis_nal:mb:category:block:rbsp_bit (analysis input = SPS+PPS+IDR,")
@@ -638,26 +649,30 @@ def visual_quality(session: Session, source: Path, stego: Path, trace: dict, exe
     session.say("Doi he so -> inverse quant/transform -> prediction -> deblock; sai khac co the lan sang block/P frame khac.")
 
 
-def verify_message(session: Session, tools: Tools, bridge: MeasuredBridge, stego: Path, key: bytes,
-                   message: bytes, plan: EmbedPlan) -> tuple[bytes, dict]:
-    session.stage("Verifier: chi nhan stego + key + verification key")
+def verify_message(session: Session, tools: Tools, bridge: MeasuredBridge, camera: DemoCamera, stego: Path,
+                   key: bytes, message: bytes, plan: EmbedPlan) -> tuple[bytes, dict]:
+    session.stage("Verifier: chi nhan stego + stego key + registry root + verification key")
     session.say("Native tu parse SPS/PPS, ghep moi IDR thanh segment, tai tao lich keyed tung segment, un-whiten,")
-    session.say("doc header 24 bit de biet do dai, gom du frame qua cac segment; Groth16 kiem payload.")
-    session.say("Khong can video goc, schedule.json hay proof.json cua sender.")
+    session.say("doc header 24 bit de biet do dai, gom du frame qua cac segment.")
+    session.say("Khong can video goc, schedule.json, proof.json hay SECRET CAMERA.")
     result = native_extract(session, tools, stego, key, plan.max_bits, "native_extract")
     recovered = bytes.fromhex(result.stdout.decode().strip())
-    # Mandatory proof verification immediately after extraction/unpacking: no message release first.
-    recovered_message, compressed = unpack(recovered)
-    if len(recovered) != 4 + len(recovered_message) + PROOF_SIZE_BYTES:
-        raise RuntimeError("Verifier rejected: non-canonical packed payload length")
-    decoded_proof = bytes_to_proof(compressed)
-    expected_public = bridge._build_public_signals(recovered_message, key)
-    accepted = verify_groth16(session, decoded_proof, expected_public, "verify_recovered")
-    session.check("mandatory Groth16 proof verified", accepted)
-    session.check("message roundtrip", recovered_message == message)
-    session.say(f"VERDICT = true; message = {recovered_message.decode('utf-8')!r}")
-    session.say(f"Recovered proof: {len(compressed)}B; payload: {len(recovered)}B; public inputs tai tao tu message/key.")
-    session.say("Trong API nay verifier can shared key de extract va tai tao commitment; proof khong chua secret.")
+    unpacked = unpack_payload(recovered)
+    started = time.perf_counter()
+    stego_digest = native_video_digest(tools.native, stego, key, frame_bits_for_message(len(unpacked.message)),
+                                       plan.max_bits)
+    session.report["timings_seconds"]["video_digest_stego"] = time.perf_counter() - started
+    session.say(f"Digest tinh lai tu STEGO = {stego_digest.hex()}")
+    session.check("digest stego = digest cover (nhung chi doi cac bit carrier)", stego_digest == camera.video_digest)
+    # Mandatory proof verification immediately after extraction: no message release first.
+    started = time.perf_counter()
+    verdict = verify_payload(bridge, camera.registry.root, recovered, native_cli=tools.native, stego=stego,
+                             stego_key=key, max_bits_per_idr=plan.max_bits)
+    session.report["timings_seconds"]["verify_payload"] = time.perf_counter() - started
+    session.check("mandatory Groth16 proof verified against the registry root", verdict.valid)
+    session.check("proof rang buoc video (mode 0)", verdict.video_bound)
+    session.check("message roundtrip", verdict.message == message)
+    session.say(f"VERDICT = true; message = {message.decode('utf-8')!r}; camera = mot la trong so dang ky (an danh).")
     # Independent educational audit AFTER acceptance; not an input to the actual verifier.
     stego_segments = inspect_segments(session, tools.inspect, stego, plan.max_bits, "segments_after")
     receiver = segment_schedule(stego_segments, key, len(plan.bits), plan.max_bits)
@@ -671,7 +686,7 @@ def verify_message(session: Session, tools: Tools, bridge: MeasuredBridge, stego
     session.say("Readback bit trong file (prefix): " + "".join(map(str, recovered_bits[:64])))
     session.say("Sau XOR keystream (frame bits):   " + "".join(map(str, bytes_to_bits(recovered_frame)[:64])))
     session.say(f"Header sau un-whiten = {recovered_frame[:3].hex()} (version 0x{FRAME_VERSION:02x}, payload_len BE16)")
-    return recovered_message, decoded_proof
+    return unpacked.message, bytes_to_proof(unpacked.proof_bytes)
 
 
 def walkthrough(session: Session) -> None:
@@ -680,7 +695,8 @@ def walkthrough(session: Session) -> None:
     session.stage("Preflight va pham vi demo")
     tools, bridge = preflight(session)
     source = video_prepare(session)
-    message, key, proof, _public = make_proof(session, bridge)
+    message = choose_message(session)
+    key = secrets.token_bytes(32)  # stego key: schedule + whitening only
     session.stage("Parser native: Annex-B -> NAL -> RBSP -> slice -> macroblock -> residual")
     before = trace_video(session, tools.inspect, source, "trace_before")
     show_video_trace(session, before)
@@ -688,7 +704,9 @@ def walkthrough(session: Session) -> None:
         session.stage("Cat NAL, EBSP -> RBSP va header doc boi chinh thu vien FFmpeg")
         deep_trace.nal_anatomy(session, source, before)
         deep_trace.library_header_trace(session, source, before)
-    payload, plan = pack_and_select(session, tools, source, before, message, key, proof)
+    max_bits, segments = choose_cap(session, tools, source, before, message)
+    proof, proof_dict, camera = make_camera_proof(session, bridge, tools, source, message, key, max_bits, segments)
+    payload, plan = pack_and_select(session, source, message, key, proof, max_bits, segments)
     session.stage("Nhung that bang native (embed-stream-auth-stdin) va doi chieu tung candidate")
     stego = session.folder / "stego.h264"
     native_embed(session, tools, source, stego, key, payload, plan.max_bits, "native_embed")
@@ -707,10 +725,12 @@ def walkthrough(session: Session) -> None:
         deep_trace.embedded_bit_location(session, source, stego, before, after, exemplar, plan.placements, plan.bits,
                                          plan.max_bits, len(message), key, info["decoded_width"],
                                          info["decoded_height"], ascii_frame)
-    recovered_message, decoded_proof = verify_message(session, tools, bridge, stego, key, message, plan)
-    negative_cases.run_all(session, tools, bridge, source, stego, after, key, recovered_message, decoded_proof, plan)
+    recovered_message, decoded_proof = verify_message(session, tools, bridge, camera, stego, key, message, plan)
+    negative_cases.run_all(session, tools, bridge, camera, source, stego, after, key, recovered_message,
+                           decoded_proof, plan)
     if not session.args.no_service:
-        service_steps.run_all(session, tools, source, stego, key, payload, message, plan.max_bits)
+        service_steps.run_all(session, tools, source, stego, key, payload, message, plan.max_bits,
+                              session.folder / "camera_registry.json")
     session.stage("Tong ket lan chay")
     for name, seconds in session.report["timings_seconds"].items():
         session.say(f"  {name:28} {seconds:10.4f} s")
@@ -730,7 +750,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--input", help="video path; mac dinh chon tu data/raw")
     parser.add_argument("--message", help="message UTF-8; mac dinh nhap tu ban phim")
     parser.add_argument("--auto", action="store_true", help="khong dung cho Enter")
-    parser.add_argument("--setup", action="store_true", help="build native + tao Groth16 setup DEMO neu thieu")
+    parser.add_argument("--setup", action="store_true", help="build native + tao Groth16 setup camera_video (DEMO) neu thieu")
     parser.add_argument("--frames", type=int, default=8, help="so frame toi da, 1..120")
     parser.add_argument("--gop", type=int, default=1, help="khoang IDR, 1..120; >1 co P frames")
     parser.add_argument("--qp", type=int, default=22, help="QP libx264, 1..51")

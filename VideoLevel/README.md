@@ -2,11 +2,13 @@
 
 Hide a Groth16 zero-knowledge proof inside H.264 Baseline video by flipping the
 signs of selected CAVLC trailing-one coefficients in IDR frames, then recover it
-blindly with a key and verify it.
+blindly with a key and verify it. The proof says: *a camera registered under a
+public root vouches for exactly this video and this message* — without revealing
+which camera, and without the verifier holding any camera secret.
 
 > **Full explanation (Vietnamese):** [`doc/he_thong_hoat_dong.md`](doc/he_thong_hoat_dong.md)
 > walks through FFmpeg/libx264, the H.264 bitstream, CAVLC, the embedding channel,
-> the keyed schedule, the authenticated frame, Groth16, the service, the demo and
+> the keyed schedule, the channel frame, the camera proof, the service, the demo and
 > how to read its debug output. Document index: [`doc/README.md`](doc/README.md).
 
 ## Status
@@ -14,34 +16,40 @@ blindly with a key and verify it.
 | Area | State |
 |---|---|
 | Maturity | Research prototype. Supported input is constrained (see [Limits](#known-limits)); this is not generic H.264 support |
-| Tests | 2026-10-04: `py -3.12 src/runtest/run_all.py` passed **139/139 across 12 phases** on a Windows host (fixtures from `prepare_fixtures.py`), native CTest 1/1. Physical-camera E2E (`--hardware`) not included. Functional evidence, not edge acceptance |
+| Tests | 2026-10-04: `py -3.12 src/runtest/run_all.py` passed **142/142 across 12 phases** on a Windows host (fixtures from `prepare_fixtures.py`), native CTest 1/1. Physical-camera E2E (`--hardware`) not included. Functional evidence, not edge acceptance |
 | Realtime | **Not accepted.** Corrected physical-camera H.264 E2E: 7.608 source FPS against a 30-FPS gate (measured before the 2026-10-02 native stdin/reader speed-up, not yet re-measured). No edge target benchmarked |
-| Proof boundary | Groth16 proves the message/key relation `commitment = SHA256(SHA256(message) ‖ secret)`. It does **not** prove video integrity, camera origin, or bind the proof to the video |
-| Benchmarks | `py -3.12 -m benchmark.run_new_suite` writes one report, `benchmark/results/benchmark_report_new.pdf` (2026-10-04: media 27/27, E2E 5/5, attacks 10/10 as expected). See [`benchmark/NEW_BENCHMARKS.md`](benchmark/NEW_BENCHMARKS.md) |
+| Proof boundary | Groth16 (`circuits/camera_video.circom`) proves that the signing camera's key is a leaf of the trusted registry Merkle tree and binds the proof to SHA256 of the masked video digest and the message. Verifiers need the registry root, not the camera secret; replaying the payload into another video or cutting the video fails. It does not prove that the camera really filmed the scene (e.g. re-filming a screen) |
+| Benchmarks | `py -3.12 -m benchmark.run_new_suite` writes one report, `benchmark/results/benchmark_report_new.pdf` (2026-10-04: media 27/27 with video-bound camera proofs, E2E 5/5, attacks 11/11 as expected — replay, truncation and later-frame edits are rejected). See [`benchmark/NEW_BENCHMARKS.md`](benchmark/NEW_BENCHMARKS.md) |
 
 ## How it works (one screen)
 
 ```text
 video --FFmpeg/libx264 (Baseline, CAVLC, 1 slice/frame, no B)--> source.h264
-message + 32-byte secret --circom/snarkjs Groth16--> proof (129 B compressed)
-payload = [len 4B][message][proof 129B]
-keys    = HKDF-SHA256(salt "zkstego-cavlc-v2-salt", secret) -> schedule_key, whitening_key
+registry = Poseidon Merkle tree (depth 16) of camera keys pk = Poseidon(s); root is public
+digest  = SHA256 over every NAL's RBSP with only the keyed frame-carrier sign bits cleared
+binding = SHA256(domain || mode || digest || SHA256(message)) -> two 128-bit public inputs
+camera secret s + Merkle path --circom/snarkjs Groth16--> proof (129 B compressed)
+payload = [0x01][mode][len 2B][message][proof 129B]
+keys    = HKDF-SHA256(salt "zkstego-cavlc-v2-salt", stego key) -> schedule_key, whitening_key
 frame   = [0x03][len 2B][payload]   (channel protocol v3: no MAC, the Groth16 proof authenticates)
 native parser: one candidate per residual block = sign bit of its first trailing one
 schedule: sort candidates by HMAC-SHA256(schedule_key, id); frame bit i -> i-th candidate
 whiten: embedded bit i = frame bit i XOR keystream bit i, keystream = HMAC-SHA256(whitening_key, block counter)
 embed: set those sign bits (bit length, TotalCoeff and nC unchanged -> stream stays valid)
-receiver: same parser + key -> same schedule -> read + un-whiten -> check version/length -> unpack -> snarkjs verify
+receiver: same parser + stego key -> same schedule -> read + un-whiten -> check version/length -> unpack
+          -> digest of the received video -> binding -> snarkjs verify against the trusted registry root
 ```
 
 There is one media core: native C++ ([`native/`](native/)). Python orchestrates
 proof generation, packaging, the HTTP/WebSocket service and the demo. The earlier
 pure-Python H.264 pipeline was removed on 2026-10-03 (recoverable from git history).
 
-Circuit `circuits/payload_verify.circom` (`PayloadVerify`): 63,321 constraints,
-513 public inputs (`payload_hash[256]`, `commitment[256]`, `payload_length`),
-private `secret[256]`; every hash, commitment and secret signal is constrained to 0/1. Proving/verification keys are a local educational setup
-(`circuits/build/DEMO_SETUP_ONLY.txt`), not a production trusted ceremony.
+Circuit `circuits/camera_video.circom`: 8,737 constraints, 3 public inputs
+(`root`, `bindingHi`, `bindingLo`); private camera secret and 16-level Merkle path.
+Keys come from `py -3.12 -m src.zk_setup`: public Hermez Powers of Tau (Phase 1),
+two Phase 2 contributions, a public beacon and `snarkjs zkey verify`, transcript in
+`circuits/build/camera_video_setup.json`. Both contributions run on one machine,
+so this is a demo ceremony; a deployment needs independent contributors.
 
 ## Repository layout
 
@@ -54,7 +62,11 @@ VideoLevel/
 |   `-- tests/                  CTest suite
 |-- circuits/                   Circom circuits, snarkjs (npm), build/ (git-ignored keys and artifacts)
 |-- src/
-|   |-- zk_proof.py             Groth16 bridge, 129-byte proof compression, pack/unpack
+|   |-- zk_proof.py             Camera-proof payload, 129-byte proof compression, Groth16 bridge
+|   |-- camera_proof.py         Sender (digest, prove, pack) and verifier (digest, verify) sides
+|   |-- camera_registry.py      Poseidon Merkle registry of camera keys; poseidon.py (circomlib-compatible)
+|   |-- video_binding.py        Video digest reference + binding (native: zkstego_blind_bits video-digest)
+|   |-- zk_setup.py             Groth16 Phase 2 ceremony for camera_video.circom
 |   |-- native_blind_contract.py  Python reference of the native schedule/frame ABI
 |   |-- api/                    FastAPI job core (app.py) + native embed/extract/verify + WebSocket (native_handlers.py)
 |   |-- realtime_cavlc.py       Bounded realtime segment scheduler
@@ -85,7 +97,7 @@ py -3.12 -m pip install -r requirements.txt
 cd circuits; npm ci; cd ..
 cmake -S native -B native/build -DBUILD_TESTING=ON
 cmake --build native/build --config Release
-py -3.12 demo/terminal_demo.py --setup         # compiles the circuit and creates a LOCAL demo Groth16 setup if keys are missing
+py -3.12 -m src.zk_setup                       # compiles camera_video.circom and runs the (demo) Groth16 ceremony
 py -3.12 src/runtest/prepare_fixtures.py       # regenerates git-ignored data/encoded/*.h264 from data/raw
 ```
 
@@ -116,7 +128,8 @@ plus where the embedded bit sits in the file and which payload field it carries.
 Every recomputed value is checked against FFmpeg or the native parser
 (`[PASS]`/`[FAIL]`). It uses the same segment protocol as the service, shows which
 IDR carries which frame-bit range, runs the rejection cases (changed message,
-invalid/missing proof, wrong key, one flipped carrier bit) and then drives the real
+invalid/missing proof, wrong key, one flipped carrier bit, a cut video, a camera
+outside the registry) and then drives the real
 HTTP jobs (embed, extract, verify) and the WebSocket stream. Without
 `--max-bits-per-idr` the per-IDR cap starts at 64 and is raised to the smallest value
 that fits the payload; an explicit cap is never changed. Artifacts go to
@@ -129,13 +142,16 @@ All commands read the 32-byte key as one 64-hex-character line (never argv) and 
 ```powershell
 # embed: stdin = key hex line, payload hex line
 zkstego_blind_bits embed-stream-auth-stdin in.h264 out.h264 64
-# blind extract: stdin = key hex line; stdout = authenticated payload hex
+# blind extract: stdin = key hex line; stdout = payload hex (not yet verified)
 zkstego_blind_bits extract-stream-auth out.h264 - 4096 64
+# video binding digest: stdin = key hex line (locates the carrier bits); frame bits = 8 * (3 + payload bytes)
+zkstego_blind_bits video-digest out.h264 1240 64
 ```
 
 | Command | Purpose |
 |---|---|
-| `embed-stream-auth-stdin`, `extract-stream-auth` | Files: authenticated frame spread over IDR segments (SPS+PPS+IDR), `max-bits-per-IDR` cap |
+| `embed-stream-auth-stdin`, `extract-stream-auth` | Files: v3 frame spread over IDR segments (SPS+PPS+IDR), `max-bits-per-IDR` cap |
+| `video-digest` | Video binding digest (key on stdin, to locate the carrier bits); identical for the cover and its stego video |
 | `measure-live-capacity-stdin` | Candidate capacity of an Annex-B stream on stdin (JSON) |
 | `embed-live-auth-stdin`, `extract-live-auth-stdin` | Same segment protocol over stdin/stdout (used by the WebSocket service) |
 
@@ -149,22 +165,25 @@ schedule (`src.native_blind_contract.segment_schedule`).
 
 ### Carrying and verifying a proof
 
-The native channel authenticates bytes; Groth16 generation and verification happen in Python:
-
 ```python
-from src.zk_proof import ZKSnarkBridge, pack, proof_to_bytes, unpack
+from src.camera_proof import build_payload, verify_payload
+from src.camera_registry import CameraRegistry
+from src.zk_proof import CameraProofBridge
 
-bridge = ZKSnarkBridge("circuits")
-proof, _ = bridge.generate_proof_for_payload(message, secret_key)   # secret_key: 32 bytes
-payload = pack(message, proof_to_bytes(proof))                     # <= 4096 bytes -> message <= 3963 bytes
-# ... embed payload, transmit, blind-extract payload ...
-recovered_message, proof_bytes = unpack(payload)
-if not bridge.verify_proof_for_payload(bridge.bytes_to_proof(proof_bytes), recovered_message, secret_key):
-    raise ValueError("Groth16 proof verification failed")
+bridge = CameraProofBridge("circuits")
+registry = CameraRegistry.load("registry.json")                # public keys of authorized cameras
+signed = build_payload(bridge, registry, camera_secret, message,
+                       native_cli=cli, cover="cover.h264")      # digest of the cover -> prove -> pack
+# ... embed signed.payload with the stego key, transmit, blind-extract `payload` ...
+verdict = verify_payload(bridge, registry.root, payload, native_cli=cli, stego="stego.h264")
+if not (verdict.valid and verdict.video_bound):
+    raise ValueError(verdict.reason)                            # proof_invalid, malformed_proof_payload, ...
 ```
 
 `bytes_to_proof` rejects malformed points (`ValueError`); verification accepts
-only when snarkjs exits 0 and prints `OK!`.
+only when snarkjs exits 0 and prints `OK!`. A live stream embeds its proof before
+the rest of the video exists, so it can only bind the message (mode 1); the
+verify job rejects such proofs unless `ZK_STEGO_ALLOW_MESSAGE_ONLY_PROOFS=1`.
 
 ## HTTP / WebSocket service
 
@@ -181,7 +200,7 @@ py -3.12 -m uvicorn src.api.native_handlers:create_native_app --factory --host 1
 | `POST /api/v1/jobs/embed`, `POST /api/v1/jobs/extract` | Multipart `.h264` upload → job id; bounded worker/queue |
 | `GET /api/v1/jobs/{id}`, `GET /api/v1/jobs/{id}/artifact` | Status; one-time artifact download, expires after 10 minutes |
 | `WS /api/v1/stream` | JSON start frame, then binary Annex-B chunks; `{"type": "end"}` to finish |
-| `POST /api/v1/jobs/verify` | Blind extract, then mandatory Groth16 verification: `succeeded` with the message only when the proof verifies; otherwise `rejected` with a reason (`payload_not_authenticated`, `malformed_proof_payload`, `proof_invalid`) |
+| `POST /api/v1/jobs/verify` | Blind extract, video digest of the upload, then mandatory Groth16 verification against the configured registry root: `succeeded` with the message and `video_bound` only when the proof verifies; otherwise `rejected` with a reason (`payload_not_found`, `malformed_proof_payload`, `proof_invalid`) |
 
 Job status values: `queued`, `running`, `succeeded`, `rejected` (a verify job whose
 Groth16 proof did not verify; clients must not treat it as success), `failed`.
@@ -196,7 +215,9 @@ idle streams close after `ZK_STEGO_STREAM_IDLE_TIMEOUT_SECONDS` (15); finished
 jobs are purged after `ZK_STEGO_API_JOB_RETENTION_SECONDS` (86400); OpenAPI
 `/docs` only with `ZK_STEGO_API_DOCS=1`. Other settings: `ZK_STEGO_NATIVE_CLI`
 (path to `zkstego_blind_bits`), `ZK_STEGO_MAX_BITS_PER_IDR` (default 64; embed and
-extract must agree), `ZK_STEGO_CIRCUITS_DIR` (verification keys, default `circuits`). Keys reach the native child through
+extract must agree), `ZK_STEGO_CIRCUITS_DIR` (verification keys, default `circuits`),
+`ZK_STEGO_CAMERA_REGISTRY` (trusted registry JSON; the verify job fails without it).
+Extract results and live payloads carry `"verified": false`. Keys reach the native child through
 stdin; the child runs without a shell, with timeouts and drained stderr. Use one
 Uvicorn worker: the queue is process-local and a work-directory lease prevents
 sharing.
@@ -215,12 +236,12 @@ On Windows set `PYTHONIOENCODING=utf-8`. Exit codes: `0` all passed, `1` failure
 
 | Phase | Covers |
 |---|---|
-| 1 | `test_zk_proof.py`: Groth16 proof format, compression, fail-closed verification |
+| 1 | `test_zk_proof.py`: proof format, payload, Poseidon vectors, registry, binding, circuit cross-check, real Groth16 prove/verify |
 | 2 | `test_native_blind_contract.py`: C++ and Python agree on HKDF, schedule, frame, whitening, segment schedule |
-| 3 | `test_native_cli_fixture.py`: CLI embed/extract on the 300-frame fixture, strict decode, wrong key |
+| 3 | `test_native_cli_fixture.py`: CLI embed/extract on the 300-frame fixture, strict decode, wrong key, video digest (native = Python, cover = stego) |
 | 4 | `test_h264_tables.py`: CAVLC VLC tables (prefix-free, Kraft, spec values) |
 | 5 | `test_service_api.py`: job core, auth-before-body, throttling, retention, verify job, key expiry |
-| 6 | `test_native_http_channel.py`: real Uvicorn HTTP jobs and WebSocket stream |
+| 6 | `test_native_http_channel.py`: real Uvicorn HTTP jobs (video-bound camera proof accepted, replay/truncation rejected) and WebSocket stream |
 | 7 | `test_manifest_security.py`: manifest signing and positions/stego binding |
 | 8 | `test_realtime_scheduler.py`: bounded realtime scheduler |
 | 9 | `test_benchmark_recorder.py`: camera recorder fail-closed checks and benchmark analysis helpers |
@@ -255,10 +276,12 @@ On Windows set `PYTHONIOENCODING=utf-8`. Exit codes: `0` all passed, `1` failure
   at MB 0, no I_PCM, one SPS/PPS id. Only IDR frames carry data.
 - The native channel derives separate schedule and whitening keys with HKDF. Since
   protocol v3 (2026-10-04) its frame carries no MAC: an extracted payload is only a
-  candidate (`"verified": false`) until its Groth16 proof verifies. The circuit uses
-  the raw secret, and the verifier must hold it to recompute the commitment.
-- Frames and proofs carry no video/session binding and can be replayed into another
-  video under the same key (design work: `future_plan.md`).
+  candidate (`"verified": false`) until its camera proof verifies.
+- The video digest clears only the sign bits that carry the frame (located with the
+  stego key, which the verifier needs anyway to extract); every other bit of the file
+  is covered, and editing a carrier bit changes the payload, which the proof rejects.
+- Live streams can only bind the message (mode 1). The Groth16 Phase 2 is a demo
+  ceremony on one machine. The proof does not show that the camera filmed a real scene.
 - Protocol v3 cannot read stego files made with v2 or v1 (different version byte), and
   proofs made with the previous circuit keys do not verify against the current keys.
   The CLI command names keep their `-auth` suffix; it now only means "keyed".

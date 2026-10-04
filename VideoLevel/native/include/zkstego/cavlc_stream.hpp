@@ -479,6 +479,32 @@ struct CavlcStreamSegmentCandidates {
 std::vector<CavlcStreamSegmentCandidates> analyze_cavlc_stream_file(
     const std::vector<std::uint8_t>& annex_b);
 
+// Video binding digest: a SHA-256 over the whole file that embedding cannot
+// change, so a proof bound to it fails on any other or edited video.
+//   carriers = the frame_bit_count sign positions the stream codec writes the
+//              frame into under secret_key (segment by segment, the first
+//              min(cap, candidates) keyed-schedule positions, until the frame ends);
+//   digest   = SHA256("zkstego/video-digest/v1" || u32be(frame_bit_count) ||
+//              u32be(maximum_bits_per_segment) || for every NAL unit in file order:
+//              u32be(1 + rbsp_size) || nal_header_byte || rbsp')
+// where rbsp' is the NAL's RBSP (emulation-prevention bytes removed) with exactly
+// the carrier bits cleared to 0. Those are the only bits embedding changes, and
+// EPB edits do not reach the RBSP, so cover and stego share one digest, while
+// every other bit of the file - any other sign included - is covered. Editing a
+// carrier bit changes the extracted payload instead, which the proof rejects.
+// The verifier needs the stego key anyway to extract. src/video_binding.py is
+// the reference.
+struct CavlcVideoBindingDigest {
+    std::array<std::uint8_t, 32> digest{};
+    std::size_t carrier_segments{};
+    std::size_t nal_units{};
+};
+CavlcVideoBindingDigest cavlc_video_binding_digest(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& secret_key,
+    std::size_t frame_bit_count,
+    std::size_t maximum_bits_per_segment);
+
 // Incremental Annex-B reader. It retains at most one NAL plus one input chunk,
 // recognizes start codes crossing read boundaries, and fails closed on a NAL
 // larger than the configured bound. Returned bytes include the start code.

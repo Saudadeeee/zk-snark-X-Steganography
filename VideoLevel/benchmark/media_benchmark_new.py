@@ -20,15 +20,23 @@ import subprocess
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import psutil
 
-from src.native_blind_contract import embedded_frame_bits, segment_schedule
-from src.zk_proof import PROOF_SIZE_BYTES, ZKSnarkBridge, bytes_to_proof, pack, proof_to_bytes, unpack
-
+from src.camera_proof import frame_bits_for_message, parse_payload, verify_payload
+from src.camera_registry import CameraRegistry, camera_public_key, new_camera_secret
+from src.native_blind_contract import segment_schedule
+from src.video_binding import MODE_VIDEO, binding_digest, native_video_digest
+from src.zk_proof import (
+    PROOF_SIZE_BYTES,
+    CameraProofBridge,
+    pack_payload,
+    proof_to_bytes,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 RAW_DIR = ROOT / "data" / "raw"
@@ -45,8 +53,10 @@ QP = 22
 # Protocol default cap (README, demo, service): changes are spread over many IDRs.
 PER_IDR_MAX_BITS = 64
 MAX_PAYLOAD_BYTES = 4096
-# Every case carries the real payload: pack(message, 129-byte Groth16 proof).
+# Every case carries the real camera payload: [format][mode][len][message][129-byte Groth16 proof],
+# proving that a registered camera vouches for this video (masked digest) and message.
 MESSAGE = "zkstego benchmark: Groth16 proof carried in CAVLC trailing-one signs".encode("utf-8")
+REGISTRY_CAMERAS = 8
 
 
 def _tool(name: str) -> str:
@@ -322,30 +332,52 @@ def sign_statistics(cover_segments: dict[str, Any], stego_segments: dict[str, An
     }
 
 
-def make_zk_payload(bridge: ZKSnarkBridge, message: bytes, key: bytes) -> dict[str, Any]:
-    """Prove the commitment for ``message`` under ``key`` and pack the carried payload."""
+@dataclass(frozen=True)
+class CameraContext:
+    """One registered camera (its secret and the registry it belongs to) plus the native CLI."""
+
+    bridge: CameraProofBridge
+    registry: CameraRegistry
+    secret: int
+    native: Path
+
+
+def camera_context(native: Path, cameras: int = REGISTRY_CAMERAS) -> CameraContext:
+    camera_secrets = [new_camera_secret() for _ in range(cameras)]
+    registry = CameraRegistry([camera_public_key(secret) for secret in camera_secrets])
+    return CameraContext(CameraProofBridge(ROOT / "circuits"), registry, camera_secrets[cameras // 2], native)
+
+
+def make_zk_payload(ctx: CameraContext, message: bytes, cover: Path, stego_key: bytes) -> dict[str, Any]:
+    """Digest the cover for this payload size, prove membership + binding, pack the payload."""
+    frame_bits = frame_bits_for_message(len(message))
     started = time.perf_counter()
-    proof, _public = bridge.generate_proof_for_payload(message, key)
+    digest = native_video_digest(ctx.native, cover, stego_key, frame_bits, PER_IDR_MAX_BITS)
+    digest_ms = (time.perf_counter() - started) * 1000.0
+    started = time.perf_counter()
+    proof = ctx.bridge.prove(ctx.secret, ctx.registry, binding_digest(MODE_VIDEO, digest, message))
     prove_ms = (time.perf_counter() - started) * 1000.0
-    proof_bytes = proof_to_bytes(proof)
-    payload = pack(message, proof_bytes)
-    return {"payload": payload, "proof_bytes": len(proof_bytes), "prove_ms": prove_ms,
-            "frame_bits": len(embedded_frame_bits(payload, key))}
+    payload = pack_payload(MODE_VIDEO, message, proof_to_bytes(proof))
+    return {"payload": payload, "proof_bytes": PROOF_SIZE_BYTES, "digest_ms": digest_ms, "prove_ms": prove_ms,
+            "frame_bits": frame_bits, "video_digest": digest.hex()}
 
 
-def verify_zk_payload(bridge: ZKSnarkBridge, payload_hex: bytes, key: bytes) -> dict[str, Any]:
-    """unpack -> decompress proof -> mandatory Groth16 verify, as the service verify job does."""
+def verify_zk_payload(ctx: CameraContext | None, payload_hex: bytes, stego: Path | None,
+                      stego_key: bytes | None = None) -> dict[str, Any]:
+    """Parse, digest the stego video and verify the proof against the registry root (the verify job's decision)."""
+    malformed = {"verified": False, "reason": "malformed_proof_payload", "verify_ms": None, "message": None,
+                 "video_bound": False}
     started = time.perf_counter()
     try:
-        message, proof_bytes = unpack(bytes.fromhex(payload_hex.decode("ascii")))
-        if not message or len(proof_bytes) != PROOF_SIZE_BYTES:
-            raise ValueError("proof payload length mismatch")
-        proof = bytes_to_proof(proof_bytes)
+        payload = bytes.fromhex(payload_hex.decode("ascii"))
     except (ValueError, UnicodeDecodeError):
-        return {"verified": False, "reason": "malformed_proof_payload", "verify_ms": None, "message": None}
-    verified = bridge.verify_proof_for_payload(proof, message, key) is True
-    return {"verified": verified, "reason": None if verified else "proof_invalid",
-            "verify_ms": (time.perf_counter() - started) * 1000.0, "message": message}
+        return malformed
+    if parse_payload(payload) is None or ctx is None:
+        return malformed
+    verdict = verify_payload(ctx.bridge, ctx.registry.root, payload, native_cli=ctx.native, stego=stego,
+                             stego_key=stego_key, max_bits_per_idr=PER_IDR_MAX_BITS)
+    return {"verified": verdict.valid, "reason": verdict.reason, "verify_ms": (time.perf_counter() - started) * 1000.0,
+            "message": verdict.message, "video_bound": verdict.video_bound}
 
 
 def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
@@ -356,7 +388,7 @@ def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
         raise RuntimeError(f"no .y4m sources found in {RAW_DIR}")
     native = _native_binary()
     inspect = _inspect_binary()
-    bridge = ZKSnarkBridge(str(ROOT / "circuits"))
+    ctx = camera_context(native)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:6]
     run_dir = output_root / "media_new" / run_id
     encoded_dir = run_dir / "encoded_h264"
@@ -400,7 +432,7 @@ def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
             capacity_ok = capacity_record["returncode"] == 0 and isinstance(capacity_metrics, dict) and "candidate_capacity_bits" in capacity_metrics
             stego = stego_dir / f"{stem}__stego_new.h264"
             key = os.urandom(32)
-            zk = make_zk_payload(bridge, MESSAGE, key)
+            zk = make_zk_payload(ctx, MESSAGE, cover, key)
             payload_line = zk["payload"].hex().encode("ascii") + b"\n"
             native_record = _run_measured(
                 [str(native), "embed-stream-auth-stdin", str(cover), str(stego), str(PER_IDR_MAX_BITS)],
@@ -421,9 +453,9 @@ def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
             if embedded:
                 recovered_code, recovered_hex, extract_error, extract_ms = extract_payload(native, stego, key)
             correct_key = recovered_code == 0 and recovered_hex.decode("ascii", errors="ignore") == zk["payload"].hex()
-            verification = verify_zk_payload(bridge, recovered_hex, key) if correct_key else {
-                "verified": False, "reason": "not_extracted", "verify_ms": None, "message": None}
-            groth16_ok = verification["verified"] and verification["message"] == MESSAGE
+            verification = verify_zk_payload(ctx, recovered_hex, stego, key) if correct_key else {
+                "verified": False, "reason": "not_extracted", "verify_ms": None, "message": None, "video_bound": False}
+            groth16_ok = verification["verified"] and verification["video_bound"] and verification["message"] == MESSAGE
             wrong_key = os.urandom(32)
             wrong_code, _, wrong_error, wrong_extract_ms = (
                 extract_payload(native, stego, wrong_key) if embedded else (-1, b"", "not attempted", None))
@@ -487,12 +519,12 @@ def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
                 "proof_bytes": zk["proof_bytes"], "frame_bits": zk["frame_bits"],
                 "max_bits_per_idr": PER_IDR_MAX_BITS,
                 "idr_segments_needed": math.ceil(zk["frame_bits"] / PER_IDR_MAX_BITS),
-                "prove_ms": zk["prove_ms"], "strict_decode_ms": strict_decode_ms,
+                "video_digest_ms": zk["digest_ms"], "prove_ms": zk["prove_ms"], "strict_decode_ms": strict_decode_ms,
                 "extract_ms": extract_ms, "wrong_key_extract_ms": wrong_extract_ms,
                 "groth16_verify_ms": verification["verify_ms"],
                 "embedded": embedded, "strict_decode_ok": decoded_ok,
                 "blind_correct_key_payload_ok": correct_key,
-                "groth16_verified": groth16_ok,
+                "groth16_verified": groth16_ok, "video_bound": verification["video_bound"],
                 "groth16_failure_reason": verification["reason"],
                 "wrong_key_rejected": wrong_key_rejected,
                 "sign_statistics": signs,
@@ -513,7 +545,7 @@ def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
 
     passed = sum(record.get("status") == "passed" for record in results)
     record = {
-        "schema": "zkstego-media-benchmark-new-v3",
+        "schema": "zkstego-media-benchmark-new-v4",
         "run_id": run_id,
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "host": {"platform": os.name, "python": os.sys.version,
@@ -527,9 +559,9 @@ def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
             "quality": "Per-frame FFmpeg PSNR Y and SSIM measured both from source Y4M to stego decode (total encode+embed distortion) and clean H.264 decode to stego decode (incremental embed distortion).",
             "fps_definition": "encoded frame count divided by native embed wall time; not camera acquisition FPS.",
             "resource_scope": "Native embed child process sampled every 5ms; sampled RSS/CPU may miss sub-sampling peaks.",
-            "acceptance": "Passing rows require native capacity scan, native embed success, FFmpeg strict decode (-v error -xerror), exact blind extraction with the right key, mandatory Groth16 verify of the extracted proof, rejection with a wrong key, and no changed sign outside the keyed schedule.",
-            "payload": "Each case proves SHA256(SHA256(message)||secret) under a fresh 32-byte key and embeds pack(message, 129-byte Groth16 proof) in the v3 channel frame (no MAC); max_bits_per_idr is the protocol default 64.",
-            "zkp_boundary": "Groth16 proving runs before embedding on the host; it is not claimed to run in the camera pixel path. The proof is not bound to the video (replay under the same key is out of scope).",
+            "acceptance": "Passing rows require native capacity scan, native embed success, FFmpeg strict decode (-v error -xerror), exact blind extraction with the right key, a video-bound camera proof that verifies against the registry root (digest recomputed from the stego video), rejection with a wrong key, and no changed sign outside the keyed schedule.",
+            "payload": "Each case uses a fresh 32-byte stego key; one camera of an 8-camera Poseidon registry proves membership and a binding of the cover's masked video digest and the message; the payload [format][mode][len][message][129-byte proof] travels in the v3 channel frame; max_bits_per_idr is the protocol default 64.",
+            "zkp_boundary": "Groth16 proving runs before embedding on the host (not in the camera pixel path). The proof binds the masked digest of the whole video and the message, so replaying it into another video fails.",
         },
         "summary": {"total_cases": len(results), "passed": passed, "failed": len(results) - passed,
                     "all_passed": bool(results) and passed == len(results)},

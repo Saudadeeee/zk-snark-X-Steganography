@@ -315,8 +315,11 @@ def findings_page(report: Report, data: dict[str, Any]) -> None:
               "(độ dài mã CAVLC không đổi; chỉ byte chống giả mã start code có thể xuất hiện/mất khi một bit dấu đổi)."),
         ("b", f"Thống kê dấu: ~{num(100 * statistics.fmean(s['changed_fraction_of_scheduled'] for s in signs) if signs else None, 0)}% vị trí lên lịch thực sự đổi; "
               f"|z| lớn nhất {num(max(abs(s['two_proportion_z']) for s in signs) if signs else None, 2)} — tỉ lệ dấu âm không phân biệt được ở mức 5%."),
-        ("b", f"Zero-knowledge: Groth16 prove {num(stages.get('prove_ms', {}).get('median'), 0)} ms, verify {num(stages.get('groth16_verify_ms', {}).get('median'), 0)} ms "
-              f"(E2E median), proof nén 129 B; PLONK prove chậm hơn ~{num(ratio, 0)}× trên cùng R1CS."),
+        ("b", f"Zero-knowledge: proof chứng minh một camera trong sổ đăng ký (gốc Merkle công khai) xác nhận đúng video này "
+              f"(hash toàn file, trừ đúng các bit mang khung) và message; bên kiểm chứng không cần secret camera và không biết camera nào. "
+              f"E2E median: hash cover {num(stages.get('video_digest_ms', {}).get('median'), 0)} ms, prove "
+              f"{num(stages.get('prove_ms', {}).get('median'), 0)} ms, verify (gồm hash stego) "
+              f"{num(stages.get('groth16_verify_ms', {}).get('median'), 0)} ms; proof nén 129 B; PLONK prove chậm hơn ~{num(ratio, 1)}×."),
         ("b", f"Tấn công: mọi thao tác sửa payload/stream được kiểm tra đều bị từ chối. Được chấp nhận theo thiết kế (giới hạn đã biết): {', '.join(limitations) or '—'}."),
         ("b", "Camera: run hợp lệ duy nhất (passthrough) đạt 7.608 FPS < 30 FPS, đo với giao thức v1 trước đợt tăng tốc — cần đo lại với v3."),
     ], subtitle="Rút ra trực tiếp từ các bảng phía sau; mỗi con số đều có nguồn trong phần tương ứng.")
@@ -330,7 +333,8 @@ def coverage_page(report: Report) -> None:
         ["Hiệu năng: mã hóa, quét, prove, nhúng, trích, verify, CPU/RAM", "Có", "4, 7, 9"],
         ["Chất lượng ảnh PSNR-Y / SSIM từng frame", "Có", "5 (+ CSV)"],
         ["Thay đổi kích thước file / bitrate", "Có (Δ byte từng case)", "6"],
-        ["Bảo mật: khóa sai, sửa bit, xóa/cắt, mã hóa lại, thay message, replay", "Có", "8"],
+        ["Bảo mật: khóa sai, sửa bit, xóa/cắt, mã hóa lại, thay message, replay, camera ngoài sổ đăng ký", "Có", "8"],
+        ["Toàn vẹn video và nguồn camera (ZK, ẩn danh trong sổ đăng ký)", "Có", "7, 8, 9"],
         ["So sánh hệ ZK (Groth16 vs PLONK) và primitive mật mã", "Có", "9, 10"],
         ["Khả năng phát hiện thống kê", "Một phần — chỉ báo bậc nhất (tỉ lệ dấu, z)", "6"],
         ["Thời gian thực trên camera", "Một phần — dữ liệu cũ (v1, trước tăng tốc)", "11"],
@@ -352,7 +356,7 @@ def contents_page(report: Report) -> None:
         ("b", "5. Chất lượng hình ảnh — PSNR-Y/SSIM so với nguồn và so với cover sạch, biểu đồ từng frame."),
         ("b", "6. Thay đổi dấu và khả năng phát hiện thống kê — bit đã lật, lật ngoài lịch, tỉ lệ dấu âm, kiểm định z."),
         ("b", "7. End-to-end với payload ZK thật — thời gian từng bước gửi/nhận qua nhiều lần chạy."),
-        ("b", "8. Ma trận tấn công / độ bền — khóa sai, lật bit, xóa IDR, cắt stream, mã hóa lại, thay message, replay."),
+        ("b", "8. Ma trận tấn công / độ bền — khóa sai, lật bit, sửa frame sau, xóa IDR, cắt stream, mã hóa lại, thay message, camera ngoài sổ đăng ký, replay."),
         ("b", "9. Hệ chứng minh không tri thức — Groth16 so với PLONK trên cùng R1CS."),
         ("b", "10. Primitive mật mã — HMAC, chữ ký, AEAD, mã hóa lai: thời gian và tính chất."),
         ("b", "11. Camera thời gian thực — dữ liệu đã ghi trên webcam vật lý (giao thức v1)."),
@@ -547,8 +551,9 @@ def sign_page(report: Report, data: dict[str, Any]) -> None:
 
 # ------------------------------------------------------------------- e2e
 
-STAGE_LABELS = (("prove_ms", "Groth16 prove"), ("embed_ms", "Nhúng native"), ("strict_decode_ms", "FFmpeg strict decode"),
-                ("extract_ms", "Trích mù native"), ("groth16_verify_ms", "Groth16 verify"))
+STAGE_LABELS = (("video_digest_ms", "Hash video (cover)"), ("prove_ms", "Groth16 prove"), ("embed_ms", "Nhúng native"),
+                ("strict_decode_ms", "FFmpeg strict decode"), ("extract_ms", "Trích mù native"),
+                ("groth16_verify_ms", "Verify (hash stego + Groth16)"))
 
 
 def e2e_pages(report: Report, data: dict[str, Any]) -> None:
@@ -574,7 +579,8 @@ def e2e_pages(report: Report, data: dict[str, Any]) -> None:
                   [num(t["sign_statistics"]["changed_signs"], 0), yes(t["groth16_verified"]), "đạt" if t["passed"] else "LỖI"]
                   for t in e2e.get("trials", [])]
     report.table("7b. Từng lần chạy end-to-end", "Payload B = 4 + message + 129. Bit khung = 8 × (payload + 3).",
-                 ["Lần", "Payload B", "Bit khung", "Prove", "Nhúng", "Decode", "Trích", "Verify", "Dấu đổi", "Groth16 đúng", "Pass"],
+                 ["Lần", "Payload B", "Bit khung", "Hash", "Prove", "Nhúng", "Decode", "Trích", "Verify", "Dấu đổi",
+                  "Groth16 đúng", "Pass"],
                  trial_rows, font=8.5)
     _stage_chart(report, stats)
 
@@ -583,8 +589,8 @@ def _stage_chart(report: Report, stats: dict[str, Any]) -> None:
     fig = report.figure("7c. Phân bổ thời gian end-to-end (median)", "Phía gửi bị chi phối bởi Groth16 prove; phía nhận bởi Groth16 verify "
                         "(chủ yếu là khởi động Node.js + kiểm tra pairing). Phần native nhúng/trích là nhỏ.")
     ax = fig.add_axes([0.2, 0.25, 0.72, 0.5])
-    lanes = (("Phía gửi", ("prove_ms", "embed_ms")), ("Phía nhận", ("extract_ms", "groth16_verify_ms")))
-    colors = {"prove_ms": RED, "embed_ms": BLUE, "extract_ms": ORANGE, "groth16_verify_ms": GREEN}
+    lanes = (("Phía gửi", ("video_digest_ms", "prove_ms", "embed_ms")), ("Phía nhận", ("extract_ms", "groth16_verify_ms")))
+    colors = {"video_digest_ms": GREY, "prove_ms": RED, "embed_ms": BLUE, "extract_ms": ORANGE, "groth16_verify_ms": GREEN}
     names = dict(STAGE_LABELS)
     for y, (_lane, keys) in enumerate(lanes):
         left = 0.0
@@ -602,13 +608,15 @@ def _stage_chart(report: Report, stats: dict[str, Any]) -> None:
 def attack_page(report: Report, data: dict[str, Any]) -> None:
     attacks = (data["e2e"] or {}).get("attacks", [])
     reasons = {None: "—", "payload_not_found": "không thấy khung (version/độ dài)", "proof_invalid": "Groth16 từ chối",
-               "malformed_proof_payload": "payload sai định dạng", "stream_rejected_by_parser": "parser từ chối stream"}
+               "malformed_proof_payload": "payload sai định dạng", "stream_rejected_by_parser": "parser từ chối stream",
+               "video_binding_required": "proof không gắn video", "video_digest_unavailable": "không tính được hash video"}
     rows = [[row["case"], wrap(row["description"], 48), "chấp nhận" if row["expected"] == "accepted" else "từ chối",
              "chấp nhận" if row["outcome"] == "accepted" else "từ chối", reasons.get(row["reason"], row["reason"]),
              yes(row.get("strict_decode_ok")), ("giới hạn đã biết" if row.get("known_limitation") else ("đúng" if row["as_expected"] else "SAI"))]
             for row in attacks]
-    report.table("8. Ma trận tấn công / độ bền", "Mỗi trường hợp đi qua đúng quyết định của job verify HTTP: trích mù → kiểm tra version/độ dài khung (v3, không MAC) → "
-                 "unpack → Groth16 verify. 'Lật bit trong lịch' đã được kiểm chứng rơi đúng vào ứng viên trước khi đánh giá.",
+    report.table("8. Ma trận tấn công / độ bền", "Mỗi trường hợp đi qua đúng quyết định của job verify HTTP: trích mù → kiểm tra khung v3 → "
+                 "unpack → tính lại hash video từ chính file nhận được → Groth16 verify với gốc sổ đăng ký tin cậy. Mỗi lần lật bit "
+                 "đã được kiểm chứng rơi đúng vào ứng viên.",
                  ["Trường hợp", "Mô tả", "Kỳ vọng", "Kết quả", "Lý do", "Decode strict", "Đánh giá"], rows, font=8,
                  widths=[0.15, 0.33, 0.08, 0.08, 0.17, 0.08, 0.11])
 
@@ -623,20 +631,18 @@ def zkp_pages(report: Report, data: dict[str, Any]) -> None:
              num(r["serialized_proof_json_bytes"], 0), num(r.get("compact_proof_bytes"), 0) if r.get("compact_proof_bytes") else "—",
              num((r.get("prove_peak_rss_bytes_sampled") or 0) / 1e6, 0), yes(r["proof_valid"]), yes(r["tampered_public_input_rejected"])]
             for r in zkp.get("results", [])]
-    ptau = zkp.get("powers_of_tau_timing_from_file_timestamps_s") or {}
-    ptau_text = (f" (new {num(ptau.get('new'), 0)} s, contribute {num(ptau.get('contribute'), 0)} s, prepare phase2 {num(ptau.get('prepare_phase2'), 0)} s)"
-                 if ptau else "")
-    subtitle = (f"Cùng R1CS payload_verify ({num(zkp.get('circuit_constraints'), 0)} constraint), cùng witness: chứng minh commitment "
-                f"SHA256(SHA256(payload)‖secret) và độ dài payload. Setup PLONK (không tính vào prove): {num((zkp.get('plonk_setup_ms') or 0) / 1000, 0)} s; "
-                f"Powers-of-Tau 2^{zkp.get('powers_of_tau_power', '?')} tạo cục bộ{ptau_text}. Proving key PLONK ~22 GB lớn gần bằng RAM máy, "
-                "nên thời gian prove PLONK chịu ảnh hưởng của bộ nhớ; RSS là giá trị lấy mẫu. Groth16 dùng setup demo cục bộ có sẵn.")
+    subtitle = (f"Cùng R1CS camera_video ({num(zkp.get('circuit_constraints'), 0)} constraint, {zkp.get('public_inputs', 3)} public input), "
+                f"cùng witness: camera trong cây Merkle Poseidon độ sâu 16 xác nhận một binding 256 bit (hash video + message). "
+                f"Setup PLONK (không tính vào prove): {num((zkp.get('plonk_setup_ms') or 0) / 1000, 1)} s trên "
+                f"{zkp.get('powers_of_tau_source', 'Powers-of-Tau')}. Groth16: Phase 1 Hermez + Phase 2 nhiều đóng góp + beacon "
+                "(src/zk_setup.py, demo trên một máy). RSS là giá trị lấy mẫu.")
     report.table("9. Groth16 so với PLONK", subtitle, ["Hệ", "Lần", "Witness ms", "Prove ms", "Verify ms", "Proof JSON B", "Proof nén B",
                                                         "RSS prove MB", "Hợp lệ", "Public input sửa bị từ chối"], rows, font=8)
     names = list(dict.fromkeys(r["algorithm"] for r in zkp.get("results", [])))
     if not names:
         return
     fig = report.figure("9b. Prove / verify (trung bình, thang log)", "Groth16 có proof hằng 129 B (nén) và verify bằng 3 pairing nhưng cần setup riêng cho circuit; "
-                        "PLONK dùng SRS phổ quát nhưng prove chậm hơn nhiều trên circuit SHA-256 này.")
+                        "PLONK dùng SRS phổ quát (không cần nghi thức riêng) nhưng proof lớn hơn nhiều — tốn dung lượng kênh giấu tin.")
     ax = fig.add_axes([0.12, 0.15, 0.8, 0.65])
     x = np.arange(len(names))
     for offset, key, label, color in ((-0.18, "prove_ms", "prove", BLUE), (0.18, "verify_ms", "verify", ORANGE)):
@@ -705,10 +711,15 @@ def limits_page(report: Report, data: dict[str, Any]) -> None:
     report.text("12. Giới hạn, phạm vi và dữ liệu thô", [
         ("h", "Đã đo và khẳng định"),
         ("b", "H.264 Annex-B Baseline/CAVLC, IDR, một slice mỗi frame; giao thức v3 (HKDF, khung không MAC, làm trắng, lịch HMAC 64 bit/IDR)."),
-        ("b", "Trích mù chỉ cần khóa; Groth16 verify bắt buộc; khóa sai, lật bit trong lịch, xóa IDR, mã hóa lại, thay message và proof của secret khác đều bị từ chối."),
+        ("b", "Proof camera: một camera trong sổ đăng ký (gốc công khai) xác nhận đúng video (mọi bit, bit mang khung bảo vệ qua payload) và message; bên kiểm chứng "
+              "chỉ cần khóa giấu tin để trích, gốc sổ đăng ký và verification key — không cần secret camera, không biết camera nào."),
+        ("b", "Bị từ chối: khóa sai, lật bit trong lịch, sửa frame sau, xóa IDR, cắt stream, mã hóa lại, thay message, "
+              "camera ngoài sổ đăng ký, chép payload sang video khác."),
         ("h", "Chưa khẳng định / giới hạn đã biết"),
-        ("b", "Proof không gắn với video: chép payload sang video khác cùng khóa vẫn được chấp nhận (phần 8, replay); cắt phần stream sau payload không bị phát hiện."),
-        ("b", "Bên kiểm chứng phải giữ secret (public signals tính lại từ message + khóa); setup Groth16 là setup demo cục bộ, không phải nghi thức nhiều bên."),
+        ("b", "Hash video phụ thuộc khóa giấu tin (vị trí bit mang khung), nên chỉ bên có khóa mới kiểm chứng được."),
+        ("b", "Luồng live nhúng proof khi video chưa quay xong nên chỉ ràng buộc message (chế độ 1); verify job từ chối chế độ này trừ khi cho phép."),
+        ("b", "Setup Groth16 Phase 2 chạy trên một máy (demo); triển khai thật cần nhiều bên độc lập. Không chứng minh camera thực sự quay "
+              "cảnh đó (ví dụ quay lại màn hình)."),
         ("b", "Kênh mong manh (fragile): bất kỳ thao tác mã hóa lại nào cũng xóa payload — phù hợp mục tiêu xác thực, không phải watermark bền vững."),
         ("b", "Không hỗ trợ CABAC, P/B-frame làm vật mang, nhiều slice; 640×480 và 1280×960 được phóng to từ CIF."),
         ("b", "Thời gian thực chưa đạt: 7.608 FPS (camera, giao thức v1, trước tăng tốc). Thống kê dấu chỉ là chỉ báo bậc nhất, chưa có steganalysis học máy."),
