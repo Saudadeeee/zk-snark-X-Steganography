@@ -23,7 +23,7 @@ class EmbedPlan:
     placements: list[SchedulePlacement]
     selected: list[NativeCavlcCandidate]  # whole-file identities, in frame-bit order
     bits: list[int]                       # embedded (whitened) bits, in frame-bit order
-    frame: bytes                          # plaintext authenticated frame v2
+    frame: bytes                          # plaintext v3 frame (no MAC)
 
 
 def file_candidate(placement: SchedulePlacement) -> NativeCavlcCandidate:

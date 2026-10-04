@@ -14,10 +14,10 @@ blindly with a key and verify it.
 | Area | State |
 |---|---|
 | Maturity | Research prototype. Supported input is constrained (see [Limits](#known-limits)); this is not generic H.264 support |
-| Tests | 2026-10-03: `py -3.12 src/runtest/run_all.py` passed **126/126 across 12 phases** (after the single-core consolidation) on a Windows host (fixtures from `prepare_fixtures.py`), native CTest 1/1. Physical-camera E2E (`--hardware`) not included. Functional evidence, not edge acceptance |
+| Tests | 2026-10-04: `py -3.12 src/runtest/run_all.py` passed **139/139 across 12 phases** on a Windows host (fixtures from `prepare_fixtures.py`), native CTest 1/1. Physical-camera E2E (`--hardware`) not included. Functional evidence, not edge acceptance |
 | Realtime | **Not accepted.** Corrected physical-camera H.264 E2E: 7.608 source FPS against a 30-FPS gate (measured before the 2026-10-02 native stdin/reader speed-up, not yet re-measured). No edge target benchmarked |
 | Proof boundary | Groth16 proves the message/key relation `commitment = SHA256(SHA256(message) ‖ secret)`. It does **not** prove video integrity, camera origin, or bind the proof to the video |
-| Benchmarks | Use the `_new` suite ([`benchmark/NEW_BENCHMARKS.md`](benchmark/NEW_BENCHMARKS.md)). SEC1–SEC10 scripts are historical drivers |
+| Benchmarks | `py -3.12 -m benchmark.run_new_suite` writes one report, `benchmark/results/benchmark_report_new.pdf` (2026-10-04: media 27/27, E2E 5/5, attacks 10/10 as expected). See [`benchmark/NEW_BENCHMARKS.md`](benchmark/NEW_BENCHMARKS.md) |
 
 ## How it works (one screen)
 
@@ -25,13 +25,13 @@ blindly with a key and verify it.
 video --FFmpeg/libx264 (Baseline, CAVLC, 1 slice/frame, no B)--> source.h264
 message + 32-byte secret --circom/snarkjs Groth16--> proof (129 B compressed)
 payload = [len 4B][message][proof 129B]
-keys    = HKDF-SHA256(salt "zkstego-cavlc-v2-salt", secret) -> schedule_key, frame_key, whitening_key
-frame   = [0x02][len 2B][payload][HMAC-SHA256(frame_key, header||payload)[:16]]
+keys    = HKDF-SHA256(salt "zkstego-cavlc-v2-salt", secret) -> schedule_key, whitening_key
+frame   = [0x03][len 2B][payload]   (channel protocol v3: no MAC, the Groth16 proof authenticates)
 native parser: one candidate per residual block = sign bit of its first trailing one
 schedule: sort candidates by HMAC-SHA256(schedule_key, id); frame bit i -> i-th candidate
 whiten: embedded bit i = frame bit i XOR keystream bit i, keystream = HMAC-SHA256(whitening_key, block counter)
 embed: set those sign bits (bit length, TotalCoeff and nC unchanged -> stream stays valid)
-receiver: same parser + key -> same schedule -> read + un-whiten -> check version/HMAC -> unpack -> snarkjs verify
+receiver: same parser + key -> same schedule -> read + un-whiten -> check version/length -> unpack -> snarkjs verify
 ```
 
 There is one media core: native C++ ([`native/`](native/)). Python orchestrates
@@ -223,7 +223,7 @@ On Windows set `PYTHONIOENCODING=utf-8`. Exit codes: `0` all passed, `1` failure
 | 6 | `test_native_http_channel.py`: real Uvicorn HTTP jobs and WebSocket stream |
 | 7 | `test_manifest_security.py`: manifest signing and positions/stego binding |
 | 8 | `test_realtime_scheduler.py`: bounded realtime scheduler |
-| 9 | `test_benchmark_recorder.py`: camera recorder fail-closed checks |
+| 9 | `test_benchmark_recorder.py`: camera recorder fail-closed checks and benchmark analysis helpers |
 | 10 | `test_trust_interfaces.py`: experimental provenance/C2PA/attestation interfaces |
 | 11 | `test_demo_h264_explain.py`: demo math matches the native parser and FFmpeg pixels |
 | 12 | `test_demo_smoke.py`: the whole demo runs with no `[FAIL]` |
@@ -231,37 +231,37 @@ On Windows set `PYTHONIOENCODING=utf-8`. Exit codes: `0` all passed, `1` failure
 
 ## Benchmarks
 
-- **Current:** `py -3.12 -m benchmark.run_new_suite` (media conversion/quality,
-  crypto, ZKP). Scope, sample limits and regeneration commands:
-  [`benchmark/NEW_BENCHMARKS.md`](benchmark/NEW_BENCHMARKS.md); delivery protocol:
-  [`benchmark/DELIVERY_BENCHMARK.md`](benchmark/DELIVERY_BENCHMARK.md). Reports:
-  `benchmark/results/*_new.pdf` and `*_new.json`, per-run data under
-  `benchmark/results/media_new/<run-id>/`. The 2026-09-24 run used nine raw
-  clips (only `foreman_cif.y4m` is tracked); media rows cover the first 30 frames
-  per case, and in run `20260924T150707Z_2be60c` 13/27 cases fall below the historical
-  40 dB modified-frame PSNR floor (worst 32.76 dB).
+- **Current:** `py -3.12 -m benchmark.run_new_suite` runs the media matrix (9 clips ×
+  3 resolutions, real Groth16 payload, protocol defaults), the end-to-end timing
+  and attack matrix, Groth16 vs PLONK and the crypto primitives, then writes the
+  single report `benchmark/results/benchmark_report_new.pdf` from the JSON/CSV
+  records next to it. Scope, requirements and the 2026-10-04 figures:
+  [`benchmark/NEW_BENCHMARKS.md`](benchmark/NEW_BENCHMARKS.md). Only
+  `foreman_cif.y4m` is tracked; the recorded run used nine raw clips.
 - **Physical camera:** set `ZK_STEGO_CAMERA_NAME` to a DirectShow device and run
   `py -3.12 -m benchmark.realtime_camera_recorder --duration 60`; records are
   appended to `benchmark/results/realtime_camera_runs_*.json` only after strict
   decode, frame-count, proof, key-rejection and stream-completion gates pass.
   Measurement details: [`doc/realtime_cavlc_theory_and_implementation.md`](doc/realtime_cavlc_theory_and_implementation.md).
-- The `_new` suite samples CPU/RSS of the native child per row, so a separate
-  resource runner is not needed. The SEC1–SEC10 scripts of the removed Python
-  pipeline are in git history only; their results are not current evidence.
-- Recorded `_new`, camera and media results predate protocol v2 and the
-  bit-constrained circuit (2026-10-03); re-run before citing them for this version.
+- The suite samples CPU/RSS of the native child per row, so a separate resource
+  runner is not needed. The SEC1–SEC10 scripts of the removed Python pipeline
+  are in git history only; their results are not current evidence.
+- Camera results predate protocol v3; the 2026-10-04 media/E2E records in
+  `benchmark/results` are re-measured with v3 (see `benchmark/NEW_BENCHMARKS.md`).
 
 ## Known limits
 
 - Input profile: Baseline, CAVLC, progressive, 4:2:0, one slice per frame starting
   at MB 0, no I_PCM, one SPS/PPS id. Only IDR frames carry data.
-- The native channel derives separate schedule, tag and whitening keys with HKDF
-  (protocol v2), but the circuit uses the raw secret, and the verifier must hold it
-  to recompute the commitment.
+- The native channel derives separate schedule and whitening keys with HKDF. Since
+  protocol v3 (2026-10-04) its frame carries no MAC: an extracted payload is only a
+  candidate (`"verified": false`) until its Groth16 proof verifies. The circuit uses
+  the raw secret, and the verifier must hold it to recompute the commitment.
 - Frames and proofs carry no video/session binding and can be replayed into another
   video under the same key (design work: `future_plan.md`).
-- Protocol v2 (2026-10-03) cannot read stego files made with v1, and proofs made with
-  the previous circuit keys do not verify against the current keys.
+- Protocol v3 cannot read stego files made with v2 or v1 (different version byte), and
+  proofs made with the previous circuit keys do not verify against the current keys.
+  The CLI command names keep their `-auth` suffix; it now only means "keyed".
 - Realtime not accepted; no edge-device measurements.
 
 Plans for these: [`future_plan.md`](future_plan.md); evidence audit and open gates:

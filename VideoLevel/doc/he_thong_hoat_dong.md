@@ -2,10 +2,10 @@
 
 Tài liệu này mô tả toàn bộ đường đi của dữ liệu trong VideoLevel: từ một file video
 chưa nén, qua FFmpeg/libx264, cấu trúc bitstream H.264, kênh nhúng trên dấu hệ số
-CAVLC, khung xác thực HMAC, proof Groth16, đến trích xuất mù và xác minh. Mỗi phần
+CAVLC, khung kênh, proof Groth16, đến trích xuất mù và xác minh. Mỗi phần
 chỉ ra file mã nguồn tương ứng và cách quan sát bước đó bằng demo.
 
-Cập nhật: 2026-10-02. Phạm vi: mã nguồn trên nhánh `main` tại thời điểm viết.
+Cập nhật: 2026-10-04 (giao thức kênh v3: bỏ thẻ HMAC trong khung). Phạm vi: mã nguồn trên nhánh `main` tại thời điểm viết.
 
 ## Mục lục
 
@@ -17,7 +17,7 @@ Cập nhật: 2026-10-02. Phạm vi: mã nguồn trên nhánh `main` tại thờ
 6. [Mã hóa entropy CAVLC](#6-mã-hóa-entropy-cavlc)
 7. [Kênh nhúng: dấu của hệ số trailing-one](#7-kênh-nhúng-dấu-của-hệ-số-trailing-one)
 8. [Lịch nhúng có khóa (keyed schedule)](#8-lịch-nhúng-có-khóa-keyed-schedule)
-9. [Khung xác thực và trích xuất mù](#9-khung-xác-thực-và-trích-xuất-mù)
+9. [Khung kênh và trích xuất mù](#9-khung-kênh-và-trích-xuất-mù)
 10. [Payload và proof Groth16](#10-payload-và-proof-groth16)
 11. [Luồng đầu-cuối và giao diện dòng lệnh native](#11-luồng-đầu-cuối-và-giao-diện-dòng-lệnh-native)
 12. [Dịch vụ HTTP/WebSocket](#12-dịch-vụ-httpwebsocket)
@@ -48,7 +48,7 @@ Cập nhật: 2026-10-02. Phạm vi: mã nguồn trên nhánh `main` tại thờ
  payload = [len 4B][message][proof 129B]                                      |
         |                                                                     |
         v                                                                     v
- khung xác thực = [0x02][len 2B][payload][HMAC 16B] --XOR keystream--> lịch nhúng HMAC theo khóa
+ khung kênh v3 = [0x03][len 2B][payload]  --XOR keystream--> lịch nhúng HMAC theo khóa
                                                                               |
                                                                               v
                                                          lật dấu tại các vị trí đã chọn -> stego.h264
@@ -57,7 +57,7 @@ Cập nhật: 2026-10-02. Phạm vi: mã nguồn trên nhánh `main` tại thờ
                                                                               v
                                                     parser native + cùng khóa -> cùng lịch
                                                                               |
-                                                     đọc bit, kiểm HMAC, lấy payload
+                                                     đọc bit, kiểm version/độ dài, lấy payload
                                                                               |
                                                      unpack -> snarkjs verify -> message
 ```
@@ -67,8 +67,8 @@ Ba lớp có trách nhiệm tách biệt:
 | Lớp | Thực hiện ở | Bảo đảm |
 |---|---|---|
 | Media | `native/src/cavlc_stream.cpp` | Bitstream sau khi nhúng vẫn hợp lệ, độ dài mã không đổi, decoder chuẩn giải được |
-| Kênh xác thực | `native/src/cavlc_stream.cpp`, `src/native_blind_contract.py` | Chỉ người có khóa tìm được vị trí; sai khóa hoặc sửa bit thì HMAC từ chối |
-| Proof | `src/zk_proof.py`, `circuits/payload_verify.circom` | Quan hệ `commitment = SHA256(SHA256(message) ‖ secret)` được chứng minh bằng Groth16 |
+| Kênh giấu tin | `native/src/cavlc_stream.cpp`, `src/native_blind_contract.py` | Chỉ người có khóa tìm được vị trí và đọc được khung; kênh không có MAC nên không tự phát hiện bit bị sửa |
+| Proof | `src/zk_proof.py`, `circuits/payload_verify.circom` | Quan hệ `commitment = SHA256(SHA256(message) ‖ secret)` được chứng minh bằng Groth16; đây là lớp duy nhất xác thực payload |
 
 Chỉ có **một lõi media là native C++**; Python điều phối proof, đóng gói, dịch vụ và demo.
 Nhánh Python cũ đã được gỡ ngày 2026-10-03 (mục 14).
@@ -472,13 +472,13 @@ này cũng bị ảnh hưởng. Demo đo PSNR từng plane Y/U/V và in bản đ
 ## 8. Lịch nhúng có khóa (keyed schedule)
 
 Vị trí nhận từng bit không cố định mà do khóa quyết định, để chỉ người có khóa đọc được.
-Từ giao thức v2 (2026-10-03), mỗi vai trò dùng một khóa con riêng, sinh bằng HKDF-SHA256
-(RFC 5869) từ secret 32 byte:
+Mỗi vai trò dùng một khóa con riêng, sinh bằng HKDF-SHA256 (RFC 5869) từ khóa giấu tin
+32 byte. Từ giao thức v3 (2026-10-04) chỉ còn hai khóa con; nhãn HKDF giữ nguyên như v2 nên
+lịch và dòng làm trắng không đổi:
 
 ```text
 PRK           = HMAC-SHA256( key = "zkstego-cavlc-v2-salt", msg = secret )        (HKDF-Extract)
 schedule_key  = HKDF-Expand( PRK, "zkstego/cavlc/v2/schedule",  32 )
-frame_key     = HKDF-Expand( PRK, "zkstego/cavlc/v2/frame-tag", 32 )
 whitening_key = HKDF-Expand( PRK, "zkstego/cavlc/v2/whitening", 32 )
 
 score(candidate) = HMAC-SHA256( schedule_key , định danh ASCII của ứng viên )
@@ -487,7 +487,8 @@ Bit thứ i của khung (MSB trước) gán cho ứng viên thứ i, SAU KHI là
 bit nhúng 0 -> dấu +, 1 -> dấu −.
 ```
 
-Lộ một khóa con (ví dụ khóa lịch) không làm lộ secret hay các khóa con khác.
+Lộ một khóa con (ví dụ khóa lịch) không làm lộ secret hay khóa con còn lại. Ở đây HMAC chỉ
+đóng vai hàm giả ngẫu nhiên có khóa (chọn vị trí, sinh dòng làm trắng), không còn dùng để xác thực.
 
 Native: `score_keyed_cavlc_sign_candidate`, `select_keyed_cavlc_sign_candidates`;
 Python tham chiếu: `src/native_blind_contract.py` (cùng ABI, có test vector chéo ngôn ngữ).
@@ -503,13 +504,12 @@ Bên nhận phải dùng cùng `max_bits_per_IDR`, nếu không lịch lệch v�
 
 ---
 
-## 9. Khung xác thực và trích xuất mù
+## 9. Khung kênh và trích xuất mù
 
 ### 9.1. Khung
 
 ```text
-[version = 0x02 : 1 byte][payload_len : 2 byte big-endian][payload][tag : 16 byte]
-tag = HMAC-SHA256( frame_key , version ‖ len ‖ payload )[0:16]
+[version = 0x03 : 1 byte][payload_len : 2 byte big-endian][payload]          (không có MAC)
 
 Làm trắng (whitening):
 keystream    = HMAC-SHA256(whitening_key, uint64_be(0)) ‖ HMAC-SHA256(whitening_key, uint64_be(1)) ‖ ...
@@ -521,7 +521,14 @@ dấu tại các vị trí được chọn bị lệch. Sau khi XOR với dòng 
 nhúng phân bố như ngẫu nhiên đối với người không có khóa.
 
 Payload tối đa 4096 byte ở các lệnh stdin (giới hạn cấu hình); định dạng cho phép tới 65 535.
-Giao thức v2 không đọc được file stego tạo bởi v1.
+
+**Vì sao bỏ thẻ HMAC (v3).** Ở v2 khung mang thêm 16 byte `HMAC(frame_key, header ‖ payload)`.
+Khi Groth16 verify đã là bắt buộc, thẻ này trùng việc: sửa message thì proof sai, sửa proof thì
+proof không hợp lệ, proof tạo bằng secret khác cũng bị từ chối. Bỏ thẻ tiết kiệm 128 bit
+(2 IDR ở 64 bit/IDR). Khóa sai vẫn bị loại rẻ ở bước kiểm header (xem 9.2) hoặc khi giải nén
+proof; phần còn sót bị Groth16 từ chối. Hệ quả: kênh không còn tự phát hiện bit payload bị
+sửa, nên **chỉ job verify** (Groth16) mới xác thực payload; lệnh/job extract trả payload kèm
+`"verified": false`. v3 không đọc được stego v2 (byte version khác) và ngược lại.
 
 ### 9.2. Trích xuất mù
 
@@ -530,22 +537,23 @@ Giao thức v2 không đọc được file stego tạo bởi v1.
 1. Parse lại các IDR của video stego, liệt kê ứng viên (giống hệt phía gửi vì lật dấu
    không đổi cấu trúc).
 2. Dùng cùng secret sinh lại các khóa con, tính score, sắp xếp, đọc bit tại các vị trí đã chọn.
-3. Bỏ làm trắng 24 bit đầu → kiểm version = 2 và độ dài ≤ giới hạn → biết tổng số bit cần đọc.
-   Sai khóa thì byte version sau khi bỏ làm trắng gần như ngẫu nhiên nên bị từ chối ngay.
-4. Đọc đủ khung, bỏ làm trắng, tính lại tag và so sánh hằng thời gian. Sai → từ chối.
+3. Bỏ làm trắng 24 bit đầu → kiểm version = 3 và độ dài ≤ giới hạn → biết tổng số bit cần đọc.
+   Sai khóa thì byte version sau khi bỏ làm trắng gần như ngẫu nhiên nên bị từ chối ngay
+   (lọt qua cả version lẫn độ dài với xác suất cỡ 1/256 × giới hạn/65 536).
+4. Đọc đủ khung và bỏ làm trắng → payload. Payload này **chưa được xác thực**: bên gọi phải
+   unpack và verify Groth16 (job verify của dịch vụ làm việc này).
 
 Thông báo lỗi native tương ứng (mọi trường hợp đều thoát mã 2):
 
 | Thông báo | Khi nào |
 |---|---|
-| `authenticated CAVLC frame tag is invalid` | Đủ bit nhưng tag HMAC sai (sai khóa hoặc bit bị sửa) |
-| `authenticated CAVLC frame/stream version is invalid` | Byte đầu (sau khi bỏ làm trắng) khác `0x02` (thường do sai khóa) |
-| `authenticated CAVLC frame/stream length exceeds configured maximum` | Trường độ dài vượt giới hạn |
+| `CAVLC frame/stream version is invalid` | Byte đầu (sau khi bỏ làm trắng) khác `0x03` (thường do sai khóa, hoặc stego v2) |
+| `CAVLC frame/stream length exceeds configured maximum`, `CAVLC frame length is invalid` | Trường độ dài vượt giới hạn hoặc không khớp |
 | `blind schedule capacity is insufficient` | Lịch cần nhiều bit hơn số ứng viên của đoạn |
-| `IDR stream ended before authenticated payload was complete`, `... ended before authenticated payload capacity was met`, `authenticated CAVLC stream is incomplete` | Chế độ theo đoạn: hết video trước khi đọc đủ khung |
+| `IDR stream ended before payload was complete`, `... ended before payload capacity was met`, `CAVLC stream is incomplete` | Chế độ theo đoạn: hết video trước khi đọc đủ khung |
 
-HMAC hợp lệ chỉ chứng minh payload đến từ người có khóa và không bị sửa;
-**không** thay cho việc kiểm proof Groth16.
+Tìm thấy khung chỉ có nghĩa là có dữ liệu ở đúng vị trí theo khóa; **không** chứng minh payload
+nguyên vẹn. Việc đó thuộc về proof Groth16 (mục 10).
 
 ---
 
@@ -612,7 +620,7 @@ không phải trusted ceremony cho triển khai.
 ### 11.2. Nhận
 
 1. `zkstego_blind_bits extract-stream-auth stego.h264 - <max_payload> <max_bits_per_IDR>`,
-   stdin: khóa hex. stdout: payload hex (đã qua HMAC).
+   stdin: khóa hex. stdout: payload hex (chưa xác thực; verify Groth16 ở bước sau).
 2. `unpack` → (message, proof 129 B) → `bytes_to_proof`.
 3. `verify_proof_for_payload(proof, message, secret)` → chỉ khi đúng mới dùng message.
 
@@ -620,7 +628,7 @@ không phải trusted ceremony cho triển khai.
 
 | Lệnh | Mục đích |
 |---|---|
-| `embed-stream-auth-stdin`, `extract-stream-auth` | Khung xác thực, lịch theo đoạn IDR, đọc/ghi file |
+| `embed-stream-auth-stdin`, `extract-stream-auth` | Khung kênh v3 (hậu tố `-auth` nghĩa là "có khóa"; khung không có MAC), lịch theo đoạn IDR, đọc/ghi file |
 | `measure-live-capacity-stdin` | Đọc Annex-B từ stdin, in JSON dung lượng ứng viên |
 | `embed-live-auth-stdin`, `extract-live-auth-stdin` | Như chế độ đoạn nhưng video vào/ra qua stdin/stdout (dùng cho WebSocket) |
 
@@ -705,12 +713,12 @@ Các bước (số thứ tự in trên terminal):
 | Message → proof | Public/private input, witness, proof JSON, cấu trúc 129 byte | public signals khớp |
 | Parser native | Bảng NAL, slice IDR, số ứng viên mỗi IDR | — |
 | Cắt NAL, EBSP→RBSP, header qua FFmpeg | Byte NAL header theo bit, ví dụ EPB, chuỗi cấu hình x264 trong SEI, toàn bộ SPS/PPS/slice header do `trace_headers` giải | độ rộng, QP, vị trí bắt đầu slice data khớp native |
-| Dung lượng theo đoạn, lịch | Dẫn xuất khóa HKDF (giá trị khóa con chỉ hiện trên terminal), khung v2, giới hạn bit/IDR, bảng IDR nào mang khoảng bit khung nào, score HMAC, bit khung ⊕ keystream = bit nhúng, bit cũ/mới | lịch Python (`segment_schedule`) khớp encoder native |
+| Dung lượng theo đoạn, lịch | Dẫn xuất khóa HKDF (giá trị khóa con chỉ hiện trên terminal), khung v3, giới hạn bit/IDR, bảng IDR nào mang khoảng bit khung nào, score HMAC, bit khung ⊕ keystream = bit nhúng, bit cũ/mới | lịch Python (`segment_schedule`) khớp encoder native |
 | Nhúng native | Bản đồ MB, khối ví dụ trước/sau | danh tính ứng viên, bit, metadata không đổi |
 | FFmpeg decode | ASCII trước/sau, bản đồ ΔY, PSNR Y/U/V | số frame, ánh xạ 1 slice/frame |
 | Giải phẫu một khối | Xem 15.2 | khớp FFmpeg và native ở từng bước |
 | Bit nhúng nằm ở đâu | Định danh ứng viên, score HMAC, thứ hạng → chỉ số bit trong khung → trường mang bit (version/độ dài/message/A.x/B.x/C.x/tag) → byte RBSP → byte EBSP (đếm EPB) → offset trong file, hex trước/sau, vị trí MB trên frame ASCII | bit trong file source khớp trace; bit trong stego = bit khung XOR bit keystream |
-| Verifier | Trích xuất mù, HMAC, Groth16 bắt buộc; bên nhận tự dựng lại cùng lịch | proof hợp lệ, message khớp |
+| Verifier | Trích xuất mù, kiểm header khung, Groth16 bắt buộc; bên nhận tự dựng lại cùng lịch | proof hợp lệ, message khớp |
 | Ca từ chối | Đổi message, proof sai, thiếu proof, sai khóa, lật một bit mang dữ liệu ngay trong byte file | đều bị từ chối đúng lý do |
 | Job HTTP | Embed (output trùng từng byte với CLI), extract, verify → `succeeded`; verify sai khóa → `rejected`; trạng thái và độ trễ | khớp payload và message |
 | Luồng WebSocket | Gửi Annex-B theo chunk, nhận stego, giải mã và trích lại | stego trùng CLI, payload khớp |
@@ -783,7 +791,7 @@ ctest --test-dir native/build -C Release --output-on-failure
 | 6 | `test_native_http_channel.py` | Job HTTP và luồng WebSocket qua Uvicorn thật |
 | 7 | `test_manifest_security.py` | Ký manifest, ràng buộc positions/stego |
 | 8 | `test_realtime_scheduler.py` | Bộ lập lịch realtime |
-| 9 | `test_benchmark_recorder.py` | Kiểm tra fail-closed của bộ ghi benchmark camera |
+| 9 | `test_benchmark_recorder.py` | Kiểm tra fail-closed của bộ ghi benchmark camera và các hàm phân tích benchmark |
 | 10 | `test_trust_interfaces.py` | Giao diện trust thử nghiệm (provenance, C2PA, attestation) |
 | 11 | `test_demo_h264_explain.py` | Toán giải thích của demo khớp native và pixel FFmpeg |
 | 12 | `test_demo_smoke.py` | Toàn bộ demo chạy không có `[FAIL]` |
@@ -795,7 +803,8 @@ Mã thoát `run_all`: 0 = tất cả qua, 1 = có lỗi, 2 = có ca bị bỏ qu
 
 ## 17. Bảo mật, giới hạn và việc còn mở
 
-- Kênh native đã tách khóa con bằng HKDF và làm trắng bit (giao thức v2), nhưng mạch
+- Kênh native tách khóa con bằng HKDF và làm trắng bit; từ v3 khung không còn MAC nên mọi
+  xác thực payload dựa vào Groth16. Mạch
   vẫn dùng secret gốc, và verifier phải giữ secret để tính lại commitment.
 - Khung và proof không chứa định danh video hay bộ đếm: có thể phát lại sang video khác
   cùng khóa. Cần thiết kế commitment theo đoạn (xem `future_plan.md`).
@@ -846,7 +855,7 @@ Kế hoạch xử lý các điểm trên: `future_plan.md`.
 | `src/manifest.py`, `src/key_policy.py`, `src/trust/` | Manifest có chữ ký, chứng chỉ khóa có hạn, giao diện trust thử nghiệm |
 | `demo/` | Demo duy nhất: `terminal_demo.py` và các module `deep_trace`, `h264_explain`, `segment_plan`, `negative_cases`, `service_steps`, `native_io` |
 | `src/runtest/` | Bộ test (`run_all.py`) và `prepare_fixtures.py` |
-| `benchmark/` | Benchmark và báo cáo đo đạc |
+| `benchmark/` | Benchmark; một lệnh `run_new_suite` ghi một báo cáo duy nhất `results/benchmark_report_new.pdf` |
 | `doc/realtime_cavlc_theory_and_implementation.md` | Lý thuyết và hợp đồng realtime chi tiết |
 | `doc/completion_plan.md` | Kiểm toán bằng chứng và cổng nghiệm thu |
 | `future_plan.md` | Kế hoạch phiên bản tiếp theo |

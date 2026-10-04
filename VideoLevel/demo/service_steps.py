@@ -123,10 +123,10 @@ def _http_jobs(session, client, headers: dict, source: Path, stego: Path, key: b
     wrong_key = bytes([key[0] ^ 1]) + key[1:]
     rejected = _submit(session, client, headers, "verify_wrong_key", "/api/v1/jobs/verify",
                        {"secret_key_b64": _b64(wrong_key), "maximum_payload_bytes": str(MAX_PAYLOAD_BYTES)}, stego_file)
-    session.check("verify job voi sai key -> rejected (payload_not_authenticated)",
+    session.check("verify job voi sai key -> rejected (payload_not_found)",
                   rejected["status"] == "rejected"
-                  and (rejected.get("result") or {}).get("reason") == "payload_not_authenticated")
-    session.say("Job ket thuc: succeeded = chap nhan; rejected = da chay nhung proof/HMAC khong dat; failed = loi ha tang.")
+                  and (rejected.get("result") or {}).get("reason") == "payload_not_found")
+    session.say("Job ket thuc: succeeded = chap nhan; rejected = khong thay khung hoac proof khong dat; failed = loi ha tang.")
     session.say("Ban ghi job khong luu key hay message; artifact chi tai duoc mot lan roi bi xoa.")
 
 

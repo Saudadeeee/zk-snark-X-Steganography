@@ -1,7 +1,7 @@
 # Tài liệu VideoLevel
 
 Bắt đầu từ **[he_thong_hoat_dong.md](he_thong_hoat_dong.md)**: mô tả đầy đủ hệ thống hoạt động
-thế nào, từ FFmpeg/libx264, cấu trúc H.264, CAVLC, kênh nhúng, lịch HMAC, khung xác thực,
+thế nào, từ FFmpeg/libx264, cấu trúc H.264, CAVLC, kênh nhúng, lịch HMAC, khung kênh v3,
 proof Groth16 đến dịch vụ, demo và cách đọc kết quả debug. Các ví dụ số trong đó lấy từ
 một lần chạy `demo/terminal_demo.py` thật.
 

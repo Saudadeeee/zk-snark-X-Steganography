@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.native_blind_contract import (
-    FRAME_TAG_INFO,
+    FRAME_HEADER_BYTES,
     FRAME_VERSION,
     HKDF_SALT,
     SCHEDULE_INFO,
@@ -35,10 +35,10 @@ from src.native_blind_contract import (
     bits_to_bytes,
     bytes_to_bits,
     derive_channel_keys,
-    pack_authenticated_frame,
+    pack_frame,
     score_candidate,
     segment_schedule,
-    unpack_authenticated_frame,
+    unpack_frame,
     unwhiten_bits,
     whitening_keystream_bits,
 )
@@ -258,13 +258,13 @@ def preflight(session: Session) -> tuple[Tools, MeasuredBridge]:
     if missing:
         raise RuntimeError("Thieu artifacts: " + ", ".join(missing) + ". Chay --setup.")
     session.say("Native C++ (zkstego_blind_bits + zkstego_inspect) + FFmpeg + Circom witness + snarkjs: san sang.")
-    session.say("Giao thuc kenh: SEGMENT protocol v2. Moi IDR = 1 segment (SPS/PPS + IDR do),")
+    session.say("Giao thuc kenh: SEGMENT protocol v3. Moi IDR = 1 segment (SPS/PPS + IDR do),")
     session.say("mang toi da --max-bits-per-idr bit cua khung xac thuc; segment sau tiep tuc tu bit ke tiep.")
     session.say("Cung giao thuc voi dich vu HTTP/WebSocket native (embed-stream-auth / embed-live-auth).")
     session.say("Gioi han core: Baseline, CAVLC, progressive, 4:2:0; chi nhung IDR.")
     if session.args.no_service:
         session.say("--no-service: bo qua buoc HTTP jobs va WebSocket stream.")
-    session.report["scope"] = "native segment-protocol authenticated payload + mandatory Groth16 verification"
+    session.report["scope"] = "native keyed segment protocol v3 (no frame MAC) + mandatory Groth16 verification"
     for label, command in (("ffmpeg_version", ["ffmpeg", "-version"]), ("node_version", ["node", "--version"]),
                            ("git_commit", ["git", "rev-parse", "HEAD"])):
         try:
@@ -420,28 +420,25 @@ def pack_and_select(session: Session, tools: Tools, source: Path, trace: dict, m
                     key: bytes, proof: bytes) -> tuple[bytes, EmbedPlan]:
     session.stage("Payload layout, capacity theo segment va lich nhung")
     payload = pack(message, proof)
-    session.say("Kenh CAVLC protocol v2: secret 32B KHONG dung truc tiep lam khoa HMAC; HKDF-SHA256 (RFC 5869) tach khoa:")
+    session.say("Kenh CAVLC protocol v3: stego key 32B KHONG dung truc tiep lam khoa HMAC; HKDF-SHA256 (RFC 5869) tach 2 khoa:")
     session.say(f"  PRK           = HMAC-SHA256(key = {HKDF_SALT!r}, msg = secret)   (HKDF-Extract)")
-    for name, info in (("schedule_key ", SCHEDULE_INFO), ("frame_key    ", FRAME_TAG_INFO), ("whitening_key", WHITENING_INFO)):
+    for name, info in (("schedule_key ", SCHEDULE_INFO), ("whitening_key", WHITENING_INFO)):
         session.say(f"  {name} = HKDF-Expand(PRK, info = {info!r}, L = 32)")
     subkeys = derive_channel_keys(key)
     session.say(f"  schedule_key  = {subkeys.schedule_key.hex()}", private=True)
-    session.say(f"  frame_key     = {subkeys.frame_key.hex()}", private=True)
     session.say(f"  whitening_key = {subkeys.whitening_key.hex()}", private=True)
     session.say("Subkey chi hien tren terminal nhu secret; transcript/report khong ghi gia tri.")
-    frame = pack_authenticated_frame(payload, key)
+    frame = pack_frame(payload)
     frame_bits = bytes_to_bits(frame)
     keystream = whitening_keystream_bits(key, len(frame_bits))
     bits = [frame_bit ^ key_bit for frame_bit, key_bit in zip(frame_bits, keystream)]  # bits that go into the file
     embedded_frame = bits_to_bytes(bits)
     session.say(f"Packed payload: [message_len BE32 = 4B][message = {len(message)}B][proof = 129B] = {len(payload)}B")
-    session.say(f"Native frame v2: [version = 0x{FRAME_VERSION:02x} 1B][payload_len BE16 = 2B][payload = {len(payload)}B]"
-                "[HMAC tag = 16B]")
-    session.say("tag = HMAC-SHA256(frame_key, version || len || payload)[0:16]")
+    session.say(f"Native frame v3: [version = 0x{FRAME_VERSION:02x} 1B][payload_len BE16 = 2B][payload = {len(payload)}B]"
+                " (khong MAC: proof Groth16 trong payload moi la thu xac thuc)")
     session.say("Whitening: keystream = HMAC-SHA256(whitening_key, uint64_be(j)), j = 0,1,2,...; noi lien, MSB-first.")
     session.say("Bit nhung i = frame bit i XOR keystream bit i (i dem TOAN CUC qua moi segment).")
-    session.say(f"Header plaintext = {frame[:3].hex()} -> header nhung (sau XOR) = {embedded_frame[:3].hex()};"
-                f" tag = {frame[-16:].hex()}")
+    session.say(f"Header plaintext = {frame[:3].hex()} -> header nhung (sau XOR) = {embedded_frame[:3].hex()}")
     session.say("Header/proof co cau truc nhung bit ghi vao sign da bi keystream lam ngau nhien; sai key -> version ngau nhien.")
     probe_cap = session.args.max_bits_per_idr or DEFAULT_MAX_BITS_PER_IDR
     segments = inspect_segments(session, tools.inspect, source, probe_cap, "segments_before")
@@ -457,7 +454,8 @@ def pack_and_select(session: Session, tools: Tools, source: Path, trace: dict, m
     capacity = segment_capacity(segments, max_bits)
     session.say(f"zkstego_inspect --segments {max_bits}: {segments['idr_segments']} IDR segment, "
                 f"{segments['raw_candidate_signs']} sign candidate, capacity = sum(min({max_bits}, candidates)) = {capacity} bit.")
-    session.say(f"Can {len(frame)} bytes = {len(bits)} bits; message toi da theo capacity nay: {max(0, capacity // 8 - 152)}B.")
+    session.say(f"Can {len(frame)} bytes = {len(bits)} bits; message toi da theo capacity nay: "
+                f"{max(0, capacity // 8 - FRAME_HEADER_BYTES - 4 - PROOF_SIZE_BYTES)}B.")
     placements = segment_schedule(segments, key, len(bits), max_bits)
     show_allocation(session, segments, placements, max_bits, len(message))
     session.say("Trong MOI segment: ID = analysis_nal:mb:category:block:rbsp_bit (analysis input = SPS+PPS+IDR,")
@@ -488,7 +486,7 @@ def pack_and_select(session: Session, tools: Tools, source: Path, trace: dict, m
                           raw_candidate_signs=segments["raw_candidate_signs"], capacity_bits=capacity,
                           segments_used=len({p.segment for p in placements}), embedded_bits=len(bits),
                           utilization=len(bits) / capacity, packed_payload_bytes=len(payload), native_frame_bytes=len(frame),
-                          channel_protocol="cavlc-v2 segment protocol (HKDF + whitening)",
+                          channel_protocol="cavlc-v3 segment protocol (HKDF + whitening, no frame MAC)",
                           expected_flips=sum(row["flip"] for row in schedule))
     return payload, EmbedPlan(max_bits, segments, placements, selected, bits, frame)
 
@@ -644,7 +642,7 @@ def verify_message(session: Session, tools: Tools, bridge: MeasuredBridge, stego
                    message: bytes, plan: EmbedPlan) -> tuple[bytes, dict]:
     session.stage("Verifier: chi nhan stego + key + verification key")
     session.say("Native tu parse SPS/PPS, ghep moi IDR thanh segment, tai tao lich keyed tung segment, un-whiten,")
-    session.say("doc header 24 bit de biet do dai, gom du frame qua cac segment roi kiem HMAC.")
+    session.say("doc header 24 bit de biet do dai, gom du frame qua cac segment; Groth16 kiem payload.")
     session.say("Khong can video goc, schedule.json hay proof.json cua sender.")
     result = native_extract(session, tools, stego, key, plan.max_bits, "native_extract")
     recovered = bytes.fromhex(result.stdout.decode().strip())
@@ -659,7 +657,7 @@ def verify_message(session: Session, tools: Tools, bridge: MeasuredBridge, stego
     session.check("message roundtrip", recovered_message == message)
     session.say(f"VERDICT = true; message = {recovered_message.decode('utf-8')!r}")
     session.say(f"Recovered proof: {len(compressed)}B; payload: {len(recovered)}B; public inputs tai tao tu message/key.")
-    session.say("Trong API nay verifier can shared key de extract/HMAC va tai tao commitment; proof khong chua secret.")
+    session.say("Trong API nay verifier can shared key de extract va tai tao commitment; proof khong chua secret.")
     # Independent educational audit AFTER acceptance; not an input to the actual verifier.
     stego_segments = inspect_segments(session, tools.inspect, stego, plan.max_bits, "segments_after")
     receiver = segment_schedule(stego_segments, key, len(plan.bits), plan.max_bits)
@@ -668,8 +666,8 @@ def verify_message(session: Session, tools: Tools, bridge: MeasuredBridge, stego
                   == [(p.segment, p.candidate.identity, p.frame_bit_index) for p in plan.placements])
     recovered_bits = [p.candidate.bit for p in receiver]
     recovered_frame = bits_to_bytes(unwhiten_bits(recovered_bits, key))
-    session.check("readback --segments + un-whiten + Python HMAC contract khop native",
-                  unpack_authenticated_frame(recovered_frame, key, MAX_PAYLOAD_BYTES) == recovered)
+    session.check("readback --segments + un-whiten + Python contract khop native",
+                  unpack_frame(recovered_frame, MAX_PAYLOAD_BYTES) == recovered)
     session.say("Readback bit trong file (prefix): " + "".join(map(str, recovered_bits[:64])))
     session.say("Sau XOR keystream (frame bits):   " + "".join(map(str, bytes_to_bits(recovered_frame)[:64])))
     session.say(f"Header sau un-whiten = {recovered_frame[:3].hex()} (version 0x{FRAME_VERSION:02x}, payload_len BE16)")

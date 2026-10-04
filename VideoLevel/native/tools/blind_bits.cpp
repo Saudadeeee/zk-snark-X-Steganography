@@ -260,13 +260,13 @@ double sample_quantile_ms(std::vector<double> samples, const std::size_t numerat
     return samples[index];
 }
 
-void run_live_authenticated_embed(
+void run_live_embed(
     std::istream& input,
     std::ostream& output,
     const std::vector<std::uint8_t>& key,
     const std::vector<std::uint8_t>& payload,
     const std::size_t maximum_bits_per_segment) {
-    zkstego::AuthenticatedCavlcStreamEncoder encoder(key, payload, maximum_bits_per_segment);
+    zkstego::CavlcStreamEncoder encoder(key, payload, maximum_bits_per_segment);
     zkstego::AnnexBNalStreamReader reader(input);
     std::vector<zkstego::AnnexBNalUnit> parameter_sets;
     std::vector<std::uint8_t> nal_bytes;
@@ -326,7 +326,7 @@ void run_live_authenticated_embed(
         }
     }
     if (idr_count == 0U) throw std::invalid_argument("input stream contained no IDR slices");
-    if (!encoder.complete()) throw std::invalid_argument("IDR stream ended before authenticated payload capacity was met");
+    if (!encoder.complete()) throw std::invalid_argument("IDR stream ended before payload capacity was met");
     std::cerr << "ZKSTEG_STREAM_METRICS {\"patched_idr_segments\":" << idr_count
               << ",\"idr_segment_count\":" << idr_segment_count
               << ",\"idr_service_samples\":" << idr_service_latency_ms.size()
@@ -342,12 +342,12 @@ void run_live_authenticated_embed(
               << "}\n";
 }
 
-std::vector<std::uint8_t> run_live_authenticated_extract(
+std::vector<std::uint8_t> run_live_extract(
     std::istream& input,
     const std::vector<std::uint8_t>& key,
     const std::size_t maximum_payload_bytes,
     const std::size_t maximum_bits_per_segment) {
-    zkstego::AuthenticatedCavlcStreamDecoder decoder(key, maximum_payload_bytes, maximum_bits_per_segment);
+    zkstego::CavlcStreamDecoder decoder(key, maximum_payload_bytes, maximum_bits_per_segment);
     zkstego::AnnexBNalStreamReader reader(input);
     std::vector<zkstego::AnnexBNalUnit> parameter_sets;
     std::vector<std::uint8_t> nal_bytes;
@@ -360,11 +360,11 @@ std::vector<std::uint8_t> run_live_authenticated_extract(
         } else if (unit.nal_unit_type == 5U) {
             ++idr_count;
             decoder.consume_segment(zkstego::assemble_cavlc_stream_segment(parameter_sets, unit));
-            if (decoder.complete()) return decoder.authenticated_payload();
+            if (decoder.complete()) return decoder.payload();
         }
     }
     if (idr_count == 0U) throw std::invalid_argument("input stream contained no IDR slices");
-    throw std::invalid_argument("input stream ended before authenticated payload was complete");
+    throw std::invalid_argument("input stream ended before payload was complete");
 }
 
 void set_standard_streams_to_binary() {
@@ -388,11 +388,13 @@ std::size_t parse_bit_count(const std::string& text) {
 int run(const std::vector<std::string>& argv) {
     const auto argc = static_cast<int>(argv.size());
     if (argc < 2) {
-        std::cerr << "usage: zkstego_blind_bits <command> ...  (authenticated CAVLC segment protocol v2)\n"
+        std::cerr << "usage: zkstego_blind_bits <command> ...  (keyed CAVLC segment protocol v3)\n"
                      "  embed-stream-auth-stdin <input.h264> <new-output.h264> <max-bits-per-IDR>\n"
                      "      stdin: key line, payload-hex line; writes the stego file\n"
                      "  extract-stream-auth <input.h264> <key-file|-> <maximum-payload-bytes> <max-bits-per-IDR>\n"
-                     "      prints the authenticated payload hex; a wrong key or tampering fails\n"
+                     "      prints the payload hex; a wrong key fails the frame version/length checks\n"
+                     "The frame has no MAC: '-auth' names a keyed command, and the payload's\n"
+                     "Groth16 proof (verified by the service) is what authenticates it.\n"
                      "  measure-live-capacity-stdin <max-bits-per-IDR>\n"
                      "      stdin: raw Annex-B; stdout: ZKSTEG_CAPACITY_METRICS JSON\n"
                      "  embed-live-auth-stdin <max-bits-per-IDR>\n"
@@ -411,10 +413,10 @@ int run(const std::vector<std::string>& argv) {
             auto payload = read_hex_payload_stdin_line();
             const auto maximum_bits = parse_bit_count(argv[4]);
             if (maximum_bits == 0U) throw std::invalid_argument("max-bits-per-IDR must be positive");
-            const auto output = zkstego::embed_authenticated_cavlc_stream_file(
+            const auto output = zkstego::embed_cavlc_stream_file(
                 read_binary(argv[2]), key.value(), payload.value(), maximum_bits);
             write_new_binary(argv[3], output);
-            std::cout << "embedded_authenticated_stream_payload_bytes=" << payload.size()
+            std::cout << "embedded_stream_payload_bytes=" << payload.size()
                       << " output_bytes=" << output.size() << '\n';
             return 0;
         }
@@ -423,7 +425,7 @@ int run(const std::vector<std::string>& argv) {
             const auto maximum_payload = parse_bit_count(argv[4]);
             const auto maximum_bits = parse_bit_count(argv[5]);
             if (maximum_bits == 0U) throw std::invalid_argument("max-bits-per-IDR must be positive");
-            const auto payload = zkstego::extract_authenticated_cavlc_stream_file(
+            const auto payload = zkstego::extract_cavlc_stream_file(
                 read_binary(argv[2]), key.value(), maximum_payload, maximum_bits);
             std::cout << bytes_to_hex(payload) << '\n';
             return 0;
@@ -440,7 +442,7 @@ int run(const std::vector<std::string>& argv) {
             auto payload = read_hex_payload_stdin_line();
             const auto maximum_bits = parse_bit_count(argv[2]);
             if (maximum_bits == 0U) throw std::invalid_argument("max-bits-per-IDR must be positive");
-            run_live_authenticated_embed(std::cin, std::cout, key.value(), payload.value(), maximum_bits);
+            run_live_embed(std::cin, std::cout, key.value(), payload.value(), maximum_bits);
             return 0;
         }
         if (operation == "extract-live-auth-stdin" && argc == 4) {
@@ -449,7 +451,7 @@ int run(const std::vector<std::string>& argv) {
             const auto maximum_payload = parse_bit_count(argv[2]);
             const auto maximum_bits = parse_bit_count(argv[3]);
             if (maximum_bits == 0U) throw std::invalid_argument("max-bits-per-IDR must be positive");
-            const auto payload = run_live_authenticated_extract(
+            const auto payload = run_live_extract(
                 std::cin, key.value(), maximum_payload, maximum_bits);
             std::cout << bytes_to_hex(payload) << '\n';
             return 0;

@@ -512,6 +512,8 @@ def _safe_verify_result(result: dict[str, Any]) -> dict[str, Any]:
 def _safe_extract_result(result: dict[str, Any], output_name: str) -> dict[str, Any]:
     safe = {key: result[key] for key in ("valid", "payload_bytes") if key in result}
     safe["output_file"] = output_name
+    # Extraction never authenticates a payload; only the verify job checks its proof.
+    safe["verified"] = False
     return safe
 
 
@@ -605,40 +607,56 @@ def create_app(
             except OSError:
                 continue
 
+    def outcome(operation: str, handler: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+        try:
+            result = handler()
+        except Exception as exc:  # Do not expose paths, secrets, or internal tracebacks.  # noqa: BLE001
+            return {"status": "failed", "error": f"{operation} failed: {type(exc).__name__}"}
+        # Fail closed: a verify job is "succeeded" only when the proof verified.
+        # Anything else is the terminal "rejected" status, keeping the valid=false body.
+        rejected = operation == "verify" and result.get("valid") is not True
+        return {"status": "rejected" if rejected else "succeeded", "result": result}
+
+    def release(job_id: str, operation: str) -> None:
+        try:
+            cleanup_inputs(job_id, operation)
+        finally:
+            capacity.release()
+
+    # A terminal status is published only after the job's inputs are removed and its
+    # capacity slot is free, so a client that sees a finished job can submit the next one.
     def submit(job_id: str, operation: str, handler: Callable[[], dict[str, Any]]) -> None:
         def run() -> None:
             try:
+                store.update(job_id, status="running")
+            except Exception:  # noqa: BLE001 - e.g. ENOSPC persisting the record.
                 try:
-                    store.update(job_id, status="running")
-                except Exception:  # noqa: BLE001 - e.g. ENOSPC persisting the record.
+                    release(job_id, operation)
+                finally:
                     # The in-memory record is updated before persisting, so this still ends the
                     # job for clients; restart recovery fails whatever state reached the disk.
                     with contextlib.suppress(Exception):
                         store.update(job_id, status="failed", error=f"{operation} could not be started")
-                    return
-                try:
-                    result = handler()
-                    # Fail closed: a verify job is "succeeded" only when the proof verified.
-                    # Anything else is the terminal "rejected" status, keeping the valid=false body.
-                    rejected = operation == "verify" and result.get("valid") is not True
-                    store.update(job_id, status="rejected" if rejected else "succeeded", result=result)
-                except Exception as exc:  # Do not expose paths, secrets, or internal tracebacks.  # noqa: BLE001
-                    store.update(job_id, status="failed", error=f"{operation} failed: {type(exc).__name__}")
+                return
+            try:
+                terminal = outcome(operation, handler)
             finally:
-                try:
-                    cleanup_inputs(job_id, operation)
-                finally:
-                    capacity.release()
+                release(job_id, operation)
+            try:
+                store.update(job_id, **terminal)
+            except Exception:  # noqa: BLE001 - e.g. ENOSPC persisting the final record.
+                # Never leave a client-visible success that the disk does not hold: end the job as
+                # failed (in memory at least; restart recovery fails a record left "running").
+                _LOGGER.warning("job %s: could not persist its %s status", job_id, terminal.get("status"))
+                with contextlib.suppress(Exception):
+                    store.update(job_id, status="failed", error=f"{operation} result could not be saved")
         try:
             executor.submit(run)
         except Exception:
             try:
-                store.update(job_id, status="failed", error=f"{operation} could not be scheduled")
+                release(job_id, operation)
             finally:
-                try:
-                    cleanup_inputs(job_id, operation)
-                finally:
-                    capacity.release()
+                store.update(job_id, status="failed", error=f"{operation} could not be scheduled")
             raise
 
     def abandon_upload(job_id: str, job_dir: Path, created: bool) -> None:

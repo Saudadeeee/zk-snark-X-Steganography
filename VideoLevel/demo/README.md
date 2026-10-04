@@ -57,13 +57,13 @@ py -3.12 demo/terminal_demo.py --rows 32 --all-maps
 Mọi input, kể cả H.264, được encode lại về Baseline/CAVLC/yuv420p, ≤640×480, một slice/frame,
 không B frame. Đây là chuẩn hóa đầu vào của demo, không phải khẳng định core hỗ trợ mọi video/profile.
 
-### Giao thức kênh: segment protocol v2
+### Giao thức kênh: segment protocol v3
 
 Demo dùng **đúng giao thức của dịch vụ native**. Mỗi IDR là một *segment* (SPS/PPS đang hiệu lực +
-IDR đó). Khung xác thực `[0x02][len BE16][payload][tag 16B]` được whitening rồi chia theo thứ tự:
+IDR đó). Khung kênh `[0x03][len BE16][payload]` (không MAC) được whitening rồi chia theo thứ tự:
 segment `s` mang tối đa `min(max_bits_per_idr, số candidate của s)` bit tiếp theo, chọn theo
 `HMAC-SHA256(schedule_key, ID trong segment)`. Capacity = Σ min(cap, candidates). Payload cần
-`(152 + message bytes) × 8` bit, nên clip ngắn cần cap lớn hơn 64 hoặc nhiều IDR hơn
+`(136 + message bytes) × 8` bit, nên clip ngắn cần cap lớn hơn 64 hoặc nhiều IDR hơn
 (ví dụ foreman QP 22 ≈ 450 candidate/IDR: `--gop 12 --frames 24` chỉ có 2 IDR ≈ 900 bit, không đủ;
 `--frames 48` thì đủ). Khi thiếu, demo dừng với thông báo rõ: tăng `--frames`, giảm `--gop`,
 tăng `--max-bits-per-idr` hoặc rút ngắn message.
@@ -78,13 +78,13 @@ tăng `--max-bits-per-idr` hoặc rút ngắn message.
 | 4 | ZKP | Message, SHA-256, commitment, 513 public inputs, secret, witness, proof A/B/C, dạng nén 129 B |
 | 5 | Parser native | `zkstego_inspect <video>`: NAL, IDR slice, candidates từng IDR |
 | 6* | NAL/EBSP/RBSP | Header NAL theo bit, EPB, SEI của x264, SPS/PPS/slice header do `trace_headers` giải |
-| 7 | Capacity + lịch | HKDF subkeys, khung v2, whitening; `zkstego_inspect --segments`; **bảng phân bổ: IDR nào mang khoảng frame bit nào**; preview lịch (ID trong segment, vị trí file, score, bit cũ/mới) |
+| 7 | Capacity + lịch | HKDF subkeys, khung v3 (không MAC), whitening; `zkstego_inspect --segments`; **bảng phân bổ: IDR nào mang khoảng frame bit nào**; preview lịch (ID trong segment, vị trí file, score, bit cũ/mới) |
 | 8 | Nhúng | `embed-stream-auth-stdin`; đối chiếu từng candidate, bản đồ MB, hệ số trước/sau |
 | 9 | Decode | Frame ASCII trước/sau, bản đồ chênh lệch Y, pixel 4×4, PSNR Y/U/V |
 | 10* | Giải phẫu một khối | Bit → CAVLC → hệ số → giải lượng tử → biến đổi ngược → dự đoán intra → pixel, khớp FFmpeg từng mẫu |
 | 11* | Bit nằm ở đâu | Segment → hạng HMAC trong segment → chỉ số frame bit → trường payload → byte trong file (tính cả EPB) |
 | 12 | Verifier | `extract-stream-auth` chỉ với stego + key, unpack, **Groth16 bắt buộc** rồi mới trả message; lịch tái tạo từ stego khớp |
-| 13 | Ca bác bỏ | Message sai; proof sai/thiếu dù HMAC đúng; sai key; lật **một** sign bit carrier ngay trong byte file (chọn vị trí không tạo/mất EPB) → HMAC tag reject |
+| 13 | Ca bác bỏ | Message sai; proof sai/thiếu dù khung đúng; sai key (header khung sai); lật **một** sign bit carrier ngay trong byte file (chọn vị trí không tạo/mất EPB) → native vẫn trích được message đã đổi 1 bit, **Groth16 từ chối** |
 | 14† | HTTP jobs | `create_native_app` thật (TestClient, token ≥32 ký tự): embed → stego trùng CLI; extract → payload; verify → `succeeded` + message; verify sai key → `rejected`; in trạng thái và độ trễ |
 | 15† | WebSocket | Gửi `source.h264` theo chunk 16 KiB qua `/api/v1/stream`; stego trả về trùng CLI, decode được, extract (CLI và WebSocket) ra đúng payload; metrics native |
 | 16 | Tổng kết | Timing, capacity, số PASS, phạm vi bảo vệ |
@@ -138,7 +138,7 @@ terminal_demo.py
   +-- src/native_blind_contract.py: segment_schedule/HKDF/whitening đúng ABI native
   +-- zkstego_blind_bits embed-stream-auth-stdin: nhúng theo segment
   +-- FFmpeg: decode và so sánh pixel
-  +-- zkstego_blind_bits extract-stream-auth: blind extraction/HMAC
+  +-- zkstego_blind_bits extract-stream-auth: blind extraction (kiểm header khung v3)
   +-- snarkjs groth16 verify: proof bắt buộc -> message hoặc lỗi
   +-- src/api/native_handlers.create_native_app: /api/v1/jobs/{embed,extract,verify}, /api/v1/stream
 ```
@@ -149,10 +149,10 @@ Secret được tạo mới cho mỗi lần demo và được in để học v�
 và subkey; shell recording/chuyển hướng stdout vẫn có thể ghi chúng. Key luôn đi qua stdin của
 tiến trình native, không qua argv hay file. Không dùng secret/token demo cho triển khai.
 
-Native CLI tự nó chỉ kiểm tra HMAC frame. Quy tắc **proof bắt buộc** được demo thực thi ngay sau
+Native CLI chỉ kiểm header khung (version, độ dài); khung v3 không có MAC. Quy tắc **proof bắt buộc** được demo thực thi ngay sau
 extract/unpack; job `/api/v1/jobs/verify` của dịch vụ cũng blind-extract rồi verify Groth16 phía server.
 Circuit chứng minh `commitment = SHA256(payload_hash || secret)`; message hash tính ngoài circuit.
-Proof/HMAC hợp lệ **chưa chứng minh tính toàn vẹn toàn video hay nguồn camera**.
+Proof hợp lệ **chưa chứng minh tính toàn vẹn toàn video hay nguồn camera**.
 
 Hệ số residual lượng tử trong ma trận **không phải pixel**. Đổi dấu ±1 có thể gây sai khác ở block
 khác qua prediction/deblock và lan sang P frame tham chiếu. Chỉ hỗ trợ Baseline, CAVLC, progressive,

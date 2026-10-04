@@ -322,19 +322,21 @@ std::vector<CavlcSignCandidate> collect_cavlc_trailing_one_sign_candidates(
     const std::vector<CavlcDecodedIdrSlice>& slices);
 std::string serialize_cavlc_sign_candidate(const CavlcSignCandidate& candidate);
 
-// Blind channel protocol v2. One 32-byte secret K is never used as an HMAC
-// key directly; RFC 5869 HKDF-SHA-256 separates it into independent subkeys:
+// Blind channel protocol v3. One 32-byte secret K (the stego key) is never
+// used as an HMAC key directly; RFC 5869 HKDF-SHA-256 separates it into
+// independent subkeys (labels unchanged from v2):
 //   PRK           = HMAC-SHA256(key = "zkstego-cavlc-v2-salt", msg = K)
 //   schedule_key  = HKDF-Expand(PRK, "zkstego/cavlc/v2/schedule", 32)
-//   frame_key     = HKDF-Expand(PRK, "zkstego/cavlc/v2/frame-tag", 32)
 //   whitening_key = HKDF-Expand(PRK, "zkstego/cavlc/v2/whitening", 32)
-// Schedule score = HMAC(schedule_key, identity); frame = [0x02][len BE16]
-// [payload][HMAC(frame_key, header || payload)[:16]]. Embedded bit i (global
-// across every IDR segment of one session) = frame bit i XOR keystream bit i,
-// where the keystream is HMAC(whitening_key, uint64_be(j)) for j = 0, 1, ...
-// and both bit streams are MSB-first. src/native_blind_contract.py is the
-// byte-for-byte Python reference.
-inline constexpr std::uint8_t kAuthenticatedCavlcFrameVersion = 2U;
+// Schedule score = HMAC(schedule_key, identity); frame = [0x03][len BE16]
+// [payload]. The frame carries no MAC: the channel only hides and locates the
+// payload, and the Groth16 proof inside it is what a verifier checks. A wrong
+// key still fails cheaply here in almost every case (random version byte or
+// length). Embedded bit i (global across every IDR segment of one session) =
+// frame bit i XOR keystream bit i, where the keystream is
+// HMAC(whitening_key, uint64_be(j)) for j = 0, 1, ... and both bit streams are
+// MSB-first. src/native_blind_contract.py is the byte-for-byte Python reference.
+inline constexpr std::uint8_t kCavlcFrameVersion = 3U;
 
 // RFC 5869 HKDF with SHA-256 (empty salt means 32 zero bytes). length must
 // not exceed 255 * 32 bytes.
@@ -356,31 +358,28 @@ std::vector<CavlcSignCandidate> select_keyed_cavlc_sign_candidates(
     const std::vector<CavlcSignCandidate>& candidates,
     const std::vector<std::uint8_t>& secret_key,
     std::size_t required_bits);
-std::vector<std::uint8_t> pack_authenticated_cavlc_frame(
-    const std::vector<std::uint8_t>& payload,
-    const std::vector<std::uint8_t>& secret_key);
-std::vector<std::uint8_t> unpack_authenticated_cavlc_frame(
+std::vector<std::uint8_t> pack_cavlc_frame(const std::vector<std::uint8_t>& payload);
+std::vector<std::uint8_t> unpack_cavlc_frame(
     const std::vector<std::uint8_t>& frame,
-    const std::vector<std::uint8_t>& secret_key,
     std::size_t maximum_payload_bytes);
 
-struct AuthenticatedCavlcStreamSegment {
+struct CavlcStreamSegment {
     std::vector<std::uint8_t> output;
     std::size_t candidate_capacity{};
     std::size_t bits_embedded{};
     bool session_complete{};
 };
 
-class AuthenticatedCavlcStreamEncoder {
+class CavlcStreamEncoder {
 public:
-    AuthenticatedCavlcStreamEncoder(
+    CavlcStreamEncoder(
         std::vector<std::uint8_t> secret_key,
         const std::vector<std::uint8_t>& payload,
         std::size_t maximum_bits_per_segment);
-    AuthenticatedCavlcStreamEncoder(const AuthenticatedCavlcStreamEncoder&) = delete;
-    AuthenticatedCavlcStreamEncoder& operator=(const AuthenticatedCavlcStreamEncoder&) = delete;
-    ~AuthenticatedCavlcStreamEncoder() noexcept;
-    [[nodiscard]] AuthenticatedCavlcStreamSegment process_segment(
+    CavlcStreamEncoder(const CavlcStreamEncoder&) = delete;
+    CavlcStreamEncoder& operator=(const CavlcStreamEncoder&) = delete;
+    ~CavlcStreamEncoder() noexcept;
+    [[nodiscard]] CavlcStreamSegment process_segment(
         const std::vector<std::uint8_t>& annex_b_segment);
     [[nodiscard]] bool complete() const noexcept;
     [[nodiscard]] std::size_t remaining_bits() const noexcept;
@@ -395,26 +394,25 @@ private:
     std::size_t next_bit_{};
 };
 
-class AuthenticatedCavlcStreamDecoder {
+class CavlcStreamDecoder {
 public:
-    AuthenticatedCavlcStreamDecoder(
+    CavlcStreamDecoder(
         std::vector<std::uint8_t> secret_key,
         std::size_t maximum_payload_bytes,
         std::size_t maximum_bits_per_segment);
-    AuthenticatedCavlcStreamDecoder(const AuthenticatedCavlcStreamDecoder&) = delete;
-    AuthenticatedCavlcStreamDecoder& operator=(const AuthenticatedCavlcStreamDecoder&) = delete;
-    ~AuthenticatedCavlcStreamDecoder() noexcept;
+    CavlcStreamDecoder(const CavlcStreamDecoder&) = delete;
+    CavlcStreamDecoder& operator=(const CavlcStreamDecoder&) = delete;
+    ~CavlcStreamDecoder() noexcept;
     void consume_segment(const std::vector<std::uint8_t>& annex_b_segment);
     [[nodiscard]] bool complete() const noexcept { return payload_.has_value(); }
     [[nodiscard]] bool failed() const noexcept { return failed_; }
     [[nodiscard]] std::size_t buffered_bit_count() const noexcept { return collected_bits_.size(); }
-    [[nodiscard]] const std::vector<std::uint8_t>& authenticated_payload() const;
+    [[nodiscard]] const std::vector<std::uint8_t>& payload() const;
 
 private:
-    // Derived v2 subkeys; the caller's secret is wiped after HKDF.
+    // Derived subkeys; the caller's secret is wiped after HKDF.
     // collected_bits_ holds un-whitened frame bits.
     std::vector<std::uint8_t> schedule_key_;
-    std::vector<std::uint8_t> frame_key_;
     std::vector<std::uint8_t> whitening_key_;
     std::vector<AnnexBNalUnit> parameter_sets_;
     std::size_t maximum_payload_bytes_{};
@@ -453,16 +451,16 @@ std::vector<std::uint8_t> assemble_annex_b(const std::vector<AnnexBNalUnit>& uni
 std::vector<std::uint8_t> assemble_cavlc_stream_segment(
     const std::vector<AnnexBNalUnit>& parameter_sets,
     const AnnexBNalUnit& idr);
-// Embeds the authenticated frame across the file's IDR segments (at most
+// Embeds the v3 frame across the file's IDR segments (at most
 // maximum_bits_per_segment scheduled signs per IDR). Non-IDR NAL units and
 // IDRs after the frame is complete are copied unchanged. Throws when the file
 // has no IDR or not enough capacity.
-std::vector<std::uint8_t> embed_authenticated_cavlc_stream_file(
+std::vector<std::uint8_t> embed_cavlc_stream_file(
     const std::vector<std::uint8_t>& annex_b,
     const std::vector<std::uint8_t>& secret_key,
     const std::vector<std::uint8_t>& payload,
     std::size_t maximum_bits_per_segment);
-std::vector<std::uint8_t> extract_authenticated_cavlc_stream_file(
+std::vector<std::uint8_t> extract_cavlc_stream_file(
     const std::vector<std::uint8_t>& annex_b,
     const std::vector<std::uint8_t>& secret_key,
     std::size_t maximum_payload_bytes,

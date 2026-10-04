@@ -1,6 +1,6 @@
 {
   "schema": "zkstego-full-y4m-conversion-new-v1",
-  "created_utc": "2026-09-24T15:07:07.540917+00:00",
+  "created_utc": "2026-10-04T02:34:14.074743+00:00",
   "encoding": "libx264 Baseline/CAVLC QP 22, all-intra, one thread and one slice per IDR",
   "total": 9,
   "converted": 9,
@@ -19,7 +19,7 @@
       "profile": "Constrained Baseline",
       "pixel_format": "yuv420p",
       "qp": 22,
-      "encode_ms": 287.47629999998026,
+      "encode_ms": 322.45410000905395,
       "output": "converted_h264_new\\akiyo_cif__full__qp22_allintra_new.h264",
       "output_bytes": 4769837,
       "sha256": "cad606f22f1452679e822a1a043c2426e4e280d78612d9f3e3e6abc4ba0b3e1c"
@@ -37,7 +37,7 @@
       "profile": "Constrained Baseline",
       "pixel_format": "yuv420p",
       "qp": 22,
-      "encode_ms": 361.9791000000987,
+      "encode_ms": 409.544400012237,
       "output": "converted_h264_new\\city_cif__full__qp22_allintra_new.h264",
       "output_bytes": 10040988,
       "sha256": "e078ce525033f37540be480be10c958f2d60ee7a563cae4bb733eb25ecedaeb1"
@@ -55,7 +55,7 @@
       "profile": "Constrained Baseline",
       "pixel_format": "yuv420p",
       "qp": 22,
-      "encode_ms": 353.21530000146595,
+      "encode_ms": 407.52419999626,
       "output": "converted_h264_new\\coastguard_cif__full__qp22_allintra_new.h264",
       "output_bytes": 10571442,
       "sha256": "bc6bcb7be2889d332e113d34042d7e8c9680b517d43e0b0faafbfee66511e98d"
@@ -73,7 +73,7 @@
       "profile": "Constrained Baseline",
       "pixel_format": "yuv420p",
       "qp": 22,
-      "encode_ms": 330.4358000004868,
+      "encode_ms": 401.0761999961687,
       "output": "converted_h264_new\\container_cif__full__qp22_allintra_new.h264",
       "output_bytes": 8392432,
       "sha256": "a224823d2a347b0dd60573189686596b418ca33146e461592be6a19164a584e8"
@@ -91,7 +91,7 @@
       "profile": "Constrained Baseline",
       "pixel_format": "yuv420p",
       "qp": 22,
-      "encode_ms": 1425.8217999995395,
+      "encode_ms": 1645.908500009682,
       "output": "converted_h264_new\\deadline_cif__full__qp22_allintra_new.h264",
       "output_bytes": 43120070,
       "sha256": "76e6f67e09b7fcbbf4faad26efb69288d6b67ae9b5accbcf0ce65ee14f1b91ac"
@@ -109,7 +109,7 @@
       "profile": "Constrained Baseline",
       "pixel_format": "yuv420p",
       "qp": 22,
-      "encode_ms": 314.63090000033844,
+      "encode_ms": 373.27860000368673,
       "output": "converted_h264_new\\football_cif__full__qp22_allintra_new.h264",
       "output_bytes": 7796840,
       "sha256": "30f0ab2df80ec7a6950a68111d22a0cbf3c976ee667f58ba0949d54db09ff896"
@@ -127,7 +127,7 @@
       "profile": "Constrained Baseline",
       "pixel_format": "yuv420p",
       "qp": 22,
-      "encode_ms": 74.79069999862986,
+      "encode_ms": 99.68250000383705,
       "output": "converted_h264_new\\foreman_cif__full__qp22_allintra_new.h264",
       "output_bytes": 567523,
       "sha256": "3ab98893e17c3c2bcfff8b50fdcaac7dcb7b2aaa1ed7b2ad45da11e2db1c4e0c"
@@ -145,7 +145,7 @@
       "profile": "Constrained Baseline",
       "pixel_format": "yuv420p",
       "qp": 22,
-      "encode_ms": 201.6299999995681,
+      "encode_ms": 261.35690000955947,
       "output": "converted_h264_new\\foreman_cif_300f__full__qp22_allintra_new.h264",
       "output_bytes": 3402313,
       "sha256": "26834c8da5c8d363b408d7ec182308c24ae82c475d1e9effd1fb5e3d312abed7"
@@ -163,7 +163,7 @@
       "profile": "Constrained Baseline",
       "pixel_format": "yuv420p",
       "qp": 22,
-      "encode_ms": 330.79800000086834,
+      "encode_ms": 415.0117999961367,
       "output": "converted_h264_new\\hall_monitor_cif__full__qp22_allintra_new.h264",
       "output_bytes": 7060727,
       "sha256": "3da0311239ab28bfa7322ce7a9988fbf628d6c0892ce16f49ddc9b6a8084dd59"

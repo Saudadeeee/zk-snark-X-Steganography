@@ -1,8 +1,9 @@
 """Rejection cases for terminal_demo.py, all on the native segment protocol.
 
 Each case builds a real file or input and asserts the specific reason it is
-rejected: Groth16 (changed message, invalid proof), the demo wrapper (missing
-proof), the native HMAC/header check (wrong key, one flipped carrier bit).
+rejected: Groth16 (changed message, invalid proof, one flipped message carrier
+bit), the demo wrapper (missing proof), the native frame header check (wrong key).
+Protocol v3 frames carry no MAC, so the proof is what catches a changed payload.
 """
 from __future__ import annotations
 
@@ -11,22 +12,21 @@ from pathlib import Path
 import deep_trace
 from native_io import inspect_segments, native_embed, native_extract, verify_groth16
 
-# Native messages raised when an authenticated CAVLC frame does not verify (see cavlc_stream.cpp).
-AUTHENTICATION_FAILURE_MARKERS = (
-    "authenticated cavlc stream version is invalid",
-    "authenticated cavlc stream length exceeds configured maximum",
-    "authenticated cavlc frame version is invalid",
-    "authenticated cavlc frame length is invalid",
-    "authenticated cavlc frame tag is invalid",
-    "ended before authenticated payload was complete",
+# Native messages raised when no v3 frame is found under a key (see cavlc_stream.cpp).
+FRAME_NOT_FOUND_MARKERS = (
+    "cavlc stream version is invalid",
+    "cavlc stream length exceeds configured maximum",
+    "cavlc frame version is invalid",
+    "cavlc frame length is invalid",
+    "ended before payload was complete",
     "blind schedule capacity is insufficient",
 )
 FRAME_HEADER_BYTES, LENGTH_PREFIX_BYTES = 3, 4
 
 
-def is_authentication_failure(stderr_text: str) -> bool:
+def is_frame_not_found(stderr_text: str) -> bool:
     lowered = stderr_text.lower()
-    return "error:" in lowered and any(marker in lowered for marker in AUTHENTICATION_FAILURE_MARKERS)
+    return "error:" in lowered and any(marker in lowered for marker in FRAME_NOT_FOUND_MARKERS)
 
 
 def run_all(session, tools, bridge, source: Path, stego: Path, after: dict, key: bytes,
@@ -36,18 +36,18 @@ def run_all(session, tools, bridge, source: Path, stego: Path, after: dict, key:
     session.check("doi message -> Groth16 false", not verify_groth16(
         session, proof, bridge._build_public_signals(bad_message, key), "reject_changed_message"))
     _invalid_and_missing_proof(session, tools, bridge, source, key, message, proof, plan)
-    session.say("Native embed/extract chi biet HMAC frame; demo wrapper bat buoc unpack + verify Groth16 truoc accept.")
+    session.say("Native chi tim khung v3 (version + do dai, khong MAC); demo wrapper bat buoc unpack + verify Groth16 truoc accept.")
     wrong_key = bytes([key[0] ^ 1]) + key[1:]
     result = native_extract(session, tools, stego, wrong_key, plan.max_bits, "reject_wrong_key", allow_failure=True)
     error = result.stderr.decode("utf-8", errors="replace")
-    session.check("sai shared key -> native reject", result.returncode == 2 and is_authentication_failure(error))
+    session.check("sai shared key -> native reject", result.returncode == 2 and is_frame_not_found(error))
     session.say("  " + error.strip())
     session.say("  Sai key -> lich segment khac + keystream khac -> header version ngau nhien -> reject.")
-    _flip_one_carrier_bit(session, tools, stego, after, key, len(message), plan)
-    session.say("Ket luan pham vi: payload duoc HMAC + Groth16 kiem tra. Video integrity va camera origin CHUA duoc circuit rang buoc.")
+    _flip_one_carrier_bit(session, tools, bridge, stego, after, key, message, plan)
+    session.say("Ket luan pham vi: payload duoc Groth16 kiem tra. Video integrity va camera origin CHUA duoc circuit rang buoc.")
     session.say("Khong duoc suy ra 'proof true => moi pixel/P frame cua video la nguyen ban'.")
     session.report["verdict"] = True
-    session.report["coverage"] = {"payload_hmac": True, "mandatory_groth16": True,
+    session.report["coverage"] = {"payload_mac": False, "mandatory_groth16": True,
                                   "whole_video_integrity": False, "camera_origin": False}
 
 
@@ -62,7 +62,7 @@ def _invalid_and_missing_proof(session, tools, bridge, source: Path, key: bytes,
                  plan.max_bits, "embed_invalid_proof")
     extracted = native_extract(session, tools, bad_proof_video, key, plan.max_bits, "extract_invalid_proof")
     bad_message, bad_proof = unpack(bytes.fromhex(extracted.stdout.decode().strip()))
-    session.check("video HMAC dung nhung proof sai -> Groth16 false", not verify_groth16(
+    session.check("khung dung nhung proof sai -> Groth16 false", not verify_groth16(
         session, bytes_to_proof(bad_proof), bridge._build_public_signals(bad_message, key), "reject_changed_proof"))
     proofless_video = session.folder / "missing_proof.h264"
     proofless_payload = len(message).to_bytes(LENGTH_PREFIX_BYTES, "big") + message
@@ -73,7 +73,7 @@ def _invalid_and_missing_proof(session, tools, bridge, source: Path, key: bytes,
         unpack(bytes.fromhex(extracted.stdout.decode().strip()))
     except ValueError:
         missing_rejected = True
-    session.check("video HMAC dung nhung thieu proof -> wrapper reject", missing_rejected)
+    session.check("khung dung nhung thieu proof -> wrapper reject", missing_rejected)
 
 
 def _pick_carrier(data: bytes, after: dict, plan, message_bytes: int):
@@ -96,8 +96,11 @@ def _pick_carrier(data: bytes, after: dict, plan, message_bytes: int):
     raise RuntimeError("Khong tim duoc carrier message co the lat ma khong doi emulation prevention")
 
 
-def _flip_one_carrier_bit(session, tools, stego: Path, after: dict, key: bytes, message_bytes: int,
+def _flip_one_carrier_bit(session, tools, bridge, stego: Path, after: dict, key: bytes, message: bytes,
                           plan) -> None:
+    from src.zk_proof import bytes_to_proof, unpack
+
+    message_bytes = len(message)
     data = stego.read_bytes()
     placement, offset, mask = _pick_carrier(data, after, plan, message_bytes)
     tampered = session.folder / "tampered_carrier.h264"
@@ -118,9 +121,12 @@ def _flip_one_carrier_bit(session, tools, stego: Path, after: dict, key: bytes, 
     decode = session.run("decode_tampered", ["ffmpeg", "-v", "error", "-xerror", "-nostdin", "-i", tampered,
                                              "-f", "null", "-"], allow_failure=True)
     session.check("FFmpeg van decode stream bi lat (loi chi nam o payload)", decode.returncode == 0)
-    result = native_extract(session, tools, tampered, key, plan.max_bits, "reject_carrier", allow_failure=True)
-    error = result.stderr.decode("utf-8", errors="replace")
-    session.check("lat 1 bit message carrier -> HMAC tag reject",
-                  result.returncode == 2 and "frame tag is invalid" in error.lower())
-    session.say("  " + error.strip())
+    result = native_extract(session, tools, tampered, key, plan.max_bits, "flipped_carrier", allow_failure=True)
+    session.check("lat 1 bit message carrier -> native van trich duoc (khung v3 khong co MAC)", result.returncode == 0)
+    altered_message, altered_proof = unpack(bytes.fromhex(result.stdout.decode().strip()))
+    session.check("message trich ra da bi doi dung 1 bit", altered_message != message
+                  and sum(bin(a ^ b).count("1") for a, b in zip(altered_message, message)) == 1)
+    session.check("lat 1 bit message carrier -> Groth16 false", not verify_groth16(
+        session, bytes_to_proof(altered_proof), bridge._build_public_signals(altered_message, key), "reject_carrier_flip"))
+    session.say("  Kenh chi giau va dinh vi payload; proof Groth16 moi la thu bat duoc message bi sua.")
 

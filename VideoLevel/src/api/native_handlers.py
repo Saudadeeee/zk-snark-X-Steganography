@@ -1,7 +1,10 @@
-"""FastAPI adapter for the authenticated native CAVLC CLI.
+"""FastAPI adapter for the native keyed CAVLC CLI (channel protocol v3).
 
 The 32-byte key is delivered only through the child's stdin, never argv or a
 temporary key file. Configure ``ZK_STEGO_NATIVE_CLI`` with the built executable.
+The v3 channel frame carries no MAC, so an extracted payload is only a candidate:
+``/api/v1/jobs/verify`` is the one operation that authenticates it (Groth16), and
+extract results and live stream payloads are marked ``"verified": false``.
 """
 
 from __future__ import annotations
@@ -33,7 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 NATIVE_STDERR_TAIL_BYTES = 64 * 1024
 DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 15.0
 
-# (stego_video_path, secret_key, maximum_payload_bytes) -> authenticated payload bytes.
+# (stego_video_path, secret_key, maximum_payload_bytes) -> extracted (unverified) payload bytes.
 PayloadExtractor = Callable[[str, bytes, int], bytes]
 # (proof_dict, message, secret_key) -> True only when the Groth16 proof verifies.
 ProofVerifier = Callable[[dict, bytes, bytes], bool]
@@ -43,8 +46,8 @@ class _StreamIdleTimeout(Exception):
     pass
 
 
-class NativePayloadNotAuthenticated(RuntimeError):
-    """The native CLI exited non-zero: no authenticated payload under this key (or a bad stream)."""
+class NativePayloadNotFound(RuntimeError):
+    """The native CLI exited non-zero: no payload frame under this key (or a bad stream)."""
 
 
 def make_proof_verify_handler(
@@ -53,7 +56,7 @@ def make_proof_verify_handler(
     """Blind-extract ``pack(message, proof)`` and accept it only if its Groth16 proof verifies.
 
     Returns ``{"valid": True, "message_b64", "payload_bytes"}`` for a verified proof and
-    ``{"valid": False, "reason"}`` when no authenticated payload, a malformed blob or an
+    ``{"valid": False, "reason"}`` when no payload frame, a malformed blob or an
     invalid proof is found. Infrastructure errors (timeouts, missing Node.js/circuits)
     propagate, so the job service marks the job "failed" rather than "rejected".
     """
@@ -61,8 +64,8 @@ def make_proof_verify_handler(
     def verify_handler(*, stego_video_path: str, secret_key: bytes, maximum_payload_bytes: int) -> dict[str, Any]:
         try:
             blob = extract_payload(stego_video_path, secret_key, maximum_payload_bytes)
-        except NativePayloadNotAuthenticated:
-            return {"valid": False, "reason": "payload_not_authenticated"}
+        except NativePayloadNotFound:
+            return {"valid": False, "reason": "payload_not_found"}
         try:
             message, proof_bytes = unpack(blob)
             if not message or len(blob) != 4 + len(message) + PROOF_SIZE_BYTES:
@@ -99,7 +102,7 @@ def create_native_app(
     payload_extractor: PayloadExtractor | None = None,
     proof_verifier: ProofVerifier | None = None,
 ) -> FastAPI:
-    """Create bounded HTTP-job and WebSocket-stream services backed by native authenticated CAVLC.
+    """Create bounded HTTP-job and WebSocket-stream services backed by native keyed CAVLC.
 
     ``stream_idle_timeout_seconds`` (default ``ZK_STEGO_STREAM_IDLE_TIMEOUT_SECONDS`` or 15 s)
     bounds how long a stream may hold a capacity slot without sending a frame.
@@ -150,7 +153,7 @@ def create_native_app(
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError("native CAVLC operation timed out") from exc
         if result.returncode != 0:
-            raise NativePayloadNotAuthenticated("native CAVLC operation failed")
+            raise NativePayloadNotFound("native CAVLC operation failed")
         return result
 
     def embed_handler(
@@ -163,10 +166,10 @@ def create_native_app(
         )
         if not Path(output_path).is_file():
             raise RuntimeError("native CAVLC operation did not create output")
-        # NOTE: computed here, not reported by the native CLI. One authenticated frame is
-        # version(1) + length(2) + HMAC tag(16) + payload, i.e. (len + 19) bytes. The
-        # "bits_embedded" key is kept for API compatibility; "bits_embedded_source" says how it was derived.
-        computed_frame_bits = (len(message) + 19) * 8
+        # NOTE: computed here, not reported by the native CLI. One v3 frame is
+        # version(1) + length(2) + payload, i.e. (len + 3) bytes. The "bits_embedded"
+        # key is kept for API compatibility; "bits_embedded_source" says how it was derived.
+        computed_frame_bits = (len(message) + 3) * 8
         return {
             "valid": True,
             "bits_embedded": computed_frame_bits,
@@ -572,7 +575,7 @@ def create_native_app(
                     raise TimeoutError("native stream deadline exceeded")
                 return_code = await asyncio.wait_for(process.wait(), timeout=remaining)
                 if return_code != 0:
-                    await websocket.send_json({"type": "error", "code": "payload_not_authenticated"})
+                    await websocket.send_json({"type": "error", "code": "payload_not_found"})
                     return
                 try:
                     payload = bytes.fromhex(output.decode("ascii").strip())
@@ -584,6 +587,7 @@ def create_native_app(
                     return
                 await websocket.send_json({
                     "type": "payload", "payload_b64": base64.b64encode(payload).decode("ascii"),
+                    "verified": False,
                 })
 
             input_task = asyncio.create_task(feed_native_stdin())

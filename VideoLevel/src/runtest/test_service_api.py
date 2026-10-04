@@ -27,7 +27,7 @@ from src.api.app import (
     RequestBodyGuard,
     create_app,
 )
-from src.api.native_handlers import NativePayloadNotAuthenticated, create_native_app
+from src.api.native_handlers import NativePayloadNotFound, create_native_app
 from src.key_policy import (
     KeyCertificate,
     issue_key_certificate,
@@ -745,6 +745,34 @@ def t_running_status_write_failure_fails_job_and_releases_capacity():
             assert _wait_job(client, second.json()["job_id"])["status"] == "succeeded"
 
 
+def t_terminal_status_write_failure_fails_job_and_releases_capacity():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        app = create_app(
+            ApiSettings(api_token=TOKEN, work_dir=Path(temp_dir), max_workers=1, max_queued_jobs=0),
+            embed_handler=lambda **kwargs: {"valid": True, "bits_embedded": 8, "capacity_bits": 8},
+        )
+        store = app.state.store
+        original_update = store.update
+        failures = {"remaining": 1}
+
+        def flaky_update(job_id, **changes):
+            if changes.get("status") == "succeeded" and failures["remaining"]:
+                failures["remaining"] -= 1
+                raise OSError("No space left on device")
+            original_update(job_id, **changes)
+
+        store.update = flaky_update
+        with TestClient(app) as client:
+            first = client.post("/api/v1/jobs/embed", **_embed_request())
+            assert first.status_code == 202, first.text
+            body = _wait_job(client, first.json()["job_id"])
+            # A success that could not be saved must not stay visible as "succeeded".
+            assert body["status"] == "failed" and body["error"] == "embed result could not be saved", body
+            second = client.post("/api/v1/jobs/embed", **_embed_request())
+            assert second.status_code == 202, second.text  # The capacity slot was released.
+            assert _wait_job(client, second.json()["job_id"])["status"] == "succeeded"
+
+
 # A well-formed (on-curve) Groth16 proof: G1/G2 generators. It parses, but proves nothing,
 # so the deterministic tests below decide validity with an injected verifier.
 _G2_GENERATOR = [
@@ -807,7 +835,7 @@ def t_native_verify_job_rejects_malformed_or_absent_proof_and_fails_on_infrastru
     off_curve = bytes([0xFF] * 32) + proof_bytes[32:]
 
     def rejected_extract(*_):
-        raise NativePayloadNotAuthenticated("native CAVLC operation failed")
+        raise NativePayloadNotFound("native CAVLC operation failed")
 
     def broken_extract(*_):
         raise RuntimeError("native CAVLC operation timed out")
@@ -816,7 +844,7 @@ def t_native_verify_job_rejects_malformed_or_absent_proof_and_fails_on_infrastru
         raise AssertionError("verifier must not run for a malformed payload")
 
     cases = (
-        ("payload_not_authenticated", rejected_extract),
+        ("payload_not_found", rejected_extract),
         ("malformed_proof_payload", lambda *_: b"\x00\x00\x00\x05short"),      # truncated blob
         ("malformed_proof_payload", lambda *_: pack(b"msg", off_curve)),       # proof not on curve
         ("malformed_proof_payload", lambda *_: pack(b"msg", proof_bytes) + b"trailing"),
@@ -893,6 +921,7 @@ def main():
         run_test("upload_timeout_is_configurable_from_environment", t_upload_timeout_is_configurable_from_environment),
         run_test("repeated_auth_failures_are_throttled_with_429", t_repeated_auth_failures_are_throttled_with_429),
         run_test("running_status_write_failure_fails_job_and_releases_capacity", t_running_status_write_failure_fails_job_and_releases_capacity),
+        run_test("terminal_status_write_failure_fails_job_and_releases_capacity", t_terminal_status_write_failure_fails_job_and_releases_capacity),
         run_test("native_verify_job_succeeds_only_for_verified_proof", t_native_verify_job_succeeds_only_for_verified_proof),
         run_test("native_verify_job_rejects_malformed_or_absent_proof_and_fails_on_infrastructure",
                  t_native_verify_job_rejects_malformed_or_absent_proof_and_fails_on_infrastructure),

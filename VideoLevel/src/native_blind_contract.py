@@ -1,4 +1,4 @@
-"""Shared Python specification for the native CAVLC blind channel, protocol v2.
+"""Shared Python specification for the native CAVLC blind channel, protocol v3.
 
 This module deliberately contains no H.264 parsing or patching.  It is the
 byte-for-byte contract that any Python adapter must satisfy before it can
@@ -6,16 +6,17 @@ interoperate with the native trailing-one-sign implementation. The locked
 native deployment ABI is 64-bit ``size_t``; a 32-bit native target needs a
 separate, versioned contract rather than silently narrowing identities.
 
-Protocol v2 key schedule (RFC 5869 HKDF-SHA-256, one 32-byte secret ``K``)::
+Protocol v3 key schedule (RFC 5869 HKDF-SHA-256, one 32-byte stego key ``K``;
+the labels are unchanged from v2, so schedules and keystreams equal v2)::
 
     PRK            = HMAC-SHA256(key = b"zkstego-cavlc-v2-salt", msg = K)
     schedule_key   = HKDF-Expand(PRK, b"zkstego/cavlc/v2/schedule", 32)
-    frame_key      = HKDF-Expand(PRK, b"zkstego/cavlc/v2/frame-tag", 32)
     whitening_key  = HKDF-Expand(PRK, b"zkstego/cavlc/v2/whitening", 32)
 
 Schedule: ``score = HMAC-SHA256(schedule_key, identity)``, sorted by
-``(score, identity)``.  Frame: ``[0x02][len BE16][payload][tag16]`` with
-``tag = HMAC-SHA256(frame_key, version || len || payload)[:16]``.  Whitening:
+``(score, identity)``.  Frame: ``[0x03][len BE16][payload]`` with no MAC: the
+channel hides and locates the payload, and the Groth16 proof inside the payload
+is what a verifier checks (v2 carried a 16-byte HMAC tag here).  Whitening:
 keystream block ``j = HMAC-SHA256(whitening_key, uint64_be(j))``; the
 embedded bit ``i`` (global across all IDR segments) is
 ``frame_bit[i] XOR keystream_bit[i]``, both MSB-first.
@@ -40,12 +41,10 @@ from typing import Any, NamedTuple
 
 HKDF_SALT = b"zkstego-cavlc-v2-salt"
 SCHEDULE_INFO = b"zkstego/cavlc/v2/schedule"
-FRAME_TAG_INFO = b"zkstego/cavlc/v2/frame-tag"
 WHITENING_INFO = b"zkstego/cavlc/v2/whitening"
 SUBKEY_BYTES = 32
-FRAME_VERSION = 2
+FRAME_VERSION = 3
 FRAME_HEADER_BYTES = 3
-FRAME_TAG_BYTES = 16
 KEYSTREAM_BLOCK_BYTES = 32
 MAX_SIZE_T = (1 << 64) - 1
 MAX_UINT32 = (1 << 32) - 1
@@ -78,10 +77,9 @@ class NativeCavlcCandidate:
 
 @dataclass(frozen=True)
 class ChannelKeys:
-    """The three independent v2 subkeys derived from one 32-byte secret."""
+    """The two independent subkeys derived from one 32-byte stego key."""
 
     schedule_key: bytes
-    frame_key: bytes
     whitening_key: bytes
 
 
@@ -119,7 +117,6 @@ def derive_channel_keys(secret_key: bytes) -> ChannelKeys:
     prk = hkdf_extract(HKDF_SALT, secret_key)
     return ChannelKeys(
         schedule_key=hkdf_expand(prk, SCHEDULE_INFO, SUBKEY_BYTES),
-        frame_key=hkdf_expand(prk, FRAME_TAG_INFO, SUBKEY_BYTES),
         whitening_key=hkdf_expand(prk, WHITENING_INFO, SUBKEY_BYTES),
     )
 
@@ -152,7 +149,7 @@ def select_candidates(
 
 
 def whitening_keystream(secret_key: bytes, byte_count: int, first_byte: int = 0) -> bytes:
-    """Keystream bytes [first_byte, first_byte + byte_count) of the v2 whitening stream."""
+    """Keystream bytes [first_byte, first_byte + byte_count) of the whitening stream."""
     if byte_count < 0 or first_byte < 0:
         raise ValueError("whitening keystream range is invalid")
     whitening_key = derive_channel_keys(secret_key).whitening_key
@@ -193,7 +190,7 @@ def bytes_to_bits(data: bytes) -> list[int]:
 
 def bits_to_bytes(bits: list[int]) -> bytes:
     if len(bits) % 8:
-        raise ValueError("authenticated frame bits must be byte-aligned")
+        raise ValueError("CAVLC frame bits must be byte-aligned")
     return bytes(sum(bits[index + offset] << (7 - offset) for offset in range(8)) for index in range(0, len(bits), 8))
 
 
@@ -205,43 +202,34 @@ def whiten_frame(frame: bytes, secret_key: bytes) -> bytes:
 unwhiten_frame = whiten_frame
 
 
-def _frame_tag(frame_key: bytes, body: bytes) -> bytes:
-    return hmac.new(frame_key, body, hashlib.sha256).digest()[:FRAME_TAG_BYTES]
-
-
-def pack_authenticated_frame(payload: bytes, secret_key: bytes) -> bytes:
-    """Plaintext v2 frame (before whitening)."""
+def pack_frame(payload: bytes) -> bytes:
+    """Plaintext v3 frame (before whitening): version, big-endian length, payload."""
     if len(payload) > 0xFFFF:
-        raise ValueError("authenticated payload exceeds 65535 bytes")
-    frame_key = derive_channel_keys(secret_key).frame_key
-    body = bytes((FRAME_VERSION,)) + len(payload).to_bytes(2, "big") + payload
-    return body + _frame_tag(frame_key, body)
+        raise ValueError("CAVLC payload exceeds 65535 bytes")
+    return bytes((FRAME_VERSION,)) + len(payload).to_bytes(2, "big") + payload
 
 
-def unpack_authenticated_frame(frame: bytes, secret_key: bytes, maximum_payload_bytes: int) -> bytes:
-    """Verify a plaintext (already un-whitened) v2 frame and return its payload."""
+def unpack_frame(frame: bytes, maximum_payload_bytes: int) -> bytes:
+    """Check a plaintext (already un-whitened) v3 frame header and return its payload."""
     if maximum_payload_bytes < 0 or maximum_payload_bytes > 0xFFFF:
-        raise ValueError("authenticated payload maximum exceeds 65535 bytes")
-    if len(frame) < FRAME_HEADER_BYTES + FRAME_TAG_BYTES or frame[0] != FRAME_VERSION:
-        raise ValueError("authenticated CAVLC frame version is invalid")
+        raise ValueError("CAVLC payload maximum exceeds 65535 bytes")
+    if len(frame) < FRAME_HEADER_BYTES or frame[0] != FRAME_VERSION:
+        raise ValueError("CAVLC frame version is invalid")
     length = int.from_bytes(frame[1:3], "big")
-    if length > maximum_payload_bytes or len(frame) != FRAME_HEADER_BYTES + length + FRAME_TAG_BYTES:
-        raise ValueError("authenticated CAVLC frame length is invalid")
-    body, tag = frame[:-FRAME_TAG_BYTES], frame[-FRAME_TAG_BYTES:]
-    if not hmac.compare_digest(tag, _frame_tag(derive_channel_keys(secret_key).frame_key, body)):
-        raise ValueError("authenticated CAVLC frame tag is invalid")
-    return frame[FRAME_HEADER_BYTES:-FRAME_TAG_BYTES]
+    if length > maximum_payload_bytes or len(frame) != FRAME_HEADER_BYTES + length:
+        raise ValueError("CAVLC frame length is invalid")
+    return frame[FRAME_HEADER_BYTES:]
 
 
 def embedded_frame_bits(payload: bytes, secret_key: bytes) -> list[int]:
     """Bits written into the selected sign positions, in schedule order."""
-    return whiten_bits(bytes_to_bits(pack_authenticated_frame(payload, secret_key)), secret_key)
+    return whiten_bits(bytes_to_bits(pack_frame(payload)), secret_key)
 
 
-def recover_authenticated_payload(embedded_bits: list[int], secret_key: bytes, maximum_payload_bytes: int) -> bytes:
-    """Un-whiten bits read in schedule order, then verify the v2 frame."""
+def recover_payload(embedded_bits: list[int], secret_key: bytes, maximum_payload_bytes: int) -> bytes:
+    """Un-whiten bits read in schedule order, then check the v3 frame header."""
     frame = bits_to_bytes(unwhiten_bits(list(embedded_bits), secret_key))
-    return unpack_authenticated_frame(frame, secret_key, maximum_payload_bytes)
+    return unpack_frame(frame, maximum_payload_bytes)
 
 
 def parse_candidate_identity(identity: str) -> NativeCavlcCandidate:
@@ -336,5 +324,5 @@ def segment_schedule(
                 break
             placements.append(SchedulePlacement(expected_index, by_identity[identity], len(placements)))
     if len(placements) < frame_bit_count:
-        raise ValueError("IDR stream capacity is insufficient for authenticated payload")
+        raise ValueError("IDR stream capacity is insufficient for payload")
     return placements

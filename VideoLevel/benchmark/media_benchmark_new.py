@@ -2,7 +2,7 @@
 
 The output is a host-side experiment. Upscaled resolutions are explicitly marked
 as derived from CIF source material; they are not native high-resolution scenes.
-Each sample must pass native authenticated embed, blind extraction, and strict
+Each sample must pass native keyed embed, blind extraction, and strict
 FFmpeg decode before it is included in the passing performance summary.
 """
 
@@ -26,6 +26,9 @@ from typing import Any
 
 import psutil
 
+from src.native_blind_contract import embedded_frame_bits, segment_schedule
+from src.zk_proof import PROOF_SIZE_BYTES, ZKSnarkBridge, bytes_to_proof, pack, proof_to_bytes, unpack
+
 
 ROOT = Path(__file__).resolve().parents[1]
 RAW_DIR = ROOT / "data" / "raw"
@@ -33,10 +36,17 @@ NATIVE_CANDIDATES = (
     ROOT / "native" / "build" / "Release" / "zkstego_blind_bits.exe",
     ROOT / "native" / "build" / "zkstego_blind_bits",
 )
+INSPECT_CANDIDATES = (
+    ROOT / "native" / "build" / "Release" / "zkstego_inspect.exe",
+    ROOT / "native" / "build" / "zkstego_inspect",
+)
 RESOLUTIONS = ((352, 288), (640, 480), (1280, 960))
 QP = 22
-PER_IDR_MAX_BITS = 4096
-PAYLOAD = b"native-cavlc-benchmark-payload-v1"
+# Protocol default cap (README, demo, service): changes are spread over many IDRs.
+PER_IDR_MAX_BITS = 64
+MAX_PAYLOAD_BYTES = 4096
+# Every case carries the real payload: pack(message, 129-byte Groth16 proof).
+MESSAGE = "zkstego benchmark: Groth16 proof carried in CAVLC trailing-one signs".encode("utf-8")
 
 
 def _tool(name: str) -> str:
@@ -51,6 +61,13 @@ def _native_binary() -> Path:
         if candidate.is_file():
             return candidate
     raise RuntimeError("native zkstego_blind_bits executable not found; build native Release first")
+
+
+def _inspect_binary() -> Path:
+    for candidate in INSPECT_CANDIDATES:
+        if candidate.is_file():
+            return candidate
+    raise RuntimeError("native zkstego_inspect executable not found; build native Release first")
 
 
 def _run(args: list[str], *, input_bytes: bytes | None = None, timeout: int = 3600) -> subprocess.CompletedProcess[bytes]:
@@ -233,22 +250,102 @@ def _summary(values: list[float | None]) -> dict[str, Any]:
             "frames_measured": len(values)}
 
 
-AUTH_FAILURE_MARKERS = (
-    "authenticated CAVLC frame tag is invalid",
-    "authenticated CAVLC frame version is invalid",
-    "authenticated CAVLC frame length",
-    "authenticated CAVLC stream version is invalid",
-    "authenticated CAVLC stream length exceeds configured maximum",
-    "authenticated CAVLC stream is incomplete",
-    "ended before authenticated payload",
+# Native messages for "no v3 frame under this key" (the frame has no MAC).
+FRAME_NOT_FOUND_MARKERS = (
+    "CAVLC frame version is invalid",
+    "CAVLC frame length",
+    "CAVLC stream version is invalid",
+    "CAVLC stream length exceeds configured maximum",
+    "ended before payload",
     "blind schedule capacity is insufficient",
 )
 
 
-def _extract(native: Path, stego_path: Path, key: bytes) -> tuple[int, bytes, str]:
-    result = _run([str(native), "extract-live-auth-stdin", "4096", str(PER_IDR_MAX_BITS)],
-                  input_bytes=key.hex().encode("ascii") + b"\n" + stego_path.read_bytes())
-    return result.returncode, result.stdout.strip(), result.stderr.decode(errors="replace")
+def extract_payload(native: Path, stego_path: Path, key: bytes,
+                    max_bits: int = PER_IDR_MAX_BITS) -> tuple[int, bytes, str, float]:
+    """Blind file-mode extraction (key on stdin); returns (exit, payload hex, stderr, wall ms)."""
+    started = time.perf_counter()
+    result = _run([str(native), "extract-stream-auth", str(stego_path), "-", str(MAX_PAYLOAD_BYTES), str(max_bits)],
+                  input_bytes=key.hex().encode("ascii") + b"\n")
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    return result.returncode, result.stdout.strip(), result.stderr.decode(errors="replace"), elapsed_ms
+
+
+def is_frame_not_found(returncode: int, stderr: str) -> bool:
+    """Exit 2 is also used for I/O and parse errors; require a frame-not-found message."""
+    return returncode == 2 and any(marker in stderr for marker in FRAME_NOT_FOUND_MARKERS)
+
+
+def inspect_segments(inspect: Path, path: Path, max_bits: int = PER_IDR_MAX_BITS) -> dict[str, Any]:
+    result = _run([str(inspect), str(path), "--segments", str(max_bits)])
+    if result.returncode:
+        raise RuntimeError(f"zkstego_inspect --segments failed for {path.name}: {result.stderr.decode(errors='replace')[-500:]}")
+    return json.loads(result.stdout)
+
+
+def _sign_bits(segments: dict[str, Any]) -> dict[tuple[int, int], int]:
+    return {(item["nal_index"], item["rbsp_bit_offset"]): item["bit"]
+            for segment in segments["segments"] for item in segment["candidates"]}
+
+
+def sign_statistics(cover_segments: dict[str, Any], stego_segments: dict[str, Any],
+                    key: bytes, frame_bit_count: int, max_bits: int = PER_IDR_MAX_BITS) -> dict[str, Any]:
+    """Compare every trailing-one sign of cover and stego against the keyed schedule.
+
+    Sign flag 1 means a -1 trailing one. A correct embed changes only scheduled
+    positions, about half of them (whitened bits are uniform), so the share of
+    negative signs over all candidates should barely move.
+    """
+    cover_bits, stego_bits = _sign_bits(cover_segments), _sign_bits(stego_segments)
+    if cover_bits.keys() != stego_bits.keys():
+        raise RuntimeError("cover and stego expose different candidate positions")
+    scheduled = {(p.candidate.nal_index, p.candidate.rbsp_bit_offset)
+                 for p in segment_schedule(stego_segments, key, frame_bit_count, max_bits)}
+    changed = {position for position, bit in cover_bits.items() if stego_bits[position] != bit}
+    total = len(cover_bits)
+    cover_negative = sum(cover_bits.values())
+    stego_negative = sum(stego_bits.values())
+    p_cover, p_stego = cover_negative / total, stego_negative / total
+    pooled = (cover_negative + stego_negative) / (2 * total)
+    spread = math.sqrt(2 * pooled * (1 - pooled) / total) if 0 < pooled < 1 else 0.0
+    return {
+        "candidate_signs": total,
+        "scheduled_positions": len(scheduled),
+        "changed_signs": len(changed),
+        "changed_outside_schedule": len(changed - scheduled),
+        "changed_fraction_of_scheduled": len(changed) / len(scheduled) if scheduled else None,
+        "idr_segments_with_changes": len({nal for nal, _ in changed}),
+        "negative_sign_fraction_cover": p_cover,
+        "negative_sign_fraction_stego": p_stego,
+        "negative_sign_fraction_delta": p_stego - p_cover,
+        "two_proportion_z": (p_stego - p_cover) / spread if spread else 0.0,
+    }
+
+
+def make_zk_payload(bridge: ZKSnarkBridge, message: bytes, key: bytes) -> dict[str, Any]:
+    """Prove the commitment for ``message`` under ``key`` and pack the carried payload."""
+    started = time.perf_counter()
+    proof, _public = bridge.generate_proof_for_payload(message, key)
+    prove_ms = (time.perf_counter() - started) * 1000.0
+    proof_bytes = proof_to_bytes(proof)
+    payload = pack(message, proof_bytes)
+    return {"payload": payload, "proof_bytes": len(proof_bytes), "prove_ms": prove_ms,
+            "frame_bits": len(embedded_frame_bits(payload, key))}
+
+
+def verify_zk_payload(bridge: ZKSnarkBridge, payload_hex: bytes, key: bytes) -> dict[str, Any]:
+    """unpack -> decompress proof -> mandatory Groth16 verify, as the service verify job does."""
+    started = time.perf_counter()
+    try:
+        message, proof_bytes = unpack(bytes.fromhex(payload_hex.decode("ascii")))
+        if not message or len(proof_bytes) != PROOF_SIZE_BYTES:
+            raise ValueError("proof payload length mismatch")
+        proof = bytes_to_proof(proof_bytes)
+    except (ValueError, UnicodeDecodeError):
+        return {"verified": False, "reason": "malformed_proof_payload", "verify_ms": None, "message": None}
+    verified = bridge.verify_proof_for_payload(proof, message, key) is True
+    return {"verified": verified, "reason": None if verified else "proof_invalid",
+            "verify_ms": (time.perf_counter() - started) * 1000.0, "message": message}
 
 
 def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
@@ -258,6 +355,8 @@ def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
     if not raw_sources:
         raise RuntimeError(f"no .y4m sources found in {RAW_DIR}")
     native = _native_binary()
+    inspect = _inspect_binary()
+    bridge = ZKSnarkBridge(str(ROOT / "circuits"))
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:6]
     run_dir = output_root / "media_new" / run_id
     encoded_dir = run_dir / "encoded_h264"
@@ -301,7 +400,8 @@ def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
             capacity_ok = capacity_record["returncode"] == 0 and isinstance(capacity_metrics, dict) and "candidate_capacity_bits" in capacity_metrics
             stego = stego_dir / f"{stem}__stego_new.h264"
             key = os.urandom(32)
-            payload_line = PAYLOAD.hex().encode("ascii") + b"\n"
+            zk = make_zk_payload(bridge, MESSAGE, key)
+            payload_line = zk["payload"].hex().encode("ascii") + b"\n"
             native_record = _run_measured(
                 [str(native), "embed-stream-auth-stdin", str(cover), str(stego), str(PER_IDR_MAX_BITS)],
                 key.hex().encode("ascii") + b"\n" + payload_line,
@@ -310,19 +410,28 @@ def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
             embedded = native_record["returncode"] == 0
             strict_result: subprocess.CompletedProcess[bytes] | None = None
             decoded_ok = False
+            strict_decode_ms = None
             if embedded:
+                started = time.perf_counter()
                 strict_result = _run([_tool("ffmpeg"), "-v", "error", "-xerror", "-i", str(stego),
                                       "-f", "null", "-"])
+                strict_decode_ms = (time.perf_counter() - started) * 1000.0
                 decoded_ok = strict_result.returncode == 0 and _probe(stego)["frames"] == encoded_meta["frames"]
-            recovered_code, recovered_hex, extract_error = (-1, b"", "not attempted")
+            recovered_code, recovered_hex, extract_error, extract_ms = (-1, b"", "not attempted", None)
             if embedded:
-                recovered_code, recovered_hex, extract_error = _extract(native, stego, key)
-            correct_key = recovered_code == 0 and recovered_hex.decode("ascii", errors="ignore") == PAYLOAD.hex()
+                recovered_code, recovered_hex, extract_error, extract_ms = extract_payload(native, stego, key)
+            correct_key = recovered_code == 0 and recovered_hex.decode("ascii", errors="ignore") == zk["payload"].hex()
+            verification = verify_zk_payload(bridge, recovered_hex, key) if correct_key else {
+                "verified": False, "reason": "not_extracted", "verify_ms": None, "message": None}
+            groth16_ok = verification["verified"] and verification["message"] == MESSAGE
             wrong_key = os.urandom(32)
-            wrong_code, _, wrong_error = _extract(native, stego, wrong_key) if embedded else (-1, b"", "not attempted")
-            # Exit 2 is also used for I/O and parse errors; require an authentication failure message.
-            wrong_key_rejected = wrong_code == 2 and any(marker in wrong_error for marker in AUTH_FAILURE_MARKERS)
-            measured = bool(capacity_ok and embedded and decoded_ok and correct_key and wrong_key_rejected)
+            wrong_code, _, wrong_error, wrong_extract_ms = (
+                extract_payload(native, stego, wrong_key) if embedded else (-1, b"", "not attempted", None))
+            wrong_key_rejected = is_frame_not_found(wrong_code, wrong_error)
+            signs = (sign_statistics(inspect_segments(inspect, cover), inspect_segments(inspect, stego),
+                                     key, zk["frame_bits"]) if embedded else None)
+            measured = bool(capacity_ok and embedded and decoded_ok and correct_key and groth16_ok
+                            and wrong_key_rejected and signs and signs["changed_outside_schedule"] == 0)
             quality_records: dict[str, Any] = {}
             frame_rows: list[dict[str, Any]] = []
             if measured:
@@ -374,9 +483,19 @@ def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
                 "embed_cpu_seconds_sampled": native_record["cpu_seconds_sampled"],
                 "embed_peak_rss_bytes_sampled": native_record["peak_rss_bytes_sampled"],
                 "output_fps": encoded_meta["frames"] / (native_record["wall_ms"] / 1000.0) if native_record["wall_ms"] else None,
+                "payload_bytes": len(zk["payload"]), "message_bytes": len(MESSAGE),
+                "proof_bytes": zk["proof_bytes"], "frame_bits": zk["frame_bits"],
+                "max_bits_per_idr": PER_IDR_MAX_BITS,
+                "idr_segments_needed": math.ceil(zk["frame_bits"] / PER_IDR_MAX_BITS),
+                "prove_ms": zk["prove_ms"], "strict_decode_ms": strict_decode_ms,
+                "extract_ms": extract_ms, "wrong_key_extract_ms": wrong_extract_ms,
+                "groth16_verify_ms": verification["verify_ms"],
                 "embedded": embedded, "strict_decode_ok": decoded_ok,
                 "blind_correct_key_payload_ok": correct_key,
+                "groth16_verified": groth16_ok,
+                "groth16_failure_reason": verification["reason"],
                 "wrong_key_rejected": wrong_key_rejected,
+                "sign_statistics": signs,
                 "wrong_key_error": wrong_error[-300:] if not wrong_key_rejected else None,
                 "status": "passed" if measured else "failed",
                 "embed_error": emb_err if not embedded else None,
@@ -394,7 +513,7 @@ def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
 
     passed = sum(record.get("status") == "passed" for record in results)
     record = {
-        "schema": "zkstego-media-benchmark-new-v1",
+        "schema": "zkstego-media-benchmark-new-v3",
         "run_id": run_id,
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "host": {"platform": os.name, "python": os.sys.version,
@@ -408,8 +527,9 @@ def run_media_benchmark(output_root: Path, sources: list[Path] | None = None,
             "quality": "Per-frame FFmpeg PSNR Y and SSIM measured both from source Y4M to stego decode (total encode+embed distortion) and clean H.264 decode to stego decode (incremental embed distortion).",
             "fps_definition": "encoded frame count divided by native embed wall time; not camera acquisition FPS.",
             "resource_scope": "Native embed child process sampled every 5ms; sampled RSS/CPU may miss sub-sampling peaks.",
-            "acceptance": "Passing rows require native capacity scan, native embed success, FFmpeg strict decode (-v error -xerror), exact blind extraction with right key, and rejection with wrong key.",
-            "zkp_boundary": "Native authenticated CAVLC stream benchmark embeds HMAC-protected payloads. Groth16/PLONK proving is separately measured in zkp_new.json/pdf and is not claimed to be in the native streaming pixel path.",
+            "acceptance": "Passing rows require native capacity scan, native embed success, FFmpeg strict decode (-v error -xerror), exact blind extraction with the right key, mandatory Groth16 verify of the extracted proof, rejection with a wrong key, and no changed sign outside the keyed schedule.",
+            "payload": "Each case proves SHA256(SHA256(message)||secret) under a fresh 32-byte key and embeds pack(message, 129-byte Groth16 proof) in the v3 channel frame (no MAC); max_bits_per_idr is the protocol default 64.",
+            "zkp_boundary": "Groth16 proving runs before embedding on the host; it is not claimed to run in the camera pixel path. The proof is not bound to the video (replay under the same key is out of scope).",
         },
         "summary": {"total_cases": len(results), "passed": passed, "failed": len(results) - passed,
                     "all_passed": bool(results) and passed == len(results)},

@@ -1,4 +1,4 @@
-"""Cross-platform fixture E2E for the native authenticated CAVLC segment protocol.
+"""Cross-platform fixture E2E for the native keyed CAVLC segment protocol (v3).
 
 1. ``zkstego_blind_bits embed-stream-auth-stdin`` / ``extract-stream-auth`` round
    trip on a real H.264 fixture, strict FFmpeg decode, wrong key rejected.
@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from src.native_blind_contract import (
     bytes_to_bits,
     embedded_frame_bits,
-    pack_authenticated_frame,
+    pack_frame,
     segment_schedule,
     whitening_keystream_bits,
 )
@@ -107,7 +107,7 @@ def t_native_cli_stream_embed_extract_and_strict_decode() -> None:
         assert correct_key.stdout.strip().decode("ascii") == PAYLOAD.hex()
 
         wrong_key = _extract(cli, stego_path, WRONG_KEY)
-        assert wrong_key.returncode != 0, "native authenticated extraction accepted a wrong key"
+        assert wrong_key.returncode != 0, "native extraction accepted a wrong key"
         print(
             "NATIVE_CLI_FIXTURE_METRICS "
             f"strict_ffmpeg_exit={strict_decode.returncode} "
@@ -144,7 +144,7 @@ def t_python_segment_schedule_matches_native_encoder() -> None:
         min(MAX_BITS_PER_IDR, len(segment["candidates"])) for segment in cover["segments"]
     )
 
-    frame_bits = bytes_to_bits(pack_authenticated_frame(PAYLOAD, SECRET_KEY))
+    frame_bits = bytes_to_bits(pack_frame(PAYLOAD))
     keystream = whitening_keystream_bits(SECRET_KEY, len(frame_bits))
     embedded = embedded_frame_bits(PAYLOAD, SECRET_KEY)
     placements = segment_schedule(cover, SECRET_KEY, len(frame_bits), MAX_BITS_PER_IDR)
@@ -183,7 +183,7 @@ def t_python_segment_schedule_matches_native_encoder() -> None:
 
 
 def main() -> None:
-    section("Native authenticated CAVLC segment protocol fixture E2E")
+    section("Native keyed CAVLC segment protocol fixture E2E")
     results = [
         run_test("native_cli_stream_fixture_e2e", t_native_cli_stream_embed_extract_and_strict_decode),
         run_test("python_segment_schedule_matches_native", t_python_segment_schedule_matches_native_encoder),

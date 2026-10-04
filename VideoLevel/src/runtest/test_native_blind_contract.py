@@ -1,4 +1,4 @@
-"""Cross-language vectors for the native CAVLC blind channel contract (protocol v2).
+"""Cross-language vectors for the native CAVLC blind channel contract (protocol v3).
 
 Every hex constant below is also asserted by native/tests/cavlc_stream_tests.cpp,
 so the Python reference and the native implementation are pinned to one value.
@@ -20,13 +20,13 @@ from src.native_blind_contract import (
     hkdf_expand,
     hkdf_extract,
     hkdf_sha256,
-    pack_authenticated_frame,
+    pack_frame,
     parse_candidate_identity,
-    recover_authenticated_payload,
+    recover_payload,
     score_candidate,
     segment_schedule,
     select_candidates,
-    unpack_authenticated_frame,
+    unpack_frame,
     unwhiten_bits,
     whiten_bits,
     whiten_frame,
@@ -44,11 +44,10 @@ CANDIDATES = [
 ]
 # Shared with native/tests/cavlc_stream_tests.cpp.
 SCHEDULE_KEY_HEX = "4a1b2cca526bfa4c0520204dcc4217d272ccedff432f3867de33802a02688abe"
-FRAME_KEY_HEX = "744cc7ef87a7c74ab1b510bdd97b55ac92fbe80c0956a663757a0f858f7785cd"
 WHITENING_KEY_HEX = "488d024d53ee15a468b5659cefa82f9be00d2e9820f29df8bf60f61361ab5a74"
 FIRST_SCORE_HEX = "bf5e312df3c9d85bfbbcaa20bbc605fdccdaa9ce1d5f9b16ea68aceed407d83b"
-FRAME_HEX = "02000570726f6f669f09c2930ba2714337465dfa1b784ac5"
-WHITENED_FRAME_HEX = "497a9db6a217155e84b27af2c20355ec3e4a866103089d2b"
+FRAME_HEX = "03000570726f6f66"
+WHITENED_FRAME_HEX = "487a9db6a217155e"
 KEYSTREAM_40_HEX = "4b7a98c6d0787a381bbbb861c9a124af090cdb9b1870d7ee14f74a01635401e68660dff97f10007b"
 
 
@@ -72,9 +71,8 @@ def t_hkdf_rfc5869_case_1() -> None:
 def t_subkeys_match_native_vector() -> None:
     keys = derive_channel_keys(KEY)
     assert keys.schedule_key.hex() == SCHEDULE_KEY_HEX
-    assert keys.frame_key.hex() == FRAME_KEY_HEX
     assert keys.whitening_key.hex() == WHITENING_KEY_HEX
-    assert len({keys.schedule_key, keys.frame_key, keys.whitening_key, KEY}) == 4
+    assert len({keys.schedule_key, keys.whitening_key, KEY}) == 3
     expect_value_error(lambda: derive_channel_keys(b"\x00" * 31))
 
 
@@ -87,12 +85,17 @@ def t_schedule_matches_native_vector() -> None:
     expect_value_error(lambda: select_candidates([CANDIDATES[0], NativeCavlcCandidate(7, 12, 1, 3, 91)], KEY, 1))
 
 
-def t_frame_round_trip_and_wrong_key_rejection() -> None:
-    frame = pack_authenticated_frame(b"proof", KEY)
-    assert frame[0] == FRAME_VERSION == 2
+def t_frame_round_trip_and_header_checks() -> None:
+    frame = pack_frame(b"proof")
+    assert frame[0] == FRAME_VERSION == 3
     assert frame.hex() == FRAME_HEX
-    assert unpack_authenticated_frame(frame, KEY, 32) == b"proof"
-    expect_value_error(lambda: unpack_authenticated_frame(frame, WRONG_KEY, 32))
+    assert unpack_frame(frame, 32) == b"proof"
+    # The v3 frame has no MAC: only the header is checked. A v2 frame, a payload
+    # above the maximum and a length that disagrees with the frame are refused.
+    expect_value_error(lambda: unpack_frame(b"\x02" + frame[1:], 32))
+    expect_value_error(lambda: unpack_frame(frame, 4))
+    expect_value_error(lambda: unpack_frame(frame[:-1], 32))
+    expect_value_error(lambda: pack_frame(bytes(0x10000)))
 
 
 def t_whitening_vector_and_round_trip() -> None:
@@ -108,7 +111,7 @@ def t_whitening_vector_and_round_trip() -> None:
     # Whitening split across segments (bit index stays global) equals one pass.
     split = whiten_bits(bytes_to_bits(frame)[:29], KEY) + whiten_bits(bytes_to_bits(frame)[29:], KEY, 29)
     assert split == embedded
-    assert recover_authenticated_payload(embedded, KEY, 32) == b"proof"
+    assert recover_payload(embedded, KEY, 32) == b"proof"
 
 
 def t_wrong_key_rejects_whitened_frame() -> None:
@@ -116,9 +119,9 @@ def t_wrong_key_rejects_whitened_frame() -> None:
     header = bits_to_bytes(unwhiten_bits(embedded[:24], WRONG_KEY))
     assert header[0] != FRAME_VERSION
     try:
-        recover_authenticated_payload(embedded, WRONG_KEY, 32)
+        recover_payload(embedded, WRONG_KEY, 32)
     except ValueError as error:
-        assert "authenticated CAVLC frame" in str(error)
+        assert "CAVLC frame" in str(error)
     else:
         raise AssertionError("wrong key must reject a whitened frame")
 
@@ -126,7 +129,7 @@ def t_wrong_key_rejects_whitened_frame() -> None:
 def t_header_bits_look_unrelated() -> None:
     # Same key, two payloads: plaintext headers share the version byte, but
     # the embedded bits differ only where the plaintext differs (fixed
-    # keystream) and the embedded version byte is no longer the constant 0x02.
+    # keystream) and the embedded version byte is no longer the constant 0x03.
     first = bits_to_bytes(embedded_frame_bits(b"proof", KEY))
     second = bits_to_bytes(embedded_frame_bits(bytes(300), KEY))
     assert first[0] == second[0] != FRAME_VERSION
@@ -134,8 +137,8 @@ def t_header_bits_look_unrelated() -> None:
     # Across keys the embedded header changes completely.
     other = bits_to_bytes(embedded_frame_bits(b"proof", WRONG_KEY))
     assert other[:3] != first[:3]
-    # Over many keys the embedded version byte is spread, not pinned to 0x02.
-    versions = {whiten_frame(pack_authenticated_frame(b"x", bytes([seed]) * 32), bytes([seed]) * 32)[0]
+    # Over many keys the embedded version byte is spread, not pinned to 0x03.
+    versions = {whiten_frame(pack_frame(b"x"), bytes([seed]) * 32)[0]
                 for seed in range(64)}
     assert len(versions) > 32
 
@@ -195,12 +198,12 @@ def t_segment_schedule_matches_per_segment_selection() -> None:
 
 
 if __name__ == "__main__":
-    section("Native blind contract (protocol v2)")
+    section("Native blind contract (protocol v3)")
     results = [
         run_test("HKDF-SHA256 RFC 5869 test case 1", t_hkdf_rfc5869_case_1),
-        run_test("v2 subkey vector", t_subkeys_match_native_vector),
+        run_test("subkey vector", t_subkeys_match_native_vector),
         run_test("native schedule vector", t_schedule_matches_native_vector),
-        run_test("native authenticated frame", t_frame_round_trip_and_wrong_key_rejection),
+        run_test("native v3 frame and header checks", t_frame_round_trip_and_header_checks),
         run_test("whitening vector and round trip", t_whitening_vector_and_round_trip),
         run_test("wrong key rejects whitened frame", t_wrong_key_rejects_whitened_frame),
         run_test("embedded header bits are keystream-masked", t_header_bits_look_unrelated),

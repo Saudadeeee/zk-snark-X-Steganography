@@ -1,4 +1,4 @@
-"""Keep camera benchmark recording safeguards in the standard suite."""
+"""Keep camera benchmark recording safeguards and benchmark analysis helpers in the standard suite."""
 
 from __future__ import annotations
 
@@ -9,6 +9,9 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+import unittest
+
+from benchmark import test_benchmark_analysis_new
 from benchmark.test_realtime_camera_recorder import RealtimeCameraRecorderTests
 from src.runtest._helpers import run_test, section, summarise
 from src.runtest.run_all import exit_code_for_phase_statuses, status_for_phase_result
@@ -21,6 +24,19 @@ def _run_case(method_name: str) -> None:
         getattr(case, method_name)()
     finally:
         case.tearDown()
+
+
+def _analysis_cases() -> list[tuple[str, unittest.TestCase]]:
+    suite = unittest.defaultTestLoader.loadTestsFromModule(test_benchmark_analysis_new)
+    return [(case.id().rsplit(".", 1)[-1].removeprefix("test_"), case) for group in suite for case in group]
+
+
+def _run_unittest_case(case: unittest.TestCase) -> None:
+    result = unittest.TestResult()
+    case.run(result)
+    problems = result.errors + result.failures
+    if problems:
+        raise AssertionError(problems[0][1])
 
 
 def _run_exit_code_case(statuses: list[str], expected: int) -> None:
@@ -89,6 +105,8 @@ def main() -> int:
         )
         for name, passed, failed, skipped, exit_code, expected in phase_status_cases
     )
+    section("Benchmark analysis helpers")
+    results.extend(run_test(name, lambda case=case: _run_unittest_case(case)) for name, case in _analysis_cases())
     return summarise(results, "Benchmark recorder")
 
 

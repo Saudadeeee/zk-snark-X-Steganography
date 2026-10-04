@@ -1,9 +1,10 @@
 # Completion Plan and Evidence Audit
 
 > **Update 2026-10-02.** The test counts below are from 2026-09-24. The current
-> suite has 12 phases plus the hardware phase H1; `run_all.py` passed 126/126 on
-> 2026-10-03 (see README), after native channel protocol v2 (HKDF subkeys, bit
-> whitening) and the bit-constrained circuit (63,321 constraints, new local keys).
+> suite has 12 phases plus the hardware phase H1; `run_all.py` passed 139/139 on
+> 2026-10-04 (see README), after native channel protocol v2 (HKDF subkeys, bit
+> whitening), protocol v3 (no HMAC frame tag; the Groth16 proof authenticates) and the
+> bit-constrained circuit (63,321 constraints, new local keys).
 > Earlier camera and media records were made with protocol v1 and the old circuit.
 > The Python media pipeline (Phases 4/5/8 below) was removed the same day; only the
 > native core remains.

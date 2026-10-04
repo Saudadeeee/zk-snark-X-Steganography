@@ -544,7 +544,7 @@ def t_physical_camera_tcp_websocket_live_round_trip():
         assert extracted_proof_bytes == proof_to_bytes(proof_dict)
         stream_metrics = terminal.get("native_metrics")
         assert isinstance(stream_metrics, dict), terminal
-        assert stream_metrics["bits_embedded"] == (len(extracted_proof_payload) + 19) * 8
+        assert stream_metrics["bits_embedded"] == (len(extracted_proof_payload) + 3) * 8
         assert stream_metrics["candidate_capacity_bits"] >= stream_metrics["bits_embedded"]
         verify_started = time.perf_counter()
         extracted_proof = proof_bridge.bytes_to_proof(extracted_proof_bytes)
@@ -562,7 +562,7 @@ def t_physical_camera_tcp_websocket_live_round_trip():
         assert wrong_key_proof_rejected, "Groth16 proof unexpectedly verified against a different key"
         assert changed_message_proof_rejected, "Groth16 proof unexpectedly verified against a changed message"
         wrong_key_result = extract_from_stream(wrong_key)
-        assert wrong_key_result.get("type") == "error" and wrong_key_result.get("code") == "payload_not_authenticated", wrong_key_result
+        assert wrong_key_result.get("type") == "error" and wrong_key_result.get("code") == "payload_not_found", wrong_key_result
 
         ffprobe = subprocess.run(
             [

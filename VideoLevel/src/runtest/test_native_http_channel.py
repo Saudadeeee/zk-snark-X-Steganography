@@ -57,7 +57,7 @@ def t_native_http_embed_blind_extract_wrong_key_and_strict_decode():
             cli_path=cli,
         )
         with TestClient(app) as client:
-            # The cover fixture carries no authenticated payload: the native verify job must be
+            # The cover fixture carries no payload frame: the native verify job must be
             # "rejected" (never "succeeded"), with no message in the result.
             cover_verify = client.post(
                 "/api/v1/jobs/verify",
@@ -71,7 +71,7 @@ def t_native_http_embed_blind_extract_wrong_key_and_strict_decode():
             assert cover_verify.status_code == 202, cover_verify.text
             cover_verify_job = _wait_terminal(client, cover_verify.json()["job_id"], headers)
             assert cover_verify_job["status"] == "rejected", cover_verify_job
-            assert cover_verify_job["result"] == {"valid": False, "reason": "payload_not_authenticated"}
+            assert cover_verify_job["result"] == {"valid": False, "reason": "payload_not_found"}
 
             embedded = client.post(
                 "/api/v1/jobs/embed",
@@ -113,6 +113,8 @@ def t_native_http_embed_blind_extract_wrong_key_and_strict_decode():
             assert extracted.status_code == 202, extracted.text
             extracted_job = _wait_terminal(client, extracted.json()["job_id"], headers)
             assert extracted_job["status"] == "succeeded", extracted_job
+            # Extraction alone never authenticates the payload (v3 frames carry no MAC).
+            assert extracted_job["result"]["verified"] is False, extracted_job
             payload_response = client.get(
                 f"/api/v1/jobs/{extracted_job['job_id']}/artifact", headers=headers,
             )
@@ -361,7 +363,7 @@ def t_native_authenticated_websocket_live_round_trip():
                 metrics = final_message.get("native_metrics")
                 assert isinstance(metrics, dict), final_message
                 assert metrics["patched_idr_segments"] > 0
-                assert metrics["bits_embedded"] == (len(payload) + 19) * 8
+                assert metrics["bits_embedded"] == (len(payload) + 3) * 8
                 assert metrics["candidate_capacity_bits"] >= metrics["bits_embedded"]
                 assert metrics["idr_segment_count"] >= metrics["patched_idr_segments"]
                 assert metrics["idr_service_samples"] == min(
@@ -439,10 +441,11 @@ def t_native_authenticated_websocket_live_round_trip():
             response = extract_over_websocket(key)
             assert response.get("type") == "payload", response
             assert base64.b64decode(response["payload_b64"], validate=True) == payload
+            assert response["verified"] is False
 
             wrong_key = bytes([0xAC]) * 32
             response = extract_over_websocket(wrong_key)
-            assert response.get("type") == "error" and response.get("code") == "payload_not_authenticated", response
+            assert response.get("type") == "error" and response.get("code") == "payload_not_found", response
             assert "key" not in json.dumps(response).lower()
 
 
@@ -637,7 +640,7 @@ def t_native_uvicorn_network_websocket_round_trip():
             assert strict.returncode == 0, strict.stderr.decode("utf-8", errors="replace")
             assert correct.get("type") == "payload", correct
             assert base64.b64decode(correct["payload_b64"], validate=True) == payload
-            assert wrong.get("type") == "error" and wrong.get("code") == "payload_not_authenticated", wrong
+            assert wrong.get("type") == "error" and wrong.get("code") == "payload_not_found", wrong
             flow = completion.get("flow_control")
             assert isinstance(flow, dict), completion
             assert flow["input_bytes"] == len(fixture)

@@ -57,7 +57,7 @@ def build_protocols() -> list[dict[str, Any]]:
         "role": "this_work_component_reference",
         "properties": {"confidentiality": False, "integrity": True,
                        "shared_key_authentication": True, "public_verifiability": False},
-        "notes": "Reference primitive measured with full 32-byte HMAC output in Python cryptography. This Work's native CAVLC frame tag truncates HMAC-SHA-256 to 16 bytes; this row is not the native tag's exact timing/overhead.",
+        "notes": "Reference primitive measured with full 32-byte HMAC output in Python cryptography. Protocol v2 carried a native CAVLC frame tag that truncated HMAC-SHA-256 to 16 bytes; this row is not the native tag's exact timing/overhead.",
         "seal": hmac_seal, "open": hmac_open,
     })
 
@@ -290,8 +290,8 @@ def run_crypto_benchmark(out_path: Path, trials: int = 100) -> dict[str, Any]:
         "runtime": {"python": os.sys.version, "cryptography": __import__("cryptography").__version__},
         "methodology": "Real in-process seal/sign and open/verify calls; 32/256/1024-byte messages; 100 measured operations after one correctness/tamper trial; keys generated once per run except per-message RSA hybrid AES keys.",
         "proposal_mapping": {
-            "this_work": "Native H.264 CAVLC stream modification with per-frame HMAC-SHA-256 truncated to 16 bytes; authentication/integrity only, no payload confidentiality or public verifiability.",
-            "hmac_row_scope": "Primitive reference only: Python cryptography full 32-byte HMAC output. Native frame-tag cost and end-to-end video cost are reported separately by the native media benchmark.",
+            "this_work": "Native H.264 CAVLC stream modification, channel protocol v3: the frame carries no MAC (the v2 16-byte HMAC tag was removed); the payload's Groth16 proof authenticates it and HMAC-SHA-256 is used only as a keyed PRF for the sign schedule and whitening. No payload confidentiality.",
+            "hmac_row_scope": "Primitive reference only: Python cryptography full 32-byte HMAC output. Protocol v3 has no native frame tag; end-to-end video cost is reported separately by the media and E2E benchmarks.",
             "zkp_scope": "Groth16/PLONK tests prove a payload commitment statement separately; the current video benchmark does not prove camera origin or bind the entire video stream."
         },
         "results": results,

@@ -58,7 +58,7 @@ def _run_cli(*args: str, timeout: int = 7200) -> dict[str, Any]:
 
 
 def _require_artifacts() -> None:
-    required = (SNARKJS, BUILD / "payload_verify.r1cs", BUILD / "pot17_final.ptau",
+    required = (SNARKJS, BUILD / "payload_verify.r1cs",
                 BUILD / "payload_verify_js" / "payload_verify.wasm",
                 BUILD / "payload_verify_js" / "generate_witness.js",
                 BUILD / "proving_key.zkey", BUILD / "verification_key.json")
@@ -93,7 +93,7 @@ def _verify_expected_invalid(vkey: Path, public: Path, proof: Path, mode: str) -
     return _measured([NODE, str(SNARKJS), mode, "verify", str(vkey), str(public), str(proof)], cwd=CIRCUITS)
 
 
-def run_zkp_benchmark(output_root: Path, trials: int = 1,
+def run_zkp_benchmark(output_root: Path, trials: int = 1, plonk_trials: int | None = None,
                       existing_setup_dir: Path | None = None,
                       existing_setup_elapsed_ms: float | None = None) -> dict[str, Any]:
     _require_artifacts()
@@ -190,8 +190,9 @@ def run_zkp_benchmark(output_root: Path, trials: int = 1,
         vkey = {"wall_ms": None}
         if not plonk_zkey.is_file() or not plonk_vkey.is_file() or not ptau.is_file():
             raise RuntimeError("precomputed PLONK zkey, verification key or Powers-of-Tau file is missing")
-    plonk_trials: list[dict[str, Any]] = []
-    for trial in range(trials):
+    plonk_trial_count = trials if plonk_trials is None else plonk_trials
+    plonk_records: list[dict[str, Any]] = []
+    for trial in range(plonk_trial_count):
         witness_start = time.perf_counter_ns()
         witness = bridge._compute_witness(bridge._build_circuit_input(payload, secret))
         witness_ms = (time.perf_counter_ns() - witness_start) / 1e6
@@ -227,7 +228,7 @@ def run_zkp_benchmark(output_root: Path, trials: int = 1,
                 "public_signal_count": len(public_data),
                 "plonk_proving_key_bytes": plonk_zkey.stat().st_size,
             }
-            plonk_trials.append(record)
+            plonk_records.append(record)
         finally:
             witness.unlink(missing_ok=True)
             proof_path.unlink(missing_ok=True)
@@ -239,7 +240,7 @@ def run_zkp_benchmark(output_root: Path, trials: int = 1,
                 work.rmdir()
             except OSError:
                 pass
-    results.extend(plonk_trials)
+    results.extend(plonk_records)
     if not all(row["proof_valid"] and row["tampered_public_input_rejected"] for row in results):
         raise RuntimeError("proof positive/negative verification gate failed")
 
@@ -248,7 +249,7 @@ def run_zkp_benchmark(output_root: Path, trials: int = 1,
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "statement": "Same existing Circom payload_verify R1CS, same payload and 32-byte secret; proves SHA256(SHA256(payload)||secret) commitment and payload length.",
         "circuit_constraints": actual_constraints,
-        "payload_bytes": len(payload), "trials_per_system": trials,
+        "payload_bytes": len(payload), "trials_per_system": {"groth16": trials, "plonk": plonk_trial_count},
         "methodology": "Measured actual Node/snarkjs witness/prove/verify commands; PLONK uses a locally generated, adequately sized Powers-of-Tau transcript and setup time is reported separately. Wall times include Node process startup. Peak process RSS sampled every 10ms and may undercount short peaks. No literature-only estimates.",
         "groth16_proving_key_sha256": __import__("hashlib").sha256((BUILD / "proving_key.zkey").read_bytes()).hexdigest(),
         "powers_of_tau_power": power,

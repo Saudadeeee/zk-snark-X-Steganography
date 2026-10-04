@@ -575,7 +575,7 @@ def frame_field(bit_index: int, message_bytes: int) -> str:
     byte = bit_index // 8
     proof_fields = (("A.x", 32), ("B.x.c0", 32), ("B.x.c1", 32), ("C.x", 32), ("co dau y", 1))
     if byte == 0:
-        return "version khung (0x02)"
+        return "version khung (0x03)"
     if byte < 3:
         return "do dai payload (2 byte)"
     offset = byte - 3
@@ -589,7 +589,7 @@ def frame_field(bit_index: int, message_bytes: int) -> str:
         if offset < size:
             return f"payload: proof {name} byte {offset}"
         offset -= size
-    return f"tag HMAC byte {offset}"
+    return f"ngoai khung (byte {offset})"
 
 
 def embedded_bit_location(session, source: Path, stego: Path, before: dict, after: dict, exemplar,
