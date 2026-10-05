@@ -58,6 +58,7 @@ node_modules/
 !benchmark/results/realtime_camera_*.json
 !benchmark/results/*_new.json
 !benchmark/results/*_new.pdf
+!benchmark/results/distortion_new/summary.json
 !benchmark/results/media_new/
 !benchmark/results/media_new/**/
 !benchmark/results/media_new/**/video_pipeline_new.json

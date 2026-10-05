@@ -1,0 +1,62 @@
+\section{Security Analysis}
+\label{sec:security}
+
+We argue goals G1--G5 informally under standard assumptions: SHA-256 and the Poseidon Merkle tree are collision resistant, Poseidon is one-way on uniformly random inputs, HMAC-SHA256 is a PRF, and Groth16 is perfectly zero-knowledge and weakly simulation-extractable: an adversary that has seen proofs for some public inputs can re-randomize them, but cannot produce an accepting proof for a \emph{new} public input without knowing a witness~\cite{baghery2021groth16}.
+
+\begin{proposition}[Validity, G1]
+\label{prop:validity}
+Embedding changes only bits in $\Gamma_K(V)$; the stego stream parses into the same syntax elements with the same lengths as the cover, and only the selected trailing-one levels change sign.
+\end{proposition}
+\begin{proof}
+Every bit in $\Gamma_K(V)$ is a \texttt{trailing\_ones\_sign\_flag}; apply Proposition~\ref{prop:syntax} once per flip, in any order.
+\end{proof}
+
+\begin{lemma}[Digest invariance]
+\label{lem:invariance}
+For a cover $V$ and its stego stream $V^{\star}$ under key $K$, $\dig_K(V^{\star})=\dig_K(V)$.
+\end{lemma}
+\begin{proof}
+By Proposition~\ref{prop:validity} both streams have the same NAL units, headers and RBSP lengths (emulation-prevention bytes are not part of the RBSP), and the same candidates, so the schedule yields $\Gamma_K(V^{\star})=\Gamma_K(V)$. Their RBSPs differ only inside this set, which Eq.~\eqref{eq:digest} clears in both.
+\end{proof}
+
+\begin{lemma}[Syntax determines the mask]
+\label{lem:mask}
+If $\dig_K(V')=\dig_K(V)$ for a stream $V'$, then, except with negligible probability, $V'$ and $V$ have the same NAL units and RBSP lengths and differ only at positions in $\Gamma_K(V)=\Gamma_K(V')$.
+\end{lemma}
+\begin{proof}
+Collision resistance of SHA-256 gives equal canonical strings, hence equal headers and lengths, and RBSPs that agree outside $\Gamma_K(V)\cup\Gamma_K(V')$. Consider the first differing bit in parsing order. Both streams parse identically up to it, so it has the same syntactic role in both; it lies in one of the two masks, hence it is a trailing-one sign flag in both. By Proposition~\ref{prop:syntax} the parse of the rest is unaffected, and induction over the differing bits shows that $V$ and $V'$ have identical syntax and candidates. The schedule depends only on syntax and $K$, so the masks are equal.
+\end{proof}
+
+\begin{theorem}[Binding, G2]
+\label{thm:binding}
+Suppose the verifier accepts $(V',m')$ in mode 0 and the adversary does not know the secret of any registered camera. Then, except with negligible probability, some registered camera produced a proof for a pair $(V,m)$ with $m'=m$ and $V'$ equal to $V$ (or to its honest stego stream) outside the carrier set $\Gamma_K(V)$.
+\end{theorem}
+\begin{proof}
+Acceptance means a valid proof for $(\rho,\bind')$ with $\bind'=\Hash(\text{dom}\cat0\cat\dig_K(V')\cat\Hash(m'))$. If no honest proof was ever produced for $\bind'$, weak simulation-extractability yields a witness $(s',\mathit{path})$ whose leaf $\Pos(s')$ opens to $\rho$; by collision resistance of the tree the leaf is a registered key, and $s'$ is then a preimage of an honest camera's public key, contradicting one-wayness. Hence an honest camera proved $\bind'=\bind$ for some $(V,m)$. Collision resistance of SHA-256 gives $\Hash(m')=\Hash(m)$, so $m'=m$, and $\dig_K(V')=\dig_K(V)$; Lemma~\ref{lem:mask} concludes.
+\end{proof}
+
+\begin{remark}[What the carriers can still hold]
+Theorem~\ref{thm:binding} leaves the carrier bits free, but those bits \emph{are} the payload: they must parse as a frame whose message is $m$ and whose proof verifies for $\bind$. An adversary can therefore at most replace $\pi$ by a re-randomized proof for the same statement. Flipping a carrier changes the extracted payload and is rejected (Section~\ref{sec:eval}); flipping any other bit changes the digest.
+\end{remark}
+
+\begin{corollary}[Attacks covered]
+Each of the following yields rejection: embedding a valid payload into another video (the digest of the other video differs); dropping, appending or truncating NAL units; editing any non-carrier bit, including a trailing-one sign in a carrier IDR or any bit of a later frame; re-encoding; replacing the message; a proof made by a camera outside the trusted registry (it opens to a different root).
+\end{corollary}
+
+\begin{proposition}[Unforgeability with the stego key, G3]
+Holding $K$ does not help produce an accepting proof for a new binding: $K$ enters only the schedule, the whitening and the mask, all of which are public to the verifier anyway, while acceptance requires a proof for $\bind$, which by the argument of Theorem~\ref{thm:binding} requires a registered secret.
+\end{proposition}
+
+This is the property a MAC-based design lacks: with a tag under $K$, every verifier can authenticate arbitrary content.
+
+\begin{proposition}[Anonymity, G4]
+The verifier's view---$\rho$, $\bind$ and $\pi$---has the same distribution for every registered camera.
+\end{proposition}
+\begin{proof}
+$\rho$ and $\bind$ do not depend on which leaf is used. By perfect zero knowledge, $\pi$ can be simulated from the statement alone, so its distribution does not depend on the witness.
+\end{proof}
+Anonymity is relative to the registry: a registry of one camera identifies it.
+
+\textbf{Covertness (G5).} Without $K$ the schedule is a pseudo-random subset of the candidates and the embedded bits are pseudo-random; with a wrong key the version byte matches with probability $2^{-8}$ and the length must additionally be admissible, after which the payload parser and the proof reject. Sign flips do not change the bit rate, the codeword lengths or the file size apart from rare emulation-prevention bytes. We only measure first-order statistics: the share of negative trailing ones does not change significantly (Section~\ref{sec:eval}). Calibrated or learned steganalysis is future work, and we do not claim security against it.
+
+\textbf{Mode 1.} A live stream embeds its proof in the first IDRs, before the rest exists, so the proof can only bind the message. Theorem~\ref{thm:binding} then holds for $m$ but not for the video, and a mode-1 payload can be replayed into another stream. Verifiers reject mode 1 unless explicitly configured otherwise.

@@ -1,0 +1,65 @@
+\section{A Distortion Model for Trailing-One Sign Embedding}
+\label{sec:distortion}
+
+The forward direction of the channel---choose candidates, embed, measure PSNR---does not tell a designer how many bits a frame can take before its quality drops below a target. This section derives the distortion of one flip in closed form, models its propagation, and inverts the result into a per-IDR bit budget. All energies are sums of squared errors (SSE) of 8-bit samples; $\PSNR=10\log_{10}(255^2 N_{\mathrm{px}}/\SSE)$ for a plane of $N_{\mathrm{px}}$ samples.
+
+\subsection{Direct distortion of one flip}
+
+\begin{lemma}[Single flip]
+\label{lem:flip}
+Flipping the sign of a trailing one at raster position $(i,j)$ of a $4\times4$ block coded with quantization parameter $\mathit{QP}$ changes the reconstructed residual of that block, before rounding and clipping, by an error of energy
+\begin{equation}
+E_{ij}=4\,\Qs(\mathit{QP})^2\,\kappa_m(i,j),
+\label{eq:flip}
+\end{equation}
+\begin{equation}
+\kappa_m(i,j)=\frac{v_m(i,j)^2\,\|b_i\|^2\|b_j\|^2}{16\,v_{m,0}^2},
+\label{eq:kappa}
+\end{equation}
+with $m=\mathit{QP}\bmod6$. $\kappa_m(i,j)=1$ for the even/even class (including the DC position) and $\kappa_m(i,j)\in[0.925,1.057]$ for all positions and all $m$.
+\end{lemma}
+\begin{proof}
+The level changes by $\Delta c=\mp2$. By Eq.~\eqref{eq:dequant} the scaled coefficient changes by $\Delta d=\mp2\,v_m(i,j)\,2^{\lfloor\mathit{QP}/6\rfloor}$ and no other coefficient changes. By linearity of Eq.~\eqref{eq:inverse} before the final rounding, the residual error is $\Delta e(x,y)=\Delta d\, b_i(x)\,b_j(y)/64$, whose energy is $(\Delta d/64)^2\|b_i\|^2\|b_j\|^2$. Substituting $\Qs=v_{m,0}2^{\lfloor\mathit{QP}/6\rfloor}/16$ gives Eq.~\eqref{eq:flip}. The bounds follow by evaluating the six tables: $\kappa\in\{1,1.056\}$, $\{1,1.012,1.046\}$, $\{0.925,0.947,1\}$, $\{1,1.033,1.054\}$, $\{0.954,0.977,1\}$ and $\{1,1.014,1.020\}$ for $m=0,\dots,5$.
+\end{proof}
+
+The near-constancy of $\kappa$ is not a coincidence: the scaling factors $v_m$ were designed to compensate the unequal norms of the integer basis~\cite{malvar2003transform}, so the scaled transform is close to orthonormal and, by Parseval, a level change of $\pm2$ costs $(2\Qs)^2$ wherever it occurs. The energy depends on the quantizer only; it does not depend on the image, the prediction mode or the frequency.
+
+\begin{lemma}[DC paths]
+\label{lem:dc}
+A flip in an Intra16$\times$16 LumaDC block or a ChromaDC block has, before rounding, the same total energy $4\Qs^2$ (with $\mathit{QP}_c$ for chroma), spread uniformly over the sixteen (resp.\ four) $4\times4$ blocks of the MB component.
+\end{lemma}
+\begin{proof}
+LumaDC: the Hadamard output changes by $\pm2$ in all sixteen positions, and the DC scaling $(f\cdot16v_{m,0}2^{\lfloor\mathit{QP}/6\rfloor})/64$ turns this into a change of $v_{m,0}2^{\lfloor\mathit{QP}/6\rfloor}/2$ in the DC coefficient of each block, i.e.\ a constant residual change of $v_{m,0}2^{\lfloor\mathit{QP}/6\rfloor}/128$ over each block; the total energy is $256\,(v_{m,0}2^{\lfloor\mathit{QP}/6\rfloor}/128)^2=4\Qs^2$. ChromaDC: the $2\times2$ Hadamard output changes by $\pm2$ in four positions, the scaling $(f\cdot16v_{m,0}2^{\lfloor\mathit{QP}_c/6\rfloor})/32$ gives $v_{m,0}2^{\lfloor\mathit{QP}_c/6\rfloor}$ per block, and four blocks of sixteen samples give the same total.
+\end{proof}
+
+\textbf{Additivity.} The schedule uses one candidate per block, so two flips in the same block can only be a DC-path flip and an AC flip of the same MB component. Their errors are orthogonal (an AC basis function has zero mean, a DC change is constant over the block), so the direct energies add exactly. Rounding by $(\cdot+32)\gg6$ adds a bounded perturbation; in the demo block of Appendix~\ref{app:example} the exact rounded energy is 128 against a model value of 121.
+
+\subsection{Propagation}
+Ignoring clipping and the rounding of prediction, intra decoding is affine in the residual: in decoding order every block is its prediction (a linear function of earlier reconstructed samples) plus its residual. A direct error $\delta_k$ of flip $k$ therefore becomes a total error $\mu_k=(I-\mathcal P)^{-1}\delta_k$, where $\mathcal P$ is the strictly lower-triangular prediction operator of the frame, and deblocking adds a further, data-dependent smoothing. We define the \emph{propagation gain}
+\begin{equation}
+G_k=\frac{\|\mu_k\|^2}{4\Qs(\mathit{QP}_k)^2},
+\end{equation}
+which captures drift through intra prediction and deblocking ($G_k\approx\kappa_k$ when nothing propagates; rounding and clipping can push it slightly below). For a set of flips the total error is $\sum_k\mu_k$; cross terms $\langle\mu_k,\mu_l\rangle$ carry the signs of the flipped levels, which are those of the cover coefficients, and are zero-mean over the random keyed choice of carriers. Hence
+\begin{equation}
+\mathbb E[\SSE]\approx\sum_k 4\,\Qs(\mathit{QP}_k)^2\,G_k .
+\end{equation}
+$G_k$ depends on the prediction structure---MB type, prediction modes, block position, whether deblocking is on---which is why it is measured rather than derived (Section~\ref{sec:eval}).
+
+\subsection{Forward model and inverse}
+With constant QP, $N$ flips in the luma plane and a frame-level gain $\bar G$ (the geometric mean of $G_k$ fitted on data),
+\begin{equation}
+\PSNR_Y\approx10\log_{10}\frac{255^2\,W H}{4\,\bar G\,N\,\Qs(\mathit{QP})^2}.
+\label{eq:forward}
+\end{equation}
+Three rules of thumb follow: doubling the number of flips costs $3.01$\,dB, raising QP by six costs $6.02$\,dB, and four times more pixels gain $6.02$\,dB at the same number of flips. Inverting Eq.~\eqref{eq:forward} for a target $T$:
+\begin{equation}
+N_{\max}(T)=\frac{255^2\,W H\,10^{-T/10}}{4\,\bar G\,\Qs(\mathit{QP})^2},\qquad
+\mathit{cap}(T)=\frac{N_{\max}(T)}{p\,f_Y},
+\label{eq:inverse-cap}
+\end{equation}
+where $p=1/2$ is the probability that a whitened bit changes the sign and $f_Y$ the share of luma candidates (a uniformly random schedule selects luma carriers at that rate). Chroma planes have their own budget with $\mathit{QP}_c$ and the chroma gain.
+
+\textbf{Receiver computability.} A per-IDR cap is usable only if the receiver derives the same value from the stego stream. Eq.~\eqref{eq:inverse-cap} uses $W$, $H$, the slice QP, $f_Y$ and a protocol constant $\bar G$; by Proposition~\ref{prop:syntax} all of them are identical in the cover and the stego stream. An adaptive cap therefore needs no side information. The same constraint applies to any cost-aware schedule: costs may depend on positions, categories, MB types, prediction modes and coefficient magnitudes, but never on the sign values that carry data.
+
+\subsection{Towards minimal-distortion embedding}
+Eq.~\eqref{eq:flip} supplies an additive per-carrier cost $\rho_k=4\Qs(\mathit{QP}_k)^2\kappa_k\hat G_k$, with $\hat G_k$ predicted from invariant features (e.g.\ category and MB type). For a payload of $L$ bits, the distortion-limited sender of~\cite{filler2011stc,fridrich2007practical} changes carrier $k$ with probability $p_k=1/(1+e^{\lambda\rho_k})$, where $\lambda$ solves $\sum_k h(p_k)=L$ ($h$ the binary entropy) and the expected distortion is $\sum_kp_k\rho_k$; syndrome-trellis codes come close to this bound. Even without costs, matrix embedding reduces flips per bit: the present channel spends $1/2$ expected flip per bit, while a Hamming code with $r=3$ embeds three bits into seven carriers with $1-2^{-3}=0.875$ expected flips, i.e.\ $0.29$ flips per bit, a $10\log_{10}(0.5/0.29)\approx2.3$\,dB gain at equal payload. Candidates are plentiful (thousands per IDR against 64 used), so the larger carrier count is affordable. We leave both to future work and use the model here to explain and set the cap.

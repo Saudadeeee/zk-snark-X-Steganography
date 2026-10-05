@@ -16,7 +16,7 @@ which camera, and without the verifier holding any camera secret.
 | Area | State |
 |---|---|
 | Maturity | Research prototype. Supported input is constrained (see [Limits](#known-limits)); this is not generic H.264 support |
-| Tests | 2026-10-04: `py -3.12 src/runtest/run_all.py` passed **142/142 across 12 phases** on a Windows host (fixtures from `prepare_fixtures.py`), native CTest 1/1. Physical-camera E2E (`--hardware`) not included. Functional evidence, not edge acceptance |
+| Tests | 2026-10-05: `py -3.12 src/runtest/run_all.py` passed **151/151 across 12 phases** on a Windows host (fixtures from `prepare_fixtures.py`), native CTest 1/1. Physical-camera E2E (`--hardware`) not included. Functional evidence, not edge acceptance |
 | Realtime | **Not accepted.** Corrected physical-camera H.264 E2E: 7.608 source FPS against a 30-FPS gate (measured before the 2026-10-02 native stdin/reader speed-up, not yet re-measured). No edge target benchmarked |
 | Proof boundary | Groth16 (`circuits/camera_video.circom`) proves that the signing camera's key is a leaf of the trusted registry Merkle tree and binds the proof to SHA256 of the masked video digest and the message. Verifiers need the registry root, not the camera secret; replaying the payload into another video or cutting the video fails. It does not prove that the camera really filmed the scene (e.g. re-filming a screen) |
 | Benchmarks | `py -3.12 -m benchmark.run_new_suite` writes one report, `benchmark/results/benchmark_report_new.pdf` (2026-10-04: media 27/27 with video-bound camera proofs, E2E 5/5, attacks 11/11 as expected — replay, truncation and later-frame edits are rejected). See [`benchmark/NEW_BENCHMARKS.md`](benchmark/NEW_BENCHMARKS.md) |

@@ -1,0 +1,472 @@
+% references.bib -- IEEE-format bibliography
+% Entries verified against primary sources (ITU, IEEE/DBLP, Springer, IACR ePrint,
+% arXiv, RFC Editor, USENIX, publisher pages). Unverifiable fields are omitted.
+
+% ---------------------------------------------------------------------------
+% H.264/AVC
+% ---------------------------------------------------------------------------
+
+@techreport{itu_h264,
+  author      = {{ITU-T}},
+  title       = {{H.264}: Advanced Video Coding for Generic Audiovisual Services},
+  institution = {International Telecommunication Union},
+  type        = {Recommendation},
+  number      = {{ITU-T} {H.264} ({V16})},
+  month       = jun,
+  year        = {2026},
+  url         = {https://www.itu.int/rec/T-REC-H.264}
+}
+
+@article{wiegand2003overview,
+  author  = {Wiegand, Thomas and Sullivan, Gary J. and Bj{\o}ntegaard, Gisle and Luthra, Ajay},
+  title   = {Overview of the {H.264/AVC} Video Coding Standard},
+  journal = {IEEE Transactions on Circuits and Systems for Video Technology},
+  volume  = {13},
+  number  = {7},
+  pages   = {560--576},
+  month   = jul,
+  year    = {2003},
+  doi     = {10.1109/TCSVT.2003.815165}
+}
+
+@article{malvar2003transform,
+  author  = {Malvar, Henrique S. and Hallapuro, Antti and Karczewicz, Marta and Kerofsky, Louis},
+  title   = {Low-Complexity Transform and Quantization in {H.264/AVC}},
+  journal = {IEEE Transactions on Circuits and Systems for Video Technology},
+  volume  = {13},
+  number  = {7},
+  pages   = {598--603},
+  month   = jul,
+  year    = {2003},
+  doi     = {10.1109/TCSVT.2003.814964}
+}
+
+@book{richardson2010h264,
+  author    = {Richardson, Iain E.},
+  title     = {The {H.264} Advanced Video Compression Standard},
+  edition   = {2nd},
+  publisher = {John Wiley \& Sons},
+  year      = {2010},
+  doi       = {10.1002/9780470989418}
+}
+
+% ---------------------------------------------------------------------------
+% zk-SNARKs, hashing, tooling
+% ---------------------------------------------------------------------------
+
+@inproceedings{groth2016,
+  author    = {Groth, Jens},
+  title     = {On the Size of Pairing-Based Non-interactive Arguments},
+  booktitle = {Advances in Cryptology -- {EUROCRYPT} 2016, Part {II}},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {9666},
+  pages     = {305--326},
+  publisher = {Springer},
+  year      = {2016},
+  doi       = {10.1007/978-3-662-49896-5_11}
+}
+
+@misc{plonk2019,
+  author       = {Gabizon, Ariel and Williamson, Zachary J. and Ciobotaru, Oana},
+  title        = {{PLONK}: Permutations over {L}agrange-bases for Oecumenical Noninteractive Arguments of Knowledge},
+  howpublished = {Cryptology {ePrint} Archive, Paper 2019/953},
+  year         = {2019},
+  url          = {https://eprint.iacr.org/2019/953}
+}
+
+@inproceedings{poseidon2021,
+  author    = {Grassi, Lorenzo and Khovratovich, Dmitry and Rechberger, Christian and Roy, Arnab and Schofnegger, Markus},
+  title     = {{Poseidon}: A New Hash Function for Zero-Knowledge Proof Systems},
+  booktitle = {Proceedings of the 30th {USENIX} Security Symposium ({USENIX} Security 21)},
+  pages     = {519--535},
+  publisher = {{USENIX} Association},
+  year      = {2021},
+  url       = {https://www.usenix.org/conference/usenixsecurity21/presentation/grassi}
+}
+
+@article{circom2023,
+  author  = {Bell{\'e}s-Mu{\~n}oz, Marta and Isabel, Miguel and Mu{\~n}oz-Tapia, Jose Luis and Rubio, Albert and Baylina, Jordi},
+  title   = {{Circom}: A Circuit Description Language for Building Zero-Knowledge Applications},
+  journal = {IEEE Transactions on Dependable and Secure Computing},
+  volume  = {20},
+  number  = {6},
+  pages   = {4733--4751},
+  year    = {2023},
+  doi     = {10.1109/TDSC.2022.3232813}
+}
+
+@misc{snarkjs,
+  author       = {{iden3}},
+  title        = {{snarkjs}: {JavaScript} and {WebAssembly} Implementation of {zk-SNARK} and {PLONK} Schemes},
+  howpublished = {GitHub repository},
+  url          = {https://github.com/iden3/snarkjs},
+  note         = {accessed Oct. 2026}
+}
+
+@misc{bowe2017mpc,
+  author       = {Bowe, Sean and Gabizon, Ariel and Miers, Ian},
+  title        = {Scalable Multi-party Computation for {zk-SNARK} Parameters in the Random Beacon Model},
+  howpublished = {Cryptology {ePrint} Archive, Paper 2017/1050},
+  year         = {2017},
+  url          = {https://eprint.iacr.org/2017/1050}
+}
+
+@inproceedings{bn2005,
+  author    = {Barreto, Paulo S. L. M. and Naehrig, Michael},
+  title     = {Pairing-Friendly Elliptic Curves of Prime Order},
+  booktitle = {Selected Areas in Cryptography ({SAC} 2005)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {3897},
+  pages     = {319--331},
+  publisher = {Springer},
+  year      = {2006},
+  doi       = {10.1007/11693383_22}
+}
+
+@misc{rfc5869,
+  author       = {Krawczyk, Hugo and Eronen, Pasi},
+  title        = {{HMAC}-based Extract-and-Expand Key Derivation Function ({HKDF})},
+  howpublished = {RFC 5869},
+  publisher    = {RFC Editor},
+  month        = may,
+  year         = {2010},
+  doi          = {10.17487/RFC5869},
+  url          = {https://www.rfc-editor.org/info/rfc5869}
+}
+
+@inproceedings{bellare1996hmac,
+  author    = {Bellare, Mihir and Canetti, Ran and Krawczyk, Hugo},
+  title     = {Keying Hash Functions for Message Authentication},
+  booktitle = {Advances in Cryptology -- {CRYPTO} '96},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {1109},
+  pages     = {1--15},
+  publisher = {Springer},
+  year      = {1996},
+  doi       = {10.1007/3-540-68697-5_1}
+}
+
+@inproceedings{merkle1987,
+  author    = {Merkle, Ralph C.},
+  title     = {A Digital Signature Based on a Conventional Encryption Function},
+  booktitle = {Advances in Cryptology -- {CRYPTO} '87},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {293},
+  pages     = {369--378},
+  publisher = {Springer},
+  year      = {1988},
+  doi       = {10.1007/3-540-48184-2_32}
+}
+
+@inproceedings{zerocash2014,
+  author    = {Ben-Sasson, Eli and Chiesa, Alessandro and Garman, Christina and Green, Matthew and Miers, Ian and Tromer, Eran and Virza, Madars},
+  title     = {Zerocash: Decentralized Anonymous Payments from {B}itcoin},
+  booktitle = {Proceedings of the 2014 {IEEE} Symposium on Security and Privacy ({SP})},
+  pages     = {459--474},
+  year      = {2014},
+  doi       = {10.1109/SP.2014.36}
+}
+
+@misc{semaphore,
+  author       = {{Privacy \& Scaling Explorations}},
+  title        = {Semaphore: A Zero-Knowledge Protocol for Anonymous Interactions},
+  howpublished = {Project website and GitHub repository},
+  url          = {https://semaphore.pse.dev},
+  note         = {Source: https://github.com/semaphore-protocol/semaphore, accessed Oct. 2026}
+}
+
+% ---------------------------------------------------------------------------
+% Cryptographic media provenance
+% ---------------------------------------------------------------------------
+
+@inproceedings{photoproof2016,
+  author    = {Naveh, Assa and Tromer, Eran},
+  title     = {{PhotoProof}: Cryptographic Image Authentication for Any Set of Permissible Transformations},
+  booktitle = {Proceedings of the 2016 {IEEE} Symposium on Security and Privacy ({SP})},
+  pages     = {255--271},
+  year      = {2016},
+  doi       = {10.1109/SP.2016.23}
+}
+
+@misc{zkimg2022,
+  author        = {Kang, Daniel and Hashimoto, Tatsunori and Stoica, Ion and Sun, Yi},
+  title         = {{ZK-IMG}: Attested Images via Zero-Knowledge Proofs to Fight Disinformation},
+  howpublished  = {arXiv:2211.04775},
+  year          = {2022},
+  eprint        = {2211.04775},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/2211.04775}
+}
+
+@inproceedings{veritas2024,
+  author    = {Datta, Trisha and Chen, Binyi and Boneh, Dan},
+  title     = {{VerITAS}: Verifying Image Transformations at Scale},
+  booktitle = {Proceedings of the 2025 {IEEE} Symposium on Security and Privacy ({SP})},
+  pages     = {4606--4623},
+  year      = {2025},
+  doi       = {10.1109/SP61157.2025.00097}
+}
+
+@article{vimz2024,
+  author  = {Dziembowski, Stefan and Ebrahimi, Shahriar and Hassanizadeh, Parisa},
+  title   = {{VIMz}: Private Proofs of Image Manipulation Using Folding-Based {zkSNARKs}},
+  journal = {Proceedings on Privacy Enhancing Technologies},
+  volume  = {2025},
+  number  = {2},
+  pages   = {344--362},
+  year    = {2025},
+  doi     = {10.56553/popets-2025-0065}
+}
+
+@misc{zkcinema2026,
+  author       = {Frolov, Alexander and Guo, Jianfeng and Zhao, Xinyi and Datta, Trisha and Boneh, Dan and Miers, Ian},
+  title        = {{zk-Cinema}: Proving Video Provenance in Zero Knowledge},
+  howpublished = {Cryptology {ePrint} Archive, Paper 2026/1598},
+  year         = {2026},
+  url          = {https://eprint.iacr.org/2026/1598}
+}
+
+@misc{aipa2026,
+  author       = {Yu, Linsheng and Yao, Yanqing},
+  title        = {{AIPA}: Anonymous Image Provenance Authentication in Online Social Networks via Unlinkable Pseudonym Certificates and {zk-SNARKs}},
+  howpublished = {Cryptology {ePrint} Archive, Paper 2026/1914},
+  year         = {2026},
+  url          = {https://eprint.iacr.org/2026/1914}
+}
+
+@misc{c2pa_spec,
+  author       = {{Coalition for Content Provenance and Authenticity}},
+  title        = {Content Credentials: {C2PA} Technical Specification, Version 2.4},
+  month        = apr,
+  year         = {2026},
+  url          = {https://spec.c2pa.org/specifications/specifications/2.4/specs/C2PA_Specification.html}
+}
+
+% ---------------------------------------------------------------------------
+% Zero knowledge + watermarking / steganography
+% ---------------------------------------------------------------------------
+
+@inproceedings{adelsbach2001zkwm,
+  author    = {Adelsbach, Andr{\'e} and Sadeghi, Ahmad-Reza},
+  title     = {Zero-Knowledge Watermark Detection and Proof of Ownership},
+  booktitle = {Information Hiding ({IH} 2001)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {2137},
+  pages     = {273--288},
+  publisher = {Springer},
+  year      = {2001},
+  doi       = {10.1007/3-540-45496-9_20}
+}
+
+@inproceedings{toso2006,
+  author    = {Toso, Matthew and Chung, Sun B.},
+  title     = {Combining Steganography and Zero-Knowledge Proofs to Embed and Prove a Digital Signature in an Image},
+  booktitle = {Proceedings of the Midwest Instruction and Computing Symposium ({MICS})},
+  year      = {2006},
+  url       = {https://www.micsymposium.org/mics_2006/papers/TosoAndChung.pdf}
+}
+
+% ---------------------------------------------------------------------------
+% H.264 data hiding and fragile watermarking
+% ---------------------------------------------------------------------------
+
+@inproceedings{kapotas2007,
+  author    = {Kapotas, Spyridon K. and Varsaki, Eleni E. and Skodras, Athanassios N.},
+  title     = {Data Hiding in {H.264} Encoded Video Sequences},
+  booktitle = {Proceedings of the 9th {IEEE} Workshop on Multimedia Signal Processing ({MMSP})},
+  pages     = {373--376},
+  month     = oct,
+  year      = {2007},
+  doi       = {10.1109/MMSP.2007.4412894}
+}
+
+@inproceedings{mobasseri2007,
+  author    = {Mobasseri, Bijan G. and Naik Raikar, Yatish},
+  title     = {Authentication of {H.264} Streams by Direct Watermarking of {CAVLC} Blocks},
+  booktitle = {Security, Steganography, and Watermarking of Multimedia Contents {IX}},
+  series    = {Proc. SPIE},
+  volume    = {6505},
+  pages     = {65051W},
+  publisher = {SPIE},
+  month     = feb,
+  year      = {2007},
+  doi       = {10.1117/12.703369}
+}
+
+@article{fragile_h264_mtap,
+  author  = {Horng, Shi-Jinn and Farfoura, Mahmoud E. and Fan, Pingzhi and Wang, Xian and Li, Tianrui and Guo, Jing-Ming},
+  title   = {A Low Cost Fragile Watermarking Scheme in {H.264/AVC} Compressed Domain},
+  journal = {Multimedia Tools and Applications},
+  volume  = {72},
+  number  = {3},
+  pages   = {2469--2495},
+  year    = {2014},
+  doi     = {10.1007/s11042-013-1561-2}
+}
+
+@article{ma2010drift,
+  author  = {Ma, Xiaojing and Li, Zhitang and Tu, Hao and Zhang, Bochao},
+  title   = {A Data Hiding Algorithm for {H.264/AVC} Video Streams Without Intra-Frame Distortion Drift},
+  journal = {IEEE Transactions on Circuits and Systems for Video Technology},
+  volume  = {20},
+  number  = {10},
+  pages   = {1320--1330},
+  month   = oct,
+  year    = {2010},
+  doi     = {10.1109/TCSVT.2010.2070950}
+}
+
+@inproceedings{wong1998,
+  author    = {Wong, Ping Wah},
+  title     = {A Public Key Watermark for Image Verification and Authentication},
+  booktitle = {Proceedings of the 1998 International Conference on Image Processing ({ICIP})},
+  volume    = {1},
+  pages     = {455--459},
+  year      = {1998},
+  doi       = {10.1109/ICIP.1998.723526}
+}
+
+@inproceedings{yeung1997,
+  author    = {Yeung, Minerva M. and Mintzer, Fred},
+  title     = {An Invisible Watermarking Technique for Image Verification},
+  booktitle = {Proceedings of the International Conference on Image Processing ({ICIP})},
+  volume    = {2},
+  pages     = {680--683},
+  year      = {1997},
+  doi       = {10.1109/ICIP.1997.638587}
+}
+
+% ---------------------------------------------------------------------------
+% Steganography and steganalysis
+% ---------------------------------------------------------------------------
+
+@article{filler2011stc,
+  author  = {Filler, Tom{\'a}{\v{s}} and Judas, Jan and Fridrich, Jessica},
+  title   = {Minimizing Additive Distortion in Steganography Using Syndrome-Trellis Codes},
+  journal = {IEEE Transactions on Information Forensics and Security},
+  volume  = {6},
+  number  = {3},
+  pages   = {920--935},
+  month   = sep,
+  year    = {2011},
+  doi     = {10.1109/TIFS.2011.2134094}
+}
+
+@inproceedings{fridrich2007practical,
+  author    = {Fridrich, Jessica and Filler, Tom{\'a}{\v{s}}},
+  title     = {Practical Methods for Minimizing Embedding Impact in Steganography},
+  booktitle = {Security, Steganography, and Watermarking of Multimedia Contents {IX}},
+  series    = {Proc. SPIE},
+  volume    = {6505},
+  pages     = {650502},
+  publisher = {SPIE},
+  month     = feb,
+  year      = {2007},
+  doi       = {10.1117/12.697471}
+}
+
+@inproceedings{westfeld2001f5,
+  author    = {Westfeld, Andreas},
+  title     = {{F5}---A Steganographic Algorithm: High Capacity Despite Better Steganalysis},
+  booktitle = {Information Hiding ({IH} 2001)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {2137},
+  pages     = {289--302},
+  publisher = {Springer},
+  year      = {2001},
+  doi       = {10.1007/3-540-45496-9_21}
+}
+
+@book{fridrich2009book,
+  author    = {Fridrich, Jessica},
+  title     = {Steganography in Digital Media: Principles, Algorithms, and Applications},
+  publisher = {Cambridge University Press},
+  year      = {2009}
+}
+
+@article{fridrich2012srm,
+  author  = {Fridrich, Jessica and Kodovsk{\'y}, Jan},
+  title   = {Rich Models for Steganalysis of Digital Images},
+  journal = {IEEE Transactions on Information Forensics and Security},
+  volume  = {7},
+  number  = {3},
+  pages   = {868--882},
+  month   = jun,
+  year    = {2012},
+  doi     = {10.1109/TIFS.2012.2190402}
+}
+
+@inproceedings{ker2013realworld,
+  author    = {Ker, Andrew D. and Bas, Patrick and B{\"o}hme, Rainer and Cogranne, R{\'e}mi and Craver, Scott and Filler, Tom{\'a}{\v{s}} and Fridrich, Jessica and Pevn{\'y}, Tom{\'a}{\v{s}}},
+  title     = {Moving Steganography and Steganalysis from the Laboratory into the Real World},
+  booktitle = {Proceedings of the 1st {ACM} Workshop on Information Hiding and Multimedia Security ({IH\&MMSec})},
+  pages     = {45--58},
+  publisher = {ACM},
+  year      = {2013},
+  doi       = {10.1145/2482513.2482965}
+}
+
+@inproceedings{simmons1984,
+  author    = {Simmons, Gustavus J.},
+  title     = {The Prisoners' Problem and the Subliminal Channel},
+  booktitle = {Advances in Cryptology: Proceedings of {Crypto} 83},
+  pages     = {51--67},
+  publisher = {Plenum Press},
+  year      = {1984},
+  doi       = {10.1007/978-1-4684-4730-9_5}
+}
+
+@inproceedings{cachin1998,
+  author    = {Cachin, Christian},
+  title     = {An Information-Theoretic Model for Steganography},
+  booktitle = {Information Hiding ({IH} 1998)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {1525},
+  pages     = {306--318},
+  publisher = {Springer},
+  year      = {1998},
+  doi       = {10.1007/3-540-49380-8_21}
+}
+
+% ---------------------------------------------------------------------------
+% Evaluation: quality metric, test media, setup artifacts
+% ---------------------------------------------------------------------------
+
+@article{wang2004ssim,
+  author  = {Wang, Zhou and Bovik, Alan C. and Sheikh, Hamid R. and Simoncelli, Eero P.},
+  title   = {Image Quality Assessment: From Error Visibility to Structural Similarity},
+  journal = {IEEE Transactions on Image Processing},
+  volume  = {13},
+  number  = {4},
+  pages   = {600--612},
+  month   = apr,
+  year    = {2004},
+  doi     = {10.1109/TIP.2003.819861}
+}
+
+@misc{xiph_media,
+  author       = {{Xiph.Org}},
+  title        = {{Xiph.org} Video Test Media [derf's collection]},
+  url          = {https://media.xiph.org/video/derf/},
+  note         = {accessed Oct. 2026}
+}
+
+@misc{hermez_ptau,
+  author       = {{iden3}},
+  title        = {Prepared Phase-2 Powers of Tau Files for {BN128} ({powersOfTau28\_hez\_final\_*.ptau}), 54 Contributions and a Random Beacon},
+  howpublished = {Listed in the snarkjs README},
+  url          = {https://github.com/iden3/snarkjs},
+  note         = {Files hosted at https://circom.info/, accessed Oct. 2026}
+}
+
+@inproceedings{baghery2021groth16,
+  author    = {Karim Baghery and Markulf Kohlweiss and Janno Siim and Mikhail Volkhov},
+  title     = {Another Look at Extraction and Randomization of {Groth's} {zk-SNARK}},
+  booktitle = {Financial Cryptography and Data Security (FC 2021)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {12674},
+  pages     = {457--475},
+  year      = {2021},
+  publisher = {Springer},
+  doi       = {10.1007/978-3-662-64322-8_22}
+}

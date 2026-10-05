@@ -1,0 +1,101 @@
+\section{Evaluation}
+\label{sec:eval}
+
+\subsection{Setup}
+All measurements ran on one laptop (Intel Core i7-12700H, 14 cores/20 threads, 25.4\,GB RAM, Windows~11) with FFmpeg~8.0.1 (x264 core~165), Node.js~22.20 and snarkjs~0.7.6. Sources are nine Xiph CIF sequences~\cite{xiph_media} (akiyo, city, coastguard, container, deadline, football, two foreman variants, hall\_monitor), 30 frames each, encoded at their native $352\times288$ and Lanczos-upscaled to $640\times480$ and $1280\times960$ (upscaled sequences test scaling, not native high-resolution content). The benchmark encoder is x264 \emph{ultrafast}/zerolatency, Constrained Baseline, QP~22 for P frames (the I-slice QP is 19), all-intra, one slice per IDR; this preset uses only Intra16$\times$16 MBs and no deblocking. Each case embeds a 68-byte message with its proof (payload 201\,B, 1{,}632 frame bits) at the default cap of 64 bits per IDR, i.e.\ into 26 of the 30 IDRs, under a fresh stego key and an 8-camera registry. Wall times include process start-up (Node.js for snarkjs).
+
+\subsection{Functional results}
+All 27 cases passed every acceptance check: native capacity scan, embedding, strict FFmpeg decoding (\texttt{-xerror}), blind extraction of the exact payload, a video-bound proof verified against the registry root with the digest recomputed from the stego file, rejection under a wrong key, and zero sign changes outside the keyed schedule (checked position by position). The stego file has exactly the size of the cover in all 27 cases. A separate end-to-end run on 300 CIF frames passed five of five trials.
+
+\subsection{Embedding quality}
+Table~\ref{tab:quality} reports PSNR-Y and SSIM~\cite{wang2004ssim} per frame, comparing the clean decode of the cover with the decode of the stego stream (incremental embedding distortion), and from the original source (encoding plus embedding). About half of the 1{,}632 scheduled signs change (808--823 on average), i.e.\ about 31 per carrying frame. No frame falls below the common 40\,dB reference. The encoder's own loss dominates: on average, cover$	o$stego PSNR is 12--15\,dB higher than source$	o$stego PSNR.
+
+\begin{table}[t]
+\centering
+\caption{Per-frame quality over the 26 carrying frames of 9 sequences per resolution.}
+\label{tab:quality}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+& CIF & $640\times480$ & $1280\times960$ \\
+\midrule
+Cover$\to$stego PSNR-Y, min [dB] & 46.71 & 44.03 & 44.72 \\
+Cover$\to$stego PSNR-Y, mean [dB] & 57.44 & 59.69 & 62.64 \\
+Cover$\to$stego SSIM, min & 0.99871 & 0.99895 & 0.99960 \\
+Source$\to$stego PSNR-Y, min [dB] & 41.48 & 41.62 & 42.94 \\
+Source$\to$stego PSNR-Y, mean [dB] & 45.57 & 46.43 & 48.11 \\
+Changed signs per case (mean) & 808 & 823 & 816 \\
+Candidates per case (mean) & 149{,}374 & 420{,}193 & 1{,}287{,}323 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\input{sections/eval_distortion}
+
+\subsection{Sign statistics}
+Over all candidate signs of a case, the share of negative trailing ones is $0.504$ before and after embedding; the two-proportion $z$-statistic is at most $0.223$ in absolute value over the 27 cases, far from the 1.96 threshold of a 5\% test. This is a first-order indicator only (Section~\ref{sec:discussion}).
+
+\subsection{Performance}
+Table~\ref{tab:zkp} compares Groth16 and PLONK on the same R1CS and witness; both verify a correct proof and reject a tampered public input. Groth16's 129-byte proof is what makes the covert channel practical: snarkjs serializes a PLONK proof as 2.25\,KB of JSON, which would need about 290 IDRs at the default cap, and even a compact binary encoding is several times larger than 129\,B. Table~\ref{tab:e2e} gives the end-to-end stages for 300 CIF frames. Native costs scale with the number of parsed IDRs: the median capacity scan takes 52, 220 and 770\,ms per IDR at the three resolutions, embedding 61, 245 and 891\,ms per carrying IDR, and the digest, which parses the 26 carrying IDRs, 1.6, 6.4 and 22.6\,s. Parsing, not proving, bounds throughput at high resolution; the parser is single-threaded and unoptimized.
+
+\begin{table}[t]
+\centering
+\caption{Proof systems on the \texttt{camera\_video} circuit (8{,}737 constraints, 3 public inputs).}
+\label{tab:zkp}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+& Groth16 & PLONK \\
+\midrule
+Trials & 5 & 3 \\
+Prove [s] & 1.52--1.60 & 21.5--23.3 \\
+Verify [s] & 0.91--1.01 & 0.90--0.94 \\
+Proof size & 129\,B (compressed) & 2.25\,KB (JSON) \\
+Peak prover RSS [MB] & 695 & 864 \\
+Setup & circuit-specific (Phase 2) & universal SRS, 3.2\,s \\
+Proving key & 4.2\,MB & 30.1\,MB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{End-to-end stages, 300 CIF frames, 5 trials (median, ms).}
+\label{tab:e2e}
+\begin{tabular}{@{}lr@{\qquad}lr@{}}
+\toprule
+\multicolumn{2}{@{}c}{Sender} & \multicolumn{2}{c@{}}{Receiver} \\
+\midrule
+Cover digest & 511 & Extract & 535 \\
+Groth16 prove & 1{,}774 & Digest + verify & 1{,}448 \\
+Embed & 500 & Strict decode & 150 \\
+\textbf{Total} & \textbf{2{,}779} & \textbf{Total} & \textbf{1{,}989} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Attack matrix}
+Table~\ref{tab:attacks} lists the attacks run through the service's verify job on the end-to-end stream. Only the untouched stream is accepted. Notably, flipping a sign that does not carry the frame---in an IDR that does carry it---is rejected through the digest, and so is the same valid payload embedded into another video; a camera that builds its own registry produces a proof that verifies against its own root but not against the trusted one.
+
+\begin{table}[t]
+\centering
+\caption{Attack matrix (verify job outcome and reason).}
+\label{tab:attacks}
+\footnotesize
+\begin{tabular}{@{}ll@{}}
+\toprule
+Case & Result (rejection reason) \\
+\midrule
+Untouched stego stream & accepted \\
+Wrong stego key & \texttt{payload\_not\_found} \\
+Flip a scheduled carrier sign & \texttt{malformed\_proof\_payload} \\
+Flip non-carrier sign, carrier IDR & \texttt{proof\_invalid} \\
+Flip a sign in a later frame & \texttt{proof\_invalid} \\
+Drop the first IDR & \texttt{payload\_not\_found} \\
+Truncate to half & \texttt{proof\_invalid} \\
+Re-encode (transcode) & \texttt{payload\_not\_found} \\
+Swap the message & \texttt{proof\_invalid} \\
+Camera outside the registry & \texttt{proof\_invalid} \\
+Replay into another video & \texttt{proof\_invalid} \\
+\bottomrule
+\end{tabular}
+\end{table}

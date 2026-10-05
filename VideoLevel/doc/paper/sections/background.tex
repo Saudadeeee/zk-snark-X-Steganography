@@ -1,0 +1,80 @@
+\section{Background}
+\label{sec:background}
+
+We summarize the parts of H.264/AVC~\cite{itu_h264,wiegand2003overview,richardson2010h264} that the channel and the distortion model rely on, and the zero-knowledge tools of the proof. We restrict attention to the Constrained Baseline profile: progressive 4:2:0, 8-bit, CAVLC entropy coding, flat scaling matrices.
+
+\subsection{Intra coding of an IDR picture}
+An IDR picture is split into $16\times16$ macroblocks (MBs) coded in raster order. In an I-slice an MB is either \emph{Intra4$\times$4} (sixteen $4\times4$ luma blocks, each predicted with one of nine directional modes from reconstructed samples above and to the left), \emph{Intra16$\times$16} (one of four modes for the whole MB: vertical, horizontal, DC, plane), or I\_PCM. Chroma ($8\times8$ per MB for 4:2:0) uses one of four modes. The encoder codes the prediction residual $e=x-p$; the decoder reconstructs $\hat x=\mathrm{clip}(p+\hat e)$. Because $p$ is computed from \emph{reconstructed} neighbors, a change in $\hat e$ of one block alters the prediction of later blocks: this is intra drift.
+
+\subsection{From the DCT to the integer transform}
+The $4\times4$ two-dimensional DCT-II is $Y=AXA^{\top}$ with
+\begin{equation}
+A=\begin{bmatrix}a&a&a&a\\ b&c&-c&-b\\ a&-a&-a&a\\ c&-b&b&-c\end{bmatrix},\quad
+\begin{aligned}a&=\tfrac12,\\ b&=\tfrac{1}{\sqrt2}\cos\tfrac{\pi}{8},\\ c&=\tfrac{1}{\sqrt2}\cos\tfrac{3\pi}{8}.\end{aligned}
+\end{equation}
+H.264 replaces $c/b\approx0.414$ by $1/2$ and rescales $b=\sqrt{2/5}$ to keep the rows orthogonal~\cite{malvar2003transform}. The transform factors into an integer core and a scaling that is folded into quantization:
+\begin{equation}
+Y=\left(C_f\,X\,C_f^{\top}\right)\odot E_f,\qquad
+C_f=\begin{bmatrix}1&1&1&1\\2&1&-1&-2\\1&-1&-1&1\\1&-2&2&-1\end{bmatrix},
+\end{equation}
+where $E_f$ has entries $a^2$, $ab/2$, $b^2/4$ according to the parity class of $(i,j)$: both indices even, both odd, or mixed. The inverse is
+\begin{equation}
+X=C_i^{\top}\left(Y\odot E_i\right)C_i,\qquad
+C_i=\begin{bmatrix}1&1&1&1\\1&\tfrac12&-\tfrac12&-1\\1&-1&-1&1\\\tfrac12&-1&1&-\tfrac12\end{bmatrix},
+\label{eq:inverse}
+\end{equation}
+with $E_i$ entries $a^2$, $ab$, $b^2$. Only additions and shifts are needed, and encoder and decoder match exactly. We write $b_0,\dots,b_3$ for the rows of $C_i$; their squared norms are $\|b_0\|^2=\|b_2\|^2=4$ and $\|b_1\|^2=\|b_3\|^2=5/2$.
+
+\subsection{Quantization and scaling}
+The quantizer step $\Qs$ doubles every six QP values:
+\begin{equation}
+\Qs(\mathit{QP})=\Qs(\mathit{QP}\bmod6)\cdot2^{\lfloor \mathit{QP}/6\rfloor},
+\label{eq:qstep}
+\end{equation}
+with $\Qs(0..5)=0.625, 0.6875, 0.8125, 0.875, 1, 1.125$. The encoder computes $W=C_fXC_f^{\top}$ and quantizes
+\begin{equation}
+|Z_{ij}|=\left(|W_{ij}|\,MF_{ij}+f\right)\gg q_{\mathrm{bits}},\quad q_{\mathrm{bits}}=15+\lfloor \mathit{QP}/6\rfloor,
+\label{eq:quant}
+\end{equation}
+with $MF=2^{q_{\mathrm{bits}}}\,PF/\Qs$, $PF\in\{a^2,ab/2,b^2/4\}$, and a dead-zone offset $f$ ($2^{q_{\mathrm{bits}}}/3$ for intra in the reference design; x264 additionally applies trellis and psychovisual decisions). The decoder scales a level $c_{ij}$ by
+\begin{equation}
+d_{ij}=c_{ij}\cdot v_{m}(i,j)\cdot2^{\lfloor \mathit{QP}/6\rfloor},\qquad m=\mathit{QP}\bmod6,
+\label{eq:dequant}
+\end{equation}
+where $v_m(i,j)\in\{v_{m,0},v_{m,1},v_{m,2}\}$ by parity class (even/even, odd/odd, mixed):
+\begin{equation}
+\begin{array}{c|cccccc}
+m & 0 & 1 & 2 & 3 & 4 & 5\\\hline
+v_{m,0} & 10 & 11 & 13 & 14 & 16 & 18\\
+v_{m,1} & 16 & 18 & 20 & 23 & 25 & 29\\
+v_{m,2} & 13 & 14 & 16 & 18 & 20 & 23
+\end{array}
+\label{eq:vtable}
+\end{equation}
+(The standard writes $\mathrm{LevelScale}=16\,v_m$ and a shift by four for flat matrices; the product is the same.) The residual is then $\hat e=(C_i^{\top}D\,C_i+32)\gg6$, where $C_i$ is applied with integer shifts. Note that $\Qs(m)=v_{m,0}/16$: the step size is the even/even scaling factor.
+
+\textbf{DC paths.} In an Intra16$\times$16 MB the sixteen luma DC coefficients form a $4\times4$ block coded separately (category \emph{LumaDC}), transformed by a $4\times4$ Hadamard matrix before scaling; the remaining fifteen coefficients of each block are \emph{Luma AC}. For chroma, the four DC coefficients of each $8\times8$ component form a $2\times2$ block (\emph{ChromaDC}) with a $2\times2$ Hadamard transform, and each $4\times4$ block has fifteen \emph{ChromaAC} coefficients. Chroma uses $\mathit{QP}_c$, derived from $\mathit{QP}+\texttt{chroma\_qp\_index\_offset}$ by a table that saturates at 39.
+
+\subsection{CAVLC}
+After a zig-zag scan, each block of levels is coded as~\cite{itu_h264,richardson2010h264}:
+\begin{enumerate}
+\item \texttt{coeff\_token}: the pair (TotalCoeff, TrailingOnes), from one of four VLC tables chosen by $n_C$, the rounded mean of TotalCoeff of the left and upper blocks;
+\item one \texttt{trailing\_ones\_sign\_flag} per trailing one---the up to three highest-frequency non-zero coefficients equal to $\pm1$---in reverse scan order, $0\mapsto+1$, $1\mapsto-1$;
+\item the remaining levels (\texttt{level\_prefix}, \texttt{level\_suffix}, adaptive \texttt{suffixLength}), \texttt{total\_zeros} and \texttt{run\_before}.
+\end{enumerate}
+
+\begin{proposition}[Syntax invariance]
+\label{prop:syntax}
+Flipping a \texttt{trailing\_ones\_sign\_flag} changes exactly one level from $\pm1$ to $\mp1$ and leaves the length and the decoded value of every other syntax element of the slice unchanged.
+\end{proposition}
+\begin{proof}
+The flag is a fixed one-bit field. TotalCoeff and TrailingOnes, hence the \texttt{coeff\_token} codeword and the $n_C$ context of later blocks, do not depend on signs. The initial \texttt{suffixLength} depends only on TotalCoeff and TrailingOnes, its updates only on the non-trailing-one levels, and the magnitude adjustment of the first non-trailing-one level only on TrailingOnes. \texttt{total\_zeros} and \texttt{run\_before} depend on positions only. Hence every later bit is parsed at the same offset with the same meaning.
+\end{proof}
+
+Consequently the edited stream is a valid stream of the same RBSP length, and the set of trailing-one sign positions (the \emph{candidates}) is the same in the cover and the stego stream. We use the \emph{first} sign flag of each block that has at least one trailing one, i.e.\ the highest-frequency trailing one.
+
+\subsection{NAL units and emulation prevention}
+An Annex-B stream is a sequence of NAL units separated by start codes \texttt{00\,00\,01}. Each NAL unit has a one-byte header (\texttt{forbidden\_zero\_bit}, \texttt{nal\_ref\_idc}, \texttt{nal\_unit\_type}) followed by the EBSP: the RBSP with an emulation-prevention byte \texttt{03} inserted after every \texttt{00\,00} that precedes a byte $\le\texttt{03}$. Bit offsets in this paper are RBSP offsets. A sign flip can add or remove one emulation-prevention byte, which changes the file size by one byte but no RBSP offset.
+
+\subsection{zk-SNARKs, Groth16 and Poseidon}
+A statement ``$\exists w: \mathcal R(x,w)$'' is compiled to a rank-1 constraint system $(Az)\circ(Bz)=Cz$ over the BN254 scalar field~\cite{bn2005}, $z=(1,x,w)$. Groth16~\cite{groth2016} proves satisfiability with $\pi=(A,B,C)\in\mathbb G_1\times\mathbb G_2\times\mathbb G_1$, verified with one pairing-product equation; it is complete, knowledge-sound and perfectly zero-knowledge in the generic group model. The common reference string comes from a universal Phase~1 (Powers of Tau) and a circuit-specific Phase~2; the multi-party ceremony is secure if one participant is honest~\cite{bowe2017mpc}. A proof compresses to 129 bytes: the $x$-coordinates of $A$, $B$ (two $\mathbb F_q$ elements) and $C$, plus one byte of sign flags. PLONK~\cite{plonk2019} trades a larger proof for a universal setup. Poseidon~\cite{poseidon2021} is a sponge hash over the scalar field designed for few constraints; we use it for public keys and Merkle nodes. Circuits are written in Circom~\cite{circom2023} and proven with snarkjs~\cite{snarkjs}.

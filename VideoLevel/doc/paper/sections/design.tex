@@ -1,0 +1,125 @@
+\section{Design}
+\label{sec:design}
+
+Fig.~\ref{fig:overview} shows the data flow. The sender computes the video digest of the cover under $K$, binds it with the message, obtains a proof from the camera, packs message and proof into a payload, frames it and embeds the frame into the trailing-one signs selected by a keyed schedule. The verifier reverses the channel, recomputes the digest from the stream it received and verifies the proof against the registry root.
+
+\begin{figure*}[t]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners=2pt, align=center, font=\footnotesize, minimum height=9mm,
+              text width=2.75cm, inner sep=2pt},
+  sec/.style={box, fill=blue!6},
+  zk/.style={box, fill=orange!10},
+  io/.style={box, fill=gray!10},
+  arr/.style={-{Stealth[length=2mm]}, semithick},
+  lab/.style={font=\scriptsize, fill=white, inner sep=1pt}]
+% sender (top row, left to right)
+\node[io]  (cover) at (0,0)    {Cover H.264\\(Annex-B, IDRs)};
+\node[sec] (dig)   at (3.4,0)  {Video digest $\dig_K(V)$\\(carriers cleared)};
+\node[box] (bind)  at (6.8,0)  {Binding $\bind$\\$\Hash(\mu\cat\dig$\\$\cat\Hash(m))$};
+\node[zk]  (prove) at (10.2,0) {Groth16 prove\\witness: $s$, Merkle path};
+\node[box] (pack)  at (13.6,0) {Payload $P$\\$[01][\mu][\ell][m][\pi]$};
+\node[box, fill=green!6] (reg) at (10.2,1.35) {Registry root $\rho$\\(Poseidon, depth 16)};
+% channel (middle row, right to left)
+\node[sec] (frame) at (13.6,-1.75) {Frame v3 $[03][\ell][P]$\\$\oplus$ HMAC keystream};
+\node[sec] (embed) at (10.2,-1.75) {Keyed schedule,\\sign embedding};
+\node[io]  (stego) at (6.8,-1.75)  {Stego H.264\\(same syntax, size)};
+% receiver (bottom row, left to right)
+\node[sec] (extract) at (3.4,-3.5)  {Blind extract\\un-whiten, parse $P$};
+\node[sec] (vdig)    at (6.8,-3.5)  {Digest of received\\stream $\dig_K(V')$};
+\node[zk]  (verify)  at (10.2,-3.5) {Groth16 verify\\$\rho$, vk};
+\node[box] (out)     at (13.6,-3.5) {accept $m$\\or reject};
+\draw[arr] (cover) -- (dig); \draw[arr] (dig) -- (bind); \draw[arr] (bind) -- (prove);
+\draw[arr] (prove) -- (pack); \draw[arr] (reg) -- (prove);
+\draw[arr] (pack) -- (frame); \draw[arr] (frame) -- (embed); \draw[arr] (embed) -- (stego);
+\draw[arr, dashed] (cover.south) -- ++(0,-0.5) -| node[lab, pos=0.25] {cover IDRs} (embed.north);
+\draw[arr] (stego.west) -| (extract.north);
+\draw[arr] (extract) -- (vdig); \draw[arr] (vdig) -- (verify); \draw[arr] (verify) -- (out);
+\draw[arr, dashed] (extract.south) -- ++(0,-0.45) -| node[lab, pos=0.25] {$m$, $\pi$, $\mu$} (verify.south);
+\end{tikzpicture}
+\caption{Data flow. Blue: covert channel under the stego key $K$; orange: zero-knowledge proof; the verifier never sees $s$.}
+\label{fig:overview}
+\end{figure*}
+
+\subsection{Keys}
+From the 32-byte stego key $K$ the channel derives two subkeys with HKDF-SHA256~\cite{rfc5869}:
+\begin{align}
+\mathit{PRK}&=\HMAC(\texttt{"zkstego-cavlc-v2-salt"},K),\\
+k_{\mathrm{sch}}&=\mathsf{Expand}(\mathit{PRK},\texttt{".../schedule"},32),\\
+k_{\mathrm{wh}}&=\mathsf{Expand}(\mathit{PRK},\texttt{".../whitening"},32).
+\end{align}
+The camera secret $s$ is an independent uniformly random non-zero element of the BN254 scalar field; its public key is $pk=\Pos(s)$.
+
+\subsection{Candidates and segments}
+Each IDR picture together with its preceding SPS and PPS forms a \emph{segment}. A native parser decodes the CAVLC syntax of the IDR slice and lists one candidate per $4\times4$ (or $2\times2$ chroma DC) block that has a trailing one: the RBSP offset of its first \texttt{trailing\_ones\_sign\_flag}. A candidate is identified by the string $\mathit{id}=\texttt{nal:mb:category:block:bit}$ of its analysis NAL index, MB address, category (LumaDC, Luma4$\times$4/AC, ChromaDC, ChromaAC), block index and RBSP bit offset. By Proposition~\ref{prop:syntax} the identifiers are the same before and after embedding.
+
+\subsection{Keyed schedule}
+Within segment $j$ with candidate set $\mathcal C_j$, every candidate gets the score $\sigma(\mathit{id})=\HMAC(k_{\mathrm{sch}},\mathit{id})$; candidates are sorted by $(\sigma,\mathit{id})$ and the first $n_j=\min(\mathit{cap},|\mathcal C_j|)$ are selected. Frame bits are assigned to segments in order: segment $j$ carries frame bits $[\sum_{i<j}n_i,\ \sum_{i\le j}n_i)$ until the frame ends. The schedule depends only on $K$, the stream syntax and the per-IDR cap (64 bits by default), so a receiver reconstructs it from the stego stream alone, and the same procedure runs on a live stream as each IDR arrives.
+
+\subsection{Frame and whitening}
+The channel frame (protocol version 3) is
+\begin{equation}
+F=\texttt{0x03}\cat \mathrm{u16}(|P|)\cat P,
+\end{equation}
+with no MAC. Bit $i$ of $F$ (MSB first, counted across segments) is XORed with bit $i$ of the keystream $\HMAC(k_{\mathrm{wh}},\mathrm{u64}(0))\cat\HMAC(k_{\mathrm{wh}},\mathrm{u64}(1))\cat\cdots$ and written as the sign of the $i$-th scheduled candidate. Whitening makes the embedded bits pseudo-random, so about half of the scheduled signs actually change, and a wrong key yields a random version byte and length, which the extractor rejects. Authentication of the payload is left entirely to the proof; an earlier version carried a 16-byte HMAC tag, which cost 128 bits (two IDRs at the default cap) and added nothing once the proof binds the message.
+
+\subsection{Camera registry}
+The registry is a binary Merkle tree of depth 16 whose leaves are camera public keys (unused leaves are 0) and whose internal nodes are $\Pos(\ell,r)$. Verifiers trust only the root $\rho$; a camera's membership witness is its sibling path $(\mathit{sib}_t,\beta_t)_{t<16}$.
+
+\subsection{Carrier-masked video digest}
+Let $\Gamma_K(V)$ be the set of (NAL, RBSP bit) positions that the schedule of $K$ selects to carry the $L_F=8|F|$ frame bits of a payload of the given length. With the domain string $\mathsf{dom}_v=\texttt{"zkstego/video-digest/v1"}$, the digest is
+\begin{align}
+\dig_K(V)=\Hash\big(&\mathsf{dom}_v\cat\mathrm{u32}(L_F)\cat\mathrm{u32}(\mathit{cap})\nonumber\\
+&\cat\textstyle\big\|_{u\in V}\,\mathrm{u32}(1+|r'_u|)\cat h_u\cat r'_u\big),
+\label{eq:digest}
+\end{align}
+where for each NAL unit $u$ in file order $h_u$ is its header byte and $r'_u$ its RBSP with every bit in $\Gamma_K(V)$ cleared. The schedule depends on the syntax only, so $\Gamma_K(V)=\Gamma_K(V^{\star})$ for a cover $V$ and its stego $V^{\star}$.
+
+\subsection{Binding, statement and payload}
+For a mode $\mu\in\{0,1\}$ (0: video-bound; 1: message-only, Section~\ref{sec:discussion}) the binding, with $\mathsf{dom}_b=\texttt{"zkstego/proof-binding/v1"}$, is
+\begin{equation}
+\bind=\Hash(\mathsf{dom}_b\cat\mu\cat \dig_K(V)\cat\Hash(m)),
+\end{equation}
+split into two 128-bit field elements $(\bind_{\mathrm{hi}},\bind_{\mathrm{lo}})$. The circuit proves
+\begin{multline}
+\mathcal R=\{(\rho,\bind_{\mathrm{hi}},\bind_{\mathrm{lo}};\ s,\mathit{sib},\beta):\\
+\mathsf{MerkleRoot}(\Pos(s),\mathit{sib},\beta)=\rho\ \wedge\ \beta_t\in\{0,1\}\}.
+\end{multline}
+The binding halves are public inputs that enter the R1CS through a squaring constraint, so a proof verifies only for the binding it was produced for. The circuit has 8{,}737 constraints and three public inputs. The payload is
+\begin{equation}
+P=\texttt{0x01}\cat\mu\cat\mathrm{u16}(|m|)\cat m\cat\pi,\qquad|\pi|=129,
+\end{equation}
+so $L_F=8(|m|+136)$; a 68-byte message gives $|P|=201$, $|F|=204$ bytes, 1{,}632 bits, i.e.\ 26 IDRs at 64 bits each.
+
+\subsection{Algorithms}
+
+\begin{algorithm}[t]
+\caption{Embed (sender)}\label{alg:embed}
+\begin{algorithmic}[1]
+\Require cover $V$, message $m$, stego key $K$, camera $(s,\mathit{path})$, cap
+\State $L_F\gets 8(|m|+136)$;\ $\Gamma\gets$ schedule$(V,K,L_F,\mathit{cap})$
+\State $\delta\gets\dig_K(V)$ \Comment{Eq.~\eqref{eq:digest}}
+\State $\bind\gets\Hash(\text{dom}\cat 0\cat\delta\cat\Hash(m))$
+\State $\pi\gets\mathsf{Groth16.Prove}(\rho,\bind;\ s,\mathit{path})$
+\State $F\gets\texttt{03}\cat\mathrm{u16}(|P|)\cat P$ with $P=\texttt{01}\cat0\cat\mathrm{u16}(|m|)\cat m\cat\pi$
+\For{$i=0$ \textbf{to} $L_F-1$}
+  \State set the sign at $\Gamma[i]$ to $F_i\oplus \mathit{ks}_i$
+\EndFor
+\State \Return $V^{\star}$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[t]
+\caption{Verify (receiver)}\label{alg:verify}
+\begin{algorithmic}[1]
+\Require stream $V'$, $K$, root $\rho$, verification key vk, cap
+\State read the first 24 scheduled bits, un-whiten; \textbf{reject} unless version $=3$ and length is admissible
+\State read and un-whiten the remaining bits; parse $P$; \textbf{reject} if malformed
+\If{$\mu=1$ and message-only proofs are not allowed} \textbf{reject}\EndIf
+\State $\delta'\gets\dig_K(V')$ with $L_F$ from the header
+\State $\bind'\gets\Hash(\text{dom}\cat\mu\cat\delta'\cat\Hash(m))$
+\State \Return $\mathsf{Groth16.Verify}(\mathrm{vk},(\rho,\bind'_{\mathrm{hi}},\bind'_{\mathrm{lo}}),\pi)$
+\end{algorithmic}
+\end{algorithm}
+
+Algorithms~\ref{alg:embed} and~\ref{alg:verify} summarize sender and receiver. The service exposes the verifier as an asynchronous job whose outcomes are \texttt{payload\_not\_found}, \texttt{malformed\_proof\_payload}, \texttt{video\_binding\_required}, \texttt{video\_digest\_unavailable}, \texttt{proof\_invalid} or acceptance with \texttt{video\_bound}; an extraction-only job returns the payload marked \texttt{verified: false}.

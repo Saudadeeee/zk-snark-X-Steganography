@@ -1,0 +1,39 @@
+\section{Related Work}
+\label{sec:related}
+
+\textbf{Data hiding in the H.264 compressed domain.} Embedding directly in entropy-coded syntax avoids a full decode--encode cycle. Kapotas \emph{et al.}~\cite{kapotas2007} and Mobasseri and Raikar~\cite{mobasseri2007} embed into CAVLC blocks; flipping the sign of a trailing one keeps the codeword length and therefore the bit rate~\cite{fragile_h264_mtap}. Because intra prediction reuses reconstructed neighbors, such changes \emph{drift} inside the frame; Ma \emph{et al.}~\cite{ma2010drift} select blocks whose error cannot propagate. We use the same carrier, add a keyed schedule and whitening, and quantify drift with an explicit model instead of excluding blocks.
+
+\textbf{Fragile watermarking and self-authentication.} A classic construction hashes the content without the embedding region, signs the hash and embeds the signature into that region~\cite{yeung1997,wong1998}. Our video digest follows this pattern, with two differences that matter for security: the excluded region is \emph{only} the set of keyed carrier positions (not a whole bit plane or block class), and the embedded object is a zero-knowledge proof rather than a signature, so verification reveals neither the signer nor a verification key per device.
+
+\textbf{Media provenance.} C2PA~\cite{c2pa_spec} binds signed manifests to assets through hard bindings (hashes) and soft bindings (watermarks or fingerprints). It offers public verifiability and an established certificate infrastructure, but the manifest is separable metadata and the signer is identified. Our proof travels inside the bitstream, is hidden from parties without the stego key, and hides the signer within the registry.
+
+\textbf{Zero-knowledge proofs for media.} PhotoProof~\cite{photoproof2016} proves that an image is derived from a signed original by permissible transformations. ZK-IMG~\cite{zkimg2022} attests images from attested cameras and hides the pre-image of transformations; VerITAS~\cite{veritas2024} and VIMz~\cite{vimz2024} scale such proofs to high-resolution images, the latter with folding-based SNARKs and signer anonymity; zk-Cinema~\cite{zkcinema2026} extends transformation proofs to video; AIPA~\cite{aipa2026} adds unlinkable pseudonym certificates. These systems prove \emph{what happened to} a signed asset and keep the proof beside it. We solve a different problem: the proof is hidden \emph{inside} the asset, bound to the exact bitstream, and the signer is anonymous within a registry; we do not support transformations.
+
+\textbf{Zero knowledge and information hiding.} Adelsbach and Sadeghi~\cite{adelsbach2001zkwm} prove the presence of a watermark in zero knowledge; Toso and Chung~\cite{toso2006} combine steganography and an interactive zero-knowledge proof to embed a signature in an image. We embed a non-interactive succinct argument whose statement depends on the cover itself.
+
+\textbf{Anonymous membership.} Proving that a committed key is a leaf of a public Merkle tree~\cite{merkle1987} without revealing the leaf is the core of Zerocash~\cite{zerocash2014} and Semaphore~\cite{semaphore}; Poseidon~\cite{poseidon2021} makes the in-circuit hashing cheap. We use this pattern for a camera registry.
+
+\textbf{Minimal-distortion steganography.} Matrix embedding~\cite{westfeld2001f5} and syndrome-trellis codes~\cite{filler2011stc,fridrich2007practical} minimize an additive distortion for a given payload. Our model supplies the per-carrier cost such codes need in the CAVLC sign domain.
+
+Table~\ref{tab:related} summarizes the comparison.
+
+\begin{table*}[t]
+\centering
+\caption{Comparison with provenance and compressed-domain hiding approaches. \checkmark: supported; --: not supported; (\checkmark): partially.}
+\label{tab:related}
+\small\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}p{4.6cm}*{6}{>{\centering\arraybackslash}p{1.65cm}}@{}}
+\toprule
+Approach & In-band (no metadata) & Hidden & Signer anonymous & Bound to exact stream & Survives re-encode & Public verification \\
+\midrule
+C2PA manifest~\cite{c2pa_spec} & -- & -- & -- & \checkmark & (\checkmark)$^a$ & \checkmark \\
+CAVLC fragile watermark~\cite{mobasseri2007,fragile_h264_mtap} & \checkmark & (\checkmark) & -- & \checkmark & -- & -- \\
+Signed digest in content~\cite{wong1998} & \checkmark & -- & -- & \checkmark & -- & \checkmark \\
+PhotoProof / ZK-IMG~\cite{photoproof2016,zkimg2022} & -- & -- & (\checkmark) & -- & \checkmark$^b$ & \checkmark \\
+VIMz / zk-Cinema / AIPA~\cite{vimz2024,zkcinema2026,aipa2026} & -- & -- & \checkmark & -- & \checkmark$^b$ & \checkmark \\
+\textbf{This work} & \checkmark & \checkmark & \checkmark & \checkmark & -- & --$^c$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}{\footnotesize $^a$ via soft-binding watermarks that recover the manifest. $^b$ for the transformations the proof system supports. $^c$ verifiers need the stego key (Section~\ref{sec:discussion}).}
+\end{table*}

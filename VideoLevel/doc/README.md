@@ -16,6 +16,7 @@ một lần chạy `demo/terminal_demo.py` thật.
 | [huong_dan_lan_theo_source_zkstego.tex](huong_dan_lan_theo_source_zkstego.tex) | Hướng dẫn lần theo mã nguồn | LaTeX |
 | [review_toan_he_thong_zkstego.tex](review_toan_he_thong_zkstego.tex) | Review toàn hệ thống | LaTeX |
 | [bao_cao_khoa_hoc_he_thong_zkstego_vi.tex](bao_cao_khoa_hoc_he_thong_zkstego_vi.tex) / `.pdf` | Báo cáo khoa học | LaTeX/PDF |
+| [paper/main.pdf](paper/main.pdf) ([nguồn, cách build](paper/README.md)) | Paper định dạng IEEE (tiếng Anh): thiết kế, phân tích bảo mật, mô hình méo của việc lật dấu trailing-one và kiểm chứng thực nghiệm (2026-10-05) | LaTeX/PDF |
 
 Các file LaTeX được viết trước đợt sửa ngày 2026-10-02 (bảng VLC Python, verify Groth16
 theo mã thoát, xác thực trước khi đọc body, giới hạn native). Khi có mâu thuẫn, tin

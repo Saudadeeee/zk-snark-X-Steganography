@@ -1,0 +1,19 @@
+\section{System and Threat Model}
+\label{sec:threat}
+
+\textbf{Parties.} A \emph{registry authority} publishes the root $\rho$ of a Merkle tree of camera public keys. A \emph{camera} holds a secret $s$ with $\Pos(s)$ in the tree. A \emph{sender} (the camera or an embedder it trusts) holds a 32-byte stego key $K$ shared with the intended verifiers, and turns a cover H.264 stream into a stego stream carrying a message $m$ and a proof. The \emph{channel} delivers the bitstream, possibly through a party that inspects or edits it. A \emph{verifier} knows $K$, $\rho$ and the Groth16 verification key, and accepts or rejects.
+
+\textbf{Two secrets, two roles.} $K$ hides and locates the payload; $s$ authorizes it. Holding $K$ lets a verifier extract and check a proof but not create one, which is the point of using a zero-knowledge proof instead of a MAC under $K$.
+
+\textbf{Adversary.} The adversary sees stego streams and may know $K$ (a curious or malicious verifier) or not (a channel observer). It may edit, truncate, splice or re-encode streams, move a valid payload into another stream, change the message, register its own cameras in a tree of its choice, and obtain proofs from honest cameras for streams of its choice. It does not know the secret of any honest registered camera and cannot break SHA-256, Poseidon, HMAC-SHA256 or the Groth16 assumptions.
+
+\textbf{Goals.}
+\begin{enumerate}
+\item[G1] \emph{Validity:} an honest stego stream is a valid H.264 stream of the same syntax as the cover.
+\item[G2] \emph{Binding:} if the verifier accepts a stream $V'$ with message $m'$, then a registered camera produced a proof for exactly $(V',m')$ up to the carrier bits that hold the payload.
+\item[G3] \emph{Unforgeability:} without the secret of a registered camera, no adversary---including one holding $K$---makes the verifier accept a (stream, message) pair that no registered camera vouched for.
+\item[G4] \emph{Anonymity:} the verifier learns nothing about which registered camera produced the proof.
+\item[G5] \emph{Covertness (empirical):} a party without $K$ cannot locate the payload, and first-order sign statistics do not reveal embedding.
+\end{enumerate}
+
+\textbf{Non-goals.} Robustness to transcoding or editing; proving that the camera recorded a real scene (a camera filming a screen produces a valid proof); verification without $K$; resistance to modern learned steganalysis, which we have not evaluated; protection of the camera secret itself, which in our prototype lives in software.

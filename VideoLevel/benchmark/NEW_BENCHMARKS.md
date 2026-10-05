@@ -89,6 +89,31 @@ Media run `20261004T142448Z_1db00a`, E2E `e2e_new.json`, ZKP `zkp_new.json`:
   registry and the payload replayed into another video all fail Groth16
   (`proof_invalid`).
 
+## Distortion model (2026-10-05)
+
+`py -3.12 -m benchmark.distortion_experiments_new` validates the model in
+`benchmark/distortion_model_new.py`: one trailing-one sign flip adds
+`4 * Qstep(QP)^2 * kappa` of pixel energy (kappa in [0.925, 1.057]) times a
+propagation gain G, which inverts into a per-IDR cap for a target PSNR. Results in
+`results/distortion_new/` (figures: `benchmark.distortion_figures_new`, used by
+`doc/paper/`):
+
+- **B, single flips** (1,200 flips: 2 x264 presets x 3 QPs x 2 frames): for all 385
+  Intra4x4 luma carriers the decoder's change of the flipped block equals the exact
+  residual change; exact/model energy has median 1.012. G does not depend on QP
+  (ultrafast luma mean 6.6/7.4/6.0, medium 38/33/34 at I-QP 19/25/31) and is heavy
+  tailed: the top 10 % of carriers cause 80–84 % of the energy. Mean luma G: 6.6
+  (ultrafast, Intra16x16 only) and 35.2 (medium, Intra4x4).
+- **A, benchmark frames** (810 frames of the media run): mean G 7.7 / 17.3 / 51.4 at
+  352x288 / 640x480 / 1280x960 (upscaled content propagates further). Single-flip
+  gains drawn at random reproduce the CIF frame-gain distribution (median 4.17 vs
+  4.00 measured); individual frames are not predictable (per-frame MAE 4–7 dB).
+- **C, inverse** (foreman CIF, 30 frames, 5 keys per setting): the expected-gain cap
+  puts 46–70 % of frames at or above the target (median near the target); a
+  95th-percentile cap reaches 80–88 % from single-flip data and 91–92 % when the
+  percentile comes from benchmark frames. Caps above the candidates per IDR
+  (~650 ultrafast, ~460 medium) saturate.
+
 ## Physical camera
 
 Set `ZK_STEGO_CAMERA_NAME` to a DirectShow device and run

@@ -11,7 +11,7 @@ if ROOT not in sys.path:
 
 import unittest
 
-from benchmark import test_benchmark_analysis_new
+from benchmark import test_benchmark_analysis_new, test_distortion_model_new
 from benchmark.test_realtime_camera_recorder import RealtimeCameraRecorderTests
 from src.runtest._helpers import run_test, section, summarise
 from src.runtest.run_all import exit_code_for_phase_statuses, status_for_phase_result
@@ -27,8 +27,11 @@ def _run_case(method_name: str) -> None:
 
 
 def _analysis_cases() -> list[tuple[str, unittest.TestCase]]:
-    suite = unittest.defaultTestLoader.loadTestsFromModule(test_benchmark_analysis_new)
-    return [(case.id().rsplit(".", 1)[-1].removeprefix("test_"), case) for group in suite for case in group]
+    loader = unittest.defaultTestLoader
+    suite = unittest.TestSuite([loader.loadTestsFromModule(test_benchmark_analysis_new),
+                                loader.loadTestsFromModule(test_distortion_model_new)])
+    return [(case.id().rsplit(".", 1)[-1].removeprefix("test_"), case)
+            for module in suite for group in module for case in group]
 
 
 def _run_unittest_case(case: unittest.TestCase) -> None:

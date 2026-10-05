@@ -1,0 +1,39 @@
+\section{Worked Example of One Carrier}
+\label{app:example}
+
+We follow one carrier of a demonstration run (\texttt{akiyo}, CIF, x264 default preset, I-slice QP 19, so $\Qs=5.5$ and $4\Qs^2=121$) from the bitstream to the pixels. The carrier is the first trailing-one sign of luma block~5 of MB~212 (Intra4$\times$4, prediction mode Diagonal\_Down\_Right), at RBSP bit 57{,}561 of the first IDR NAL unit.
+
+\textbf{CAVLC.} With $n_C=6$ the block is coded as \texttt{coeff\_token}=\texttt{1011} (TotalCoeff 4, TrailingOnes 3), sign flags \texttt{0\,1\,1}, one level \texttt{1}, \texttt{total\_zeros}=\texttt{111} and two \texttt{run\_before} codes. The scheduled bit is the first sign flag; whitening requires a 1, so the flag becomes \texttt{1} and the flags read \texttt{1\,1\,1}. All other bits keep their position and meaning. In the file the byte at offset 7{,}805 changes from \texttt{bf} to \texttt{ff}.
+
+\textbf{Levels and scaling.} The scan $(1,-1,0,-1,1,0,\dots)$ becomes $(1,-1,0,-1,-1,0,\dots)$: zig-zag position 4, raster $(1,1)$, an odd/odd coefficient. With $v_{1}(1,1)=18$ and $2^{\lfloor19/6\rfloor}=8$ the scaled coefficient changes from $144$ to $-144$:
+\begin{equation*}
+D=\begin{bmatrix}88&-112&0&0\\0&\pm144&0&0\\-88&0&0&0\\0&0&0&0\end{bmatrix}.
+\end{equation*}
+
+\textbf{Residual.} The inverse transform gives
+\begin{equation*}
+\hat e_{\mathrm{before}}=\begin{bmatrix}1&0&0&0\\2&2&3&3\\0&1&4&6\\-4&-2&2&4\end{bmatrix},\
+\hat e_{\mathrm{after}}=\begin{bmatrix}-4&-2&2&4\\0&1&4&6\\2&2&3&3\\1&0&0&0\end{bmatrix},
+\end{equation*}
+a change of energy $\sum\Delta\hat e^2=128$. Lemma~\ref{lem:flip} predicts $4\Qs^2\kappa_1(1,1)=121\times1.046=126.6$ before rounding.
+
+\textbf{Reconstruction.} A flip does not affect blocks decoded earlier, so if this were the only carrier the block's prediction would be unchanged and its samples would change by exactly $\Delta\hat e$ (Experiment~B confirms this for every sampled Intra4$\times$4 block). In the demo a block decoded earlier also carried a flip, which shows up as a uniform change of $+1$ in this block's prediction: an instance of intra drift. Our Python reconstruction (prediction plus residual) matches FFmpeg sample by sample before and after embedding, decoded with \texttt{-skip\_loop\_filter all}; deblocking then smooths the block edges.
+
+\section{Notation}
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+$K$, $s$ & stego key, camera secret \\
+$k_{\mathrm{sch}}$, $k_{\mathrm{wh}}$ & schedule and whitening subkeys \\
+$\rho$, $pk$ & registry root, camera public key $\Pos(s)$ \\
+$\Gamma_K(V)$ & carrier positions of stream $V$ under $K$ \\
+$\dig_K$, $\bind$ & carrier-masked digest, binding \\
+$F$, $P$, $\pi$ & frame, payload, compressed proof \\
+$\mathit{cap}$ & bits per IDR segment \\
+$\Qs$, $v_m(i,j)$ & quantizer step, scaling factor \\
+$\kappa$, $G$ & position factor, propagation gain \\
+\bottomrule
+\end{tabular}
+\end{table}

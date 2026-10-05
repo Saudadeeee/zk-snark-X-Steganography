@@ -1,0 +1,20 @@
+\section{Discussion and Limitations}
+\label{sec:discussion}
+
+\textbf{Where the design fits.} The scheme protects bitstreams that are moved without re-encoding: surveillance and body-camera evidence chains that archive the camera's H.264, files exchanged as files, and newsroom or legal workflows that need to show that footage comes from an authorized device without naming it. In these settings metadata is routinely lost while the elementary stream survives, and hiding the proof keeps an adversary from selectively removing it.
+
+\textbf{Why not a SEI message?} A proof could be carried in a user-data SEI NAL unit at no capacity cost and with the same digest construction (the SEI unit would be excluded instead of the carrier bits). The difference is covertness: a SEI payload is visible to every parser and trivially stripped by a sanitizer, while the sign channel is located only with $K$. When covertness is not needed, the SEI variant is simpler, and our binding and proof carry over unchanged.
+
+\textbf{Verification requires the stego key.} Both extraction and the carrier mask depend on $K$, so verification is limited to key holders; a key holder still cannot forge proofs (G3). Public verification would require publishing the carrier set, e.g.\ as a commitment opened to verifiers, which trades covertness for verifiability.
+
+\textbf{Fragility.} Any re-encode, resize or transcode destroys the payload and changes the digest. Robust provenance across edits requires transformation proofs~\cite{photoproof2016,veritas2024,zkcinema2026} or a robust watermark acting as a soft binding~\cite{c2pa_spec}; combining such a layer with an in-band anonymous proof is an open direction.
+
+\textbf{What the proof does not show.} A registered camera can film a screen; the camera secret lives in software in our prototype, so a compromised device can sign anything; registry governance (enrollment, revocation by publishing a new root, root distribution) is outside the system. Binding the secret to a secure element or an attested sensor pipeline, as in ZK-IMG~\cite{zkimg2022}, would address part of this.
+
+\textbf{Live streams.} In mode 1 the proof binds the message only and can be replayed; video binding for live streams would need a proof that commits to frames embedded later, e.g.\ a chain of proofs or a final proof carried in a trailing segment.
+
+\textbf{Codec scope.} The channel needs CAVLC and IDR frames. Most capture devices use the High profile with CABAC, where sign bits are bypass-coded but not length-invariant in the same simple way; HEVC uses sign data hiding, which interacts with sign embedding. Porting the channel is engineering work with its own distortion and syntax analysis.
+
+\textbf{Trusted setup.} Groth16 needs a circuit-specific ceremony; our ceremony is a demonstration. PLONK removes the circuit-specific phase at a cost of roughly $14\times$ in proving time and a $2.25$\,KB proof (Section~\ref{sec:eval}), which no longer fits the covert channel at the default cap.
+
+\textbf{Steganalysis.} We only measured first-order sign statistics. The flips are sparse (about 32 per frame in our runs) but the drift they cause is visible in the pixel domain as low-amplitude block-shaped changes; rich-model and learned steganalysis~\cite{fridrich2012srm,ker2013realworld} should be evaluated before claiming covertness against an active warden. The cost-aware schedule of Section~\ref{sec:distortion} is also a natural defense.
