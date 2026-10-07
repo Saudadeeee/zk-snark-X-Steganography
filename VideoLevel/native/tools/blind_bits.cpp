@@ -37,8 +37,10 @@ public:
     char& operator[](const std::size_t index) noexcept { return value_[index]; }
 
 private:
-    // 64 hex characters, optional CR, LF delimiter, and terminating NUL.
-    std::array<char, 67> value_{};
+    // The longest accepted line is "token:" + 128 hex characters, plus an
+    // optional CR, the LF delimiter and the terminating NUL; a few spare bytes
+    // make an overlong line fail on length rather than on the stream state.
+    std::array<char, 140> value_{};
 };
 
 class SensitivePayloadText {
@@ -118,7 +120,35 @@ std::vector<std::uint8_t> read_binary(const std::string& path) {
     return zkstego::cli::read_binary_file(path);
 }
 
-SensitiveBytes read_key_file(const std::string& path) {
+// A channel secret line: the 64-hex master key K, or "token:" followed by the
+// 128-hex per-video verification token (schedule_key || whitening_key).
+struct ChannelSecret {
+    SensitiveBytes bytes;
+    bool token{};
+};
+
+constexpr std::string_view kTokenPrefix{"token:"};
+
+ChannelSecret parse_channel_secret(const char* text, const std::size_t text_size, const char* source) {
+    const auto hex_line = [&](const std::size_t first, const std::size_t count) {
+        SensitiveBytes bytes(count / 2U);
+        for (std::size_t index = first; index < first + count; index += 2U) {
+            bytes.append(static_cast<std::uint8_t>(
+                (hex_nibble(text[index]) << 4U) | hex_nibble(text[index + 1U])));
+        }
+        return bytes;
+    };
+    if (text_size >= kTokenPrefix.size() && std::string_view(text, kTokenPrefix.size()) == kTokenPrefix) {
+        if (text_size - kTokenPrefix.size() != 2U * zkstego::kCavlcVerificationTokenBytes) {
+            throw std::invalid_argument("verification token must be 'token:' followed by 128 hex characters");
+        }
+        return {hex_line(kTokenPrefix.size(), 2U * zkstego::kCavlcVerificationTokenBytes), true};
+    }
+    if (text_size != 64U) throw std::invalid_argument(std::string(source) + " must contain exactly 64 hex characters");
+    return {hex_line(0U, 64U), false};
+}
+
+ChannelSecret read_key_file(const std::string& path) {
     std::ifstream key_file;
     std::istream* input = &std::cin;
     if (path != "-") {
@@ -129,7 +159,7 @@ SensitiveBytes read_key_file(const std::string& path) {
     SensitiveKeyText text;
     input->getline(text.data(), static_cast<std::streamsize>(text.size()));
     if (input->fail() && !input->eof()) {
-        throw std::invalid_argument("key file must contain exactly one 64-character key line");
+        throw std::invalid_argument("key file must contain exactly one key line");
     }
     std::size_t text_size = std::char_traits<char>::length(text.data());
     if (text_size > 0U && text[text_size - 1U] == '\r') --text_size;
@@ -140,31 +170,48 @@ SensitiveBytes read_key_file(const std::string& path) {
         }
     }
     if (input->bad()) throw std::invalid_argument("failed while reading protected key source");
-    if (text_size != 64U) throw std::invalid_argument("key file must contain exactly 64 hex characters");
-    SensitiveBytes key;
-    for (std::size_t index = 0; index < text_size; index += 2U) {
-        key.append(static_cast<std::uint8_t>(
-            (hex_nibble(text[index]) << 4U) | hex_nibble(text[index + 1U])));
-    }
-    if (key.size() != 32U) throw std::invalid_argument("key file must decode to exactly 32 bytes");
-    return key;
+    return parse_channel_secret(text.data(), text_size, "key file");
 }
 
-SensitiveBytes read_key_stdin_line() {
+ChannelSecret read_key_stdin_line() {
     SensitiveKeyText text;
     std::cin.getline(text.data(), static_cast<std::streamsize>(text.size()));
     if (std::cin.fail() && !std::cin.eof()) {
-        throw std::invalid_argument("stdin key must be exactly one 64-character hex line");
+        throw std::invalid_argument("stdin key must be exactly one hex key line");
     }
     std::size_t text_size = std::char_traits<char>::length(text.data());
     if (text_size > 0U && text[text_size - 1U] == '\r') --text_size;
-    if (text_size != 64U) throw std::invalid_argument("stdin key must contain exactly 64 hex characters");
-    SensitiveBytes key;
-    for (std::size_t index = 0; index < text_size; index += 2U) {
-        key.append(static_cast<std::uint8_t>(
-            (hex_nibble(text[index]) << 4U) | hex_nibble(text[index + 1U])));
+    return parse_channel_secret(text.data(), text_size, "stdin key");
+}
+
+// Optional trailing channel flags: --select random|low-drift and
+// --key-mode master|per-video, each at most once.
+zkstego::CavlcChannelOptions parse_channel_flags(const std::vector<std::string>& argv, const std::size_t first) {
+    zkstego::CavlcChannelOptions options;
+    bool saw_select = false;
+    bool saw_key_mode = false;
+    if ((argv.size() - first) % 2U != 0U) throw std::invalid_argument("channel flags must be '--name value' pairs");
+    for (std::size_t index = first; index < argv.size(); index += 2U) {
+        const auto& name = argv[index];
+        const auto& value = argv[index + 1U];
+        if (name == "--select" && !saw_select) {
+            options.selection = zkstego::parse_cavlc_selection_policy(value);
+            saw_select = true;
+        } else if (name == "--key-mode" && !saw_key_mode) {
+            options.key_mode = zkstego::parse_cavlc_key_mode(value);
+            saw_key_mode = true;
+        } else {
+            throw std::invalid_argument("unknown or repeated channel flag (use --select, --key-mode)");
+        }
     }
-    return key;
+    return options;
+}
+
+// A token carries the subkeys of one video, so it only makes sense per-video.
+void require_secret_matches_key_mode(const ChannelSecret& secret, const zkstego::CavlcChannelOptions& options) {
+    if (secret.token && options.key_mode != zkstego::CavlcKeyMode::PerVideo) {
+        throw std::invalid_argument("a verification token requires --key-mode per-video");
+    }
 }
 
 SensitiveBytes read_hex_payload_stdin_line() {
@@ -265,8 +312,11 @@ void run_live_embed(
     std::ostream& output,
     const std::vector<std::uint8_t>& key,
     const std::vector<std::uint8_t>& payload,
-    const std::size_t maximum_bits_per_segment) {
-    zkstego::CavlcStreamEncoder encoder(key, payload, maximum_bits_per_segment);
+    const std::size_t maximum_bits_per_segment,
+    const zkstego::CavlcChannelOptions options) {
+    // Per-video mode: the encoder derives its subkeys from the first segment
+    // as it arrives (its SPS/PPS context and first IDR).
+    zkstego::CavlcStreamEncoder encoder(key, payload, maximum_bits_per_segment, options);
     zkstego::AnnexBNalStreamReader reader(input);
     std::vector<zkstego::AnnexBNalUnit> parameter_sets;
     std::vector<std::uint8_t> nal_bytes;
@@ -346,8 +396,9 @@ std::vector<std::uint8_t> run_live_extract(
     std::istream& input,
     const std::vector<std::uint8_t>& key,
     const std::size_t maximum_payload_bytes,
-    const std::size_t maximum_bits_per_segment) {
-    zkstego::CavlcStreamDecoder decoder(key, maximum_payload_bytes, maximum_bits_per_segment);
+    const std::size_t maximum_bits_per_segment,
+    const zkstego::CavlcChannelOptions options) {
+    zkstego::CavlcStreamDecoder decoder(key, maximum_payload_bytes, maximum_bits_per_segment, options);
     zkstego::AnnexBNalStreamReader reader(input);
     std::vector<zkstego::AnnexBNalUnit> parameter_sets;
     std::vector<std::uint8_t> nal_bytes;
@@ -389,60 +440,84 @@ int run(const std::vector<std::string>& argv) {
     const auto argc = static_cast<int>(argv.size());
     if (argc < 2) {
         std::cerr << "usage: zkstego_blind_bits <command> ...  (keyed CAVLC segment protocol v3)\n"
-                     "  embed-stream-auth-stdin <input.h264> <new-output.h264> <max-bits-per-IDR>\n"
+                     "  embed-stream-auth-stdin <input.h264> <new-output.h264> <max-bits-per-IDR> [flags]\n"
                      "      stdin: key line, payload-hex line; writes the stego file\n"
-                     "  extract-stream-auth <input.h264> <key-file|-> <maximum-payload-bytes> <max-bits-per-IDR>\n"
+                     "  extract-stream-auth <input.h264> <key-file|-> <maximum-payload-bytes> <max-bits-per-IDR> [flags]\n"
                      "      prints the payload hex; a wrong key fails the frame version/length checks\n"
                      "The frame has no MAC: '-auth' names a keyed command, and the payload's\n"
                      "Groth16 proof (verified by the service) is what authenticates it.\n"
-                     "  video-digest <input.h264> <frame-bits> <max-bits-per-IDR>\n"
+                     "  video-digest <input.h264> <frame-bits> <max-bits-per-IDR> [flags]\n"
                      "      stdin: key line; prints the video binding digest: SHA-256 of every\n"
                      "      NAL's RBSP with exactly the keyed frame-carrier sign bits cleared\n"
+                     "  video-token <input.h264>\n"
+                     "      stdin: master key line; prints the 128-hex per-video verification token\n"
                      "  measure-live-capacity-stdin <max-bits-per-IDR>\n"
                      "      stdin: raw Annex-B; stdout: ZKSTEG_CAPACITY_METRICS JSON\n"
-                     "  embed-live-auth-stdin <max-bits-per-IDR>\n"
+                     "  embed-live-auth-stdin <max-bits-per-IDR> [flags]\n"
                      "      stdin: key line, payload-hex line, then raw Annex-B; stdout: H.264\n"
-                     "  extract-live-auth-stdin <maximum-payload-bytes> <max-bits-per-IDR>\n"
+                     "  extract-live-auth-stdin <maximum-payload-bytes> <max-bits-per-IDR> [flags]\n"
                      "      stdin: key line, then raw Annex-B; stdout: payload hex\n"
+                     "flags (channel parameters, out of band like the cap; defaults = v3):\n"
+                     "  --select random|low-drift      sign selection policy (default random)\n"
+                     "  --key-mode master|per-video    subkeys from K, or bound to the video (default master)\n"
                      "Each IDR is one segment (stored SPS/PPS + that IDR) carrying at most\n"
-                     "max-bits-per-IDR scheduled sign bits. A key is one 64-hex-character line;\n"
-                     "key files must have restricted OS access ('-' reads the key from stdin).\n";
+                     "max-bits-per-IDR scheduled sign bits. A key line is the 64-hex master key, or\n"
+                     "'token:' + 128 hex (a per-video verification token; needs --key-mode per-video).\n"
+                     "Key files must have restricted OS access ('-' reads the key from stdin).\n";
         return 2;
     }
     try {
         const std::string operation{argv[1]};
-        if (operation == "embed-stream-auth-stdin" && argc == 5) {
+        if (operation == "embed-stream-auth-stdin" && argc >= 5) {
+            const auto options = parse_channel_flags(argv, 5U);
             auto key = read_key_stdin_line();
+            require_secret_matches_key_mode(key, options);
             auto payload = read_hex_payload_stdin_line();
             const auto maximum_bits = parse_bit_count(argv[4]);
             if (maximum_bits == 0U) throw std::invalid_argument("max-bits-per-IDR must be positive");
             const auto output = zkstego::embed_cavlc_stream_file(
-                read_binary(argv[2]), key.value(), payload.value(), maximum_bits);
+                read_binary(argv[2]), key.bytes.value(), payload.value(), maximum_bits, options);
             write_new_binary(argv[3], output);
             std::cout << "embedded_stream_payload_bytes=" << payload.size()
                       << " output_bytes=" << output.size() << '\n';
             return 0;
         }
-        if (operation == "extract-stream-auth" && argc == 6) {
+        if (operation == "extract-stream-auth" && argc >= 6) {
+            const auto options = parse_channel_flags(argv, 6U);
             const auto key = read_key_file(argv[3]);
+            require_secret_matches_key_mode(key, options);
             const auto maximum_payload = parse_bit_count(argv[4]);
             const auto maximum_bits = parse_bit_count(argv[5]);
             if (maximum_bits == 0U) throw std::invalid_argument("max-bits-per-IDR must be positive");
             const auto payload = zkstego::extract_cavlc_stream_file(
-                read_binary(argv[2]), key.value(), maximum_payload, maximum_bits);
+                read_binary(argv[2]), key.bytes.value(), maximum_payload, maximum_bits, options);
             std::cout << bytes_to_hex(payload) << '\n';
             return 0;
         }
-        if (operation == "video-digest" && argc == 5) {
+        if (operation == "video-digest" && argc >= 5) {
+            const auto options = parse_channel_flags(argv, 5U);
             const auto key = read_key_stdin_line();
+            require_secret_matches_key_mode(key, options);
             const auto frame_bits = parse_bit_count(argv[3]);
             const auto maximum_bits = parse_bit_count(argv[4]);
             if (maximum_bits == 0U) throw std::invalid_argument("max-bits-per-IDR must be positive");
             const auto result = zkstego::cavlc_video_binding_digest(
-                read_binary(argv[2]), key.value(), frame_bits, maximum_bits);
+                read_binary(argv[2]), key.bytes.value(), frame_bits, maximum_bits, options);
             const std::vector<std::uint8_t> digest(result.digest.begin(), result.digest.end());
             std::cout << "ZKSTEGO_VIDEO_DIGEST " << bytes_to_hex(digest) << " carrier_segments="
                       << result.carrier_segments << " nal_units=" << result.nal_units << '\n';
+            return 0;
+        }
+        if (operation == "video-token" && argc == 3) {
+            const auto key = read_key_stdin_line();
+            if (key.token) throw std::invalid_argument("video-token needs the master key, not a token");
+            auto token = zkstego::cavlc_verification_token(read_binary(argv[2]), key.bytes.value());
+            auto text = bytes_to_hex(token);
+            secure_wipe(token.data(), token.size());
+            std::cout << text << '\n';
+            std::cout.flush();
+            secure_wipe(text.data(), text.size());
+            if (!std::cout) throw std::invalid_argument("failed while writing the verification token");
             return 0;
         }
         if (operation == "measure-live-capacity-stdin" && argc == 3) {
@@ -451,23 +526,27 @@ int run(const std::vector<std::string>& argv) {
             run_live_capacity_measure(std::cin, std::cout, maximum_bits);
             return 0;
         }
-        if (operation == "embed-live-auth-stdin" && argc == 3) {
+        if (operation == "embed-live-auth-stdin" && argc >= 3) {
+            const auto options = parse_channel_flags(argv, 3U);
             set_standard_streams_to_binary();
             auto key = read_key_stdin_line();
+            require_secret_matches_key_mode(key, options);
             auto payload = read_hex_payload_stdin_line();
             const auto maximum_bits = parse_bit_count(argv[2]);
             if (maximum_bits == 0U) throw std::invalid_argument("max-bits-per-IDR must be positive");
-            run_live_embed(std::cin, std::cout, key.value(), payload.value(), maximum_bits);
+            run_live_embed(std::cin, std::cout, key.bytes.value(), payload.value(), maximum_bits, options);
             return 0;
         }
-        if (operation == "extract-live-auth-stdin" && argc == 4) {
+        if (operation == "extract-live-auth-stdin" && argc >= 4) {
+            const auto options = parse_channel_flags(argv, 4U);
             set_standard_streams_to_binary();
             auto key = read_key_stdin_line();
+            require_secret_matches_key_mode(key, options);
             const auto maximum_payload = parse_bit_count(argv[2]);
             const auto maximum_bits = parse_bit_count(argv[3]);
             if (maximum_bits == 0U) throw std::invalid_argument("max-bits-per-IDR must be positive");
             const auto payload = run_live_extract(
-                std::cin, key.value(), maximum_payload, maximum_bits);
+                std::cin, key.bytes.value(), maximum_payload, maximum_bits, options);
             std::cout << bytes_to_hex(payload) << '\n';
             return 0;
         }

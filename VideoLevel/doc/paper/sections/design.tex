@@ -91,6 +91,26 @@ P=\texttt{0x01}\cat\mu\cat\mathrm{u16}(|m|)\cat m\cat\pi,\qquad|\pi|=129,
 \end{equation}
 so $L_F=8(|m|+136)$; a 68-byte message gives $|P|=201$, $|F|=204$ bytes, 1{,}632 bits, i.e.\ 26 IDRs at 64 bits each.
 
+\subsection{Channel parameters: selection policy and key mode}
+\label{sec:params}
+Two optional parameters are agreed out of band, like the cap; their defaults reproduce the channel described so far byte for byte.
+
+\textbf{Selection policy.} Policy \texttt{random} ranks a segment's candidates by $(\sigma,\mathit{id})$. Policy \texttt{low-drift} ranks them by $(\tau,\sigma,\mathit{id})$, where the integer \emph{drift tier}
+\begin{equation}
+\tau=r+d+f\in\{0,\dots,5\}
+\label{eq:tier}
+\end{equation}
+is derived from the distortion model of Section~\ref{sec:distortion}: $r=2,1,0$ for an MB row in the top, middle or bottom third of the picture (more blocks predict from upper rows), $d=2$ for the DC paths LumaDC and ChromaDC (their change covers a whole MB component), and $f=1$ when the flipped AC coefficient has $i+j\le2$ (low frequencies change the right column and bottom row used for prediction). All three inputs are syntax that sign flips never change, so the receiver recomputes the tiers from the stego stream; inside a tier the order stays keyed.
+
+\textbf{Per-video keys and verification tokens.} In key mode \texttt{per-video} the subkeys are bound to the video. With $\nu=\Hash(\texttt{"zkstego/video-nonce/v1"}\cat\ldots)$ computed like Eq.~\eqref{eq:digest} over the SPS, PPS and first IDR of the stream with \emph{all} trailing-one sign candidates cleared (so $\nu$ is the same for cover and stego and independent of any key),
+\begin{align}
+\mathit{PRK}'&=\mathsf{Extract}(\texttt{"...-v4-salt"},K),\nonumber\\
+k_v&=\mathsf{Expand}(\mathit{PRK}',\ \texttt{".../video"}\cat\nu,32),\nonumber\\
+k_{\mathrm{sch}}&=\mathsf{Expand}(k_v,\texttt{".../schedule"},32),\nonumber\\
+k_{\mathrm{wh}}&=\mathsf{Expand}(k_v,\texttt{".../whitening"},32).
+\end{align}
+The pair $t_V=(k_{\mathrm{sch}},k_{\mathrm{wh}})$ is the \emph{verification token} of video $V$. Anyone given $t_V$ can extract the payload of $V$ and compute $\dig$ of $V$ (Algorithm~\ref{alg:verify} with $t_V$ in place of $K$) and so verify its proof publicly, without learning $K$ or the token of any other video. A live stream obtains $\nu$ from its first segment as it arrives. The verify job accepts a token in place of the key in this mode.
+
 \subsection{Algorithms}
 
 \begin{algorithm}[t]

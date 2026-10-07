@@ -16,7 +16,7 @@ which camera, and without the verifier holding any camera secret.
 | Area | State |
 |---|---|
 | Maturity | Research prototype. Supported input is constrained (see [Limits](#known-limits)); this is not generic H.264 support |
-| Tests | 2026-10-05: `py -3.12 src/runtest/run_all.py` passed **151/151 across 12 phases** on a Windows host (fixtures from `prepare_fixtures.py`), native CTest 1/1. Physical-camera E2E (`--hardware`) not included. Functional evidence, not edge acceptance |
+| Tests | 2026-10-07: `py -3.12 src/runtest/run_all.py` passed **161/161 across 12 phases** on a Windows host (fixtures from `prepare_fixtures.py`), native CTest 7/7. Physical-camera E2E (`--hardware`) not included. Functional evidence, not edge acceptance |
 | Realtime | **Not accepted.** Corrected physical-camera H.264 E2E: 7.608 source FPS against a 30-FPS gate (measured before the 2026-10-02 native stdin/reader speed-up, not yet re-measured). No edge target benchmarked |
 | Proof boundary | Groth16 (`circuits/camera_video.circom`) proves that the signing camera's key is a leaf of the trusted registry Merkle tree and binds the proof to SHA256 of the masked video digest and the message. Verifiers need the registry root, not the camera secret; replaying the payload into another video or cutting the video fails. It does not prove that the camera really filmed the scene (e.g. re-filming a screen) |
 | Benchmarks | `py -3.12 -m benchmark.run_new_suite` writes one report, `benchmark/results/benchmark_report_new.pdf` (2026-10-04: media 27/27 with video-bound camera proofs, E2E 5/5, attacks 11/11 as expected — replay, truncation and later-frame edits are rejected). See [`benchmark/NEW_BENCHMARKS.md`](benchmark/NEW_BENCHMARKS.md) |
@@ -137,7 +137,8 @@ that fits the payload; an explicit cap is never changed. Artifacts go to
 
 ## Native CLI
 
-All commands read the 32-byte key as one 64-hex-character line (never argv) and exit 2 on any error.
+All commands read the 32-byte key as one 64-hex-character line (never argv) and exit 2 on any error
+(in per-video mode the line may instead be `token:` + a 128-hex verification token, see below).
 
 ```powershell
 # embed: stdin = key hex line, payload hex line
@@ -152,10 +153,49 @@ zkstego_blind_bits video-digest out.h264 1240 64
 |---|---|
 | `embed-stream-auth-stdin`, `extract-stream-auth` | Files: v3 frame spread over IDR segments (SPS+PPS+IDR), `max-bits-per-IDR` cap |
 | `video-digest` | Video binding digest (key on stdin, to locate the carrier bits); identical for the cover and its stego video |
+| `video-token` | Per-video verification token of one video (master key on stdin; prints 128 hex) |
 | `measure-live-capacity-stdin` | Candidate capacity of an Annex-B stream on stdin (JSON) |
 | `embed-live-auth-stdin`, `extract-live-auth-stdin` | Same segment protocol over stdin/stdout (used by the WebSocket service) |
 
 There is one protocol (segments) for files, HTTP jobs and live streams.
+
+### Channel parameters: `--select` and `--key-mode`
+
+Two optional trailing flags of `embed-stream-auth-stdin`, `extract-stream-auth`,
+`video-digest`, `embed-live-auth-stdin` and `extract-live-auth-stdin`. Like the
+per-IDR cap they are shared out of band: the receiver must use the same values.
+Without flags (`random`, `master`) every byte is protocol v3 as before.
+
+```powershell
+zkstego_blind_bits embed-stream-auth-stdin in.h264 out.h264 64 --select low-drift --key-mode per-video
+zkstego_blind_bits video-token out.h264                       # stdin: master key -> 128-hex token
+zkstego_blind_bits extract-stream-auth out.h264 - 4096 64 --select low-drift --key-mode per-video
+#   stdin: the master key line, or "token:<128 hex>" (verification token of this video)
+```
+
+- `--select random|low-drift`: `random` ranks a segment's candidates by
+  `(HMAC score, id)`; `low-drift` ranks by `(tier, HMAC score, id)` and takes the
+  first `min(cap, n)`. `tier = r + d + f` uses only syntax a sign flip never changes:
+  `r` = 2/1/0 for an MB row in the top/middle/bottom third of the picture, `d` = 2 for
+  LumaDC/ChromaDC, `f` = 1 for Luma4x4/AC or ChromaAC when the candidate coefficient
+  (the last non-zero one in zig-zag order) sits at `i + j <= 2`. Low tiers (bottom
+  rows, high-frequency AC) propagate less intra-prediction drift. `zkstego_inspect`
+  (`--segments` and the full trace) prints `mb_row`, `mb_height`, `freq` and `tier`.
+- `--key-mode master|per-video`: `master` derives the subkeys from the 32-byte key K
+  (v3). `per-video` binds them to the video: `video_nonce` = SHA-256 over the first
+  segment (stored SPS/PPS + first IDR, every candidate sign cleared, so cover and stego
+  agree and the nonce is key-independent); `PRK = HKDF-Extract("zkstego-cavlc-v4-salt", K)`,
+  `video_key = HKDF-Expand(PRK, "zkstego/cavlc/v4/video" || nonce)`, then the schedule and
+  whitening subkeys from `video_key` (`.../v4/schedule`, `.../v4/whitening`). The
+  verification token `schedule_key || whitening_key` lets a verifier extract and digest
+  that one video without K (another video's token fails); it would also let its holder
+  re-embed into that video, which the payload's Groth16 proof still rejects.
+
+Service: `ZK_STEGO_SELECTION_POLICY` (`random` | `low-drift`) and `ZK_STEGO_KEY_MODE`
+(`master` | `per-video`) set both for every job and stream; in per-video mode
+`/api/v1/jobs/verify` also accepts the 64-byte token as `secret_key_b64`. Python:
+`segment_schedule(..., policy=)`, `video_binding.video_digest/native_video_digest(...,
+select=, key_mode=)` and `camera_proof.build_payload/verify_payload(..., select=, key_mode=)`.
 
 `zkstego_inspect input.h264` dumps NALs, slices and candidates as JSON;
 `--summary` prints a readable overview; `--macroblock NAL MB` gives every MB

@@ -5,6 +5,12 @@ temporary key file. Configure ``ZK_STEGO_NATIVE_CLI`` with the built executable.
 The v3 channel frame carries no MAC, so an extracted payload is only a candidate:
 ``/api/v1/jobs/verify`` is the one operation that authenticates it (Groth16), and
 extract results and live stream payloads are marked ``"verified": false``.
+
+Channel parameters come from ``ApiSettings`` (``ZK_STEGO_SELECTION_POLICY`` =
+``random`` | ``low-drift``, ``ZK_STEGO_KEY_MODE`` = ``master`` | ``per-video``;
+defaults pass no extra flags) and apply to every native call, files and streams.
+In per-video mode the verify job also accepts the stego video's 64-byte
+verification token (``zkstego_blind_bits video-token``) instead of the key.
 """
 
 from __future__ import annotations
@@ -31,7 +37,7 @@ from starlette.websockets import WebSocketDisconnect
 from src.api.app import ApiSettings, bearer_token_matches, client_host, create_app
 from src.camera_proof import Verdict, check_proof, parse_payload
 from src.camera_registry import CameraRegistry
-from src.native_blind_contract import FRAME_HEADER_BYTES
+from src.native_blind_contract import FRAME_HEADER_BYTES, channel_flags, secret_line
 from src.zk_proof import CameraPayload, CameraProofBridge
 
 _LOGGER = logging.getLogger(__name__)
@@ -141,16 +147,21 @@ def create_native_app(
         raise ValueError("ZK_STEGO_MAX_BITS_PER_IDR must be a positive integer") from exc
     if maximum_bits_per_idr <= 0:
         raise ValueError("ZK_STEGO_MAX_BITS_PER_IDR must be a positive integer")
+    # Trailing CLI flags of every keyed command (empty for random/master, i.e. protocol v3).
+    flags = channel_flags(settings.selection_policy, settings.key_mode)
 
     def invoke(
-        arguments: list[str], secret_key: bytes, *, stdin_tail: bytes = b"",
+        arguments: list[str], secret_key: bytes, *, stdin_tail: bytes = b"", allow_token: bool = False,
     ) -> subprocess.CompletedProcess[bytes]:
-        if len(secret_key) != 32:
+        # A 64-byte per-video verification token is only accepted where the caller allows it
+        # (verify); secret_line additionally requires key mode per-video for it.
+        if len(secret_key) != 32 and not (allow_token and len(secret_key) == 64):
             raise ValueError("native CAVLC key must be 32 bytes")
+        key_line = secret_line(secret_key, settings.key_mode)
         try:
             result = subprocess.run(
-                [str(executable), *arguments],
-                input=secret_key.hex().encode("ascii") + b"\n" + stdin_tail,
+                [str(executable), *arguments, *flags],
+                input=key_line + stdin_tail,
                 capture_output=True,
                 timeout=timeout_seconds,
                 check=False,
@@ -183,9 +194,12 @@ def create_native_app(
         }
 
     def native_extract_payload(stego_video_path: str, secret_key: bytes, maximum_payload_bytes: int) -> bytes:
+        # Only the verify job can pass a token here (the app accepts it in per-video mode only);
+        # the extract job's key is always 32 bytes.
         result = invoke(
             ["extract-stream-auth", stego_video_path, "-", str(maximum_payload_bytes), str(maximum_bits_per_idr)],
             secret_key,
+            allow_token=True,
         )
         try:
             payload = bytes.fromhex(result.stdout.decode("ascii").strip())
@@ -205,7 +219,8 @@ def create_native_app(
             raise RuntimeError("Groth16 verification key is not available")
         return check_proof(bridge, registry.root, payload, proof, native_cli=executable, stego=stego_video_path,
                            stego_key=secret_key, max_bits_per_idr=maximum_bits_per_idr,
-                           require_video_binding=settings.require_video_binding)
+                           require_video_binding=settings.require_video_binding,
+                           select=settings.selection_policy, key_mode=settings.key_mode)
 
     def extract_handler(
         *, stego_video_path: str, output_path: str, secret_key: bytes, maximum_payload_bytes: int,
@@ -302,7 +317,7 @@ def create_native_app(
                     message = base64.b64decode(message_text, validate=True)
                     if not message or len(message) > 4096:
                         raise ValueError("invalid payload length")
-                    arguments = ["embed-live-auth-stdin", str(maximum_bits_per_idr)]
+                    arguments = ["embed-live-auth-stdin", str(maximum_bits_per_idr), *flags]
                     preamble = key.hex().encode("ascii") + b"\n" + message.hex().encode("ascii") + b"\n"
                     maximum_payload_bytes = 0
                 else:
@@ -311,7 +326,7 @@ def create_native_app(
                             or not 1 <= maximum_payload_bytes <= 4096):
                         raise ValueError("invalid payload bound")
                     arguments = [
-                        "extract-live-auth-stdin", str(maximum_payload_bytes), str(maximum_bits_per_idr),
+                        "extract-live-auth-stdin", str(maximum_payload_bytes), str(maximum_bits_per_idr), *flags,
                     ]
                     preamble = key.hex().encode("ascii") + b"\n"
                 del key

@@ -27,7 +27,13 @@ py -3.12 -m benchmark.distortion_figures_new                # figures/*.pdf from
 | Groth16 / PLONK (Table VI) | `benchmark/results/zkp_new.json` |
 | End-to-end stages, attack matrix (Tables VII, VIII) | `benchmark/results/e2e_new.json` |
 | Distortion model validation (Tables III–V, Figs. 2–4) | `benchmark/results/distortion_new/` (`summary.json`, CSVs) |
+| Method comparison, quality vs QP/GOP (Table VI, Fig. 5) | `benchmark/results/stego_compare/{cif,hd}.jsonl` |
+| Steganalysis (Table VII, Fig. 6) | `benchmark/results/stego_compare/steganalysis_*.json` |
+| Native low-drift and tokens (Table VIII) | `benchmark/results/stego_compare/channel_options_*.jsonl` |
 | Worked example (Appendix A) | terminal demo run, block MB 212 / block 5 |
+
+Tables VI–VIII are generated (`py -3.12 -m benchmark.paper_tables_new` writes `tables/*.tex`);
+figures by `benchmark.distortion_figures_new` and `benchmark.stego_compare_report_new`.
 
 ## Before submission
 

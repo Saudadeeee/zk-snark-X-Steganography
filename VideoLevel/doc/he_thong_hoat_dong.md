@@ -671,6 +671,7 @@ binding → verify với root tin cậy (`src/camera_proof.verify_payload`, job 
 |---|---|
 | `embed-stream-auth-stdin`, `extract-stream-auth` | Khung kênh v3 (hậu tố `-auth` nghĩa là "có khóa"; khung không có MAC), lịch theo đoạn IDR, đọc/ghi file |
 | `video-digest` | Hash ràng buộc video (stego key qua stdin để xác định bit carrier); cover và stego cho cùng giá trị |
+| `video-token` | Token xác minh per-video của một video (K qua stdin, in 128 ký tự hex; mục 11.4) |
 | `measure-live-capacity-stdin` | Đọc Annex-B từ stdin, in JSON dung lượng ứng viên |
 | `embed-live-auth-stdin`, `extract-live-auth-stdin` | Như chế độ đoạn nhưng video vào/ra qua stdin/stdout (dùng cho WebSocket) |
 
@@ -678,6 +679,45 @@ Khóa không bao giờ đi qua tham số dòng lệnh. Mã thoát 2 = mọi lỗ
 Công cụ soi duy nhất: `zkstego_inspect` — mặc định xuất JSON NAL/slice/ứng viên;
 `--summary` in tóm tắt dễ đọc; `--macroblock NAL MB` xuất toàn bộ header MB của slice và
 từng phần tử CAVLC của một MB; `--segments MAX_BITS` liệt kê ứng viên theo đoạn.
+
+### 11.4. Tham số kênh: chính sách chọn (`--select`) và chế độ khóa (`--key-mode`)
+
+Hai cờ tùy chọn đặt cuối lệnh `embed-stream-auth-stdin`, `extract-stream-auth`, `video-digest`,
+`embed-live-auth-stdin`, `extract-live-auth-stdin`. Giống giới hạn bit/IDR, chúng được thống nhất
+ngoài kênh: bên nhận phải dùng đúng giá trị của bên gửi. Không truyền cờ (`random`, `master`)
+thì mọi byte giữ nguyên giao thức v3 (khung 0x03 không đổi).
+
+- `--select random|low-drift`. `random`: xếp ứng viên của đoạn theo (điểm HMAC, định danh).
+  `low-drift`: xếp theo (tier, điểm HMAC, định danh) rồi lấy min(cap, n) ứng viên đầu, với
+  `tier = r + d + f` chỉ tính từ cú pháp mà lật dấu không bao giờ đổi:
+  `r` = 2 nếu hàng MB nằm ở 1/3 trên của ảnh (`mb_row*3 < mb_height`), 1 nếu ở 1/3 giữa, 0 nếu
+  ở 1/3 dưới; `d` = 2 với LumaDC/ChromaDC; `f` = 1 với Luma4x4 (kể cả AC của I16x16) hoặc
+  ChromaAC khi hệ số mang dấu (hệ số khác 0 cuối cùng theo zig-zag) có `i + j <= 2`.
+  Tier thấp (hàng dưới, AC tần số cao) làm lệch dự đoán intra lan ít hơn. `zkstego_inspect`
+  (`--segments` và JSON đầy đủ) in thêm `mb_row`, `mb_height`, `freq`, `tier` cho mỗi ứng viên;
+  `segment_schedule(..., policy="low-drift")` trong Python tái tạo đúng lịch này.
+- `--key-mode master|per-video`. `master`: khóa con dẫn xuất từ khóa 32 byte K như mục 8.
+  `per-video`: khóa con gắn với video:
+
+```text
+video_nonce   = SHA256("zkstego/video-nonce/v1" ‖ với SPS, PPS (ngữ cảnh lưu) và IDR đầu tiên:
+                u32(1 + len(rbsp')) ‖ header ‖ rbsp')   rbsp' = RBSP của IDR với MỌI bit dấu ứng viên = 0
+PRK           = HKDF-Extract("zkstego-cavlc-v4-salt", K)
+video_key     = HKDF-Expand(PRK, "zkstego/cavlc/v4/video" ‖ video_nonce, 32)
+schedule_key  = HKDF-Expand(video_key, "zkstego/cavlc/v4/schedule", 32)
+whitening_key = HKDF-Expand(video_key, "zkstego/cavlc/v4/whitening", 32)
+```
+
+  Nonce không phụ thuộc khóa và giống nhau cho cover và stego; luồng live lấy nonce từ đoạn đầu
+  tiên khi nó tới. **Token xác minh** = `schedule_key ‖ whitening_key` (64 byte, lệnh
+  `video-token <video>`, K qua stdin) cho phép trích và tính `video-digest` của đúng video đó mà
+  không cần K; token của video khác thì trích thất bại. Các lệnh đọc khóa từ stdin nhận dòng hex
+  64 ký tự (K) hoặc `token:<128 hex>` (chỉ hợp lệ với `--key-mode per-video`). Người giữ token
+  cũng có thể nhúng lại vào video đó, nhưng payload giả vẫn bị Groth16 từ chối.
+
+Dịch vụ: biến môi trường `ZK_STEGO_SELECTION_POLICY` (`random` | `low-drift`) và
+`ZK_STEGO_KEY_MODE` (`master` | `per-video`) áp cho mọi job và luồng; ở chế độ per-video, job
+verify nhận token 64 byte thay cho khóa trong `secret_key_b64`.
 
 ---
 

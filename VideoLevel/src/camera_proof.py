@@ -57,13 +57,17 @@ class SignedPayload:
 def build_payload(bridge: CameraProofBridge, registry: CameraRegistry, secret: int, message: bytes, *,
                   native_cli: str | Path | None = None, cover: str | Path | None = None,
                   stego_key: bytes | None = None, max_bits_per_idr: int = 64,
-                  mode: int = MODE_VIDEO) -> SignedPayload:
-    """Prove and pack. Mode 0 needs ``native_cli``, the ``cover`` it will be embedded in and the stego key."""
+                  mode: int = MODE_VIDEO, select: str = "random", key_mode: str = "master") -> SignedPayload:
+    """Prove and pack. Mode 0 needs ``native_cli``, the ``cover`` it will be embedded in and the stego key.
+
+    ``select`` / ``key_mode`` are the channel parameters the cover will be embedded with; the
+    digest marks the carriers of exactly that embedding.
+    """
     if mode == MODE_VIDEO:
         if native_cli is None or cover is None or stego_key is None:
             raise ValueError("video binding needs the native CLI, the cover video and the stego key")
         digest = native_video_digest(native_cli, cover, stego_key, frame_bits_for_message(len(message)),
-                                     max_bits_per_idr)
+                                     max_bits_per_idr, select=select, key_mode=key_mode)
     elif mode == MODE_MESSAGE_ONLY:
         digest = bytes(DIGEST_BYTES)
     else:
@@ -102,19 +106,25 @@ def parse_payload(payload: bytes) -> tuple[CameraPayload, dict] | None:
 
 def verify_payload(bridge: CameraProofBridge, root: int, payload: bytes, *, native_cli: str | Path | None = None,
                    stego: str | Path | None = None, stego_key: bytes | None = None, max_bits_per_idr: int = 64,
-                   require_video_binding: bool = True) -> Verdict:
-    """Groth16 decision for an extracted payload; reasons match the service verify job."""
+                   require_video_binding: bool = True, select: str = "random",
+                   key_mode: str = "master") -> Verdict:
+    """Groth16 decision for an extracted payload; reasons match the service verify job.
+
+    In ``key_mode="per-video"`` the ``stego_key`` may be the video's 64-byte verification token.
+    """
     parsed = parse_payload(payload)
     if parsed is None:
         return Verdict(False, "malformed_proof_payload")
     return check_proof(bridge, root, *parsed, native_cli=native_cli, stego=stego, stego_key=stego_key,
-                       max_bits_per_idr=max_bits_per_idr, require_video_binding=require_video_binding)
+                       max_bits_per_idr=max_bits_per_idr, require_video_binding=require_video_binding,
+                       select=select, key_mode=key_mode)
 
 
 def check_proof(bridge: CameraProofBridge, root: int, unpacked: CameraPayload, proof: dict, *,
                 native_cli: str | Path | None = None, stego: str | Path | None = None,
                 stego_key: bytes | None = None, max_bits_per_idr: int = 64,
-                require_video_binding: bool = True) -> Verdict:
+                require_video_binding: bool = True, select: str = "random",
+                key_mode: str = "master") -> Verdict:
     """Rebuild the binding (from the stego video for mode 0) and verify the proof against ``root``."""
     if unpacked.mode == MODE_MESSAGE_ONLY:
         if require_video_binding:
@@ -125,7 +135,7 @@ def check_proof(bridge: CameraProofBridge, root: int, unpacked: CameraPayload, p
             raise ValueError("a video-bound payload needs the native CLI, the stego video and the stego key")
         try:
             digest = native_video_digest(native_cli, stego, stego_key, frame_bits_for_message(len(unpacked.message)),
-                                         max_bits_per_idr)
+                                         max_bits_per_idr, select=select, key_mode=key_mode)
         except ValueError:
             return Verdict(False, "video_digest_unavailable", unpacked.mode)
     binding = binding_digest(unpacked.mode, digest, unpacked.message)

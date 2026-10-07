@@ -67,6 +67,14 @@ std::uint8_t rbsp_bit(const std::vector<std::uint8_t>& rbsp, const std::size_t o
     return static_cast<std::uint8_t>((rbsp.at(offset / 8U) >> (7U - offset % 8U)) & 1U);
 }
 
+// Low-drift tier and its sign-invariant inputs (see cavlc_candidate_tier).
+void tier_fields(const zkstego::CavlcSignCandidate& candidate) {
+    out << ",\"mb_row\":" << candidate.mb_row
+        << ",\"mb_height\":" << candidate.mb_height
+        << ",\"freq\":" << +candidate.frequency
+        << ",\"tier\":" << +zkstego::cavlc_candidate_tier(candidate);
+}
+
 std::int64_t initial_slice_qp(const zkstego::CavlcDecodedIdrSlice& slice) {
     const auto qp = std::int64_t{26} + slice.pps.pic_init_qp_minus26 + slice.header.slice_qp_delta;
     if (qp < 0 || qp > 51) throw std::invalid_argument("slice QP outside Baseline range");
@@ -248,6 +256,7 @@ int trace(const std::string& path) {
         numbers(block.token.sign_bit_offsets);
         out << ",\"coefficients_scan\":";
         numbers(block.coefficients);
+        tier_fields(c);
         out << '}';
     }
     out << "]}\n";
@@ -296,7 +305,8 @@ int summary(const std::string& path) {
 // Segment-protocol audit view (schema "segments-1"). For each IDR segment the
 // candidates are exactly those the stream codec schedules from: "id" is the
 // segment-relative identity scored by HMAC(schedule_key, id); nal_index and
-// rbsp_bit_offset locate the same sign bit in this file; "bit" is its value.
+// rbsp_bit_offset locate the same sign bit in this file; "bit" is its value;
+// mb_row, mb_height, freq and tier are the low-drift ranking inputs.
 int segments(const std::string& path, const std::size_t maximum_bits_per_idr) {
     const auto bytes = read_input(path);
     const auto units = zkstego::split_annex_b(bytes);
@@ -329,7 +339,9 @@ int segments(const std::string& path, const std::size_t maximum_bits_per_idr) {
             out << "{\"id\":\"" << zkstego::serialize_cavlc_sign_candidate(c)
                 << "\",\"nal_index\":" << segment.idr_nal_index
                 << ",\"rbsp_bit_offset\":" << c.rbsp_bit_offset
-                << ",\"bit\":" << +rbsp_bit(rbsp, c.rbsp_bit_offset) << '}';
+                << ",\"bit\":" << +rbsp_bit(rbsp, c.rbsp_bit_offset);
+            tier_fields(c);
+            out << '}';
         }
         out << "]}";
     }

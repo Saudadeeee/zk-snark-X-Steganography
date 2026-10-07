@@ -59,4 +59,15 @@ Anonymity is relative to the registry: a registry of one camera identifies it.
 
 \textbf{Covertness (G5).} Without $K$ the schedule is a pseudo-random subset of the candidates and the embedded bits are pseudo-random; with a wrong key the version byte matches with probability $2^{-8}$ and the length must additionally be admissible, after which the payload parser and the proof reject. Sign flips do not change the bit rate, the codeword lengths or the file size apart from rare emulation-prevention bytes. We only measure first-order statistics: the share of negative trailing ones does not change significantly (Section~\ref{sec:eval}). Calibrated or learned steganalysis is future work, and we do not claim security against it.
 
+\begin{proposition}[Token scope]
+\label{prop:token}
+In per-video key mode, a verification token $t_V$ lets its holder extract and verify $V$, and gives no advantage in computing $K$ or the token $t_{V'}$ of any video $V'$ with $\nu(V')\ne\nu(V)$.
+\end{proposition}
+\begin{proof}
+$\nu$ depends only on syntax that embedding does not change, so the holder recomputes $\nu$ from the stego stream and $t_V$ equals the subkeys the sender used; extraction and the digest of Algorithm~\ref{alg:verify} need nothing else. Tokens are outputs of HKDF-Expand (HMAC-SHA256, a PRF) under the secret $k_v$, which is itself a PRF output under the extracted key of $K$ on input $\nu$. Tokens of different nonces are therefore computationally independent, and recovering $K$ from $t_V$ would invert HMAC.
+\end{proof}
+Disclosing $t_V$ deliberately gives up the covertness of $V$ (its carriers and plaintext become known to the token holder); the covertness of every other video under the same $K$ is preserved. Two videos with identical first-IDR syntax up to the signs would share a nonce; for natural content this does not happen.
+
+\textbf{Low-drift policy and covertness.} The policy keeps the order keyed inside each tier, but it concentrates carriers in low tiers (bottom of the picture, high-frequency AC). An adversary who knows the policy knows where carriers are more likely; whether this helps detection is an empirical question, measured in Section~\ref{sec:eval-steg}.
+
 \textbf{Mode 1.} A live stream embeds its proof in the first IDRs, before the rest exists, so the proof can only bind the message. Theorem~\ref{thm:binding} then holds for $m$ but not for the video, and a mode-1 payload can be replayed into another stream. Verifiers reject mode 1 unless explicitly configured otherwise.

@@ -1452,10 +1452,64 @@ std::vector<CavlcDecodedIdrSlice> decode_baseline_i_idr_slices(
     return decoded_slices;
 }
 
+namespace {
+
+// i + j of the raster position of the candidate coefficient. The first
+// trailing-one sign (the candidate) belongs to the highest-frequency non-zero
+// coefficient, i.e. the last non-zero one in scan order; sign flips keep every
+// zero/non-zero position, so this value is the same for cover and stego.
+std::uint8_t candidate_frequency(const CavlcDecodedLumaBlock& block, const CavlcResidualCategory category) {
+    // 4x4 zig-zag (frame) scan index -> i + j.
+    constexpr std::array<std::uint8_t, 16> kZigZagFrequency{{0, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 5, 5, 6}};
+    // 2x2 ChromaDC raster order c[0..3] -> i + j.
+    constexpr std::array<std::uint8_t, 4> kChromaDcFrequency{{0, 1, 1, 2}};
+    const auto& coefficients = block.coefficients;
+    std::size_t last = coefficients.size();
+    while (last > 0U && coefficients[last - 1U] == 0) --last;
+    if (last == 0U) throw std::logic_error("sign candidate block has no non-zero coefficient");
+    const auto scan_index = last - 1U;
+    if (category == CavlcResidualCategory::ChromaDc) {
+        if (coefficients.size() != kChromaDcFrequency.size()) throw std::logic_error("ChromaDC block size is invalid");
+        return kChromaDcFrequency[scan_index];
+    }
+    // AC-only blocks (I16x16 luma AC, ChromaAC) hold 15 coefficients that
+    // start at zig-zag index 1.
+    const auto zig_zag_index = scan_index + (coefficients.size() == 15U ? 1U : 0U);
+    if (zig_zag_index >= kZigZagFrequency.size()) throw std::logic_error("residual block size is invalid");
+    return kZigZagFrequency[zig_zag_index];
+}
+
+}  // namespace
+
+std::uint8_t cavlc_candidate_tier(const CavlcSignCandidate& candidate) {
+    const auto row3 = static_cast<std::uint64_t>(candidate.mb_row) * 3U;
+    const auto height = static_cast<std::uint64_t>(candidate.mb_height);
+    const unsigned row_term = row3 < height ? 2U : (row3 < 2U * height ? 1U : 0U);
+    const bool dc = candidate.category == CavlcResidualCategory::LumaDc ||
+        candidate.category == CavlcResidualCategory::ChromaDc;
+    const bool low_frequency_ac = (candidate.category == CavlcResidualCategory::Luma4x4 ||
+        candidate.category == CavlcResidualCategory::ChromaAc) && candidate.frequency <= 2U;
+    return static_cast<std::uint8_t>(row_term + (dc ? 2U : 0U) + (low_frequency_ac ? 1U : 0U));
+}
+
+CavlcSelectionPolicy parse_cavlc_selection_policy(const std::string& text) {
+    if (text == "random") return CavlcSelectionPolicy::Random;
+    if (text == "low-drift") return CavlcSelectionPolicy::LowDrift;
+    throw std::invalid_argument("selection policy must be 'random' or 'low-drift'");
+}
+
+CavlcKeyMode parse_cavlc_key_mode(const std::string& text) {
+    if (text == "master") return CavlcKeyMode::Master;
+    if (text == "per-video") return CavlcKeyMode::PerVideo;
+    throw std::invalid_argument("key mode must be 'master' or 'per-video'");
+}
+
 std::vector<CavlcSignCandidate> collect_cavlc_trailing_one_sign_candidates(
     const std::vector<CavlcDecodedIdrSlice>& slices) {
     std::vector<CavlcSignCandidate> candidates;
     for (const auto& slice : slices) {
+        const auto width = static_cast<std::uint32_t>(slice.sps.pic_width_in_mbs_minus1) + 1U;
+        const auto height = static_cast<std::uint32_t>(slice.sps.pic_height_in_map_units_minus1) + 1U;
         for (const auto& macroblock : slice.macroblocks) {
             const auto append = [&](const CavlcDecodedLumaBlock& block,
                                     const CavlcResidualCategory category,
@@ -1467,6 +1521,9 @@ std::vector<CavlcSignCandidate> collect_cavlc_trailing_one_sign_candidates(
                     category,
                     block_index,
                     block.token.sign_bit_offsets.front(),
+                    macroblock.address / width,
+                    height,
+                    candidate_frequency(block, category),
                 });
             };
             if (macroblock.header.mb_type >= 1U && macroblock.header.mb_type <= 24U) {
@@ -1810,9 +1867,21 @@ std::vector<std::uint8_t> unpack_frame(
 std::vector<CavlcSignCandidate> select_with_schedule_key(
     const std::vector<CavlcSignCandidate>& candidates,
     const std::vector<std::uint8_t>& schedule_key,
-    const std::size_t required_bits) {
+    const std::size_t required_bits,
+    const CavlcSelectionPolicy policy) {
     if (required_bits > candidates.size()) throw std::invalid_argument("blind schedule capacity is insufficient");
-    struct ScoredCandidate { std::array<std::uint8_t, 32> score; std::string identity; CavlcSignCandidate candidate; };
+    if (policy != CavlcSelectionPolicy::Random && policy != CavlcSelectionPolicy::LowDrift) {
+        throw std::invalid_argument("blind schedule selection policy is invalid");
+    }
+    // Random ranks every candidate at tier 0, so its order is exactly
+    // (score, identity), the v3 schedule.
+    const bool low_drift = policy == CavlcSelectionPolicy::LowDrift;
+    struct ScoredCandidate {
+        std::uint8_t tier;
+        std::array<std::uint8_t, 32> score;
+        std::string identity;
+        CavlcSignCandidate candidate;
+    };
     std::vector<ScoredCandidate> scored;
     scored.reserve(candidates.size());
     std::unordered_set<std::string> identities;
@@ -1832,13 +1901,15 @@ std::vector<CavlcSignCandidate> select_with_schedule_key(
             throw std::invalid_argument("blind schedule candidate patch target is duplicated");
         }
         const auto score = ordering_hmac.digest(identity);
-        scored.push_back({score, std::move(identity), candidate});
+        const auto tier = low_drift ? cavlc_candidate_tier(candidate) : std::uint8_t{0U};
+        scored.push_back({tier, score, std::move(identity), candidate});
     }
-    // (score, identity) is a strict total order because identities are unique
-    // (checked above), so partially sorting the lowest required_bits yields
-    // exactly the same prefix, in the same order, as a full sort.
+    // (tier, score, identity) is a strict total order because identities are
+    // unique (checked above), so partially sorting the lowest required_bits
+    // yields exactly the same prefix, in the same order, as a full sort.
     std::partial_sort(scored.begin(), scored.begin() + static_cast<std::ptrdiff_t>(required_bits), scored.end(),
         [](const auto& left, const auto& right) {
+            if (left.tier != right.tier) return left.tier < right.tier;
             return left.score != right.score ? left.score < right.score : left.identity < right.identity;
         });
     std::vector<CavlcSignCandidate> selected;
@@ -1888,11 +1959,12 @@ std::array<std::uint8_t, 32> score_keyed_cavlc_sign_candidate(
 std::vector<CavlcSignCandidate> select_keyed_cavlc_sign_candidates(
     const std::vector<CavlcSignCandidate>& candidates,
     const std::vector<std::uint8_t>& secret_key,
-    const std::size_t required_bits) {
+    const std::size_t required_bits,
+    const CavlcSelectionPolicy policy) {
     if (secret_key.size() != 32U) throw std::invalid_argument("blind schedule key must be exactly 32 bytes");
     if (required_bits > candidates.size()) throw std::invalid_argument("blind schedule capacity is insufficient");
     SensitiveBytes schedule_key(derive_cavlc_subkey(secret_key, kScheduleInfo));
-    return select_with_schedule_key(candidates, schedule_key.value(), required_bits);
+    return select_with_schedule_key(candidates, schedule_key.value(), required_bits, policy);
 }
 
 std::vector<std::uint8_t> pack_cavlc_frame(const std::vector<std::uint8_t>& payload) {
@@ -1912,12 +1984,133 @@ void wipe_stream_secret(std::vector<std::uint8_t>& value) noexcept {
     for (std::size_t index = 0; index < value.size(); ++index) bytes[index] = 0U;
 }
 
+std::array<std::uint8_t, 32> sha256_digest(const std::vector<std::uint8_t>& data) {
+    std::array<std::uint8_t, 32> digest{};
+#ifdef _WIN32
+    if (data.size() > std::numeric_limits<ULONG>::max()) throw std::invalid_argument("SHA-256 input is too large");
+    if (BCryptHash(BCRYPT_SHA256_ALG_HANDLE, nullptr, 0, const_cast<PUCHAR>(data.data()),
+            static_cast<ULONG>(data.size()), digest.data(), static_cast<ULONG>(digest.size())) < 0) {
+        throw std::runtime_error("Windows CNG SHA-256 failed");
+    }
+#else
+    unsigned int length = 0;
+    if (EVP_Digest(data.data(), data.size(), digest.data(), &length, EVP_sha256(), nullptr) != 1 ||
+        length != digest.size()) {
+        throw std::runtime_error("OpenSSL SHA-256 failed");
+    }
+#endif
+    return digest;
+}
+
+void append_u32be(std::vector<std::uint8_t>& output, const std::size_t value) {
+    if (value > 0xffffffffU) throw std::invalid_argument("video binding field exceeds 32 bits");
+    for (int shift = 24; shift >= 0; shift -= 8) {
+        output.push_back(static_cast<std::uint8_t>((value >> shift) & 0xffU));
+    }
+}
+
+// u32be(1 + rbsp_size) || nal_header_byte || rbsp: one NAL of the video
+// digest and video nonce canonical encodings.
+void append_canonical_nal(std::vector<std::uint8_t>& canonical, const AnnexBNalUnit& unit,
+                          const std::vector<std::uint8_t>& rbsp) {
+    append_u32be(canonical, 1U + rbsp.size());
+    canonical.push_back(static_cast<std::uint8_t>(
+        (unit.forbidden_zero_bit << 7U) | (unit.nal_ref_idc << 5U) | unit.nal_unit_type));
+    canonical.insert(canonical.end(), rbsp.begin(), rbsp.end());
+}
+
+void clear_rbsp_bit(std::vector<std::uint8_t>& rbsp, const std::size_t bit) {
+    if (bit >= rbsp.size() * 8U) throw std::logic_error("sign candidate is outside its RBSP");
+    rbsp[bit / 8U] = static_cast<std::uint8_t>(rbsp[bit / 8U] & ~(0x80U >> (bit % 8U)));
+}
+
 struct PreparedCavlcStreamSegment {
     std::vector<std::uint8_t> analysis_input;
     std::vector<AnnexBNalUnit> parameter_sets;
     std::vector<CavlcSignCandidate> candidates;
     std::size_t context_nal_count{};
+    AnnexBNalUnit idr;
 };
+
+// ---- Key mode per-video (v4 key schedule; the v3 frame is unchanged).
+
+constexpr std::string_view kVideoNonceDomain{"zkstego/video-nonce/v1"};
+constexpr std::string_view kV4HkdfSalt{"zkstego-cavlc-v4-salt"};
+constexpr std::string_view kV4VideoInfo{"zkstego/cavlc/v4/video"};
+constexpr std::string_view kV4ScheduleInfo{"zkstego/cavlc/v4/schedule"};
+constexpr std::string_view kV4WhiteningInfo{"zkstego/cavlc/v4/whitening"};
+
+// Nonce of a stream's first segment: its stored SPS/PPS context (as the codec
+// keeps it) then its IDR, with every candidate sign bit of the IDR cleared.
+std::array<std::uint8_t, 32> video_nonce_of_segment(const PreparedCavlcStreamSegment& prepared) {
+    std::vector<std::uint8_t> canonical(kVideoNonceDomain.begin(), kVideoNonceDomain.end());
+    for (const auto& unit : prepared.parameter_sets) append_canonical_nal(canonical, unit, unit.rbsp());
+    auto idr_rbsp = prepared.idr.rbsp();
+    for (const auto& candidate : prepared.candidates) clear_rbsp_bit(idr_rbsp, candidate.rbsp_bit_offset);
+    append_canonical_nal(canonical, prepared.idr, idr_rbsp);
+    return sha256_digest(canonical);
+}
+
+std::vector<std::uint8_t> per_video_prk(const std::vector<std::uint8_t>& master_key) {
+    if (master_key.size() != 32U) throw std::invalid_argument("native CAVLC key must be 32 bytes");
+    return hkdf_sha256_extract(std::vector<std::uint8_t>(kV4HkdfSalt.begin(), kV4HkdfSalt.end()), master_key);
+}
+
+void derive_per_video_subkeys(
+    const std::vector<std::uint8_t>& prk,
+    const std::array<std::uint8_t, 32>& video_nonce,
+    std::vector<std::uint8_t>& schedule_key,
+    std::vector<std::uint8_t>& whitening_key) {
+    SensitiveBytes info(std::vector<std::uint8_t>(kV4VideoInfo.begin(), kV4VideoInfo.end()));
+    info.value().insert(info.value().end(), video_nonce.begin(), video_nonce.end());
+    SensitiveBytes video_key(hkdf_sha256_expand(prk, byte_view(info.value()), kSubkeyBytes));
+    schedule_key = hkdf_sha256_expand(video_key.value(), kV4ScheduleInfo, kSubkeyBytes);
+    whitening_key = hkdf_sha256_expand(video_key.value(), kV4WhiteningInfo, kSubkeyBytes);
+}
+
+// Sets the subkeys a channel secret yields under key_mode. Master: v3 subkeys
+// of K. Per-video: a 64-byte token is split into its subkeys; K is reduced to
+// its v4 PRK (pending_prk) until the first segment fixes the video nonce.
+void initialize_channel_keys(
+    const std::vector<std::uint8_t>& secret,
+    const CavlcKeyMode key_mode,
+    std::vector<std::uint8_t>& schedule_key,
+    std::vector<std::uint8_t>& whitening_key,
+    std::vector<std::uint8_t>& pending_prk) {
+    if (key_mode == CavlcKeyMode::Master) {
+        if (secret.size() == kCavlcVerificationTokenBytes) {
+            throw std::invalid_argument("a verification token requires key mode per-video");
+        }
+        if (secret.size() != 32U) throw std::invalid_argument("native CAVLC key must be 32 bytes");
+        schedule_key = derive_cavlc_subkey(secret, kScheduleInfo);
+        whitening_key = derive_cavlc_subkey(secret, kWhiteningInfo);
+        return;
+    }
+    if (key_mode != CavlcKeyMode::PerVideo) throw std::invalid_argument("channel key mode is invalid");
+    if (secret.size() == kCavlcVerificationTokenBytes) {
+        schedule_key.assign(secret.begin(), secret.begin() + 32);
+        whitening_key.assign(secret.begin() + 32, secret.end());
+        return;
+    }
+    if (secret.size() != 32U) {
+        throw std::invalid_argument("per-video channel secret must be a 32-byte key or a 64-byte verification token");
+    }
+    pending_prk = per_video_prk(secret);
+}
+
+// Called with every prepared segment in order: the first one resolves a
+// pending per-video PRK into subkeys and wipes it. Returns true when it did.
+bool resolve_pending_channel_keys(
+    const PreparedCavlcStreamSegment& prepared,
+    std::vector<std::uint8_t>& schedule_key,
+    std::vector<std::uint8_t>& whitening_key,
+    std::vector<std::uint8_t>& pending_prk) {
+    if (pending_prk.empty()) return false;
+    derive_per_video_subkeys(pending_prk, video_nonce_of_segment(prepared), schedule_key, whitening_key);
+    wipe_stream_secret(pending_prk);
+    pending_prk.clear();
+    return true;
+}
 
 PreparedCavlcStreamSegment prepare_cavlc_stream_segment(
     const std::vector<std::uint8_t>& annex_b_segment,
@@ -1957,16 +2150,18 @@ PreparedCavlcStreamSegment prepare_cavlc_stream_segment(
         throw std::invalid_argument("stream segment must contain exactly one supported IDR slice");
     }
     auto candidates = collect_cavlc_trailing_one_sign_candidates(slices);
+    const auto idr = std::find_if(units.begin(), units.end(), [](const auto& unit) { return unit.is_idr(); });
     return {std::move(analysis_input), std::move(parameter_sets), std::move(candidates),
-            analysis_units.size() - units.size()};
+            analysis_units.size() - units.size(), *idr};
 }
 
 std::vector<std::uint8_t> extract_keyed_bits_from_candidates(
     const std::vector<std::uint8_t>& annex_b,
     const std::vector<std::uint8_t>& schedule_key,
     const std::vector<CavlcSignCandidate>& candidates,
-    const std::size_t payload_bit_count) {
-    const auto selected = select_with_schedule_key(candidates, schedule_key, payload_bit_count);
+    const std::size_t payload_bit_count,
+    const CavlcSelectionPolicy policy) {
+    const auto selected = select_with_schedule_key(candidates, schedule_key, payload_bit_count, policy);
     const auto units = split_annex_b(annex_b);
     std::vector<std::uint8_t> payload_bits;
     payload_bits.reserve(selected.size());
@@ -2001,26 +2196,35 @@ std::vector<std::uint8_t> remove_stream_context_prefix(
 CavlcStreamEncoder::CavlcStreamEncoder(
     std::vector<std::uint8_t> secret_key,
     const std::vector<std::uint8_t>& payload,
-    const std::size_t maximum_bits_per_segment)
-    : maximum_bits_per_segment_(maximum_bits_per_segment) {
+    const std::size_t maximum_bits_per_segment,
+    const CavlcChannelOptions options)
+    : options_(options), maximum_bits_per_segment_(maximum_bits_per_segment) {
     // The caller's secret is wiped as soon as the subkeys exist. The
     // destructor does not run when a constructor throws, so wipe the derived
-    // schedule key and any frame material before rethrowing.
+    // keys and any frame material before rethrowing.
     SensitiveBytes secret(std::move(secret_key));
     try {
         if (maximum_bits_per_segment_ == 0U) {
             throw std::invalid_argument("maximum stream bits per segment must be positive");
         }
-        if (secret.value().size() != 32U) {
-            throw std::invalid_argument("native CAVLC key must be 32 bytes");
+        if (options_.selection != CavlcSelectionPolicy::Random && options_.selection != CavlcSelectionPolicy::LowDrift) {
+            throw std::invalid_argument("blind schedule selection policy is invalid");
         }
-        schedule_key_ = derive_cavlc_subkey(secret.value(), kScheduleInfo);
-        SensitiveBytes whitening_key(derive_cavlc_subkey(secret.value(), kWhiteningInfo));
+        initialize_channel_keys(secret.value(), options_.key_mode, schedule_key_, whitening_key_, pending_prk_);
         SensitiveBytes frame(pack_frame(payload));
-        SensitiveBytes plain_bits(bytes_to_msb_bits(frame.value()));
-        frame_bits_ = whiten_cavlc_frame_bits(plain_bits.value(), whitening_key.value(), 0U);
+        frame_bits_ = bytes_to_msb_bits(frame.value());
+        if (pending_prk_.empty()) {
+            // Subkeys are known now: whiten once and drop the whitening key.
+            SensitiveBytes plain_bits(std::move(frame_bits_));
+            frame_bits_ = whiten_cavlc_frame_bits(plain_bits.value(), whitening_key_, 0U);
+            frame_whitened_ = true;
+            wipe_stream_secret(whitening_key_);
+            whitening_key_.clear();
+        }
     } catch (...) {
         wipe_stream_secret(schedule_key_);
+        wipe_stream_secret(whitening_key_);
+        wipe_stream_secret(pending_prk_);
         wipe_stream_secret(frame_bits_);
         throw;
     }
@@ -2028,6 +2232,8 @@ CavlcStreamEncoder::CavlcStreamEncoder(
 
 CavlcStreamEncoder::~CavlcStreamEncoder() noexcept {
     wipe_stream_secret(schedule_key_);
+    wipe_stream_secret(whitening_key_);
+    wipe_stream_secret(pending_prk_);
     wipe_stream_secret(frame_bits_);
 }
 
@@ -2035,6 +2241,15 @@ CavlcStreamSegment CavlcStreamEncoder::process_segment(
     const std::vector<std::uint8_t>& annex_b_segment) {
     if (complete()) return {annex_b_segment, 0U, 0U, true};
     auto prepared = prepare_cavlc_stream_segment(annex_b_segment, parameter_sets_);
+    if (resolve_pending_channel_keys(prepared, schedule_key_, whitening_key_, pending_prk_)) {
+        // Per-video: the first segment fixed the subkeys; whiten the frame now.
+        SensitiveBytes plain_bits(std::move(frame_bits_));
+        frame_bits_ = whiten_cavlc_frame_bits(plain_bits.value(), whitening_key_, 0U);
+        frame_whitened_ = true;
+        wipe_stream_secret(whitening_key_);
+        whitening_key_.clear();
+    }
+    if (!frame_whitened_) throw std::logic_error("stream encoder frame was not whitened");
     parameter_sets_ = std::move(prepared.parameter_sets);
     const auto& candidates = prepared.candidates;
     const auto segment_capacity = std::min(maximum_bits_per_segment_, candidates.size());
@@ -2045,7 +2260,7 @@ CavlcStreamSegment CavlcStreamEncoder::process_segment(
     // positions carry (whitened) frame bits; positions past the frame end in
     // the final segment keep their cover sign instead of a forced constant.
     const auto bits_embedded = std::min(segment_capacity, remaining_bits());
-    const auto selected = select_with_schedule_key(candidates, schedule_key_, segment_capacity);
+    const auto selected = select_with_schedule_key(candidates, schedule_key_, segment_capacity, options_.selection);
     auto units = split_annex_b(prepared.analysis_input);
     std::vector<std::vector<FixedLengthBitPatch>> patches_by_nal(units.size());
     for (std::size_t index = 0; index < bits_embedded; ++index) {
@@ -2073,25 +2288,33 @@ std::size_t CavlcStreamEncoder::remaining_bits() const noexcept {
 CavlcStreamDecoder::CavlcStreamDecoder(
     std::vector<std::uint8_t> secret_key,
     const std::size_t maximum_payload_bytes,
-    const std::size_t maximum_bits_per_segment)
-    : maximum_payload_bytes_(maximum_payload_bytes),
+    const std::size_t maximum_bits_per_segment,
+    const CavlcChannelOptions options)
+    : options_(options),
+      maximum_payload_bytes_(maximum_payload_bytes),
       maximum_bits_per_segment_(maximum_bits_per_segment) {
     // The caller's secret is wiped when this scope ends (also on throw); only
-    // the derived subkeys are retained.
+    // the derived subkeys (or the per-video PRK) are retained.
     SensitiveBytes secret(std::move(secret_key));
-    if (secret.value().size() != 32U) throw std::invalid_argument("native CAVLC key must be 32 bytes");
+    if (options_.key_mode == CavlcKeyMode::Master && secret.value().size() != 32U &&
+        secret.value().size() != kCavlcVerificationTokenBytes) {
+        throw std::invalid_argument("native CAVLC key must be 32 bytes (a 64-byte token needs per-video key mode)");
+    }
     if (maximum_payload_bytes_ > std::numeric_limits<std::uint16_t>::max()) {
         throw std::invalid_argument("CAVLC payload maximum exceeds 65535 bytes");
     }
     if (maximum_bits_per_segment_ == 0U) {
         throw std::invalid_argument("maximum stream bits per segment must be positive");
     }
+    if (options_.selection != CavlcSelectionPolicy::Random && options_.selection != CavlcSelectionPolicy::LowDrift) {
+        throw std::invalid_argument("blind schedule selection policy is invalid");
+    }
     try {
-        schedule_key_ = derive_cavlc_subkey(secret.value(), kScheduleInfo);
-        whitening_key_ = derive_cavlc_subkey(secret.value(), kWhiteningInfo);
+        initialize_channel_keys(secret.value(), options_.key_mode, schedule_key_, whitening_key_, pending_prk_);
     } catch (...) {
         wipe_stream_secret(schedule_key_);
         wipe_stream_secret(whitening_key_);
+        wipe_stream_secret(pending_prk_);
         throw;
     }
 }
@@ -2099,6 +2322,7 @@ CavlcStreamDecoder::CavlcStreamDecoder(
 CavlcStreamDecoder::~CavlcStreamDecoder() noexcept {
     wipe_stream_secret(schedule_key_);
     wipe_stream_secret(whitening_key_);
+    wipe_stream_secret(pending_prk_);
     wipe_stream_secret(collected_bits_);
     if (payload_.has_value()) wipe_stream_secret(*payload_);
 }
@@ -2109,6 +2333,7 @@ void CavlcStreamDecoder::consume_segment(
     if (failed_) throw std::invalid_argument(failure_reason_);
     try {
         auto prepared = prepare_cavlc_stream_segment(annex_b_segment, parameter_sets_);
+        static_cast<void>(resolve_pending_channel_keys(prepared, schedule_key_, whitening_key_, pending_prk_));
         parameter_sets_ = std::move(prepared.parameter_sets);
         const auto& candidates = prepared.candidates;
         const auto segment_bit_count = std::min(maximum_bits_per_segment_, candidates.size());
@@ -2117,7 +2342,8 @@ void CavlcStreamDecoder::consume_segment(
         // from earlier segments), so the 24-bit header below is parsed from
         // plaintext; a wrong key yields a keystream-random version byte.
         SensitiveBytes segment_bits(whiten_cavlc_frame_bits(
-            extract_keyed_bits_from_candidates(prepared.analysis_input, schedule_key_, candidates, segment_bit_count),
+            extract_keyed_bits_from_candidates(
+                prepared.analysis_input, schedule_key_, candidates, segment_bit_count, options_.selection),
             whitening_key_, collected_bits_.size()));
         for (const auto bit : segment_bits.value()) {
             if (expected_frame_bits_.has_value() && collected_bits_.size() >= *expected_frame_bits_) break;
@@ -2208,8 +2434,9 @@ std::vector<std::uint8_t> embed_cavlc_stream_file(
     const std::vector<std::uint8_t>& annex_b,
     const std::vector<std::uint8_t>& secret_key,
     const std::vector<std::uint8_t>& payload,
-    const std::size_t maximum_bits_per_segment) {
-    CavlcStreamEncoder encoder(secret_key, payload, maximum_bits_per_segment);
+    const std::size_t maximum_bits_per_segment,
+    const CavlcChannelOptions options) {
+    CavlcStreamEncoder encoder(secret_key, payload, maximum_bits_per_segment, options);
     std::vector<AnnexBNalUnit> output_units;
     const auto idr_count = visit_cavlc_stream_file(annex_b,
         [&](std::size_t, const AnnexBNalUnit& unit, const std::vector<std::uint8_t>* segment,
@@ -2232,8 +2459,9 @@ std::vector<std::uint8_t> extract_cavlc_stream_file(
     const std::vector<std::uint8_t>& annex_b,
     const std::vector<std::uint8_t>& secret_key,
     const std::size_t maximum_payload_bytes,
-    const std::size_t maximum_bits_per_segment) {
-    CavlcStreamDecoder decoder(secret_key, maximum_payload_bytes, maximum_bits_per_segment);
+    const std::size_t maximum_bits_per_segment,
+    const CavlcChannelOptions options) {
+    CavlcStreamDecoder decoder(secret_key, maximum_payload_bytes, maximum_bits_per_segment, options);
     const auto idr_count = visit_cavlc_stream_file(annex_b,
         [&](std::size_t, const AnnexBNalUnit&, const std::vector<std::uint8_t>* segment,
             const std::vector<AnnexBNalUnit>&) {
@@ -2272,45 +2500,56 @@ std::vector<CavlcStreamSegmentCandidates> analyze_cavlc_stream_file(
     return segments;
 }
 
-namespace {
-
-std::array<std::uint8_t, 32> sha256_digest(const std::vector<std::uint8_t>& data) {
-    std::array<std::uint8_t, 32> digest{};
-#ifdef _WIN32
-    if (data.size() > std::numeric_limits<ULONG>::max()) throw std::invalid_argument("SHA-256 input is too large");
-    if (BCryptHash(BCRYPT_SHA256_ALG_HANDLE, nullptr, 0, const_cast<PUCHAR>(data.data()),
-            static_cast<ULONG>(data.size()), digest.data(), static_cast<ULONG>(digest.size())) < 0) {
-        throw std::runtime_error("Windows CNG SHA-256 failed");
-    }
-#else
-    unsigned int length = 0;
-    if (EVP_Digest(data.data(), data.size(), digest.data(), &length, EVP_sha256(), nullptr) != 1 ||
-        length != digest.size()) {
-        throw std::runtime_error("OpenSSL SHA-256 failed");
-    }
-#endif
-    return digest;
+std::array<std::uint8_t, 32> cavlc_video_nonce(const std::vector<std::uint8_t>& annex_b) {
+    std::optional<std::array<std::uint8_t, 32>> nonce;
+    std::vector<AnnexBNalUnit> codec_parameter_sets;
+    visit_cavlc_stream_file(annex_b,
+        [&](std::size_t, const AnnexBNalUnit&, const std::vector<std::uint8_t>* segment,
+            const std::vector<AnnexBNalUnit>&) {
+            if (segment == nullptr) return true;
+            nonce = video_nonce_of_segment(prepare_cavlc_stream_segment(*segment, codec_parameter_sets));
+            return false;
+        });
+    if (!nonce.has_value()) throw std::invalid_argument("input contains no IDR slices");
+    return *nonce;
 }
 
-void append_u32be(std::vector<std::uint8_t>& output, const std::size_t value) {
-    if (value > 0xffffffffU) throw std::invalid_argument("video binding field exceeds 32 bits");
-    for (int shift = 24; shift >= 0; shift -= 8) {
-        output.push_back(static_cast<std::uint8_t>((value >> shift) & 0xffU));
-    }
+std::vector<std::uint8_t> cavlc_verification_token_for_nonce(
+    const std::vector<std::uint8_t>& master_key,
+    const std::array<std::uint8_t, 32>& video_nonce) {
+    SensitiveBytes prk(per_video_prk(master_key));
+    SensitiveBytes schedule_key(std::vector<std::uint8_t>{});
+    SensitiveBytes whitening_key(std::vector<std::uint8_t>{});
+    derive_per_video_subkeys(prk.value(), video_nonce, schedule_key.value(), whitening_key.value());
+    std::vector<std::uint8_t> token;
+    token.reserve(kCavlcVerificationTokenBytes);
+    token.insert(token.end(), schedule_key.value().begin(), schedule_key.value().end());
+    token.insert(token.end(), whitening_key.value().begin(), whitening_key.value().end());
+    return token;
 }
 
-}  // namespace
+std::vector<std::uint8_t> cavlc_verification_token(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& master_key) {
+    if (master_key.size() != 32U) throw std::invalid_argument("a verification token is derived from the 32-byte key");
+    return cavlc_verification_token_for_nonce(master_key, cavlc_video_nonce(annex_b));
+}
 
 CavlcVideoBindingDigest cavlc_video_binding_digest(
     const std::vector<std::uint8_t>& annex_b,
     const std::vector<std::uint8_t>& secret_key,
     const std::size_t frame_bit_count,
-    const std::size_t maximum_bits_per_segment) {
+    const std::size_t maximum_bits_per_segment,
+    const CavlcChannelOptions options) {
     if (frame_bit_count == 0U) throw std::invalid_argument("video binding frame bit count must be positive");
     if (maximum_bits_per_segment == 0U) {
         throw std::invalid_argument("maximum stream bits per segment must be positive");
     }
-    SensitiveBytes schedule_key(derive_cavlc_subkey(secret_key, kScheduleInfo));
+    SensitiveBytes schedule_key(std::vector<std::uint8_t>{});
+    SensitiveBytes whitening_key(std::vector<std::uint8_t>{});
+    SensitiveBytes pending_prk(std::vector<std::uint8_t>{});
+    initialize_channel_keys(secret_key, options.key_mode, schedule_key.value(), whitening_key.value(),
+                            pending_prk.value());
     // Same walk and schedule as the stream encoder: exactly the positions that
     // carry frame bits (positions past the frame end keep their cover sign).
     std::unordered_map<std::size_t, std::vector<std::size_t>> cleared_bits;
@@ -2322,10 +2561,13 @@ CavlcVideoBindingDigest cavlc_video_binding_digest(
             const std::vector<AnnexBNalUnit>&) {
             if (segment == nullptr) return true;
             auto prepared = prepare_cavlc_stream_segment(*segment, codec_parameter_sets);
+            static_cast<void>(resolve_pending_channel_keys(
+                prepared, schedule_key.value(), whitening_key.value(), pending_prk.value()));
             codec_parameter_sets = std::move(prepared.parameter_sets);
             const auto capacity = std::min(maximum_bits_per_segment, prepared.candidates.size());
             if (capacity == 0U) return true;
-            const auto selected = select_with_schedule_key(prepared.candidates, schedule_key.value(), capacity);
+            const auto selected = select_with_schedule_key(
+                prepared.candidates, schedule_key.value(), capacity, options.selection);
             const auto taken = std::min(capacity, frame_bit_count - carried);
             auto& offsets = cleared_bits[file_index];
             for (std::size_t index = 0; index < taken; ++index) offsets.push_back(selected[index].rbsp_bit_offset);

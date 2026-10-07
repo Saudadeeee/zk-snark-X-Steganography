@@ -1,7 +1,7 @@
 \section{Related Work}
 \label{sec:related}
 
-\textbf{Data hiding in the H.264 compressed domain.} Embedding directly in entropy-coded syntax avoids a full decode--encode cycle. Kapotas \emph{et al.}~\cite{kapotas2007} and Mobasseri and Raikar~\cite{mobasseri2007} embed into CAVLC blocks; flipping the sign of a trailing one keeps the codeword length and therefore the bit rate~\cite{fragile_h264_mtap}. Because intra prediction reuses reconstructed neighbors, such changes \emph{drift} inside the frame; Ma \emph{et al.}~\cite{ma2010drift} select blocks whose error cannot propagate. We use the same carrier, add a keyed schedule and whitening, and quantify drift with an explicit model instead of excluding blocks.
+\textbf{Data hiding in the H.264 compressed domain.} Embedding directly in entropy-coded syntax avoids a full decode--encode cycle. Kim \emph{et al.}~\cite{kim2007t1} write a bit into the sign of the highest-frequency trailing one of luma blocks, which keeps every codeword length and therefore the bit rate; Lin \emph{et al.}~\cite{lin2012cavlc} embed the XOR of all trailing-one signs of keyed blocks; Wang and Ma~\cite{wang2018cavlc} use one host block out of every $E$ candidates and a $(1,3,2)$ matrix code when a block has three trailing ones; Liao \emph{et al.}~\cite{liao2009t1,liao2012t1journal} hide one bit per intra macroblock in a trailing-one parity. Other CAVLC methods substitute codewords~\cite{mobasseri2007} or modify levels~\cite{fragile_h264_mtap}. Because intra prediction reuses reconstructed neighbors, such changes \emph{drift} inside the frame; Ma \emph{et al.}~\cite{ma2010drift} choose blocks and modify coefficient pairs so that the error cannot propagate (their conditions are tabulated in~\cite{nguyen2022drift}). You \emph{et al.}~\cite{you2017cavlc} show that CAVLC hiding is detectable and propose a detection strategy. We use the trailing-one sign carrier, add a keyed schedule and whitening, quantify drift with an explicit model, and compare against the sign-reducible methods above under identical conditions (Section~\ref{sec:eval}).
 
 \textbf{Fragile watermarking and self-authentication.} A classic construction hashes the content without the embedding region, signs the hash and embeds the signature into that region~\cite{yeung1997,wong1998}. Our video digest follows this pattern, with two differences that matter for security: the excluded region is \emph{only} the set of keyed carrier positions (not a whole bit plane or block class), and the embedded object is a zero-knowledge proof rather than a signature, so verification reveals neither the signer nor a verification key per device.
 
@@ -28,12 +28,13 @@ Approach & In-band (no metadata) & Hidden & Signer anonymous & Bound to exact st
 \midrule
 C2PA manifest~\cite{c2pa_spec} & -- & -- & -- & \checkmark & (\checkmark)$^a$ & \checkmark \\
 CAVLC fragile watermark~\cite{mobasseri2007,fragile_h264_mtap} & \checkmark & (\checkmark) & -- & \checkmark & -- & -- \\
+CAVLC sign/parity hiding~\cite{kim2007t1,lin2012cavlc,wang2018cavlc,liao2012t1journal} & \checkmark & \checkmark & -- & -- & -- & -- \\
 Signed digest in content~\cite{wong1998} & \checkmark & -- & -- & \checkmark & -- & \checkmark \\
 PhotoProof / ZK-IMG~\cite{photoproof2016,zkimg2022} & -- & -- & (\checkmark) & -- & \checkmark$^b$ & \checkmark \\
 VIMz / zk-Cinema / AIPA~\cite{vimz2024,zkcinema2026,aipa2026} & -- & -- & \checkmark & -- & \checkmark$^b$ & \checkmark \\
-\textbf{This work} & \checkmark & \checkmark & \checkmark & \checkmark & -- & --$^c$ \\
+\textbf{This work} & \checkmark & \checkmark & \checkmark & \checkmark & -- & (\checkmark)$^c$ \\
 \bottomrule
 \end{tabular}
 
-\vspace{2pt}{\footnotesize $^a$ via soft-binding watermarks that recover the manifest. $^b$ for the transformations the proof system supports. $^c$ verifiers need the stego key (Section~\ref{sec:discussion}).}
+\vspace{2pt}{\footnotesize $^a$ via soft-binding watermarks that recover the manifest. $^b$ for the transformations the proof system supports. $^c$ per video, through a disclosed verification token (Section~\ref{sec:params}); otherwise verifiers need the stego key.}
 \end{table*}

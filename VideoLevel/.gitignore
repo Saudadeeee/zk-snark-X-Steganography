@@ -104,3 +104,9 @@ demo/native_walkthrough/runs/
 .build-presentation/
 .chart-data-*/
 .codex-finalizer/
+
+# Native HD test material (benchmark/hd_dataset_new.py)
+data/raw_hd/
+benchmark/results/stego_cache/
+benchmark/results/stego_compare/stego/
+benchmark/results/steganalysis_cache/

@@ -4,6 +4,8 @@ Every hex constant below is also asserted by native/tests/cavlc_stream_tests.cpp
 so the Python reference and the native implementation are pinned to one value.
 """
 
+import hashlib
+import hmac
 import json
 import os
 import sys
@@ -12,10 +14,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from src.native_blind_contract import (
     FRAME_VERSION,
+    ChannelKeys,
     NativeCavlcCandidate,
     bits_to_bytes,
     bytes_to_bits,
+    candidate_tier,
+    channel_flags,
     derive_channel_keys,
+    derive_video_channel_keys,
     embedded_frame_bits,
     hkdf_expand,
     hkdf_extract,
@@ -23,7 +29,9 @@ from src.native_blind_contract import (
     pack_frame,
     parse_candidate_identity,
     recover_payload,
+    scan_frequency,
     score_candidate,
+    secret_line,
     segment_schedule,
     select_candidates,
     unpack_frame,
@@ -197,6 +205,92 @@ def t_segment_schedule_matches_per_segment_selection() -> None:
     expect_value_error(lambda: parse_candidate_identity("07:11:1:3:91"))
 
 
+def t_candidate_tier_and_scan_frequency() -> None:
+    # (category, mb_row, mb_height, freq) -> tier; mirrors native cavlc_candidate_tier.
+    cases = {
+        (0, 0, 18, 6): 4,   # LumaDC, top third
+        (2, 17, 18, 2): 2,  # ChromaDC, bottom third (DC never earns the frequency term)
+        (1, 5, 18, 0): 3,   # Luma4x4 top third (15 < 18), low frequency
+        (1, 6, 18, 2): 2,   # middle third (18 < 36), freq 2 still counts
+        (3, 11, 18, 3): 1,  # ChromaAC middle third, high frequency
+        (3, 12, 18, 6): 0,  # bottom third (36 is not < 36)
+    }
+    for inputs, tier in cases.items():
+        assert candidate_tier(*inputs) == tier, (inputs, tier)
+    assert max(candidate_tier(c, r, 18, f) for c in range(4) for r in range(18) for f in range(7)) == 4
+    expect_value_error(lambda: candidate_tier(1, -1, 18, 0))
+    # Last non-zero coefficient in scan order -> i + j of its raster position.
+    assert scan_frequency(1, [5, 0, -1] + [0] * 13) == 1           # zig-zag 2 = (1, 0)
+    assert scan_frequency(1, [1, 0, 0, 0, 0, 1] + [0] * 10) == 2   # zig-zag 5 = (0, 2)
+    assert scan_frequency(1, [0] * 15 + [1]) == 6                  # zig-zag 15 = (3, 3)
+    assert scan_frequency(3, [0, 0, 0, 0, -1] + [0] * 10) == 2     # AC: scan 4 = zig-zag 5
+    assert scan_frequency(1, [1] + [0] * 14) == 1                  # I16x16 AC: scan 0 = zig-zag 1
+    assert scan_frequency(2, [3, 0, 1, 0]) == 1                    # ChromaDC c2 = (1, 0)
+    assert scan_frequency(0, [0, 0, 0, 1] + [0] * 12) == 2         # LumaDC uses the 4x4 zig-zag
+    expect_value_error(lambda: scan_frequency(1, [0] * 16))
+    expect_value_error(lambda: scan_frequency(2, [1] * 16))
+
+
+def t_low_drift_selection_orders_by_tier() -> None:
+    candidates = [NativeCavlcCandidate(4, mb, 1, block, 100 * mb + block) for mb in range(6) for block in range(4)]
+    tiers = {c: (c.macroblock_address + c.block_index) % 4 for c in candidates}
+    selected = select_candidates(candidates, KEY, 10, "low-drift", tiers)
+    expected = sorted(candidates, key=lambda c: (tiers[c], score_candidate(c, KEY), c.serialize()))[:10]
+    assert selected == expected
+    assert [tiers[c] for c in selected] == sorted(tiers[c] for c in selected)
+    assert max(tiers[c] for c in selected) <= min(tiers[c] for c in candidates if c not in selected)
+    # Random ignores tiers; low-drift with equal tiers is the random order.
+    assert select_candidates(candidates, KEY, 10) == select_candidates(candidates, KEY, 10, "random", tiers)
+    assert select_candidates(candidates, KEY, 10, "low-drift", {c: 3 for c in candidates}) == \
+        select_candidates(candidates, KEY, 10)
+    expect_value_error(lambda: select_candidates(candidates, KEY, 3, "low-drift"))
+    expect_value_error(lambda: select_candidates(candidates, KEY, 3, "lowest"))
+    # segment_schedule reads the tier inputs from the --segments JSON.
+    document = _segments_json([candidates])
+    for item, candidate in zip(document["segments"][0]["candidates"], candidates):
+        item.update({"mb_row": tiers[candidate], "mb_height": 3, "freq": 6})  # tier = r: 2/1/0
+    native_tiers = {c: candidate_tier(c.category, tiers[c], 3, 6) for c in candidates}
+    placements = segment_schedule(document, KEY, 7, 10, "low-drift")
+    assert [p.candidate.identity for p in placements] == select_candidates(candidates, KEY, 7, "low-drift", native_tiers)
+    tampered = json.loads(json.dumps(document))
+    tampered["segments"][0]["candidates"][0]["tier"] = 5
+    expect_value_error(lambda: segment_schedule(tampered, KEY, 3, 10, "low-drift"))
+    expect_value_error(lambda: segment_schedule(_segments_json([candidates]), KEY, 3, 10, "low-drift"))
+
+
+def t_per_video_keys_and_token() -> None:
+    nonce = hashlib.sha256(b"video").digest()
+    keys = derive_video_channel_keys(KEY, nonce)
+    # Single-block HKDF written out: PRK, video_key, then the two subkeys.
+    prk = hmac.new(b"zkstego-cavlc-v4-salt", KEY, hashlib.sha256).digest()
+    video_key = hmac.new(prk, b"zkstego/cavlc/v4/video" + nonce + b"\x01", hashlib.sha256).digest()
+    assert keys.schedule_key == hmac.new(video_key, b"zkstego/cavlc/v4/schedule\x01", hashlib.sha256).digest()
+    assert keys.whitening_key == hmac.new(video_key, b"zkstego/cavlc/v4/whitening\x01", hashlib.sha256).digest()
+    master = derive_channel_keys(KEY)
+    assert len({keys.schedule_key, keys.whitening_key, master.schedule_key, master.whitening_key}) == 4
+    assert derive_video_channel_keys(KEY, hashlib.sha256(b"other").digest()) != keys
+    assert derive_video_channel_keys(WRONG_KEY, nonce) != keys
+    expect_value_error(lambda: derive_video_channel_keys(KEY, nonce[:31]))
+    # Token round trip; derived keys drive every keyed function like the master key does.
+    token = keys.token()
+    assert len(token) == 64 and ChannelKeys.from_token(token) == keys
+    expect_value_error(lambda: ChannelKeys.from_token(token[:63]))
+    assert score_candidate(CANDIDATES[0], master) == score_candidate(CANDIDATES[0], KEY)
+    assert whitening_keystream(master, 40).hex() == KEYSTREAM_40_HEX
+    assert recover_payload(embedded_frame_bits(b"proof", keys), ChannelKeys.from_token(token), 32) == b"proof"
+    document = _segments_json([[NativeCavlcCandidate(4, mb, 1, 0, mb) for mb in range(8)]])
+    assert segment_schedule(document, master, 5, 8) == segment_schedule(document, KEY, 5, 8)
+    assert segment_schedule(document, keys, 5, 8) != segment_schedule(document, KEY, 5, 8)
+    # Native CLI stdin line and flags: defaults add nothing; a token needs per-video.
+    assert channel_flags() == []
+    assert channel_flags("low-drift", "per-video") == ["--select", "low-drift", "--key-mode", "per-video"]
+    assert secret_line(KEY) == KEY.hex().encode("ascii") + b"\n"
+    assert secret_line(token, "per-video") == b"token:" + token.hex().encode("ascii") + b"\n"
+    expect_value_error(lambda: secret_line(token))
+    expect_value_error(lambda: secret_line(KEY[:31]))
+    expect_value_error(lambda: channel_flags("lowdrift"))
+
+
 if __name__ == "__main__":
     section("Native blind contract (protocol v3)")
     results = [
@@ -208,5 +302,8 @@ if __name__ == "__main__":
         run_test("wrong key rejects whitened frame", t_wrong_key_rejects_whitened_frame),
         run_test("embedded header bits are keystream-masked", t_header_bits_look_unrelated),
         run_test("segment schedule reproduces per-IDR selection", t_segment_schedule_matches_per_segment_selection),
+        run_test("low-drift tier and scan frequency", t_candidate_tier_and_scan_frequency),
+        run_test("low-drift selection orders by tier", t_low_drift_selection_orders_by_tier),
+        run_test("per-video keys and verification token", t_per_video_keys_and_token),
     ]
     sys.exit(summarise(results, "Native blind contract"))

@@ -221,13 +221,46 @@ enum class CavlcResidualCategory : std::uint8_t {
 // A trailing-one sign bit is a bit-exact, length-invariant CAVLC candidate:
 // flipping it changes only coefficient sign, never coeff_token or residual
 // block length. One candidate is emitted per residual block.
+//
+// The first five fields are the candidate identity (serialized and scored by
+// the keyed schedule). The trailing fields are low-drift tier inputs derived
+// only from syntax a sign flip never changes; they are not part of the
+// identity and default to zero for candidates built by hand.
 struct CavlcSignCandidate {
     std::size_t nal_index{};
     std::uint32_t macroblock_address{};
     CavlcResidualCategory category{};
     std::uint8_t block_index{};
     std::size_t rbsp_bit_offset{};
+    std::uint32_t mb_row{};      // macroblock_address / PicWidthInMbs
+    std::uint32_t mb_height{};   // PicHeightInMbs of the slice's SPS
+    // i + j of the raster position (i, j) of the coefficient whose sign this
+    // is: the last non-zero coefficient in scan order (4x4 zig-zag; AC-only
+    // blocks start at zig-zag index 1; ChromaDC uses its 2x2 raster order).
+    std::uint8_t frequency{};
 };
+
+// Channel parameters carried out of band, like the per-IDR cap. The defaults
+// are protocol v3 exactly.
+//   selection: random    = rank by (HMAC score, identity)
+//              low-drift = rank by (tier, HMAC score, identity), tier below
+//   key_mode:  master    = v3 subkeys from the 32-byte stego key K
+//              per-video = v4 subkeys bound to the video nonce (see below)
+enum class CavlcSelectionPolicy : std::uint8_t { Random = 0, LowDrift = 1 };
+enum class CavlcKeyMode : std::uint8_t { Master = 0, PerVideo = 1 };
+struct CavlcChannelOptions {
+    CavlcSelectionPolicy selection{CavlcSelectionPolicy::Random};
+    CavlcKeyMode key_mode{CavlcKeyMode::Master};
+};
+// "random" | "low-drift" and "master" | "per-video"; anything else throws.
+CavlcSelectionPolicy parse_cavlc_selection_policy(const std::string& text);
+CavlcKeyMode parse_cavlc_key_mode(const std::string& text);
+
+// Low-drift tier = r + d + f in [0, 5] (lower is selected first):
+//   r = 2 if mb_row * 3 < mb_height, 1 if mb_row * 3 < 2 * mb_height, else 0
+//   d = 2 for LumaDC / ChromaDC, else 0
+//   f = 1 for Luma4x4 (incl. I16x16 AC) / ChromaAC with frequency <= 2, else 0
+std::uint8_t cavlc_candidate_tier(const CavlcSignCandidate& candidate);
 
 struct H264BaselineIdrNalHeader {
     std::size_t nal_index{};
@@ -354,10 +387,40 @@ std::vector<std::uint8_t> cavlc_whitening_keystream(
 std::array<std::uint8_t, 32> score_keyed_cavlc_sign_candidate(
     const CavlcSignCandidate& candidate,
     const std::vector<std::uint8_t>& secret_key);
+// secret_key is the 32-byte master key (v3 schedule subkey).
 std::vector<CavlcSignCandidate> select_keyed_cavlc_sign_candidates(
     const std::vector<CavlcSignCandidate>& candidates,
     const std::vector<std::uint8_t>& secret_key,
-    std::size_t required_bits);
+    std::size_t required_bits,
+    CavlcSelectionPolicy policy = CavlcSelectionPolicy::Random);
+
+// Key mode per-video (channel protocol v3 frame, v4 key schedule):
+//   video_nonce   = SHA256("zkstego/video-nonce/v1" || for each NAL of the
+//                   first stream segment - its stored SPS/PPS context, then
+//                   its IDR - : u32be(1 + rbsp_size) || nal_header_byte || rbsp')
+//                   where rbsp' is the IDR RBSP with EVERY trailing-one sign
+//                   candidate bit cleared (parameter sets are unchanged), so the
+//                   nonce is key-independent and equal for cover and stego;
+//   PRK           = HKDF-Extract(salt = "zkstego-cavlc-v4-salt", K)
+//   video_key     = HKDF-Expand(PRK, "zkstego/cavlc/v4/video" || video_nonce, 32)
+//   schedule_key  = HKDF-Expand(video_key, "zkstego/cavlc/v4/schedule", 32)
+//   whitening_key = HKDF-Expand(video_key, "zkstego/cavlc/v4/whitening", 32)
+// A verification token is schedule_key || whitening_key (64 bytes): it
+// extracts from, and computes the video digest of, that one video without K.
+// The stream encoder/decoder and the file/digest entry points below that take
+// a "secret" accept the 32-byte K, or (per-video only) a 64-byte token; a
+// token in master mode is rejected. The low-level keyed selection/scoring
+// helpers (select_/score_keyed_cavlc_sign_candidate*) take the 32-byte K only.
+inline constexpr std::size_t kCavlcVerificationTokenBytes = 64U;
+std::array<std::uint8_t, 32> cavlc_video_nonce(const std::vector<std::uint8_t>& annex_b);
+// Token for a known nonce (cross-language vectors) and for a whole file.
+// The caller owns and wipes the returned secret.
+std::vector<std::uint8_t> cavlc_verification_token_for_nonce(
+    const std::vector<std::uint8_t>& master_key,
+    const std::array<std::uint8_t, 32>& video_nonce);
+std::vector<std::uint8_t> cavlc_verification_token(
+    const std::vector<std::uint8_t>& annex_b,
+    const std::vector<std::uint8_t>& master_key);
 std::vector<std::uint8_t> pack_cavlc_frame(const std::vector<std::uint8_t>& payload);
 std::vector<std::uint8_t> unpack_cavlc_frame(
     const std::vector<std::uint8_t>& frame,
@@ -372,10 +435,12 @@ struct CavlcStreamSegment {
 
 class CavlcStreamEncoder {
 public:
+    // secret_key: 32-byte K, or a 64-byte verification token (per-video only).
     CavlcStreamEncoder(
         std::vector<std::uint8_t> secret_key,
         const std::vector<std::uint8_t>& payload,
-        std::size_t maximum_bits_per_segment);
+        std::size_t maximum_bits_per_segment,
+        CavlcChannelOptions options = {});
     CavlcStreamEncoder(const CavlcStreamEncoder&) = delete;
     CavlcStreamEncoder& operator=(const CavlcStreamEncoder&) = delete;
     ~CavlcStreamEncoder() noexcept;
@@ -385,13 +450,19 @@ public:
     [[nodiscard]] std::size_t remaining_bits() const noexcept;
 
 private:
-    // Only the derived schedule key and the already-whitened frame bits are
-    // retained; the caller's secret is wiped after HKDF in the constructor.
+    // Only derived subkeys and frame bits are retained; the caller's secret
+    // is wiped after HKDF in the constructor. In per-video mode with K, the
+    // HKDF-Extract PRK is held until the first segment fixes the video nonce;
+    // until then frame_bits_ is plaintext and is whitened in place there.
+    CavlcChannelOptions options_;
     std::vector<std::uint8_t> schedule_key_;
+    std::vector<std::uint8_t> whitening_key_;
+    std::vector<std::uint8_t> pending_prk_;
     std::vector<std::uint8_t> frame_bits_;
     std::vector<AnnexBNalUnit> parameter_sets_;
     std::size_t maximum_bits_per_segment_{};
     std::size_t next_bit_{};
+    bool frame_whitened_{};
 };
 
 class CavlcStreamDecoder {
@@ -399,7 +470,8 @@ public:
     CavlcStreamDecoder(
         std::vector<std::uint8_t> secret_key,
         std::size_t maximum_payload_bytes,
-        std::size_t maximum_bits_per_segment);
+        std::size_t maximum_bits_per_segment,
+        CavlcChannelOptions options = {});
     CavlcStreamDecoder(const CavlcStreamDecoder&) = delete;
     CavlcStreamDecoder& operator=(const CavlcStreamDecoder&) = delete;
     ~CavlcStreamDecoder() noexcept;
@@ -410,10 +482,13 @@ public:
     [[nodiscard]] const std::vector<std::uint8_t>& payload() const;
 
 private:
-    // Derived subkeys; the caller's secret is wiped after HKDF.
+    // Derived subkeys; the caller's secret is wiped after HKDF (per-video
+    // with K: the PRK waits for the first segment's nonce).
     // collected_bits_ holds un-whitened frame bits.
+    CavlcChannelOptions options_;
     std::vector<std::uint8_t> schedule_key_;
     std::vector<std::uint8_t> whitening_key_;
+    std::vector<std::uint8_t> pending_prk_;
     std::vector<AnnexBNalUnit> parameter_sets_;
     std::size_t maximum_payload_bytes_{};
     std::size_t maximum_bits_per_segment_{};
@@ -459,12 +534,14 @@ std::vector<std::uint8_t> embed_cavlc_stream_file(
     const std::vector<std::uint8_t>& annex_b,
     const std::vector<std::uint8_t>& secret_key,
     const std::vector<std::uint8_t>& payload,
-    std::size_t maximum_bits_per_segment);
+    std::size_t maximum_bits_per_segment,
+    CavlcChannelOptions options = {});
 std::vector<std::uint8_t> extract_cavlc_stream_file(
     const std::vector<std::uint8_t>& annex_b,
     const std::vector<std::uint8_t>& secret_key,
     std::size_t maximum_payload_bytes,
-    std::size_t maximum_bits_per_segment);
+    std::size_t maximum_bits_per_segment,
+    CavlcChannelOptions options = {});
 
 // Audit view of the file-mode schedule input: for each IDR segment, the
 // trailing-one sign candidates exactly as the stream codec collects them.
@@ -493,7 +570,8 @@ std::vector<CavlcStreamSegmentCandidates> analyze_cavlc_stream_file(
 // every other bit of the file - any other sign included - is covered. Editing a
 // carrier bit changes the extracted payload instead, which the proof rejects.
 // The verifier needs the stego key anyway to extract. src/video_binding.py is
-// the reference.
+// the reference. The carriers follow options (selection policy and key mode;
+// a per-video verification token suffices); the formula itself is unchanged.
 struct CavlcVideoBindingDigest {
     std::array<std::uint8_t, 32> digest{};
     std::size_t carrier_segments{};
@@ -503,7 +581,8 @@ CavlcVideoBindingDigest cavlc_video_binding_digest(
     const std::vector<std::uint8_t>& annex_b,
     const std::vector<std::uint8_t>& secret_key,
     std::size_t frame_bit_count,
-    std::size_t maximum_bits_per_segment);
+    std::size_t maximum_bits_per_segment,
+    CavlcChannelOptions options = {});
 
 // Incremental Annex-B reader. It retains at most one NAL plus one input chunk,
 // recognizes start codes crossing read boundaries, and fails closed on a NAL

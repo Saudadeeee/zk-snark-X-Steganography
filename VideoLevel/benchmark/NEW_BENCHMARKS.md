@@ -114,6 +114,36 @@ propagation gain G, which inverts into a per-IDR cap for a target PSNR. Results 
   percentile comes from benchmark frames. Caps above the candidates per IDR
   (~650 ultrafast, ~460 medium) saturate.
 
+## Method comparison, native HD material and steganalysis (2026-10-07)
+
+Native 720p/1080p material: `py -3.12 -m benchmark.hd_dataset_new` fetches the first 60
+frames of 19 camera-captured Xiph sequences (12 at 1080p, 7 at 720p) into the git-ignored
+`data/raw_hd/` (parallel HTTP ranges; the server throttles single connections).
+
+- **Methods** (`stego_methods_new.py`, framework `stego_embed_new.py`): ours `random`
+  (keyed uniform, the deployed schedule) and `low-drift` (drift tiers, native
+  `--select low-drift`), and four published trailing-one methods re-implemented inside a
+  sign-only channel: Kim et al. 2007, Lin et al. 2012, Wang & Ma 2018, Liao-style 2009
+  (selection and mapping rules only). `test_stego_methods_new.py` checks that every
+  method embeds exactly its message bits.
+- **Quality** (`stego_compare_new.py --dataset cif|hd`): x264 medium Baseline, QP
+  18/22/28/34, GOP 1 and 30, 64 bits per IDR and 5% of the candidates; 768 CIF and 1,824
+  HD runs in `results/stego_compare/{cif,hd}.jsonl`. Low-drift beats random by 3.3–7.2 dB
+  on CIF (median 4.9) and 3.3–8.0 dB on HD (median 5.9), and the best baseline by
+  3.9–9.2 dB, in every setting; no method changes the bit rate.
+- **Steganalysis** (`benchmark/steganalysis/`, needs PyTorch for the CNN):
+  `stego_dataset_new.py` builds 486 cover/stego pairs (6 methods × 64 bits / 5% / 20%,
+  27 sources split 17/3/7 by sequence); `steganalysis.evaluate` runs CAVLC features (323-D),
+  SPAM-686, SRM-lite (3,978-D) with the FLD ensemble, and a Xu-Net-style CNN. At 64 bits
+  per IDR every detector is at chance for every method (P_E 0.44–0.49); at 20% P_E is
+  0.17–0.42. Results: `results/stego_compare/steganalysis_*.json`.
+- **Native channel parameters** (`channel_options_new.py`, 8 CIF + 19 HD covers, 108 runs):
+  every run extracts the exact payload, size unchanged; low-drift +3.9 dB (CIF) / +6.6 dB
+  (HD) median and +6.4 / +10.8 dB worst frame over random; per-video tokens extract and give
+  the master-key digest in 27/27 videos, a foreign token fails the frame check in 25/25
+  pairs, a token takes 0.07 s (CIF) / 0.7 s (1080p).
+- Tables and figures for the paper: `stego_compare_report_new.py`, `paper_tables_new.py`.
+
 ## Physical camera
 
 Set `ZK_STEGO_CAMERA_NAME` to a DirectShow device and run

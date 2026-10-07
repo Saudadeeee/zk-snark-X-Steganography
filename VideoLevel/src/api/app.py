@@ -42,6 +42,8 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
+from src.native_blind_contract import KEY_MODES, SELECTION_POLICIES, VERIFICATION_TOKEN_BYTES
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -354,6 +356,17 @@ class ApiSettings:
     enable_docs: bool = False
     auth_failure_limit: int = 10
     auth_failure_window_seconds: float = 60.0
+    # Channel parameters shared out of band with every receiver (like the per-IDR cap):
+    # sign selection "random" | "low-drift" and key mode "master" | "per-video". In
+    # per-video mode the verify job also accepts the video's 64-byte verification token.
+    selection_policy: str = "random"
+    key_mode: str = "master"
+
+    def __post_init__(self) -> None:
+        if self.selection_policy not in SELECTION_POLICIES:
+            raise ValueError("selection_policy must be 'random' or 'low-drift'")
+        if self.key_mode not in KEY_MODES:
+            raise ValueError("key_mode must be 'master' or 'per-video'")
 
     @classmethod
     def from_environment(cls) -> ApiSettings:
@@ -375,7 +388,17 @@ class ApiSettings:
             upload_timeout_seconds=_seconds_from_environment("ZK_STEGO_API_UPLOAD_TIMEOUT_SECONDS", 120.0),
             job_retention_seconds=_seconds_from_environment("ZK_STEGO_API_JOB_RETENTION_SECONDS", 24 * 3600.0),
             enable_docs=os.environ.get("ZK_STEGO_API_DOCS") == "1",
+            selection_policy=_choice_from_environment("ZK_STEGO_SELECTION_POLICY", SELECTION_POLICIES),
+            key_mode=_choice_from_environment("ZK_STEGO_KEY_MODE", KEY_MODES),
         )
+
+
+def _choice_from_environment(name: str, choices: tuple[str, ...]) -> str:
+    """One of ``choices`` (the first is the default when the variable is unset or empty)."""
+    value = os.environ.get(name) or choices[0]
+    if value not in choices:
+        raise RuntimeError(f"{name} must be one of: {', '.join(choices)}")
+    return value
 
 
 def _seconds_from_environment(name: str, default: float) -> float:
@@ -455,13 +478,17 @@ class JobStore:
         os.replace(temporary, destination)
 
 
-def _decode_key(value: str, field_name: str) -> bytes:
+def _decode_key(value: str, field_name: str, *, allow_verification_token: bool = False) -> bytes:
     try:
         decoded = base64.b64decode(value, validate=True)
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=422, detail=f"{field_name} must be base64") from exc
+    if allow_verification_token and len(decoded) == VERIFICATION_TOKEN_BYTES:
+        return decoded
     if len(decoded) != 32:
-        raise HTTPException(status_code=422, detail=f"{field_name} must decode to exactly 32 bytes")
+        detail = (f"{field_name} must decode to 32 bytes (key) or 64 bytes (per-video verification token)"
+                  if allow_verification_token else f"{field_name} must decode to exactly 32 bytes")
+        raise HTTPException(status_code=422, detail=detail)
     return decoded
 
 
@@ -867,7 +894,9 @@ def create_app(
     ) -> dict[str, str]:
         if verify_handler is None:
             raise HTTPException(status_code=501, detail="proof verification is not configured for this service")
-        secret_key = _decode_key(secret_key_b64, "secret_key_b64")
+        # Per-video key mode: a verifier may hold only the video's verification token.
+        secret_key = _decode_key(secret_key_b64, "secret_key_b64",
+                                 allow_verification_token=settings.key_mode == "per-video")
         reserve_capacity()
         job_dir_created = False
         try:

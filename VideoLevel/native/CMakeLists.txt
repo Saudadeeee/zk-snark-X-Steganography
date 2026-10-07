@@ -42,6 +42,12 @@ target_link_libraries(zkstego_cavlc_stream_tests PRIVATE zkstego_cavlc_stream)
 target_compile_definitions(zkstego_cavlc_stream_tests PRIVATE
   ZKSTEGO_PROJECT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+# Channel parameters (selection policy, per-video key mode): one CTest per case.
+add_executable(zkstego_channel_options_tests tests/channel_options_tests.cpp)
+target_link_libraries(zkstego_channel_options_tests PRIVATE zkstego_cavlc_stream)
+target_compile_definitions(zkstego_channel_options_tests PRIVATE
+  ZKSTEGO_PROJECT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")
+
 # Channel CLI: the authenticated CAVLC segment protocol (file and live modes).
 add_executable(zkstego_blind_bits tools/blind_bits.cpp)
 target_link_libraries(zkstego_blind_bits PRIVATE zkstego_cavlc_stream)
@@ -59,4 +65,13 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
   add_test(NAME zkstego_cavlc_stream_tests COMMAND zkstego_cavlc_stream_tests)
+  foreach(channel_case
+      low_drift_order_follows_tiers
+      defaults_are_protocol_v3
+      per_video_nonce_cover_equals_stego
+      token_extract_equals_master
+      token_of_other_video_fails
+      token_digest_equals_master_digest)
+    add_test(NAME channel_options.${channel_case} COMMAND zkstego_channel_options_tests ${channel_case})
+  endforeach()
 endif()
