@@ -350,8 +350,11 @@ with polynomial loss.
   rejection loops.
 - In-band mode does not authenticate the creator; the session challenge is
   not secret, so issue it over an authenticated channel if that matters.
-- Proving that each payload bit is 0 or 1 needs a fully-splitting ring and the
-  ALS20/ENS20 product proofs; this version does not provide it.
+- Proving that each payload bit is 0 or 1 is not part of this version. An
+  optional, separate proof that a base commitment hides a 256-bit binary
+  string, over this same ring, is described in `docs/BINARY_PROOF_DESIGN.md`
+  (`src/lattice_zk/binary_proof.py`); it changes nothing specified here, and
+  the payload encoding of 3.2 is not binary.
 
 ## 8. References
 
