@@ -4,6 +4,11 @@ The verifier builds :class:`VideoStatement` only from its own pins and from
 values it derives from the received H.264 stream.  The envelope carries the
 commitment and the proof; it never carries the payload, the randomness, or
 anything the verifier is expected to trust.
+
+A payload is disclosed later with :func:`create_disclosure`: the holder reveals
+the payload and an equality proof that the carried commitment hides it, bound
+to a recipient-chosen nonce.  The commitment randomness never leaves the
+holder, so the recipient cannot prove anything about the commitment afterwards.
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import bdlop, codec, opening_proof
+from . import bdlop, codec, equality_proof, opening_proof
 from .params import BdlopParams
 
 STATEMENT_VERSION = 1
@@ -25,6 +30,11 @@ ENVELOPE_VERSION = 1
 _STATEMENT_DOMAIN = b"zkstego/lattice-zk/video-statement/v1\0"
 _VIDEO_COMMITMENT_DOMAIN = b"zkstego/video-zk/video-commitment/v1\0"
 _ENVELOPE_HEADER = struct.Struct(">4sB32s32s")
+DISCLOSURE_MAGIC = b"ZKLD"
+DISCLOSURE_VERSION = 1
+DISCLOSURE_NONCE_BYTES = 32
+_DISCLOSURE_DOMAIN = b"zkstego/lattice-zk/disclosure/v1\0"
+_DISCLOSURE_HEADER = struct.Struct(">4sB32sH")
 _DIGEST_FIELDS = (
     "relation_id", "parameter_id", "registry_root", "session_challenge",
     "codec_policy_id", "carrier_profile_id", "positions_hash", "video_commitment",
@@ -94,7 +104,12 @@ class VideoStatement:
 
 @dataclass(frozen=True)
 class PayloadOpening:
-    """Prover-private opening; disclose only to a party entitled to the payload."""
+    """Prover-private opening; never hand it over.
+
+    Whoever holds ``randomness`` can prove knowledge of the opening for new
+    statements, i.e. make accepted videos with this commitment.  Reveal the
+    payload with :func:`create_disclosure` instead.
+    """
 
     payload: bytes
     randomness: np.ndarray
@@ -210,8 +225,14 @@ def verify_envelope(params: BdlopParams, statement: VideoStatement, data: bytes)
     return opening_proof.verify(params, statement.to_bytes(), envelope.commitment, envelope.proof)
 
 
-def verify_disclosure(params: BdlopParams, data: bytes, opening: PayloadOpening) -> bool:
-    """Check a later disclosure of the committed payload against an envelope."""
+def self_check_opening(params: BdlopParams, data: bytes, opening: PayloadOpening) -> bool:
+    """Holder-side check that ``opening`` opens the commitment in an envelope.
+
+    This needs the randomness, so it is not a disclosure protocol: a party that
+    receives ``opening`` can afterwards prove knowledge of the opening for new
+    statements.  Use it only on the holder's own data; disclose with
+    :func:`create_disclosure`.
+    """
     if not isinstance(opening, PayloadOpening):
         return False
     try:
@@ -266,3 +287,129 @@ def verify_registered_envelope(
         return False
     proof = data[_ENVELOPE_HEADER.size:]
     return opening_proof.verify(params, statement.to_bytes(), commitment, proof)
+
+
+# -- zero-knowledge payload disclosure ------------------------------------ #
+
+@dataclass(frozen=True)
+class Disclosure:
+    """Revealed payload plus an equality proof; contains no randomness."""
+
+    payload: bytes
+    proof: bytes
+
+
+def disclosure_context(params: BdlopParams, statement_id: bytes, nonce: bytes) -> bytes:
+    """Domain-separated, length-prefixed context a disclosure proof is bound to.
+
+    ``statement_id`` names what is disclosed (the verified video statement for
+    an envelope, or e.g. the relation id for a registered credential);
+    ``nonce`` is chosen by the recipient, so an old disclosure cannot be
+    replayed to them.
+    """
+    _require_digest("statement_id", statement_id)
+    if not isinstance(nonce, bytes) or len(nonce) != DISCLOSURE_NONCE_BYTES:
+        raise ValueError(f"disclosure nonce must be exactly {DISCLOSURE_NONCE_BYTES} bytes")
+    encoded = _DISCLOSURE_DOMAIN + params.parameter_id
+    for item in (statement_id, nonce):
+        encoded += struct.pack(">Q", len(item)) + item
+    return encoded
+
+
+def _public_commitment(params: BdlopParams, payload: bytes) -> tuple[bdlop.Commitment, np.ndarray]:
+    """``Com(encode(payload); 0) = (0, encode(payload))`` and its zero opening."""
+    zero = np.zeros((params.width, params.degree), dtype=np.int64)
+    return bdlop.commit(params, codec.encode_payload(params, payload), zero), zero
+
+
+def encode_disclosure(params: BdlopParams, disclosure: Disclosure) -> bytes:
+    """``"ZKLD" || 0x01 || parameter_id || u16 len || payload || proof``."""
+    if not isinstance(disclosure, Disclosure) or not isinstance(disclosure.payload, bytes):
+        raise TypeError("disclosure must be a Disclosure with a bytes payload")
+    if len(disclosure.payload) > params.max_payload_bytes:
+        raise ValueError("payload does not fit the message polynomial")
+    proof = disclosure.proof
+    if not isinstance(proof, bytes) or len(proof) != equality_proof.proof_bytes(params):
+        raise ValueError("disclosure proof has the wrong length for this parameter set")
+    header = _DISCLOSURE_HEADER.pack(
+        DISCLOSURE_MAGIC, DISCLOSURE_VERSION, params.parameter_id, len(disclosure.payload)
+    )
+    return header + disclosure.payload + proof
+
+
+def decode_disclosure(params: BdlopParams, data: bytes) -> Disclosure:
+    """Parse a disclosure; reject every deviation from the layout."""
+    if not isinstance(data, bytes) or len(data) < _DISCLOSURE_HEADER.size:
+        raise ValueError("disclosure is truncated")
+    magic, version, parameter_id, length = _DISCLOSURE_HEADER.unpack_from(data)
+    if magic != DISCLOSURE_MAGIC or version != DISCLOSURE_VERSION:
+        raise ValueError("disclosure magic or version is unsupported")
+    if not hmac.compare_digest(parameter_id, params.parameter_id):
+        raise ValueError("disclosure parameter set differs from the verifier pin")
+    if length > params.max_payload_bytes:
+        raise ValueError("disclosed payload does not fit the message polynomial")
+    split = _DISCLOSURE_HEADER.size + length
+    if len(data) != split + equality_proof.proof_bytes(params):
+        raise ValueError("disclosure has the wrong length")
+    return Disclosure(data[_DISCLOSURE_HEADER.size:split], data[split:])
+
+
+def create_commitment_disclosure(
+    params: BdlopParams, commitment: bdlop.Commitment, opening: PayloadOpening,
+    *, statement_id: bytes, nonce: bytes,
+) -> bytes:
+    """Reveal the payload of ``commitment`` with a proof; ``opening`` stays private.
+
+    The proof is an equality proof between ``commitment`` and the
+    deterministic ``Com(encode(payload); 0)``.  Raises ``ValueError`` if
+    ``opening`` does not open ``commitment``.
+    """
+    if not isinstance(opening, PayloadOpening):
+        raise TypeError("opening must be a PayloadOpening")
+    context = disclosure_context(params, statement_id, nonce)
+    public, zero = _public_commitment(params, opening.payload)
+    proof = equality_proof.prove(params, context, commitment, opening.randomness, public, zero)
+    return encode_disclosure(params, Disclosure(opening.payload, proof))
+
+
+def verify_commitment_disclosure(
+    params: BdlopParams, commitment: bdlop.Commitment, data: bytes,
+    *, statement_id: bytes, nonce: bytes,
+) -> bool:
+    """Accept iff ``data`` proves that ``commitment`` hides its disclosed payload.
+
+    ``statement_id`` and ``nonce`` are the recipient's own values, never read
+    from ``data``.  Read the payload with :func:`decode_disclosure` after
+    acceptance.  Malformed input returns ``False``.
+    """
+    try:
+        disclosure = decode_disclosure(params, data)
+        context = disclosure_context(params, statement_id, nonce)
+        public, _ = _public_commitment(params, disclosure.payload)
+    except (TypeError, ValueError):
+        return False
+    return equality_proof.verify(params, context, commitment, public, disclosure.proof)
+
+
+def create_disclosure(
+    params: BdlopParams, envelope: bytes, opening: PayloadOpening,
+    *, statement_id: bytes, nonce: bytes,
+) -> bytes:
+    """Disclose the payload committed in an in-band envelope to one recipient."""
+    commitment = decode_envelope(params, envelope).commitment
+    return create_commitment_disclosure(
+        params, commitment, opening, statement_id=statement_id, nonce=nonce
+    )
+
+
+def verify_disclosure_proof(
+    params: BdlopParams, envelope: bytes, data: bytes, *, statement_id: bytes, nonce: bytes
+) -> bool:
+    """Verify a disclosure against a verified in-band envelope."""
+    try:
+        commitment = decode_envelope(params, envelope).commitment
+    except ValueError:
+        return False
+    return verify_commitment_disclosure(
+        params, commitment, data, statement_id=statement_id, nonce=nonce
+    )

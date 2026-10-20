@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 
 import numpy as np
@@ -183,3 +184,39 @@ def test_random_equality_proof_corruptions_never_verify() -> None:
         assert equality_proof.verify(
             TOY, STATEMENT, commitments[0], commitments[1], corrupted
         ) is False
+
+
+# -- zero randomness (disclosure) and completeness cap --------------------- #
+
+def test_zero_randomness_opens_the_public_commitment_of_a_message() -> None:
+    """``Com(m; 0) = (0, m)`` is a valid ternary opening the prover accepts."""
+    commitments, randomness = _pair()
+    zero = np.zeros((TOY.width, TOY.degree), dtype=np.int64)
+    message = codec.encode_payload(TOY, b"credential")
+    public = bdlop.commit(TOY, message, zero)
+    assert not public.t1.any() and np.array_equal(public.t2, message)
+    proof = equality_proof.prove(TOY, STATEMENT, commitments[0], randomness[0], public, zero)
+    assert equality_proof.verify(TOY, STATEMENT, commitments[0], public, proof)
+    other = bdlop.commit(TOY, codec.encode_payload(TOY, b"credentiaL"), zero)
+    assert not equality_proof.verify(TOY, STATEMENT, commitments[0], other, proof)
+    with pytest.raises(ValueError):
+        equality_proof.prove(TOY, STATEMENT, commitments[0], randomness[0], other, zero)
+    # Zero randomness on both sides is the trivial case and still verifies.
+    trivial = equality_proof.prove(TOY, STATEMENT, public, zero, public, zero)
+    assert equality_proof.verify(TOY, STATEMENT, public, public, trivial)
+
+
+@pytest.mark.parametrize("params", [TOY, BDLOP_OPEN_128], ids=lambda p: p.name)
+def test_equality_prover_cap_gives_negligible_completeness_error(params) -> None:
+    """Both responses must be accepted: p_acc^2 per attempt, own cap below 2^-128."""
+    accepted = params.acceptance_probability ** 2
+    bound = equality_proof.MAX_ATTEMPTS * math.log2(1.0 - accepted)
+    assert bound == pytest.approx(equality_proof.abort_probability_log2(params))
+    assert bound < -equality_proof.COMPLETENESS_ERROR_BITS
+    assert equality_proof.MAX_ATTEMPTS > opening_proof.MAX_ATTEMPTS
+
+
+def test_shared_opening_cap_would_not_have_sufficed_for_production() -> None:
+    capped = equality_proof.abort_probability_log2(BDLOP_OPEN_128, opening_proof.MAX_ATTEMPTS)
+    assert -36 < capped < -34  # the 2^-35 of the security review (item D4)
+    assert opening_proof.MAX_ATTEMPTS * math.log2(1 - BDLOP_OPEN_128.acceptance_probability) < -128

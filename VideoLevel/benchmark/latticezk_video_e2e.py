@@ -110,6 +110,14 @@ def _link_to_credential(params, embedded, verified) -> dict[str, Any] | None:
     stranger = bdlop.commit(
         params, codec.encode_payload(params, DEMO_PAYLOAD), bdlop.sample_randomness(params)
     )
+    # Zero-knowledge disclosure: the payload plus an equality proof bound to a
+    # recipient nonce; the opening randomness is never handed over.
+    nonce = os.urandom(video_proof.DISCLOSURE_NONCE_BYTES)
+    started = time.perf_counter()
+    disclosure = video_proof.create_disclosure(
+        params, verified.envelope, embedded.opening, statement_id=verified.statement_id, nonce=nonce
+    )
+    disclose_s = time.perf_counter() - started
     return {
         "proof_bytes": len(proof),
         "prove_s": round(prove_s, 3),
@@ -117,8 +125,10 @@ def _link_to_credential(params, embedded, verified) -> dict[str, Any] | None:
         "other_credential_rejected": not linkage.verify_linkage(
             params, context, in_video, stranger, proof
         ),
-        "disclosure_verifies": video_proof.verify_disclosure(
-            params, verified.envelope, embedded.opening
+        "disclosure_bytes": len(disclosure),
+        "disclose_s": round(disclose_s, 3),
+        "disclosure_verifies": video_proof.verify_disclosure_proof(
+            params, verified.envelope, disclosure, statement_id=verified.statement_id, nonce=nonce
         ),
     }
 
