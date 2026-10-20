@@ -12,7 +12,9 @@ spatial-domain convolutional detector trained on the GPU:
   pooling, ending in one logit;
 * **training** -- random 4-aligned crops (the H.264 4x4 transform grid keeps
   its phase), the same crop and D4 transform (flips/rot90) on the cover and
-  its stego in every mini-batch, AdamW, early stopping on a validation split
+  its stego in every mini-batch, AdamW, a payload curriculum (the change is
+  amplified 6x and decayed to the real 1x over the first epochs -- from scratch
+  at 1x the loss never leaves ln 2), early stopping on a validation split
   carved from the training clips only;
 * **scoring** -- per-frame score = mean logit over a fixed grid of crops
   covering the full frame (the full-frame logit is reported too); per-video
@@ -571,6 +573,7 @@ def main() -> int:
     train.add_argument("--curriculum-epochs", type=int, default=TrainConfig.curriculum_epochs)
     train.add_argument("--amplify", type=float, default=1.0,
                        help="margin experiment: train/validate/test on cover + a*(stego-cover)")
+    train.add_argument("--seed", type=int, default=RANDOM_SEED)
     train.add_argument("--device", default=None)
     arguments = parser.parse_args()
     encoded, stego, reports, cache = _paths(arguments)
@@ -584,7 +587,8 @@ def main() -> int:
     config = TrainConfig(max_epochs=arguments.max_epochs, patience=arguments.patience,
                          batch_pairs=arguments.batch_pairs, learning_rate=arguments.learning_rate,
                          curriculum_start=arguments.curriculum_start,
-                         curriculum_epochs=arguments.curriculum_epochs, amplify=arguments.amplify)
+                         curriculum_epochs=arguments.curriculum_epochs, amplify=arguments.amplify,
+                         seed=arguments.seed)
     report = run_protocol(load_set(paths), arguments.protocol, config, device)
     report.update({"case_set": arguments.set, "cases": list(CASE_SETS[arguments.set]),
                    "torch": torch.__version__,
