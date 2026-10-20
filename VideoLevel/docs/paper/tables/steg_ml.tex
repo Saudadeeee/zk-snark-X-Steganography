@@ -1,0 +1,24 @@
+\begin{table}[t]
+\centering
+\caption{Learned steganalysis on modified frames (P\_E = 0.5 is chance).}
+\label{tab:steg-ml}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llll}
+\toprule
+Protocol & Features / detector & P\_E & AUC \\
+\midrule
+paired\_half\_split & coefficient/logistic & 0.414 & 0.617 \\
+paired\_half\_split & coefficient/fld\_ensemble & 0.394 & 0.638 \\
+paired\_half\_split & pixel/logistic & 0.424 & 0.608 \\
+paired\_half\_split & pixel/fld\_ensemble & 0.410 & 0.627 \\
+paired\_half\_split & combined/logistic & 0.401 & 0.633 \\
+paired\_half\_split & combined/fld\_ensemble & 0.357 & 0.685 \\
+leave\_one\_clip\_out & coefficient/logistic & 0.407 & 0.604 \\
+leave\_one\_clip\_out & coefficient/fld\_ensemble & 0.399 & 0.628 \\
+leave\_one\_clip\_out & pixel/logistic & 0.454 & 0.538 \\
+leave\_one\_clip\_out & pixel/fld\_ensemble & 0.458 & 0.536 \\
+leave\_one\_clip\_out & combined/logistic & 0.437 & 0.575 \\
+leave\_one\_clip\_out & combined/fld\_ensemble & 0.422 & 0.583 \\
+\bottomrule
+\end{tabular}}
+\end{table}
