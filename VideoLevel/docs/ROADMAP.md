@@ -44,3 +44,8 @@ gộp trên nhánh.
 
 - 2026-10-21: commit `22d52c9` chứa toàn bộ hệ thống tới thời điểm này.
   Giai đoạn A bắt đầu.
+- 2026-10-22: A1 (gia cố, độ phủ 99 %), A3 (tái lập + CI), A4 (bản thảo 19
+  trang, trích dẫn đã xác minh), A5 (mô hình + chứng minh) đã merge. A5 tìm ra
+  lỗ hổng D1–D6; A7 đang sửa D2/D3/D4/D6; D1 (chunk header khả biến khi chỉ có
+  một chunk) sửa sau khi merge A2. Còn chạy: A2, A6, A7, A0 (mật độ 4CIF,
+  Soccer/Crew).
