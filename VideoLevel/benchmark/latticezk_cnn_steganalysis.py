@@ -59,6 +59,8 @@ CASE_SETS: dict[str, tuple[str, ...]] = {
                      "deadline_cif_q22_reg_b1mag"),
     "b1_adaptive": ("container_cif_q22_reg_b1adapt", "coastguard_cif_q22_reg_b1adapt",
                     "deadline_cif_q22_reg_b1adapt"),
+    "b1_adaptive_texture": ("container_cif_q22_reg_b1adtex", "coastguard_cif_q22_reg_b1adtex",
+                            "deadline_cif_q22_reg_b1adtex"),
 }
 
 

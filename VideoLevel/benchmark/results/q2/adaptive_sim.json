@@ -1,0 +1,212 @@
+{
+  "protocol": "simulated embedding of the registered envelope (2 x 100 frames per clip), real stable carriers, coefficient features, FLD ensemble, leave-one-clip-out",
+  "constraint_height": 10,
+  "clips": {
+    "container_200": {
+      "changes": {
+        "direct": 30503,
+        "stc/uniform": 16123,
+        "stc/magnitude": 18194,
+        "stc/magnitude2": 21344,
+        "stc/texture": 17388,
+        "stc/texture-magnitude-v1": 19005,
+        "stc/texture-magnitude2": 21775,
+        "stc/high-frequency": 18507
+      },
+      "carriers": [
+        50757,
+        50682
+      ],
+      "payload_bits": [
+        30696,
+        30608
+      ]
+    },
+    "coastguard_200": {
+      "changes": {
+        "direct": 30575,
+        "stc/uniform": 22633,
+        "stc/magnitude": 23310,
+        "stc/magnitude2": 24502,
+        "stc/texture": 23075,
+        "stc/texture-magnitude-v1": 23787,
+        "stc/texture-magnitude2": 24629,
+        "stc/high-frequency": 23747
+      },
+      "carriers": [
+        31404,
+        39899
+      ],
+      "payload_bits": [
+        30696,
+        30608
+      ]
+    },
+    "deadline_200": {
+      "changes": {
+        "direct": 30542,
+        "stc/uniform": 16709,
+        "stc/magnitude": 18530,
+        "stc/magnitude2": 21022,
+        "stc/texture": 18018,
+        "stc/texture-magnitude-v1": 19322,
+        "stc/texture-magnitude2": 21398,
+        "stc/high-frequency": 19602
+      },
+      "carriers": [
+        46589,
+        48743
+      ],
+      "payload_bits": [
+        30696,
+        30608
+      ]
+    }
+  },
+  "detection": {
+    "direct": {
+      "p_e_mean": 0.3942,
+      "auc_mean": 0.6258,
+      "folds": {
+        "coastguard_200": {
+          "p_e": 0.3775,
+          "auc": 0.6503
+        },
+        "container_200": {
+          "p_e": 0.4225,
+          "auc": 0.5864
+        },
+        "deadline_200": {
+          "p_e": 0.3825,
+          "auc": 0.6406
+        }
+      }
+    },
+    "stc/uniform": {
+      "p_e_mean": 0.4442,
+      "auc_mean": 0.559,
+      "folds": {
+        "coastguard_200": {
+          "p_e": 0.4175,
+          "auc": 0.5968
+        },
+        "container_200": {
+          "p_e": 0.465,
+          "auc": 0.5238
+        },
+        "deadline_200": {
+          "p_e": 0.45,
+          "auc": 0.5565
+        }
+      }
+    },
+    "stc/magnitude": {
+      "p_e_mean": 0.4258,
+      "auc_mean": 0.5795,
+      "folds": {
+        "coastguard_200": {
+          "p_e": 0.41,
+          "auc": 0.6138
+        },
+        "container_200": {
+          "p_e": 0.4525,
+          "auc": 0.5413
+        },
+        "deadline_200": {
+          "p_e": 0.415,
+          "auc": 0.5833
+        }
+      }
+    },
+    "stc/magnitude2": {
+      "p_e_mean": 0.43,
+      "auc_mean": 0.5804,
+      "folds": {
+        "coastguard_200": {
+          "p_e": 0.4075,
+          "auc": 0.6251
+        },
+        "container_200": {
+          "p_e": 0.455,
+          "auc": 0.5376
+        },
+        "deadline_200": {
+          "p_e": 0.4275,
+          "auc": 0.5786
+        }
+      }
+    },
+    "stc/texture": {
+      "p_e_mean": 0.4283,
+      "auc_mean": 0.5816,
+      "folds": {
+        "coastguard_200": {
+          "p_e": 0.4075,
+          "auc": 0.6203
+        },
+        "container_200": {
+          "p_e": 0.455,
+          "auc": 0.5454
+        },
+        "deadline_200": {
+          "p_e": 0.4225,
+          "auc": 0.5792
+        }
+      }
+    },
+    "stc/texture-magnitude-v1": {
+      "p_e_mean": 0.4233,
+      "auc_mean": 0.5833,
+      "folds": {
+        "coastguard_200": {
+          "p_e": 0.395,
+          "auc": 0.629
+        },
+        "container_200": {
+          "p_e": 0.4425,
+          "auc": 0.5508
+        },
+        "deadline_200": {
+          "p_e": 0.4325,
+          "auc": 0.5701
+        }
+      }
+    },
+    "stc/texture-magnitude2": {
+      "p_e_mean": 0.4325,
+      "auc_mean": 0.5814,
+      "folds": {
+        "coastguard_200": {
+          "p_e": 0.4175,
+          "auc": 0.6134
+        },
+        "container_200": {
+          "p_e": 0.45,
+          "auc": 0.5533
+        },
+        "deadline_200": {
+          "p_e": 0.43,
+          "auc": 0.5775
+        }
+      }
+    },
+    "stc/high-frequency": {
+      "p_e_mean": 0.4392,
+      "auc_mean": 0.5601,
+      "folds": {
+        "coastguard_200": {
+          "p_e": 0.425,
+          "auc": 0.5826
+        },
+        "container_200": {
+          "p_e": 0.45,
+          "auc": 0.5463
+        },
+        "deadline_200": {
+          "p_e": 0.4425,
+          "auc": 0.5515
+        }
+      }
+    }
+  }
+}

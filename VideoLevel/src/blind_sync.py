@@ -156,7 +156,9 @@ class AdaptiveOperatingContract(BlindOperatingContract):
     # 1: the header code uses exactly 112 carriers, so the contract fits
     # exactly the segments the direct magnitude contract fits.
     header_carriers_per_bit: int = 1
-    cost_model: str = "texture-magnitude-v1"
+    # "uniform" minimises the number of changes, which measured best against the
+    # learned detectors (docs/ADAPTIVE_CARRIERS.md); "texture-magnitude-v1" weights them.
+    cost_model: str = "uniform"
 
 
 def is_syndrome_coded(contract: BlindOperatingContract) -> bool:

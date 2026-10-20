@@ -367,13 +367,13 @@ def test_adaptive_carriers_round_trip_from_the_stego_video_alone(tmp_path):
     cover = _cut(tmp_path, 4)
     stego = tmp_path / "stego.h264"
     payload = os.urandom(150)
-    contract = AdaptiveOperatingContract()
+    contract = AdaptiveOperatingContract(cost_model="texture-magnitude-v1")
     envelope_bits = len(pack_blind_payload(payload)) * 8
     embedded = embed_blind_video_payload(str(cover), str(stego), payload, b"sync", contract)
     embed_positions, _ = derive_coded_carrier_positions(str(cover), b"sync", envelope_bits, contract)
     cover_costs = ac.carrier_costs(
         embed_positions, load_or_build_video_analysis(cover, stable_blind_only=True)[0],
-        contract.cost_model,
+        "texture-magnitude-v1",
     )
     clear_video_analysis_cache()
 
@@ -381,7 +381,7 @@ def test_adaptive_carriers_round_trip_from_the_stego_video_alone(tmp_path):
     stego_costs = ac.carrier_costs(
         list(extracted.carrier_positions),
         load_or_build_video_analysis(stego, stable_blind_only=True)[0],
-        contract.cost_model,
+        "texture-magnitude-v1",
     )
     clear_video_analysis_cache()
     assert extracted.payload == payload

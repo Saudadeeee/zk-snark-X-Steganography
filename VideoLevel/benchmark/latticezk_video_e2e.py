@@ -61,7 +61,11 @@ T1_SIGN_CONTRACT = BlindOperatingContract(
 # Same stable magnitude carriers, cost-adaptive syndrome-trellis coded
 # (docs/ADAPTIVE_CARRIERS.md): fewer, cheaper changes for the same envelope.
 ADAPTIVE_CONTRACT = AdaptiveOperatingContract()
-CARRIER_CONTRACTS = {"magnitude": CONTRACT, "t1": T1_SIGN_CONTRACT, "adaptive": ADAPTIVE_CONTRACT}
+ADAPTIVE_TEXTURE_CONTRACT = AdaptiveOperatingContract(cost_model="texture-magnitude-v1")
+CARRIER_CONTRACTS = {
+    "magnitude": CONTRACT, "t1": T1_SIGN_CONTRACT,
+    "adaptive": ADAPTIVE_CONTRACT, "adaptive-texture": ADAPTIVE_TEXTURE_CONTRACT,
+}
 DEMO_PAYLOAD = b"zkstego lattice-ZK demo payload: hidden provenance record #0001"
 
 
@@ -256,7 +260,8 @@ def main() -> int:
     parser.add_argument(
         "--carrier", choices=sorted(CARRIER_CONTRACTS), default="magnitude",
         help="magnitude: LSB of the first |level|>=4 AC coefficient; t1: trailing-one sign flip; "
-        "adaptive: the magnitude carriers, cost-adaptive syndrome-trellis coded",
+        "adaptive: the magnitude carriers, syndrome-trellis coded (fewest changes); "
+        "adaptive-texture: the same with texture/magnitude costs",
     )
     parser.add_argument(
         "--skip-security-checks", action="store_true",
