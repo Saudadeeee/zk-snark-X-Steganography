@@ -99,6 +99,49 @@ def test_session_server_refuses_non_loopback_bind(tmp_path):
         create_session_server(store, context_binding=b"l" * 32, host="0.0.0.0")
 
 
+def test_store_failure_returns_503_instead_of_dropping_the_connection(running_session_server):
+    server, _store, _binding, base_url = running_session_server
+
+    class FailingStore:
+        def issue(self, **_options):
+            raise sqlite3.OperationalError("database is locked")
+
+    server.store = FailingStore()
+    request = Request(
+        f"{base_url}/api/v1/zkp/sessions", data=b"", headers={"Content-Length": "0"}, method="POST"
+    )
+    with pytest.raises(HTTPError) as error:
+        urlopen(request, timeout=3)
+    assert error.value.code == 503
+    assert json.loads(error.value.read()) == {"error": "session_store_unavailable"}
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="SO_EXCLUSIVEADDRUSE is Windows-only")
+def test_windows_bind_is_exclusive(running_session_server):
+    import socket
+
+    server, _store, _binding, _base_url = running_session_server
+    assert not server.allow_reuse_address
+    intruder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        intruder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        with pytest.raises(OSError):
+            intruder.bind(("127.0.0.1", server.server_port))
+    finally:
+        intruder.close()
+
+
+def test_session_server_rejects_malformed_configuration(tmp_path):
+    store = SessionChallengeStore(tmp_path / "sessions.sqlite3")
+    with pytest.raises(TypeError):
+        create_session_server(object(), context_binding=b"l" * 32)  # type: ignore[arg-type]
+    for binding in (b"l" * 31, "l" * 32):
+        with pytest.raises(ValueError):
+            create_session_server(store, context_binding=binding)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="loopback"):
+        create_session_server(store, context_binding=b"l" * 32, host="localhost")
+
+
 def test_module_cli_runs_http_session_issuer(tmp_path):
     process = subprocess.Popen(
         [

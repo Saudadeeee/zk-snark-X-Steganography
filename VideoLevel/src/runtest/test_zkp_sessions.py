@@ -152,3 +152,73 @@ def test_store_requires_durable_path_and_positive_integer_ttl(tmp_path) -> None:
         SessionChallengeStore(tmp_path / "sessions.sqlite3", ttl_seconds=True)
     with pytest.raises(ValueError, match="positive integer"):
         SessionChallengeStore(tmp_path / "sessions.sqlite3", ttl_seconds=0)
+
+
+def test_only_a_literal_true_verdict_consumes_the_challenge(tmp_path) -> None:
+    import numpy as np
+
+    store = SessionChallengeStore(tmp_path / "sessions.sqlite3", ttl_seconds=60)
+    binding = b"t" * 32
+    grant = store.issue(context_binding=binding, now=10)
+    for verdict in (1, "yes", np.True_, [True], None):
+        assert not store.verify_and_consume(
+            grant.challenge, context_binding=binding, verify=lambda *_: verdict, now=11
+        )
+    assert store.is_active(grant.challenge, context_binding=binding, now=11)
+
+
+def test_verifier_exception_propagates_and_leaves_the_challenge_live(tmp_path) -> None:
+    store = SessionChallengeStore(tmp_path / "sessions.sqlite3", ttl_seconds=60)
+    binding = b"e" * 32
+    grant = store.issue(context_binding=binding, now=10)
+
+    def broken(_challenge: bytes, _binding: bytes) -> bool:
+        raise RuntimeError("verifier crashed")
+
+    with pytest.raises(RuntimeError):
+        store.verify_and_consume(grant.challenge, context_binding=binding, verify=broken, now=11)
+    assert store.verify_and_consume(
+        grant.challenge, context_binding=binding, verify=lambda *_: True, now=12
+    )
+    with pytest.raises(TypeError):
+        store.verify_and_consume(grant.challenge, context_binding=binding, verify=None)  # type: ignore[arg-type]
+
+
+def test_random_unissued_challenges_are_never_accepted(tmp_path) -> None:
+    import random
+
+    rng = random.Random(0x5EED0051)
+    store = SessionChallengeStore(tmp_path / "sessions.sqlite3", ttl_seconds=60)
+    binding = b"r" * 32
+    grant = store.issue(context_binding=binding, now=10)
+    for _ in range(100):
+        guess = rng.randbytes(32)
+        assert guess == grant.challenge or not store.verify_and_consume(
+            guess, context_binding=binding, verify=lambda *_: True, now=11
+        )
+    for malformed_binding in (b"r" * 31, "r" * 32, None):
+        assert not store.is_active(grant.challenge, context_binding=malformed_binding, now=11)
+        assert not store.consume(grant.challenge, context_binding=malformed_binding, now=11)
+    with pytest.raises(ValueError):
+        store.issue(context_binding=b"r" * 31)
+    with pytest.raises(TypeError):
+        store.issue(context_binding="r" * 32)  # type: ignore[arg-type]
+
+
+def test_expired_rows_are_purged_and_stay_unusable(tmp_path) -> None:
+    import sqlite3
+
+    store = SessionChallengeStore(tmp_path / "sessions.sqlite3", ttl_seconds=5)
+    binding = b"x" * 32
+    old = store.issue(context_binding=binding, now=100)
+    store.issue(context_binding=binding, now=200)  # purges rows expired by t = 200
+    with sqlite3.connect(store.database_path) as connection:
+        rows = connection.execute("SELECT COUNT(*) FROM zkp_session_challenges").fetchone()[0]
+    assert rows == 1
+    assert not store.verify_and_consume(
+        old.challenge, context_binding=binding, verify=lambda *_: True, now=101
+    )
+    with pytest.raises(ValueError):
+        store.issue(context_binding=binding, now=-1)
+    with pytest.raises(TypeError):
+        store.issue(context_binding=binding, now=1.5)  # type: ignore[arg-type]

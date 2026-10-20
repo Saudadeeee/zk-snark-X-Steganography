@@ -26,6 +26,7 @@ BDLOP_OPEN_ZKP_SUITE = "bdlop-open-v1"
 SUPPORTED_ZKP_SUITES = frozenset({REGISTRY_ZKP_SUITE, BDLOP_OPEN_ZKP_SUITE})
 _DOMAIN = b"zkstego/pq-zkp-relation-registry/v1/"
 _HEX_256 = re.compile(r"[0-9a-f]{64}")
+MAX_EPOCH = 1 << 64
 _DESCRIPTOR_FIELDS = {
     "zkp_suite",
     "constraint_module_hash",
@@ -37,6 +38,13 @@ _DESCRIPTOR_FIELDS = {
 
 def _canonical_json_bytes(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("utf-8")
+
+
+def _require_epoch(value: Any, field_name: str = "epoch") -> int:
+    """Epochs travel as unsigned 64-bit fields in video statements."""
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value < MAX_EPOCH:
+        raise ValueError(f"{field_name} must be a non-negative integer below 2^64")
+    return value
 
 
 def _digest(value: str, field_name: str) -> str:
@@ -70,7 +78,7 @@ class RelationRecord:
     def from_descriptor(cls, value: dict[str, Any]) -> "RelationRecord":
         if not isinstance(value, dict) or set(value) != _DESCRIPTOR_FIELDS:
             raise ValueError("relation descriptor has an invalid field set")
-        if value["zkp_suite"] not in SUPPORTED_ZKP_SUITES:
+        if not isinstance(value["zkp_suite"], str) or value["zkp_suite"] not in SUPPORTED_ZKP_SUITES:
             raise ValueError("relation record uses an unsupported ZKP suite")
         return cls(
             zkp_suite=value["zkp_suite"],
@@ -102,8 +110,7 @@ class SignedZkpRelationRegistry:
 
     @classmethod
     def create(cls, *, epoch: int, relations: Iterable[dict[str, Any]]) -> "SignedZkpRelationRegistry":
-        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 0:
-            raise ValueError("epoch must be a non-negative integer")
+        _require_epoch(epoch)
         parsed = tuple(RelationRecord.from_descriptor(record) for record in relations)
         if not parsed:
             raise ValueError("registry must contain at least one relation")
@@ -238,9 +245,10 @@ class SignedZkpRelationRegistry:
         parsed = tuple(RelationRecord.from_dict(record) for record in value["relations"])
         if not parsed or len({record.relation_id for record in parsed}) != len(parsed):
             raise ValueError("registry relations must be unique and non-empty")
-        registry = cls(value["epoch"], tuple(sorted(parsed, key=lambda record: record.relation_id)))
-        if isinstance(registry.epoch, bool) or not isinstance(registry.epoch, int) or registry.epoch < 0:
-            raise ValueError("epoch must be a non-negative integer")
+        registry = cls(
+            _require_epoch(value["epoch"]),
+            tuple(sorted(parsed, key=lambda record: record.relation_id)),
+        )
         if not isinstance(value["signer_id"], str) or not value["signer_id"]:
             raise ValueError("registry signer_id must be a non-empty string")
         signature_pattern = rf"[0-9a-f]{{{ml_dsa_65.SIGNATURE_SIZE * 2}}}"

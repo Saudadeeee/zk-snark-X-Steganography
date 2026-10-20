@@ -11,6 +11,8 @@ import argparse
 import json
 import re
 import socket
+import sqlite3
+import sys
 from collections.abc import Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
@@ -84,7 +86,12 @@ class _SessionIssuanceHandler(BaseHTTPRequestHandler):
             self._respond(405, {"error": "method_not_allowed"})
             return
         server = cast(SessionIssuanceServer, self.server)
-        grant = server.store.issue(context_binding=server.context_binding)
+        try:
+            grant = server.store.issue(context_binding=server.context_binding)
+        except (sqlite3.Error, OSError, RuntimeError):
+            # The store failed closed; tell the client instead of dropping the socket.
+            self._respond(503, {"error": "session_store_unavailable"})
+            return
         self._respond(201, grant.to_dict())
 
     do_GET = _handle
@@ -105,7 +112,15 @@ class SessionIssuanceServer(ThreadingHTTPServer):
     """A small HTTP server bound exclusively to a loopback address."""
 
     daemon_threads = True
-    allow_reuse_address = True
+    # On Windows SO_REUSEADDR lets another process bind the same port and
+    # receive the challenges; request an exclusive bind there instead.
+    allow_reuse_address = sys.platform != "win32"
+
+    def server_bind(self) -> None:
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if sys.platform == "win32" and exclusive is not None:
+            self.socket.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+        super().server_bind()
 
     def __init__(
         self,
