@@ -19,14 +19,21 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import struct
 
 import numpy as np
 
 from . import codec, ring, sampling
-from .bdlop import Commitment, derive_key
-from .opening_proof import MAX_ATTEMPTS, ProofResult, _challenge_times, hedged_mask_key
+from .bdlop import Commitment, derive_key, ternary_randomness
+from .opening_proof import (
+    MAX_ATTEMPTS,
+    ProofResult,
+    _canonical_or_none,
+    _challenge_times,
+    hedged_mask_key,
+    prover_entropy,
+    require_commitment,
+)
 from .params import CHALLENGE_SEED_BYTES, BdlopParams
 
 _CHALLENGE_DOMAIN = b"zkstego/lattice-zk/bdlop-equal/v1/fiat-shamir\0"
@@ -55,6 +62,26 @@ def _in_range(params: BdlopParams, response: np.ndarray) -> bool:
     return int(np.abs(response).max()) <= params.response_bound
 
 
+def _checked_witness(
+    params: BdlopParams, first: Commitment, first_randomness: np.ndarray,
+    second: Commitment, second_randomness: np.ndarray,
+) -> tuple[tuple[Commitment, Commitment], tuple[np.ndarray, np.ndarray]]:
+    """Refuse unless both openings are valid and the message gap is zero.
+
+    Returns the ``int64``-normalized commitments and witnesses.
+    """
+    witnesses = (ternary_randomness(params, first_randomness), ternary_randomness(params, second_randomness))
+    commitments = (require_commitment(params, first), require_commitment(params, second))
+    key, q = derive_key(params), params.modulus
+    for commitment, randomness in zip(commitments, witnesses):
+        if not np.array_equal(key.apply_b1(randomness % q), commitment.t1):
+            raise ValueError("randomness does not open the commitment")
+    gap = key.apply_b2((witnesses[0] - witnesses[1]) % q)
+    if not np.array_equal(gap, (commitments[0].t2 - commitments[1].t2) % q):
+        raise ValueError("commitments do not hide the same message")
+    return commitments, witnesses
+
+
 def prove_with_stats(
     params: BdlopParams, statement: bytes,
     first: Commitment, first_randomness: np.ndarray,
@@ -64,19 +91,13 @@ def prove_with_stats(
     """Prove both commitments hide one message, bound to ``statement``."""
     if not isinstance(statement, bytes):
         raise TypeError("statement must be bytes")
+    (first, second), (first_randomness, second_randomness) = _checked_witness(
+        params, first, first_randomness, second, second_randomness
+    )
     shape = (params.width, params.degree)
-    for randomness in (first_randomness, second_randomness):
-        if randomness.shape != shape or int(np.abs(randomness).max()) > 1:
-            raise ValueError("commitment randomness must be a ternary (k, N) vector")
     key, q = derive_key(params), params.modulus
-    for commitment, randomness in ((first, first_randomness), (second, second_randomness)):
-        if not np.array_equal(key.apply_b1(randomness % q), commitment.t1):
-            raise ValueError("randomness does not open the commitment")
-    gap = key.apply_b2((first_randomness - second_randomness) % q)
-    if not np.array_equal(gap, (first.t2 - second.t2) % q):
-        raise ValueError("commitments do not hide the same message")
     commitments = (first.to_bytes(params), second.to_bytes(params))
-    entropy = os.urandom(32) if mask_seed is None else mask_seed
+    entropy = prover_entropy(mask_seed)
     mask_key = hedged_mask_key(
         entropy, statement, *commitments, first_randomness, second_randomness
     )
@@ -122,6 +143,9 @@ def verify(
         return False
     if len(proof) != proof_bytes(params):
         return False
+    first, second = _canonical_or_none(params, first), _canonical_or_none(params, second)
+    if first is None or second is None:
+        return False
     q, rows = params.modulus, params.width
     seed = proof[:CHALLENGE_SEED_BYTES]
     try:
@@ -129,9 +153,9 @@ def verify(
             proof[CHALLENGE_SEED_BYTES:], 2 * rows * params.degree,
             params.response_bits, 2 * params.response_bound + 1,
         )
-        commitments = (first.to_bytes(params), second.to_bytes(params))
     except ValueError:
         return False
+    commitments = (first.to_bytes(params), second.to_bytes(params))
     responses = (shifted - params.response_bound).reshape(2, rows, params.degree) % q
     challenge = sampling.challenge_poly(seed, params.degree, params.challenge_weight)
     key = derive_key(params)

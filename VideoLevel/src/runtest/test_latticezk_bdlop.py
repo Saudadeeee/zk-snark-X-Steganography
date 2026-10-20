@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import random
 
 import numpy as np
 import pytest
@@ -348,3 +349,236 @@ def test_production_challenge_differences_are_invertible() -> None:
     first = sampling.challenge_poly(b"\x01" * 32, params.degree, params.challenge_weight)
     second = sampling.challenge_poly(b"\x02" * 32, params.degree, params.challenge_weight)
     assert ring.is_invertible((first - second) % params.modulus, params.modulus)
+
+
+# -- input validation and exception safety ------------------------------- #
+
+def random_corruptions(data: bytes, rng: random.Random, count: int) -> list[bytes]:
+    """Distinct corruptions of ``data``: bit flips, byte rewrites, truncation, extension."""
+    corrupted = []
+    while len(corrupted) < count:
+        mutated = bytearray(data)
+        kind = rng.randrange(5)
+        if kind == 0:
+            bit = rng.randrange(len(data) * 8)
+            mutated[bit // 8] ^= 0x80 >> (bit % 8)
+        elif kind == 1:
+            for bit in rng.sample(range(len(data) * 8), rng.randint(2, 8)):
+                mutated[bit // 8] ^= 0x80 >> (bit % 8)
+        elif kind == 2:
+            index = rng.randrange(len(data))
+            mutated[index] = (mutated[index] + rng.randint(1, 255)) % 256
+        elif kind == 3:
+            del mutated[rng.randrange(len(data)):]
+        else:
+            mutated += rng.randbytes(rng.randint(1, 16))
+        assert bytes(mutated) != data
+        corrupted.append(bytes(mutated))
+    return corrupted
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"name": ""}, {"name": "pärameters"}, {"name": "x" * 70_000}, {"name": 7},
+        {"degree": True}, {"degree": 64.0}, {"msis_rank": 1 << 32}, {"modulus": -1_048_573},
+        {"challenge_weight": 1 << 32}, {"setup_seed": "s" * 32},
+    ],
+)
+def test_parameters_reject_malformed_field_types(changes: dict) -> None:
+    with pytest.raises(ValueError):
+        dataclasses.replace(TOY, **changes)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"msis_rank": 0}, {"mlwe_rank": 0}, {"challenge_weight": 0},
+        {"challenge_weight": TOY.degree + 1}, {"setup_seed": b"s" * 31},
+        {"modulus": 5, "mask_bound": 16, "challenge_weight": 1},  # differences not invertible
+    ],
+)
+def test_parameters_reject_out_of_range_values(changes: dict) -> None:
+    with pytest.raises(ValueError):
+        dataclasses.replace(TOY, **changes)
+
+
+def test_provers_fail_closed_when_every_attempt_aborts(monkeypatch) -> None:
+    from src.lattice_zk import equality_proof
+
+    _, randomness, commitment = _committed()
+    monkeypatch.setattr(opening_proof, "MAX_ATTEMPTS", 0)
+    monkeypatch.setattr(equality_proof, "MAX_ATTEMPTS", 0)
+    with pytest.raises(RuntimeError):
+        opening_proof.prove(TOY, STATEMENT, commitment, randomness)
+    with pytest.raises(RuntimeError):
+        equality_proof.prove(TOY, STATEMENT, commitment, randomness, commitment, randomness)
+
+
+def test_commit_refuses_malformed_witness_and_message() -> None:
+    message, randomness, _ = _committed()
+    for value, error in (
+        (randomness * 2, ValueError),  # not in S_1: hiding needs ternary randomness
+        (randomness[:-1], ValueError),
+        (randomness.astype(np.float64), TypeError),
+        (randomness.tolist(), TypeError),
+        (np.full(randomness.shape, 1 << 63, dtype=np.uint64), ValueError),
+    ):
+        with pytest.raises(error):
+            bdlop.commit(TOY, message, value)
+    for value, error in (
+        (message.astype(np.float64), TypeError),
+        (message[:-1], ValueError),
+        (np.full_like(message, TOY.modulus), ValueError),
+        (-np.ones_like(message), ValueError),
+    ):
+        with pytest.raises(error):
+            bdlop.commit(TOY, value, randomness)
+
+
+def test_commitment_is_independent_of_the_integer_dtype() -> None:
+    message, randomness, commitment = _committed()
+    narrow = bdlop.commit(TOY, message.astype(np.int32), randomness.astype(np.int8))
+    assert narrow.to_bytes(TOY) == commitment.to_bytes(TOY)
+
+
+def test_randomness_seed_must_be_at_least_32_bytes() -> None:
+    for seed in (b"", b"s" * 31, "s" * 32, bytearray(32)):
+        with pytest.raises(ValueError):
+            bdlop.sample_randomness(TOY, seed)  # type: ignore[arg-type]
+    assert np.array_equal(
+        bdlop.sample_randomness(TOY, b"s" * 32), bdlop.sample_randomness(TOY, b"s" * 32)
+    )
+
+
+def test_mask_seed_must_have_the_fixed_entropy_width() -> None:
+    _, randomness, commitment = _committed()
+    for seed in (b"m" * 31, b"m" * 33, "m" * 32):
+        with pytest.raises(ValueError):
+            opening_proof.prove_with_stats(
+                TOY, STATEMENT, commitment, randomness, mask_seed=seed  # type: ignore[arg-type]
+            )
+    # The entropy is hashed without a length prefix, so its width must be fixed.
+    with pytest.raises(ValueError):
+        opening_proof.hedged_mask_key(b"e" * 31, STATEMENT, randomness)
+
+
+def _malformed_commitments(commitment: bdlop.Commitment) -> list[object]:
+    t1, t2 = commitment.t1, commitment.t2
+    return [
+        None, "commitment", (t1, t2),
+        bdlop.Commitment(t1.reshape(-1), t2),  # used to raise inside verify
+        bdlop.Commitment(np.concatenate([t1, t1]), t2),  # broadcastable extra row
+        bdlop.Commitment(t1, t2[:-1]),
+        bdlop.Commitment(t1.astype(np.float64), t2),
+        bdlop.Commitment(t1, np.full_like(t2, TOY.modulus)),  # fits the bit width, not reduced
+        bdlop.Commitment(t1, t2 - TOY.modulus),  # congruent but negative
+        bdlop.Commitment(t1.tolist(), t2),  # type: ignore[arg-type]
+    ]
+
+
+def test_non_canonical_commitments_are_refused_everywhere() -> None:
+    message, randomness, commitment = _committed()
+    proof = opening_proof.prove(TOY, STATEMENT, commitment, randomness)
+    for malformed in _malformed_commitments(commitment):
+        assert opening_proof.verify(TOY, STATEMENT, malformed, proof) is False  # type: ignore[arg-type]
+        assert bdlop.verify_opening(TOY, malformed, message, randomness) is False  # type: ignore[arg-type]
+        with pytest.raises((TypeError, ValueError)):
+            opening_proof.prove(TOY, STATEMENT, malformed, randomness)  # type: ignore[arg-type]
+        if isinstance(malformed, bdlop.Commitment):
+            assert not malformed.is_canonical(TOY)
+            with pytest.raises((TypeError, ValueError)):
+                malformed.to_bytes(TOY)
+    assert commitment.is_canonical(TOY)
+
+
+def test_verify_opening_never_raises_on_malformed_witness() -> None:
+    message, randomness, commitment = _committed()
+    for bad_message, bad_randomness in (
+        (message, randomness.tolist()), (message, None), (message.tolist(), randomness),
+        (message, randomness.astype(np.float64)), (None, randomness), (message[:3], randomness),
+    ):
+        assert bdlop.verify_opening(TOY, commitment, bad_message, bad_randomness) is False
+
+
+def test_packed_fields_must_be_bytes() -> None:
+    _, _, commitment = _committed()
+    encoded = commitment.to_bytes(TOY)
+    with pytest.raises(TypeError):
+        bdlop.Commitment.from_bytes(TOY, bytearray(encoded))  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        codec.unpack_uints("00", 1, 8, 256)  # type: ignore[arg-type]
+
+
+# -- randomized properties ------------------------------------------------ #
+
+def test_random_valid_statements_always_verify() -> None:
+    rng = random.Random(0x5EED0001)
+    for _ in range(25):
+        payload = rng.randbytes(rng.randrange(TOY.max_payload_bytes + 1))
+        statement = rng.randbytes(rng.randrange(300))
+        message = codec.encode_payload(TOY, payload)
+        randomness = bdlop.sample_randomness(TOY, rng.randbytes(32))
+        commitment = bdlop.commit(TOY, message, randomness)
+        restored = bdlop.Commitment.from_bytes(TOY, commitment.to_bytes(TOY))
+        proof = opening_proof.prove_with_stats(
+            TOY, statement, commitment, randomness, mask_seed=rng.randbytes(32)
+        ).proof
+        assert opening_proof.verify(TOY, statement, restored, proof)
+        assert bdlop.verify_opening(TOY, restored, message, randomness)
+        assert codec.decode_payload(TOY, message) == payload
+        other = rng.randbytes(rng.randrange(300))
+        assert other == statement or not opening_proof.verify(TOY, other, restored, proof)
+
+
+def test_random_proof_corruptions_never_verify() -> None:
+    rng = random.Random(0x5EED0002)
+    _, randomness, commitment = _committed()
+    proof = opening_proof.prove(TOY, STATEMENT, commitment, randomness)
+    for corrupted in random_corruptions(proof, rng, 400):
+        assert opening_proof.verify(TOY, STATEMENT, commitment, corrupted) is False
+
+
+def test_random_commitment_corruptions_are_rejected_or_do_not_verify() -> None:
+    rng = random.Random(0x5EED0003)
+    _, randomness, commitment = _committed()
+    proof = opening_proof.prove(TOY, STATEMENT, commitment, randomness)
+    for corrupted in random_corruptions(commitment.to_bytes(TOY), rng, 300):
+        try:
+            parsed = bdlop.Commitment.from_bytes(TOY, corrupted)
+        except ValueError:
+            continue
+        assert parsed.to_bytes(TOY) == corrupted  # decoding is canonical: one encoding per value
+        assert not opening_proof.verify(TOY, STATEMENT, parsed, proof)
+
+
+def test_random_packed_fields_round_trip_and_decode_canonically() -> None:
+    rng = random.Random(0x5EED0004)
+    for _ in range(200):
+        bits, count = rng.randint(1, 62), rng.randint(0, 40)
+        bound = rng.randint(1, 1 << bits)
+        values = np.array([rng.randrange(bound) for _ in range(count)], dtype=np.int64)
+        packed = codec.pack_uints(values, bits)
+        assert np.array_equal(codec.unpack_uints(packed, count, bits, bound), values)
+        garbage = rng.randbytes(len(packed))
+        try:
+            decoded = codec.unpack_uints(garbage, count, bits, bound)
+        except ValueError:
+            continue
+        assert codec.pack_uints(decoded, bits) == garbage
+
+
+def test_decodable_messages_are_exactly_the_encoder_image() -> None:
+    rng = random.Random(0x5EED0005)
+    width_bits = 8 * TOY.payload_bytes_per_coefficient
+    decoded_any = False
+    for _ in range(300):
+        message = codec.encode_payload(TOY, rng.randbytes(rng.randrange(TOY.max_payload_bytes + 1)))
+        message[rng.randrange(TOY.degree)] = rng.randrange(1 << (width_bits + 1))
+        try:
+            payload = codec.decode_payload(TOY, message)
+        except ValueError:
+            continue
+        decoded_any = True
+        assert np.array_equal(codec.encode_payload(TOY, payload), message)
+    assert decoded_any

@@ -25,12 +25,13 @@ from dataclasses import dataclass
 import numpy as np
 
 from . import codec, ring, sampling
-from .bdlop import Commitment, CommitmentKey, derive_key
+from .bdlop import Commitment, CommitmentKey, derive_key, ternary_randomness
 from .params import CHALLENGE_SEED_BYTES, BdlopParams
 
 _CHALLENGE_DOMAIN = b"zkstego/lattice-zk/bdlop-open/v1/fiat-shamir\0"
 _MASK_DOMAIN = b"zkstego/lattice-zk/bdlop-open/v1/mask\0"
 MAX_ATTEMPTS = 512
+ENTROPY_BYTES = 32
 
 
 @dataclass(frozen=True)
@@ -50,12 +51,38 @@ def _challenge_seed(
     return transcript.digest(CHALLENGE_SEED_BYTES)
 
 
+def prover_entropy(mask_seed: bytes | None) -> bytes:
+    """Fresh 32-byte prover entropy, or an explicit seed for known-answer tests."""
+    if mask_seed is None:
+        return os.urandom(ENTROPY_BYTES)
+    if not isinstance(mask_seed, bytes) or len(mask_seed) != ENTROPY_BYTES:
+        raise ValueError(f"mask seed must be exactly {ENTROPY_BYTES} bytes")
+    return mask_seed
+
+
+def require_commitment(params: BdlopParams, commitment: object) -> Commitment:
+    """Return an ``int64`` copy of a canonical commitment for ``params``, else raise."""
+    if not isinstance(commitment, Commitment):
+        raise TypeError("commitment must be a BDLOP Commitment")
+    return commitment.normalized(params)
+
+
+def _canonical_or_none(params: BdlopParams, commitment: object) -> Commitment | None:
+    try:
+        return require_commitment(params, commitment)
+    except (TypeError, ValueError):
+        return None
+
+
 def hedged_mask_key(entropy: bytes, statement: bytes, *witness_context: bytes | np.ndarray) -> bytes:
     """Bind mask randomness to the statement and witness, as hedged ML-DSA does.
 
     Reusing one mask for two challenges would reveal the witness, so the mask
-    stream never depends on the entropy alone.
+    stream never depends on the entropy alone.  The entropy is not length
+    prefixed, so it must have the fixed width ``ENTROPY_BYTES``.
     """
+    if not isinstance(entropy, bytes) or len(entropy) != ENTROPY_BYTES:
+        raise ValueError(f"prover entropy must be exactly {ENTROPY_BYTES} bytes")
     digest = hashlib.sha3_256(entropy + struct.pack(">Q", len(statement)) + statement)
     for item in witness_context:
         encoded = item if isinstance(item, bytes) else item.astype(">i8").tobytes()
@@ -90,13 +117,13 @@ def prove_with_stats(
     """Prove knowledge of ``randomness`` opening ``commitment``, bound to ``statement``."""
     if not isinstance(statement, bytes):
         raise TypeError("statement must be bytes")
-    if randomness.shape != (params.width, params.degree) or int(np.abs(randomness).max()) > 1:
-        raise ValueError("commitment randomness must be a ternary (k, N) vector")
+    randomness = ternary_randomness(params, randomness)
+    commitment = require_commitment(params, commitment)
+    commitment_bytes = commitment.to_bytes(params)
     key = derive_key(params)
     if not np.array_equal(key.apply_b1(randomness % params.modulus), commitment.t1):
         raise ValueError("randomness does not open the commitment")
-    commitment_bytes = commitment.to_bytes(params)
-    entropy = os.urandom(32) if mask_seed is None else mask_seed
+    entropy = prover_entropy(mask_seed)
     mask_key = hedged_mask_key(entropy, statement, commitment_bytes, randomness)
     for attempt in range(1, MAX_ATTEMPTS + 1):
         stream = sampling.XofStream(_MASK_DOMAIN + mask_key + struct.pack(">I", attempt))
@@ -121,6 +148,9 @@ def verify(params: BdlopParams, statement: bytes, commitment: Commitment, proof:
         return False
     if len(proof) != params.proof_bytes:
         return False
+    commitment = _canonical_or_none(params, commitment)
+    if commitment is None:
+        return False
     q = params.modulus
     seed = proof[:CHALLENGE_SEED_BYTES]
     try:
@@ -128,9 +158,9 @@ def verify(params: BdlopParams, statement: bytes, commitment: Commitment, proof:
             proof[CHALLENGE_SEED_BYTES:], params.width * params.degree,
             params.response_bits, 2 * params.response_bound + 1,
         )
-        commitment_bytes = commitment.to_bytes(params)
     except ValueError:
         return False
+    commitment_bytes = commitment.to_bytes(params)
     response = (shifted - params.response_bound).reshape(params.width, params.degree)
     challenge = sampling.challenge_poly(seed, params.degree, params.challenge_weight)
     key = derive_key(params)

@@ -21,6 +21,12 @@ _PARAMETER_DOMAIN = b"zkstego/lattice-zk/bdlop-open/v1/parameters\0"
 CHALLENGE_SEED_BYTES = 32
 MIN_CHALLENGE_SPACE_BITS = 256
 PAYLOAD_LENGTH_BYTES = 2
+MAX_NAME_BYTES = 0xFFFF
+# Widths of the big-endian fields that ``parameter_id`` packs each value into.
+_INTEGER_FIELDS = (
+    ("degree", 32), ("modulus", 64), ("msis_rank", 32),
+    ("mlwe_rank", 32), ("challenge_weight", 32), ("mask_bound", 64),
+)
 
 
 @dataclass(frozen=True)
@@ -35,6 +41,14 @@ class BdlopParams:
     setup_seed: bytes
 
     def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name or not self.name.isascii():
+            raise ValueError("parameter set name must be a non-empty ASCII string")
+        if len(self.name) > MAX_NAME_BYTES:
+            raise ValueError("parameter set name is too long")
+        for field, bits in _INTEGER_FIELDS:
+            value = getattr(self, field)
+            if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value < 1 << bits:
+                raise ValueError(f"{field} must be an unsigned {bits}-bit integer")
         if self.degree < 4 or self.degree & (self.degree - 1):
             raise ValueError("ring degree must be a power of two")
         validate_modulus(self.modulus)

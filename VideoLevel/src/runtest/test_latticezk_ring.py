@@ -125,3 +125,52 @@ def test_is_invertible_detects_a_zero_divisor() -> None:
     factor[TOY_N // 2] = 1
     factor[0] = (TOY_Q - root) % TOY_Q  # X^(N/2) - r divides X^N + 1
     assert not ring.is_invertible(factor, TOY_Q)
+
+
+@pytest.mark.parametrize(
+    "modulus",
+    [
+        85,  # 5 * 17, congruent to 5 mod 8
+        1_373_653,  # strong pseudoprime to bases 2 and 3, congruent to 5 mod 8
+        13 * 37 * 61,  # composite with only small factors from the witness list
+        (1 << 62) + 5,  # beyond the int64 working range
+        3.0,  # not an integer
+        -3,
+    ],
+)
+def test_modulus_validation_rejects_composites_and_out_of_range_values(modulus) -> None:
+    with pytest.raises(ValueError):
+        ring.validate_modulus(modulus)
+
+
+def test_witness_bases_are_handled_as_primes() -> None:
+    assert ring._is_prime(13) and ring._is_prime(37) and not ring._is_prime(1)
+    for prime in (13, 29, 37, 1_048_573, (1 << 30) - 35):
+        root = ring.sqrt_minus_one(prime)
+        assert root * root % prime == prime - 1
+
+
+def test_arithmetic_rejects_incompatible_shapes() -> None:
+    with pytest.raises(ValueError):
+        ring.poly_mul(_uniform(b"a"), _uniform(b"b", n=TOY_N // 2), TOY_Q)
+    matrix = np.stack([_uniform(b"m")]).reshape(1, 1, TOY_N)
+    with pytest.raises(ValueError):
+        ring.mat_vec(matrix, np.stack([_uniform(b"v"), _uniform(b"w")]), TOY_Q)
+
+
+def test_samplers_reject_malformed_arguments() -> None:
+    for seed in (b"", "seed", None):
+        with pytest.raises(ValueError):
+            sampling.XofStream(seed)  # type: ignore[arg-type]
+    stream = sampling.XofStream(b"seed")
+    for gamma in (0, 1, 3, 6):
+        with pytest.raises(ValueError):
+            sampling.mask_vector(stream, gamma, (1, TOY_N))
+    for weight in (0, TOY_N + 1):
+        with pytest.raises(ValueError):
+            sampling.challenge_poly(b"s" * 32, TOY_N, weight)
+
+
+def test_full_weight_challenge_has_no_zero_coefficient() -> None:
+    challenge = sampling.challenge_poly(b"s" * 32, TOY_N, TOY_N)
+    assert set(np.abs(challenge).tolist()) == {1}

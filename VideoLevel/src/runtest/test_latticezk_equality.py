@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import random
+
 import numpy as np
 import pytest
 
 from src.lattice_zk import bdlop, codec, equality_proof, opening_proof
 from src.lattice_zk.params import BDLOP_OPEN_128, TOY
+from src.runtest.test_latticezk_bdlop import random_corruptions
 
 STATEMENT = b"video statement"
 
@@ -101,3 +104,82 @@ def test_production_parameters_prove_equality() -> None:
     assert len(proof) == 15_008
     assert equality_proof.verify(params, STATEMENT, commitments[0], commitments[1], proof)
     assert not equality_proof.verify(params, b"other", commitments[0], commitments[1], proof)
+
+
+def test_verify_never_raises_on_malformed_commitment_objects() -> None:
+    commitments, randomness = _pair()
+    proof = _prove(commitments, randomness)
+    first = commitments[0]
+    for malformed in (
+        None, "commitment",
+        bdlop.Commitment(first.t1.reshape(-1), first.t2),
+        bdlop.Commitment(first.t1, np.full_like(first.t2, TOY.modulus)),
+        bdlop.Commitment(first.t1.astype(np.float64), first.t2),
+    ):
+        assert equality_proof.verify(TOY, STATEMENT, malformed, commitments[1], proof) is False
+        assert equality_proof.verify(TOY, STATEMENT, commitments[0], malformed, proof) is False
+        with pytest.raises((TypeError, ValueError)):
+            equality_proof.prove(
+                TOY, STATEMENT, malformed, randomness[0], commitments[1], randomness[1]
+            )
+    assert equality_proof.verify(TOY, "statement", commitments[0], commitments[1], proof) is False
+
+
+def test_commitment_integer_dtype_does_not_change_the_verdict() -> None:
+    """Unsigned arrays must not wrap in t2_a - t2_b; values are normalized to int64."""
+    commitments, randomness = _pair()
+    proof = _prove(commitments, randomness)
+    narrow = [
+        bdlop.Commitment(c.t1.astype(np.uint32), c.t2.astype(np.uint32)) for c in commitments
+    ]
+    assert equality_proof.verify(TOY, STATEMENT, narrow[0], narrow[1], proof)
+    def deterministic(pair, witnesses) -> bytes:
+        return equality_proof.prove_with_stats(
+            TOY, STATEMENT, pair[0], witnesses[0], pair[1], witnesses[1], mask_seed=b"m" * 32
+        ).proof
+
+    narrow_witnesses = [r.astype(np.int8) for r in randomness]
+    assert deterministic(narrow, narrow_witnesses) == deterministic(commitments, randomness)
+    opening = opening_proof.prove(TOY, STATEMENT, narrow[0], randomness[0])
+    assert opening_proof.verify(TOY, STATEMENT, commitments[0], opening)
+    assert opening_proof.verify(TOY, STATEMENT, narrow[0], opening)
+
+
+def test_prover_refuses_malformed_witness_types_and_mask_seed() -> None:
+    commitments, randomness = _pair()
+    with pytest.raises(TypeError):
+        _prove(commitments, [randomness[0].tolist(), randomness[1]])
+    with pytest.raises(TypeError):
+        _prove(commitments, randomness, statement="statement")  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        equality_proof.prove_with_stats(
+            TOY, STATEMENT, commitments[0], randomness[0], commitments[1], randomness[1],
+            mask_seed=b"short",
+        )
+
+
+def test_random_equal_payloads_always_prove_equal() -> None:
+    rng = random.Random(0x5EED0011)
+    for _ in range(12):
+        payload = rng.randbytes(rng.randrange(TOY.max_payload_bytes + 1))
+        statement = rng.randbytes(rng.randrange(200))
+        randomness = [bdlop.sample_randomness(TOY, rng.randbytes(32)) for _ in range(2)]
+        commitments = [
+            bdlop.commit(TOY, codec.encode_payload(TOY, payload), r) for r in randomness
+        ]
+        proof = equality_proof.prove_with_stats(
+            TOY, statement, commitments[0], randomness[0], commitments[1], randomness[1],
+            mask_seed=rng.randbytes(32),
+        ).proof
+        assert equality_proof.verify(TOY, statement, commitments[0], commitments[1], proof)
+        assert not equality_proof.verify(TOY, statement, commitments[1], commitments[0], proof)
+
+
+def test_random_equality_proof_corruptions_never_verify() -> None:
+    rng = random.Random(0x5EED0012)
+    commitments, randomness = _pair()
+    proof = _prove(commitments, randomness)
+    for corrupted in random_corruptions(proof, rng, 300):
+        assert equality_proof.verify(
+            TOY, STATEMENT, commitments[0], commitments[1], corrupted
+        ) is False

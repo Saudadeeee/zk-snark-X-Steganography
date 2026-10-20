@@ -23,6 +23,36 @@ from .params import BdlopParams
 
 _KEY_DOMAIN = b"zkstego/lattice-zk/bdlop-open/v1/key\0"
 _RANDOMNESS_DOMAIN = b"zkstego/lattice-zk/bdlop-open/v1/randomness\0"
+MIN_SEED_BYTES = 32
+
+
+def integer_array(value: object, shape: tuple[int, ...], name: str) -> np.ndarray:
+    """Return ``value`` as ``int64`` after checking its type and exact shape."""
+    if not isinstance(value, np.ndarray) or not np.issubdtype(value.dtype, np.integer):
+        raise TypeError(f"{name} must be an integer numpy array")
+    if value.shape != shape:
+        raise ValueError(f"{name} must have shape {shape}")
+    if value.dtype == np.uint64 and value.size and int(value.max()) >= 1 << 63:
+        raise ValueError(f"{name} has coefficients outside the int64 range")
+    return value.astype(np.int64, copy=False)
+
+
+def reduced_array(
+    params: BdlopParams, value: object, shape: tuple[int, ...], name: str
+) -> np.ndarray:
+    """Require an integer array of ``shape`` with every coefficient in [0, q)."""
+    values = integer_array(value, shape, name)
+    if values.size and (int(values.min()) < 0 or int(values.max()) >= params.modulus):
+        raise ValueError(f"{name} must be reduced modulo q")
+    return values
+
+
+def ternary_randomness(params: BdlopParams, randomness: object) -> np.ndarray:
+    """Require commitment randomness in S_1^k: a (k, N) vector over {-1, 0, 1}."""
+    values = integer_array(randomness, (params.width, params.degree), "commitment randomness")
+    if int(np.abs(values).max()) > 1:
+        raise ValueError("commitment randomness must be ternary")
+    return values
 
 
 @dataclass(frozen=True)
@@ -47,7 +77,25 @@ class Commitment:
     t1: np.ndarray
     t2: np.ndarray
 
+    def normalized(self, params: BdlopParams) -> "Commitment":
+        """Return an ``int64`` copy; raise unless ``t1`` is (n, N), ``t2`` is (N,), both reduced."""
+        return Commitment(
+            reduced_array(params, self.t1, (params.msis_rank, params.degree), "commitment t1"),
+            reduced_array(params, self.t2, (params.degree,), "commitment t2"),
+        )
+
+    def validate(self, params: BdlopParams) -> None:
+        self.normalized(params)
+
+    def is_canonical(self, params: BdlopParams) -> bool:
+        try:
+            self.validate(params)
+        except (TypeError, ValueError):
+            return False
+        return True
+
     def to_bytes(self, params: BdlopParams) -> bytes:
+        self.validate(params)
         coefficients = np.concatenate([self.t1.reshape(-1), self.t2])
         return codec.pack_uints(coefficients, params.modulus_bits)
 
@@ -76,18 +124,18 @@ def derive_key(params: BdlopParams) -> CommitmentKey:
 
 def sample_randomness(params: BdlopParams, seed: bytes | None = None) -> np.ndarray:
     """Sample the ternary commitment randomness r; fresh entropy by default."""
+    if seed is not None and (not isinstance(seed, bytes) or len(seed) < MIN_SEED_BYTES):
+        raise ValueError(f"randomness seed must be at least {MIN_SEED_BYTES} bytes")
     entropy = os.urandom(32) if seed is None else seed
     stream = sampling.XofStream(_RANDOMNESS_DOMAIN + entropy)
     return sampling.ternary_vector(stream, (params.width, params.degree))
 
 
 def commit(params: BdlopParams, message: np.ndarray, randomness: np.ndarray) -> Commitment:
-    if randomness.shape != (params.width, params.degree):
-        raise ValueError("commitment randomness must be a (k, N) vector")
-    if message.shape != (params.degree,) or int(message.min()) < 0 or int(message.max()) >= params.modulus:
-        raise ValueError("message must be a reduced polynomial")
+    """Commit to a reduced message polynomial under ternary randomness."""
+    reduced = ternary_randomness(params, randomness) % params.modulus
+    message = reduced_array(params, message, (params.degree,), "message")
     key = derive_key(params)
-    reduced = randomness % params.modulus
     t2 = (key.apply_b2(reduced) + message) % params.modulus
     return Commitment(key.apply_b1(reduced), t2)
 
@@ -95,11 +143,11 @@ def commit(params: BdlopParams, message: np.ndarray, randomness: np.ndarray) -> 
 def verify_opening(
     params: BdlopParams, commitment: Commitment, message: np.ndarray, randomness: np.ndarray
 ) -> bool:
-    """Check an honest (non-relaxed) opening, as used for later disclosure."""
-    if randomness.shape != (params.width, params.degree) or int(np.abs(randomness).max()) > 1:
+    """Check an honest (non-relaxed) opening; malformed input returns ``False``."""
+    if not isinstance(commitment, Commitment) or not commitment.is_canonical(params):
         return False
     try:
         expected = commit(params, message, randomness)
-    except ValueError:
+    except (TypeError, ValueError):
         return False
     return np.array_equal(expected.t1, commitment.t1) and np.array_equal(expected.t2, commitment.t2)

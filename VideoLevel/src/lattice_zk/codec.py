@@ -18,6 +18,8 @@ def pack_uints(values: np.ndarray, bits: int) -> bytes:
 
 def unpack_uints(data: bytes, count: int, bits: int, bound: int) -> np.ndarray:
     """Inverse of :func:`pack_uints`; values must be below ``bound``."""
+    if not isinstance(data, bytes):
+        raise TypeError("packed field must be bytes")
     if len(data) != (count * bits + 7) // 8:
         raise ValueError("packed field has the wrong length")
     stream = np.unpackbits(np.frombuffer(data, dtype=np.uint8))
