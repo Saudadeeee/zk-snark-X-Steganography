@@ -9,7 +9,7 @@ integer below ``2^53``: float64 represents it exactly, so the BLAS result is exa
 independent of the summation order.  The limbs are recombined with ``int64``
 arithmetic modulo ``q``.
 
-Only moduli below ``2^30`` take this path; :func:`ring.poly_mul` stays the
+Only moduli up to ``2^30`` take this path; :func:`ring.poly_mul` stays the
 reference implementation and the tests compare both.
 """
 
@@ -25,7 +25,7 @@ MAX_TERMS = (1 << 53) // (2 * ((1 << LIMB_BITS) - 1) ** 2)
 
 def _check_modulus(q: int) -> None:
     if not 2 < q <= MAX_MODULUS:
-        raise ValueError("fast_ring needs a modulus below 2^30")
+        raise ValueError("fast_ring needs a modulus of at most 2^30")
 
 
 def _limbs(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

@@ -250,14 +250,14 @@ KAT = {
     "bdlop-binary-toy-v1": (
         "0d5e22ce9b3c581f5727c3ce2abcbeb3f198f6e2f1700fce5b851d7289fef818",
         "6048b6b2d3095c5a0a1cb9515de3e4f98663b7cddc61a4163df3e8aa0cadfee3",
-        "1fcd65e978520bdd83fde18002d4bb06bf36df6fd31c8a0b3ca048f6b3927567",
-        2,
+        "80c3d543228e5256b051783f2f0ee7684e7a09645cf2169e9a0e1066afc43620",
+        24,
     ),
     "bdlop-binary-128-v1": (
         "54e33dc9731e5c5713eaf9101b925ecfd367091bd984079ace01d09fd5a79801",
         "c8701fe78bbaa61dbe40035382709dee9d71b1487485cd36309729e46f77c231",
-        "103af087f365dde5dddc748c279189aee6e0072222eb3bebd7b2a89d04d19cd5",
-        161,
+        "61b0b66ac0060c16e512ebc82ca4c06bc0bea7a6e9b95da3bc971cb284491b97",
+        10,
     ),
 }
 

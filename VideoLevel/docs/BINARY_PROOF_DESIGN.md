@@ -100,7 +100,8 @@ domain-separated and chained to the previous seed.
 Decoding is strict: exact length, every packed coefficient in range, zero
 padding, `ct(h_t) = 0` by construction, canonical commitments only.
 Randomness is hedged (`opening_proof.hedged_mask_key` over the entropy,
-statement, commitment, message and `r`).
+statement, binary `parameter_id`, commitment, message and `r`), so even an
+explicit known-answer seed never reuses `r'` under two auxiliary keys.
 
 ## 4. Soundness
 

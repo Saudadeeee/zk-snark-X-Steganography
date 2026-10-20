@@ -105,7 +105,7 @@ class BinaryParams:
         if not isinstance(self.setup_seed, bytes) or len(self.setup_seed) != 32:
             raise ValueError("setup seed must be exactly 32 bytes")
         if self.base.modulus > fast_ring.MAX_MODULUS:
-            raise ValueError("binary proof arithmetic needs a modulus below 2^30")
+            raise ValueError("binary proof arithmetic needs a modulus of at most 2^30")
         if self.degree % 8:
             raise ValueError("ring degree must be a multiple of 8")
 
@@ -488,7 +488,10 @@ def _prove(
     k, n = params.lift_repetitions, base.msis_rank
     aux_key = derive_aux_key(params)
     commitment_bytes = commitment.to_bytes(base)
-    mask_key = hedged_mask_key(entropy, statement, commitment_bytes, message, randomness)
+    # parameter_id pins the auxiliary key, so r' is never reused under two keys.
+    mask_key = hedged_mask_key(
+        entropy, statement, params.parameter_id, commitment_bytes, message, randomness
+    )
 
     lift_seed = _lift_seed(params, statement, commitment_bytes)
     gammas = _lift_challenges(params, lift_seed)
