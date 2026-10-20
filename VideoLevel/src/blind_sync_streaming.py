@@ -29,6 +29,7 @@ from .core.analysis_cache import (
     clear_video_analysis_cache,
     load_or_build_reconstruction_context,
     load_or_build_video_analysis,
+    park_video_analysis_for_content_reuse,
 )
 
 DEFAULT_STREAM_SEGMENT_FRAMES = 100
@@ -304,6 +305,7 @@ def derive_chunked_video_context(
         segment_digests: list[tuple[int, str]] = []
         frame_offset = 0
         macroblocks_per_frame: int | None = None
+        completed = False
         try:
             for index, (segment, frame_count) in enumerate(zip(segments, frame_counts, strict=True)):
                 _emit_progress(
@@ -357,7 +359,8 @@ def derive_chunked_video_context(
                 else:
                     segment_digests.append((frame_count, _sha256_file(segment)))
                 frame_offset += frame_count
-                clear_video_analysis_cache()
+                if index < len(chunks) - 1:
+                    clear_video_analysis_cache()
                 _emit_progress(
                     progress_callback,
                     "carrier_context",
@@ -366,8 +369,15 @@ def derive_chunked_video_context(
                     segments_total=len(segments),
                     carriers_used=carriers_used,
                 )
+            completed = True
         finally:
-            clear_video_analysis_cache()
+            if completed:
+                # Only read so far: the embedder normally re-analyses the
+                # byte-identical last chunk segment next, so keep that one
+                # analysis for reuse by content instead of rebuilding it.
+                park_video_analysis_for_content_reuse()
+            else:
+                clear_video_analysis_cache()
 
     return ChunkedVideoContext(
         positions_hash=hash_positions(global_positions),
