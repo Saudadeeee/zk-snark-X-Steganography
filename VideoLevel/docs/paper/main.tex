@@ -1,309 +1,902 @@
 \documentclass[journal]{IEEEtran}
+\usepackage[T1]{fontenc}
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{booktabs}
 \usepackage{graphicx}
+\usepackage{xcolor}
 \usepackage{url}
+\usepackage{cite}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds,calc}
 \usepackage[hidelinks]{hyperref}
 
+% Theorem environments shared with sections/security.tex (do not redefine there).
 \newtheorem{definition}{Definition}
 \newtheorem{lemma}{Lemma}
 \newtheorem{theorem}{Theorem}
+\newtheorem{proposition}{Proposition}
+\newtheorem{corollary}{Corollary}
+\newtheorem{remark}{Remark}
+
 \newcommand{\Rq}{\mathcal{R}_q}
 \newcommand{\norm}[1]{\lVert #1 \rVert}
+\newcommand{\todo}[1]{\textbf{[TODO: #1]}}
+\newcommand{\Hash}{\mathsf{H}}
+\newcommand{\pid}{\mathit{pid}}
+\newcommand{\SIB}{\mathsf{SampleInBall}}
+% Scale content down to \linewidth if it is wider; never scale it up.
+\newsavebox{\fitwidthbox}
+\newcommand{\fitwidth}[1]{\sbox{\fitwidthbox}{#1}%
+  \ifdim\wd\fitwidthbox>\linewidth\resizebox{\linewidth}{!}{\usebox{\fitwidthbox}}%
+  \else\usebox{\fitwidthbox}\fi}
 
 \begin{document}
 
-\title{In-Band Lattice Zero-Knowledge Proofs for Compressed-Domain\\ H.264 Video Steganography}
+\title{In-Band Lattice Zero-Knowledge Proofs for\\ Compressed-Domain H.264 Video Steganography}
 
 \author{Anonymous authors (double-blind review)}
+
+\markboth{Manuscript submitted for review}{Anonymous: In-Band Lattice Zero-Knowledge Proofs for H.264 Video}
 
 \maketitle
 
 \begin{abstract}
 Proof-carrying steganography hides a payload in a cover medium together with a
-zero-knowledge proof about it, so that a verifier can check the claim from the
-medium alone. Existing systems either rely on pairing-based SNARKs, which do
-not survive quantum adversaries, or keep the proof outside the medium. We
-present a system that embeds a post-quantum zero-knowledge proof directly in
-the CAVLC residuals of an H.264 Baseline bitstream and verifies it from the
-received video, without side files, SEI messages, or the cover. The proof is a
-Fiat--Shamir-with-aborts proof of knowledge of the opening of a BDLOP lattice
-commitment, instantiated at an estimated 138--140-bit classical (125--127-bit
-quantum) core-SVP level. Its statement binds a carrier-normalized digest of
-the video, the verifier-derived carrier positions, a one-use verifier
-challenge and an issuer-signed relation registry; carrier normalization breaks
-the circularity between a proof and the video that contains it. Two modes are
-supported: a 7\,589-byte envelope proving possession of a registered
-credential, and a 14\,309-byte envelope that commits to a hidden payload which
-can later be disclosed or linked to another video without revealing it. We
-report capacity on standard sequences, end-to-end embedding and video-only
-verification, decoded quality, and classical and learned steganalysis.
+zero-knowledge proof about it, so that a verifier can check a claim from the
+medium alone. Existing systems either rely on pairing- or
+discrete-logarithm-based SNARKs, which do not survive quantum adversaries,
+or deliver the proof beside the medium, where
+it is easily stripped or swapped. We present a system that embeds a lattice
+zero-knowledge proof directly in the CAVLC residuals of an H.264 Baseline
+bitstream and verifies it from the received video, without side files,
+metadata boxes or access to the cover. The proof is a Fiat--Shamir-with-aborts
+proof of knowledge of an opening of a BDLOP commitment, instantiated at an
+estimated 138--140-bit classical (125--127-bit quantum) core-SVP level. Its
+statement binds a carrier-normalized digest of the video, the
+verifier-recomputed carrier positions, a one-use verifier challenge and an
+issuer-signed relation registry; carrier normalization breaks the circularity
+between a proof and the video that contains it. Two modes are supported: a
+7\,589-byte envelope proving possession of a registered credential, and a
+14\,309-byte envelope committing to a hidden payload that can later be
+disclosed or linked to another commitment. On standard CIF and 4CIF sequences
+every completed run verified from the stego video alone and, where tested,
+rejected replayed sessions and single-bit tampering; luma PSNR on modified
+frames is
+40.0--45.4\,dB. Targeted classical steganalysis does not separate cover and
+stego, whereas a learned per-frame detector reaches a detection error of 0.40
+across clips, which we report as a limitation. We state precisely what the
+proof does and does not establish.
 \end{abstract}
 
 \begin{IEEEkeywords}
 Video steganography, H.264/AVC, CAVLC, zero-knowledge proofs, lattice-based
-cryptography, post-quantum security, media provenance.
+cryptography, post-quantum cryptography, steganalysis.
 \end{IEEEkeywords}
 
+% =====================================================================
 \section{Introduction}
+\label{sec:intro}
 
-Compressed-domain steganography modifies quantized transform coefficients of
-an encoded video, avoiding a decode/re-encode cycle and keeping the stream
-standard-compliant~\cite{ref:h264stego}. Recent work attaches cryptographic
-evidence to hidden data: a zero-knowledge proof that the hidden payload
-satisfies a relation, carried with or inside the medium~\cite{ref:zkwagon}.
-Two problems remain open for video.
+\IEEEPARstart{C}{ompressed-domain} video steganography modifies the syntax
+elements of an encoded stream, such as quantized transform coefficients or
+their entropy codes, instead of decoding and re-encoding pixels. It keeps the
+stream standard-compliant, avoids re-compression artefacts and, for H.264/AVC,
+has a long literature~\cite{ref:liu19review,ref:kunhoth23,ref:mstafa16}.
+A recent line of work attaches cryptographic evidence to media: a
+zero-knowledge proof that a hidden or withheld value satisfies a relation, so
+that a verifier learns that a claim holds without learning the
+value~\cite{ref:photoproof,ref:zkimg,ref:veritas,ref:vimz,ref:eva,ref:zkwagon}.
+Combining the two gives \emph{proof-carrying steganography}: the medium
+carries a hidden envelope that a verifier can check from the medium alone.
 
-First, deployed proof systems for this purpose are pairing-based. Groth16
-proofs are 128--192 bytes and easy to hide, but their soundness and the
-security of the commitments they prove about fall to Shor's algorithm. Media
-provenance records are expected to outlive that horizon.
+Two problems remain open for video. First, the proof systems used in this
+setting are pre-quantum: pairing-based SNARKs such as
+Groth16~\cite{ref:groth16}, or discrete-logarithm-based folding schemes.
+Their proofs are small and easy to hide, but their soundness and the hiding
+of the commitments they prove about rest on discrete-logarithm-type
+assumptions that a large quantum computer breaks. Media evidence is often
+expected to remain checkable for years, so it is worth asking what a
+post-quantum alternative costs in a channel whose capacity is measured in
+kilobits per hundred frames.
 
-Second, a proof that lives in a side file or a metadata box is trivially
-stripped or swapped, and a proof inside the video faces a circularity: the
-proof cannot contain a hash of the bitstream that contains the proof.
+Second, where the proof lives matters. A proof in a side file or a metadata
+box (as in content-credential manifests~\cite{ref:c2pa}) is removed by any
+re-muxing tool and can be swapped between videos. Moving the proof into the
+bitstream creates a circularity: the proof should bind the video, yet it
+cannot depend on a hash of a bitstream that contains the proof itself.
 
-We address both. Our contributions are:
+This paper addresses both problems for H.264 Baseline (CAVLC) video. Our
+contributions are:
 \begin{itemize}
-\item an in-band design in which a lattice zero-knowledge proof travels inside
-  H.264 CAVLC residuals and is verified from the stego video alone, with a
-  carrier-normalized video commitment that removes the proof/video
-  circularity (Section~\ref{sec:construction});
-\item a statement that binds the verifier-recomputed video commitment, carrier
-  positions, a one-use verifier challenge and an ML-DSA-signed relation
-  registry, giving replay protection and verifier-side trust anchoring;
-\item two proof modes (registered credential and in-band hidden payload),
-  plus linkage proofs showing that two videos, or a video and a credential,
-  hide the same payload;
-\item a concrete parameter set with security estimates, known-answer vectors,
-  and an evaluation of capacity, quality and steganalysis on standard
-  sequences (Section~\ref{sec:evaluation}).
+\item \textbf{An in-band design.} A lattice zero-knowledge proof travels
+  inside H.264 CAVLC residuals and is verified from the stego video alone,
+  with no side file, SEI message or cover. A \emph{carrier-normalized} video
+  commitment, computed with every carrier coefficient replaced by a canonical
+  value and with carrier positions fixed from a placeholder envelope of the
+  final length, removes the proof/video circularity
+  (Section~\ref{sec:construction}).
+\item \textbf{A verifier-built statement.} The Fiat--Shamir statement binds
+  the recomputed video commitment, the recomputed carrier positions, a
+  one-use verifier challenge, and a relation registry signed by an issuer
+  with ML-DSA-65~\cite{ref:fips204}. The verifier never reads a statement
+  field from the video, which gives replay protection and anchors trust at
+  the verifier.
+\item \textbf{Two proof modes and linkage.} A registered mode proves
+  possession of an issuer-registered credential (7\,589-byte envelope), and
+  an in-band mode commits to a hidden payload of up to 766 bytes (14\,309-byte
+  envelope) that can later be disclosed or linked, by an equality proof, to
+  another video or to a credential without being revealed.
+\item \textbf{A concrete, reproducible instantiation and evaluation.} We give
+  a parameter set with core-SVP estimates and known-answer vectors, and we
+  evaluate capacity, end-to-end embedding and video-only verification,
+  decoded quality, classical and learned steganalysis, the choice of carrier,
+  and the cost relative to Groth16, ML-DSA and a lattice zkSNARK
+  (Sections~\ref{sec:implementation}--\ref{sec:evaluation}).
 \end{itemize}
+We are explicit about the limits (Section~\ref{sec:discussion}): soundness is
+relaxed, the security argument is in the classical random-oracle model, the
+implementation is neither audited nor constant time, and a learned per-frame
+detector does separate cover and stego better than chance.
 
+% =====================================================================
 \section{Related work}
 \label{sec:related}
 
-\paragraph{Proof-carrying media} PhotoProof~\cite{ref:photoproof} introduced
-proof-carrying data for image authentication; ZK-IMG, VerITAS and
-VIMz~\cite{ref:zkimg,ref:veritas,ref:vimz} prove image transformations with
-SNARKs or folding schemes; Eva~\cite{ref:eva} proves the authenticity of H.264
-video edits with incrementally verifiable computation. All keep the proof
-outside the medium and use pre-quantum assumptions. ZK-WAGON~\cite{ref:zkwagon}
-hides a zk-SNARK of model provenance inside an image by spatial LSB
-embedding; it is the closest in-band precedent but is image-domain and not
-post-quantum. Zero-knowledge watermark detection~\cite{ref:adelsbach} proves
-the presence of a watermark without revealing it.
+\subsection{Proof-carrying and provenance media}
+PhotoProof~\cite{ref:photoproof} introduced cryptographic image
+authentication that survives a set of permissible transformations, using
+proof-carrying data over a signed original. ZK-IMG~\cite{ref:zkimg},
+VerITAS~\cite{ref:veritas} and VIMz~\cite{ref:vimz} prove image
+transformations with SNARKs, lookup arguments or folding schemes, and
+Eva~\cite{ref:eva} proves the authenticity of lossily encoded (e.g.\ H.264)
+videos with folding-based incrementally verifiable computation and a 448-byte
+proof. These systems target provenance of edits from an attested capture;
+the proof is an object delivered with the medium, and their assumptions are
+pre-quantum. Content credentials~\cite{ref:c2pa} attach signed provenance
+manifests as metadata, which survive only as long as the container keeps
+them. Closest to us in placement is ZK-WAGON~\cite{ref:zkwagon}, which embeds
+a zk-SNARK about an image-generation model into the generated image by
+spatial-domain LSB steganography; it is image-domain, embeds a gzip-compressed Halo2 proof of about 100\,kB
+in the pixel LSBs, and relies on a pre-quantum SNARK.
+Adelsbach and Sadeghi~\cite{ref:adelsbach} proved the presence of a
+watermark in zero knowledge, which is the converse problem (a proof
+\emph{about} hidden data, kept outside it). To our knowledge no prior system
+carries a lattice zero-knowledge proof inside a compressed video bitstream
+and verifies it from the stream alone; we make no provenance claim of the
+kind PhotoProof or Eva make.
 
-\paragraph{Lattice zero-knowledge} BDLOP commitments~\cite{ref:bdlop} with
-Fiat--Shamir-with-aborts openings~\cite{ref:lyu09,ref:lyu12} underlie the
-exact proofs of Attema et al.~\cite{ref:als20}, Esgin et al.~\cite{ref:ens20}
-and Lyubashevsky et al.~\cite{ref:lnp22}. General lattice SNARKs such as
-LaBRADOR, LatticeFold, RoKoko or SALSAA target succinctness and, in their
-published form, do not provide zero knowledge; designated-verifier lattice
-SNARKs (ISW21) rely on a knowledge assumption that is invalid against quantum
-attackers. We surveyed these as backends and report why none fit
-(Section~\ref{sec:discussion}).
+\subsection{Compressed-domain H.264 steganography and steganalysis}
+Surveys~\cite{ref:liu19review,ref:kunhoth23,ref:mstafa16} classify H.264
+schemes by the syntax they modify: intra-prediction modes, motion vectors,
+quantized DCT coefficients and the entropy-coding layer. Coefficient schemes
+must control \emph{intra-frame distortion drift}, the propagation of a
+modified block into intra-predicted neighbours~\cite{ref:ma10}. Within CAVLC,
+the signs of trailing $\pm1$ coefficients (``trailing ones'') can be flipped
+without changing the code length~\cite{ref:liao12}; we compare this carrier
+with the magnitude-parity carrier we adopt (Section~\ref{sec:carrier}).
+Video steganalysis~\cite{ref:bouzegza22} has concentrated on motion-vector
+embedding~\cite{ref:wang14mv}; for all-intra streams the natural attacks are
+image-steganalysis features applied to decoded frames, such as spatial rich
+models with ensemble classifiers~\cite{ref:srm,ref:ensemble} and CNN
+detectors~\cite{ref:srnet}, together with targeted histogram attacks on the
+modified domain~\cite{ref:westfeld,ref:spa}. Evidence pooled over many
+frames of one video is stronger than per-frame evidence~\cite{ref:ker06}, a
+point we return to in Section~\ref{sec:discussion}.
 
+\subsection{Lattice zero-knowledge proofs}
+BDLOP commitments~\cite{ref:bdlop} with Fiat--Shamir-with-aborts
+openings~\cite{ref:lyu09,ref:lyu12} are the basis of the exact and
+linear/product proofs of Attema et al.~\cite{ref:als20}, Esgin et
+al.~\cite{ref:ens20} and Lyubashevsky et al.~\cite{ref:lnp22}, implemented
+in LaZer~\cite{ref:lazer}; ML-DSA~\cite{ref:fips204,ref:dilithium} uses the
+same masking-and-rejection technique for signatures. Succinct lattice
+arguments, including LaBRADOR~\cite{ref:labrador},
+LatticeFold~\cite{ref:latticefold}, RoKoko~\cite{ref:rokoko} and
+SALSAA~\cite{ref:salsaa}, target proof size for large relations; the
+versions we could evaluate disable zero knowledge in their reported
+configurations, prove knowledge soundness only, or (for folding) do not
+provide a standalone zero-knowledge prover. Designated-verifier lattice
+zkSNARKs~\cite{ref:isw21,ref:luna} are compact, but the oblivious
+LWE-sampling assumption used in the analysis of the standard-model
+constructions, including ISW21, is invalidated against quantum
+adversaries~\cite{ref:dfs24} (without an attack on the constructions
+themselves). We evaluated these candidates as backends against four gates
+(zero knowledge, expressibility of the verifier-built statement, runnability
+on the target host, and fit in the measured carrier capacity); none passed
+all four, which motivates the small, self-contained BDLOP opening proof used
+here. The relation we need, knowledge of one commitment opening bound to a
+statement, is exactly the one the BDLOP opening proof covers.
+
+% =====================================================================
 \section{Background}
+\label{sec:background}
 
-\paragraph{H.264 CAVLC} In Baseline profile, residual $4\times4$ blocks are
-entropy-coded with CAVLC. The carrier rule used here selects, in each
-eligible luma block, the first AC coefficient with $|\mathit{level}|\ge 4$ that
-is not a trailing one, and writes one bit into its magnitude parity by a
-change of $\pm1$. The change preserves the eligibility of the coefficient, so
-a blind extractor reapplies the same rule; a patchability check rejects
-blocks whose re-encoding would change the CAVLC syntax.
+\paragraph{H.264 CAVLC}
+In the Baseline profile~\cite{ref:h264,ref:wiegand03}, the residual of each
+$4\times4$ block is entropy-coded with CAVLC: a \texttt{coeff\_token} giving
+the number of non-zero coefficients and of trailing ones (up to three final
+$\pm1$ values in reverse zig-zag order), one raw sign bit per trailing one,
+variable-length level codes for the remaining coefficients with an adaptive
+suffix length, and run-length codes for the zeros. The context of
+\texttt{coeff\_token} depends on the number of non-zero coefficients in
+neighbouring blocks, so a change that alters that number propagates to the
+coding of later blocks. In intra slices each block is also a prediction
+reference for its neighbours, which is the origin of intra drift.
 
-\paragraph{BDLOP commitments} Let $\Rq=\mathbb{Z}_q[X]/(X^N+1)$. With public
-$B_1=[I_n\,|\,B_1']$ and $b_2=[0^n\,|\,1\,|\,b_2']$, a commitment to
-$m\in\Rq$ with ternary randomness $r$ is $t_1=B_1r$, $t_2=\langle b_2,r\rangle+m$.
-It is hiding under Module-LWE and binding under Module-SIS~\cite{ref:bdlop}.
+\paragraph{BDLOP commitments}
+Let $\Rq=\mathbb{Z}_q[X]/(X^N+1)$ with $N$ a power of two and $q\equiv5
+\pmod 8$ prime, so that $X^N+1$ splits into two irreducible factors and every
+non-zero element of small norm, in particular every difference of two
+challenges, is invertible~\cite{ref:ls18}. With public
+$B_1=[I_n\,|\,B_1']\in\Rq^{n\times k}$, $b_2=[0^n\,|\,1\,|\,b_2']\in\Rq^{1\times k}$
+and $k=n+\lambda+1$, a commitment to $m\in\Rq$ with ternary randomness $r$ is
+$t_1=B_1r$, $t_2=\langle b_2,r\rangle+m$. It is computationally hiding under
+Module-LWE and binding under Module-SIS~\cite{ref:bdlop,ref:ls15}.
 
+\paragraph{Fiat--Shamir with aborts}
+The opening proof is a $\Sigma$-protocol in which the prover masks the
+response $z=y+cr$ with a uniform $y$ and aborts unless $z$ lies in a range
+that makes its distribution independent of $r$~\cite{ref:lyu09,ref:lyu12}.
+It is made non-interactive with the Fiat--Shamir
+transform~\cite{ref:fs86}. The original reprogramming argument for this
+transform had a gap that was fixed by Barbosa et al.~\cite{ref:barbosa} and
+Devevey et al.~\cite{ref:devevey}; quantum-random-oracle results for
+Fiat--Shamir~\cite{ref:dfms19,ref:lz19} are generic and not tight for our
+setting.
+
+% =====================================================================
 \section{System and threat model}
+\label{sec:model}
 
-Four roles interact: an \emph{issuer} signs a relation registry (ML-DSA-65);
-a \emph{holder} produces the stego video; a \emph{verifier} issues one-use
-session challenges and verifies; an \emph{adversary} observes, replays, edits
-and re-embeds videos and may run steganalysis. The verifier trusts only its
-pinned issuer key, parameter set and carrier profile, and its own session
-store. It trusts nothing read from the video before verification succeeds.
+\paragraph{Roles}
+An \emph{issuer} publishes a relation registry signed with ML-DSA-65. Each
+registry record pins a proof suite, the hash of the verification key
+(including, in registered mode, the holder's credential commitment), the
+parameter-set identifier and a policy hash over the codec policy and the
+carrier profile; the registry has an epoch. A \emph{holder} owns a payload or
+a credential and produces the stego video. A \emph{verifier} issues one-use
+session challenges, receives videos and decides. The \emph{adversary}
+observes all videos and challenges, replays, edits, re-encodes and re-embeds
+videos, runs its own holder instances, and performs steganalysis.
 
-We aim for (i) \emph{soundness}: an accepted video was produced by a party
-knowing an opening of the bound commitment, for this video and session;
-(ii) \emph{zero knowledge}: the video reveals nothing about the payload or the
-opening beyond the statement; (iii) \emph{integrity}: any change outside the
-carriers, and any change to the carriers, is rejected; (iv) \emph{replay
-resistance}; and (v) \emph{undetectability} against passive steganalysis.
-Camera provenance and codec correctness are out of scope.
+\paragraph{Trust}
+The verifier trusts only (i) the issuer public key, (ii) a minimum registry
+epoch (its rollback floor), (iii) the parameter set and carrier profile it is
+configured with, and (iv) its own session store. Nothing read from the video
+is trusted before verification succeeds. The holder and verifier share a
+symmetric carrier-ordering (stego) key when undetectability is required; the
+key can instead be derived from public configuration
+(Section~\ref{sec:orderkey}).
 
+\paragraph{Goals}
+(G1) \emph{Soundness bound to video and session}: if the verifier accepts,
+then whoever produced the video knew a (relaxed) opening of the bound
+commitment, for exactly this carrier-normalized video, carrier layout,
+registry entry and session.
+(G2) \emph{Zero knowledge}: the video reveals nothing about the payload or the
+opening beyond the statement.
+(G3) \emph{Integrity}: any change to non-carrier syntax, and any change to
+the envelope bytes carried by the carriers, is rejected. (Changes to a few
+carrier bits that hold chunk-framing fields are currently not all rejected;
+see Section~\ref{sec:discussion}.)
+(G4) \emph{Replay resistance}: an envelope is accepted at most once, and only
+for a challenge the verifier issued and has not consumed.
+(G5) \emph{Linkage and disclosure}: a holder can later show that two
+commitments hide the same payload, or open a commitment to a chosen party.
+(G6) \emph{Undetectability} against an adversary without the stego key,
+measured empirically by steganalysis.
+
+\paragraph{Non-goals}
+The proof does not establish that the payload is true, that a camera recorded
+the video, that an encoder ran correctly, or who the creator is in in-band
+mode (anyone holding a session challenge can produce an in-band proof about a
+fresh commitment; identity requires registered mode). The channel is fragile
+by design: re-encoding or transcoding destroys the envelope, and verification
+then fails closed. Robustness is not a goal.
+
+% =====================================================================
 \section{Construction}
 \label{sec:construction}
 
+Figure~\ref{fig:flow} summarizes the embed and verify flows. The proof system
+is specified in Section~\ref{sec:proof}; the remaining subsections describe
+how its statement is tied to the H.264 stream.
+
+\begin{figure*}[t]
+\centering
+\begin{tikzpicture}[
+  font=\footnotesize,
+  box/.style={draw, rounded corners=2pt, align=center, minimum height=8.5mm, inner sep=2.5pt, fill=white},
+  role/.style={font=\footnotesize\bfseries},
+  arr/.style={-{Latex[length=2mm]}, thick},
+  pinarr/.style={-{Latex[length=2mm]}, dashed},
+  node distance=4mm and 3.6mm]
+  % holder lane
+  \node[box] (cover) {Cover\\H.264};
+  \node[box, right=of cover] (ana) {CAVLC analysis:\\stable, patchable\\carriers};
+  \node[box, right=of ana] (place) {placeholder\\envelope $\to$\\keyed layout $P$};
+  \node[box, right=of place] (dig) {$D$: digest with\\carriers canonical;\\$h_P=\Hash(P)$};
+  \node[box, right=of dig] (stmt) {statement $x$\\(pins, $N_s$,\\$|P|$, $h_P$, $V$)};
+  \node[box, right=of stmt] (prove) {Prove\\$\pi$ (Alg.~\ref{alg:proof})};
+  \node[box, right=of prove] (emb) {envelope $\to$\\CRC chunks $\to$\\patch residuals};
+  \node[box, right=of emb, fill=blue!6] (stego) {Stego\\H.264};
+  % verifier lane (right to left, under the holder lane)
+  \node[box, below=14mm of stego] (vana) {blind\\analysis:\\same rule};
+  \node[box, below=14mm of emb] (vplace) {keyed layout $P'$\\$\to$ extract,\\check CRC};
+  \node[box, below=14mm of prove] (vdig) {$D'$, $h_{P'}$\\recomputed\\from stego};
+  \node[box, below=14mm of stmt] (vstmt) {statement $x'$\\from own pins\\and $N_s$};
+  \node[box, below=14mm of dig] (vver) {Verify $\pi$\\(Alg.~\ref{alg:proof})};
+  \node[box, below=14mm of place] (cons) {consume $N_s$\\atomically\\if valid};
+  \node[box, below=14mm of ana, fill=green!8] (dec) {accept /\\reject};
+  \node[box, below=14mm of cover, fill=orange!8] (iss) {Issuer:\\ML-DSA-65\\registry};
+  \draw[arr] (cover) -- (ana); \draw[arr] (ana) -- (place); \draw[arr] (place) -- (dig);
+  \draw[arr] (dig) -- (stmt); \draw[arr] (stmt) -- (prove); \draw[arr] (prove) -- (emb);
+  \draw[arr] (emb) -- (stego);
+  \draw[arr] (vana) -- (vplace); \draw[arr] (vplace) -- (vdig); \draw[arr] (vdig) -- (vstmt);
+  \draw[arr] (vstmt) -- (vver); \draw[arr] (vver) -- (cons); \draw[arr] (cons) -- (dec);
+  \draw[arr] (stego) -- node[right, font=\scriptsize, align=left]{video\\only} (vana);
+  \draw[pinarr] (vstmt.north) -- node[right, font=\scriptsize, align=left]{session\\challenge $N_s$} (stmt.south);
+  \draw[pinarr] (iss) -- node[left, font=\scriptsize]{pins} (cover);
+  % lanes and roles
+  \begin{scope}[on background layer]
+    \node[fill=gray!8, rounded corners, fit=(cover)(stego), inner sep=2.5mm] (hl) {};
+    \node[fill=gray!8, rounded corners, fit=(dec)(vana), inner sep=2.5mm] (vl) {};
+  \end{scope}
+  \node[role, anchor=south west] at (hl.north west) {Holder};
+  \node[role, anchor=north east] at (vl.south east) {Verifier};
+  \draw[pinarr] (iss.south) -- ++(0,-7mm) -| node[pos=0.25, below, font=\scriptsize]{pins: issuer key, minimum epoch, parameter set, carrier profile} (vver.south |- vl.south);
+\end{tikzpicture}
+\caption{Embedding (top) and video-only verification (bottom). Carrier
+positions and the carrier-normalized digest $D$ are fixed from a placeholder
+envelope of the final length before the proof is computed, so the statement
+can bind them without depending on the proof bits. The verifier recomputes
+every statement field from the stego video and its own pinned configuration.}
+\label{fig:flow}
+\end{figure*}
+
+\subsection{Carriers}
+\label{sec:carriers}
+In every eligible luma $4\times4$ block of an IDR slice, the carrier is the
+first AC coefficient in zig-zag order with $|\mathit{level}|\ge4$ that is not a
+trailing one. One bit is written into the least-significant bit of its
+magnitude by a change of $\pm1$, keeping the sign; the coefficient stays
+eligible and, because the selection rule is also required to be
+\emph{rank-stable} (no earlier candidate becomes eligible after the flip),
+a blind extractor that applies the same rule to the stego stream finds the
+same position. A block is used only if its re-encoding with the modified
+carrier round-trips through the CAVLC parser of the rewritten slice
+(\emph{patchability} check), and at most one coefficient per block is
+modified. The
+embedder writes the bits by re-encoding the affected blocks and rewriting the
+slice payload, which may change its length. An alternative profile uses the
+sign of a trailing one as the carrier (Section~\ref{sec:carrier}).
+
+\subsection{Carrier layout and the carrier-normalized commitment}
+\label{sec:order}
+The stream is divided into segments of $F=100$ frames. The envelope is
+framed into chunks of a fixed size (a 23-byte header with magic, version,
+index, count, total and chunk sizes and a CRC-32 of the chunk body) and one
+chunk is embedded per segment. Within a segment, carrier positions are
+ordered by a keyed permutation; the ordering key is derived with HMAC-SHA-256
+from the stego key. Let $P$ be the ordered list of global carrier positions
+used by all chunks.
+
+The circularity is broken by fixing everything the statement depends on
+\emph{before} the proof exists. The embedder first frames a
+\emph{placeholder} envelope of exactly the final length; this determines the
+chunk sizes and hence $P$. It then computes, for each segment, the SHA-256
+digest of the segment bitstream with every carrier coefficient in $P$
+replaced by a canonical value (magnitude with its least-significant bit
+cleared, sign kept; a sign carrier is set to $+1$), and combines the segment
+digests into $D$ with a domain-separated hash. The video commitment is
+\[
+V=\mathrm{SHA\mbox{-}256}(\mathit{dom}_V\,\|\,D),
+\]
+with the domain tag $\mathit{dom}_V$ =
+\url{zkstego/video-zk/video-commitment/v1}.
+After proving, the embedder checks that the real envelope produces exactly
+the placeholder's chunk layout and aborts otherwise. Because $D$ normalizes
+exactly the positions that carry the envelope, it is the same before and
+after embedding; any change outside the carriers changes $D$, and any change
+of an envelope byte invalidates the proof or the statement. The framing
+fields themselves are a partial exception (Section~\ref{sec:discussion}).
+
+\subsection{Statement}
+The Fiat--Shamir statement $x$ is the fixed-width (274-byte) encoding
+\begin{multline*}
+x=\mathit{ver}\,\|\,\mathit{rel}\,\|\,\pid\,\|\,\mathit{root}\,\|\,\mathit{epoch}\,\|\,N_s\,\|\\
+\mathit{codec}\,\|\,\mathit{profile}\,\|\,|P|\,\|\,\Hash(P)\,\|\,V,
+\end{multline*}
+with a 16-bit version, 64-bit epoch and carrier count, and 32-byte values
+otherwise: relation identifier, parameter-set identifier, registry root,
+session challenge, codec-policy identifier, carrier-profile identifier (a hash
+of the carrier contract, segment length, chunk size, envelope length and
+mode), carrier-position hash and video commitment. The verifier builds $x$
+only from its pinned configuration and from values it recomputes from the
+received stream.
+
 \subsection{Proof system}
-The prover samples $y$ uniformly in $[-\gamma+1,\gamma]^{kN}$, computes
-$w=B_1y$, derives $c=\mathsf{SampleInBall}(H(\mathit{pid},x,t,w))$ with $\kappa$
-coefficients $\pm1$, and outputs $(H(\cdot),z=y+cr)$ if
-$\norm{z}_\infty\le B=\gamma-\kappa-1$, retrying otherwise. The verifier
-recomputes $w'=B_1z-ct_1$ and checks the hash. The full algorithm, encodings
-and domain tags are specified in the accompanying specification.
+\label{sec:proof}
+Algorithm~\ref{alg:proof} gives the opening proof and its verification for
+statement $x$ and commitment $t=(t_1,t_2)$; $\Hash$ is SHAKE-256 with domain
+separation and length prefixes, and $\SIB$ is the ML-DSA-style sampler that
+outputs $c\in\Rq$ with exactly $\kappa$ coefficients in $\{\pm1\}$ and the rest
+zero. The masks are derived deterministically from fresh entropy, the
+statement, the commitment and the witness (hedged), so a mask is never reused
+across statements. Nothing from a rejected attempt leaves the prover. The
+equality proof used for linkage runs two copies of the protocol with a common
+challenge and adds $u=\langle b_2,y_a-y_b\rangle$ to the hash, which the
+verifier recomputes as $\langle b_2,z_a-z_b\rangle-c\,(t_{2,a}-t_{2,b})$.
 
-\subsection{Statement and carrier-normalized commitment}
-The statement $x$ is a fixed-width encoding of the relation identifier,
-parameter identifier, registry root and epoch, session challenge, codec
-policy, carrier profile, carrier count, carrier-position hash and video
-commitment $V$. $V$ hashes the bitstream with every carrier coefficient
-replaced by a canonical value. Carrier positions are fixed from a placeholder
-of the final envelope length before the proof is computed, so $V$ does not
-depend on the proof bits. The verifier recomputes every field of $x$ from the
-received video and its own configuration.
-
-\subsection{Envelope, registry and sessions}
-The envelope is
-$\texttt{"ZKLB"}\|v\|\mathit{pid}\|N_s\|t\|\pi$ (in-band) or
-$\texttt{"ZKLR"}\|v\|\mathit{pid}\|N_s\|\pi$ (registered), where in the
-registered mode $t$ is a credential whose hash is part of the registry entry
-signed by the issuer. It is split into fixed-size chunks with CRC framing and
-embedded segment by segment. The session challenge $N_s$ is consumed
-atomically after successful verification.
-
-\subsection{Linkage}
-An equality proof (the linear-relation proof of BDLOP) shows that two
-commitments hide the same message; it costs two opening proofs and binds both
-commitments and both statements.
-
-\section{Security analysis}
-\label{sec:security}
-
-\begin{theorem}[informal]
-In the random-oracle model, the proof is complete with per-attempt acceptance
-$((2B+1)/2\gamma)^{kN}$, honest-verifier zero knowledge for accepted
-transcripts, and special sound with extractor output a relaxed opening
-$(\bar r,f)$ with $B_1\bar r=ft_1$, $\norm{\bar r}_\infty\le2B$ and $f$
-invertible. Two relaxed openings to different messages yield a Module-SIS
-solution of $\ell_\infty$ norm at most $8\kappa B$; hiding reduces to
-Module-LWE of rank $\lambda$ with $n+1$ samples.
-\end{theorem}
-
-The proofs follow the published arguments for ML-DSA and BDLOP with uniform
-masking; the gap in the Fiat--Shamir-with-aborts reprogramming argument is
-treated by Barbosa et al.~\cite{ref:barbosa} and Devevey et al.~\cite{ref:devevey}.
-We call the scheme plausibly post-quantum; we do not claim a tight
-quantum-random-oracle proof.
+\begin{algorithm}[t]
+\caption{Opening proof (prover) and verification.}
+\label{alg:proof}
+\small
+\begin{algorithmic}[1]
+\Statex \textbf{Prove}$(\pid, x, t, r)$ \Comment{$B=\gamma-\kappa-1$}
+\State \textbf{require} $\norm{r}_\infty\le1$ and $B_1r=t_1$
+\State $K\gets\mathrm{SHA3\mbox{-}256}(\mathit{entropy}\,\|\,x\,\|\,t\,\|\,r)$
+\For{$i=1,\dots,512$}
+  \State $y\gets$ uniform in $[-\gamma+1,\gamma]^{kN}$ from $\Hash(\texttt{mask}\,\|\,K\,\|\,i)$
+  \State $w\gets B_1y$
+  \State $s\gets\Hash(\texttt{fs}\,\|\,\pid\,\|\,|x|\,\|\,x\,\|\,t\,\|\,w)$ \Comment{32 bytes}
+  \State $c\gets\SIB(s)$;\quad $z\gets y+cr$
+  \If{$\norm{z}_\infty\le B$} \Return $\pi=(s,\mathrm{Pack}(z+B))$ \EndIf
+\EndFor
+\State \Return $\bot$ \Comment{probability $<2^{-178}$}
+\Statex
+\Statex \textbf{Verify}$(\pid, x, t, \pi)$
+\State parse $\pi=(s,z)$; reject unless $|\pi|$ is exact, every packed value
+  lies in $[0,2B]$ and padding bits are zero
+\State $c\gets\SIB(s)$;\quad $w'\gets B_1z-c\,t_1$
+\State \Return $s=\Hash(\texttt{fs}\,\|\,\pid\,\|\,|x|\,\|\,x\,\|\,t\,\|\,w')$
+\end{algorithmic}
+\end{algorithm}
 
 \input{tables/params}
 
+Table~\ref{tab:params} lists the production parameter set. With uniform
+masking the accepted response is exactly uniform on $[-B,B]^{kN}$, which
+gives zero knowledge without a Gaussian sampler; the price is a larger
+extracted norm, so binding is estimated for the $\ell_\infty$ bound $8\kappa B$
+rather than reused from~\cite{ref:bdlop}. The per-attempt acceptance
+probability is $((2B+1)/2\gamma)^{kN}\approx0.215$ (4.65 expected attempts;
+4.68 measured over 50 runs). Core-SVP costs were computed with the CRYSTALS
+estimation scripts~\cite{ref:crystalsestimates}, ignoring reduction losses as
+for ML-DSA; an independent cross-check with the
+lattice-estimator~\cite{ref:aps15,ref:latticeestimator} is
+\todo{cross-check M-SIS/M-LWE estimates with lattice-estimator}.
+
+\subsection{Envelopes, registry and sessions}
+The envelope is
+\begin{align*}
+E_{\mathrm{in}}  &= \texttt{"ZKLB"}\,\|\,\texttt{0x01}\,\|\,\pid\,\|\,N_s\,\|\,t\,\|\,\pi,\\
+E_{\mathrm{reg}} &= \texttt{"ZKLR"}\,\|\,\texttt{0x01}\,\|\,\pid\,\|\,N_s\,\|\,\pi,
+\end{align*}
+for the in-band and registered modes. In the in-band mode a fresh
+commitment $t$ (6\,720 bytes) to the payload travels in the video; the
+payload is encoded injectively into $N$ coefficients and is at most 766
+bytes. In the registered mode $t$ is the holder's credential commitment,
+whose bytes enter the verification-key hash that the issuer signs into the
+registry, so only the credential holder can produce an accepting proof and
+the video carries only $\pi$.
+
+The verifier resolves its pins from the registry: it checks the ML-DSA-65
+signature against the pinned issuer key, rejects epochs below its floor,
+rejects parameter sets with a challenge space below $2^{256}$, and requires
+exactly one record matching its parameter set, carrier profile and (in
+registered mode) credential. Session challenges are 32-byte random values
+stored in a SQLite database with a time-to-live and a binding digest over the
+parameter set, relation, registry root and epoch, codec policy and carrier
+profile. The verifier reads $N_s$ from the extracted envelope only to look it
+up; in a single transaction it checks that the challenge was issued, is
+unexpired, unconsumed and correctly bound, verifies the proof under the
+statement it built, and marks the challenge consumed only if verification
+succeeds.
+
+\subsection{Linkage and disclosure}
+\label{sec:linkage}
+A holder of two openings can prove that two commitments hide the same
+payload with the equality proof (15\,008 bytes), bound to the two
+commitments and to a context such as the two statement identifiers. This
+links two in-band videos to one payload, or links an in-band video to a
+registered credential after the fact, without revealing the payload. A
+holder can also disclose the payload and its randomness to a chosen party,
+who checks the opening against the commitment extracted from a verified
+video.
+
+\subsection{Carrier ordering key}
+\label{sec:orderkey}
+With a secret stego key shared by holder and verifier, the carrier layout is
+unknown to third parties, which is what steganographic undetectability
+requires: without a secret, anyone who knows the scheme can locate the
+carriers and test for an envelope~\cite{ref:simmons}. Where undetectability
+is not required, the ordering key can be derived from public registered
+configuration, $\mathrm{SHA\mbox{-}256}(\mathit{domain}\,\|\,\pid\,\|\,\mathit{profile})$,
+so that anyone with the registry can verify. The key only determines where
+bits are found: soundness and zero knowledge of the proof do not depend on
+it, because the verifier recomputes $P$ and $V$ and both enter the statement.
+
+\begin{algorithm}[t]
+\caption{Video-level embedding and verification.}
+\label{alg:video}
+\small
+\begin{algorithmic}[1]
+\Statex \textbf{Embed}(cover, payload or credential, pins, $N_s$, key)
+\State $E_0\gets$ placeholder envelope of the final length; chunk it
+\State $(P, D)\gets$ carrier layout and normalized digest of cover for $E_0$
+\State $x\gets\mathrm{Statement}(\text{pins}, N_s, |P|, \Hash(P), V(D))$
+\State $E\gets$ envelope with $\pi\gets\textbf{Prove}(\pid, x, t, r)$
+\State \textbf{abort} unless $\mathrm{chunks}(E)$ has the layout of $\mathrm{chunks}(E_0)$
+\State write $\mathrm{chunks}(E)$ into the carriers $P$ by patching; \Return stego
+\Statex
+\Statex \textbf{VerifyVideo}(stego, pins, session store, key)
+\State $(P', D', E)\gets$ blind extraction (same rule and key); reject on CRC
+  or framing error
+\State $x'\gets\mathrm{Statement}(\text{pins}, N_s(E), |P'|, \Hash(P'), V(D'))$
+\State \Return $\mathrm{ConsumeIf}(N_s(E),\ \textbf{Verify}(\pid, x', t, \pi))$
+\end{algorithmic}
+\end{algorithm}
+
+% =====================================================================
+% The security section is written in sections/security.tex (workstream A5;
+% it starts with its own \section, label sec:security-model) and its proofs in
+% sections/security_appendix.tex (label app:security-proofs), input after
+% \appendices below. Both use the theorem environments of this preamble and
+% \providecommand their macros; their extra references are in references.bib.
+% Without the files, the short informal version below is typeset instead, so
+% the document compiles either way. main.tex does not \ref this section,
+% because its label differs between the two cases.
+\IfFileExists{sections/security.tex}{\input{sections/security}}{%
+\section{Security analysis}
+\label{sec:security}
+
+We summarize the argument; full statements and proofs follow the published
+analyses of BDLOP~\cite{ref:bdlop} and ML-DSA~\cite{ref:dilithium,ref:fips204}
+with uniform masking.
+
+\begin{theorem}[informal]
+In the classical random-oracle model, the opening proof is complete with
+per-attempt acceptance $((2B+1)/2\gamma)^{kN}$; it is honest-verifier zero
+knowledge for accepted transcripts; and it is special sound, with extractor
+output a relaxed opening $(\bar r,f)$ satisfying $B_1\bar r=f\,t_1$,
+$\norm{\bar r}_\infty\le2B$ and $f$ a difference of two challenges, hence
+invertible. Two relaxed openings of one commitment to different messages
+yield a Module-SIS solution for $B_1$ of $\ell_\infty$ norm at most $8\kappa B$;
+hiding reduces to Module-LWE of rank $\lambda$ with $n+1$ samples and ternary
+secret and error.
+\end{theorem}
+
+Knowledge soundness of the non-interactive proof follows from special
+soundness by the forking lemma~\cite{ref:ps00,ref:bn06}, with a non-tight
+reduction; the rejection-sampling bias in the random-oracle reprogramming is
+handled as in~\cite{ref:barbosa,ref:devevey}. The parameter
+identifier, the 274-byte statement and the full commitment are hashed before
+the challenge is derived, so a proof verifies only for the statement it was
+made for; since the verifier recomputes every statement field, the proof is
+bound to the carrier-normalized video, the carrier layout, the registry entry
+and the session (G1, and G3 for the envelope bytes), and the atomic consumption of $N_s$ gives G4. The
+equality proof yields relaxed openings with a common $f$, from which the two
+extracted messages are equal (G5). We call the scheme \emph{plausibly
+post-quantum}: the underlying problems have no known efficient quantum
+algorithm, but we do not claim a proof in the quantum random-oracle model.
+}
+
+% =====================================================================
+\section{Implementation}
+\label{sec:implementation}
+
+The backend is a self-contained, pure-Python implementation (Python 3.12,
+NumPy) of about 1\,700 lines for the ring, sampling, commitment, opening and
+equality proofs, payload codec, statement, envelope, linkage and a command-line
+interface that separates the issuer, holder and verifier roles. Polynomial
+multiplication uses exact big-integer Kronecker substitution; there is no
+NTT because $q\equiv5\pmod8$ does not split $X^N+1$ fully. The H.264 side reuses a
+Python CAVLC parser and bitstream patcher with a blind carrier
+synchronizer, a carrier canonicalizer, the chunk framing, an ML-DSA-65-signed
+relation registry (via the \texttt{pqcrypto} bindings) and the SQLite
+session store. The test suite covers the ring and samplers, commitment and
+proof correctness, the accepted-response uniformity and the acceptance edge,
+extraction of relaxed openings from two transcripts, statement substitution,
+envelope tampering, registry pinning and rollback, session replay, linkage,
+the CLI, and byte-exact known-answer vectors for the parameter set.
+
+\paragraph{Sizes} Commitment 6\,720~B, opening proof 7\,520~B (a 32-byte
+challenge seed and $kN$ responses of 18 bits), equality proof 15\,008~B,
+envelope header 69~B; hence 7\,589~B (registered) and 14\,309~B (in-band) in
+the video, plus 23~B of framing per chunk.
+
+\paragraph{Timing} On the evaluation host (single thread, idle), the median
+times over 50 runs are 21\,ms to commit, 120\,ms to prove (95th percentile
+302\,ms) and 22\,ms to verify an opening, and 0.97\,s and 46\,ms for the
+equality proof. Cryptography is therefore negligible end to end: embedding
+and verification of a clip take minutes and are dominated by the Python
+CAVLC analysis and patching (Table~\ref{tab:e2e}). A faster verification
+path is in progress; \todo{update verification times after the verification
+speed-up (roadmap A2)}.
+
+\paragraph{Why not a native encoder path} Embedding inside an encoder would
+change the reconstructed reference pixels, and with them all subsequent
+intra-predicted values, as a function of the proof bits, so a statement could
+not bind the video without a codec-level relation. Post-encoding patching
+with a carrier-normalized digest keeps the statement independent of the
+proof.
+
+% =====================================================================
 \section{Evaluation}
 \label{sec:evaluation}
 
 \subsection{Setup}
-All measurements were taken on a Windows 11 host with an Intel i7-12700H
-(14 cores, 16\,GB RAM). Sequences are standard Xiph test clips (CIF
-$352\times288$, 300 frames; 4CIF $704\times576$, 600 frames), encoded with x264
-in Baseline/CAVLC, all-intra, at a fixed QP. The proof system and the H.264
-analysis are pure Python. Unless stated otherwise the registered mode is used
-(7\,589-byte envelope) and the envelope is split into 100-frame segments with a
-chunk size chosen from the measured capacity of each clip. One run in each
-mode also replays the consumed session and verifies a copy with one flipped
-bit; both are rejected.
+All measurements were taken on one Windows~11 host with an Intel Core
+i7-12700H (14 cores) and 24\,GB of RAM. Sources are standard Xiph test
+sequences: CIF ($352\times288$; 300 frames, except Deadline with 1\,374 and
+Football with 260) and 4CIF ($704\times576$; 600 frames). They were encoded
+with FFmpeg/libx264 in the Baseline profile (CAVLC), all-intra
+($\mathit{GOP}=1$, no B-frames) at a fixed QP of 18, 22 or 28. Two longer
+inputs were used for the earliest runs: the first 1\,000 frames of Deadline,
+and Coastguard looped ten times to 3\,000 frames (marked $\ast$). Quality is
+the FFmpeg luma PSNR of the decoded stego against the decoded cover; the PSNR
+of modified frames is computed from their mean MSE, and SSIM is over the
+whole video. Unless stated otherwise the registered mode and the magnitude
+carrier are used, with 100-frame segments and a chunk size chosen from the
+measured capacity of each clip. Experiments ran sequentially, except where
+noted in the tables.
 
 \subsection{Capacity}
-Table~\ref{tab:capacity} lists the stable, patchability-checked carriers per
-100 frames. At QP\,22 CIF clips offer 10--51\,kbit per 100 frames: textured
-content (Container, Deadline) carries the registered envelope in 200 frames,
-flat content (Akiyo, Foreman) cannot carry it in 300 frames. Capacity falls
-steeply with QP (Container: 89, 50 and 10\,kbit at QP 18, 22 and 28) and grows
-with resolution (City 4CIF: about 110\,kbit). The scan exposed a defect in the
+Table~\ref{tab:capacity} lists stable, patchability-checked carriers. At
+QP\,22 CIF clips offer 10.5--49.8\,kbit per 100 frames. Textured content
+(Container, Deadline, Coastguard) carries the registered envelope
+(about 61\,kbit) in 200 frames, and Container and Deadline carry the in-band
+envelope (about 115\,kbit) in 300; flat or
+smooth content (Akiyo, Foreman) cannot carry the registered envelope in its
+300 frames. Capacity falls steeply with QP (Container: 88.3, 49.8 and
+10.0\,kbit at QP 18, 22 and 28), because coarser quantization leaves fewer
+coefficients with $|\mathit{level}|\ge4$, and grows with resolution where the
+content is textured (City: 23.8\,kbit at CIF, 82.3\,kbit at 4CIF). Capacity
+also varies strongly within a clip: one Soccer segment offers only
+3.5\,kbit, and Crew offers 11--17\,kbit per segment, so the sweep skipped
+both 4CIF clips as not fitting. The capacity scan exposed a defect in the
 carrier analysis at non-CIF resolutions, which mapped macroblocks to frames
-with the CIF size and silently discarded three quarters of each 4CIF frame; it
-failed closed and is fixed.
-\input{tables/capacity}
+with the CIF macroblock count and so discarded most of each 4CIF frame; it
+failed closed (no wrong data, only lost capacity) and was fixed before the
+4CIF runs.
 
-\subsection{End-to-end embedding and verification}
-Every run in Table~\ref{tab:e2e} verifies from the stego video alone. On the
-modified frames the luma PSNR against the cover is 40--45\,dB, with a worst
-frame of 32--39\,dB; whole-video SSIM stays above 0.999. Embedding takes
-6--15 minutes and verification 2--10 minutes per clip, dominated by the Python
-CAVLC analysis; proving and verifying take about 0.12\,s and 0.02\,s. The
-in-band mode was also exercised end to end with a linkage proof between the
-commitment extracted from the video and a separately committed credential,
-and with a later disclosure of the hidden payload.
-\input{tables/e2e}
+\input{tables/paper_capacity}
+
+\subsection{End-to-end embedding and video-only verification}
+Table~\ref{tab:e2e} reports the end-to-end runs. Every completed run verified
+from the stego video alone, and in the runs that exercised them a replay of
+the consumed session and a copy with one flipped bit were both rejected; the
+payload or credential never appears in the output file. The in-band runs
+additionally verified a linkage proof between the commitment extracted from
+the video and a separately committed credential, rejected the linkage to a
+different credential, and verified a later disclosure of the payload. On
+modified frames the luma PSNR is 40.0--45.4\,dB, the worst frame is
+32.1--39.3\,dB, and whole-video SSIM is at least 0.9991. The worst frames are
+those in which many carriers fall in smooth regions, where intra prediction
+spreads a $\pm1$ change to neighbouring blocks. Embedding takes 6--63 minutes
+(90 minutes for the concurrently run 3\,000-frame in-band case) and
+verification 2--33 minutes per clip in pure Python; the proof itself
+takes about 0.1\,s. Pending runs are marked in the table:
+\todo{City 4CIF at QP 18 and 28}.
+
+\input{tables/paper_e2e}
 
 \subsection{Steganalysis}
-Classical targeted tests against the exact cover (Westfeld--Pfitzmann
-pairs-of-values on the carrier magnitudes, a two-sample magnitude histogram
-test, trailing-one sign tests and SPA) do not separate cover and stego
-(Table~\ref{tab:steg-classical}). A learned detector is more effective. We
-train Fisher-linear-discriminant ensembles~\cite{ref:ensemble} on 340
-coefficient-domain features (per-position magnitude histograms, parity of
-large magnitudes, adjacent magnitude co-occurrences and sign shares) and on
-500 reduced spatial-rich-model features~\cite{ref:srm}, using only frames the
-embedding touched. With leave-one-clip-out evaluation over five CIF clips
-(1\,300 frame pairs) the detection error is $P_E=0.40$ for coefficient
-features and $0.45$ for pixel features; an attacker trained on the same clip
-reaches $P_E=0.36$ (Table~\ref{tab:steg-ml}). These are per-frame figures;
-aggregating evidence over all modified frames of a video would detect the
-embedding more reliably. Spreading the envelope over more frames lowers the
-per-frame density and raises $P_E$ (Section~\ref{sec:density}).
-\input{tables/steg_classical}
-\input{tables/steg_ml}
+\paragraph{Classical} Targeted tests against the exact cover, on the first
+100 frames of each stego video, do not separate cover and stego
+(Table~\ref{tab:steg-classical}): the Westfeld--Pfitzmann pairs-of-values
+attack on carrier magnitudes~\cite{ref:westfeld} returns an embedding
+probability of zero for both cover and stego, the two-sample magnitude
+histogram and sign tests give $p\ge0.998$, and SPA on decoded
+luma~\cite{ref:spa} changes in the fourth decimal. RS analysis returned no
+difference for cover or stego on this content and is not used as evidence.
+
+\input{tables/paper_steg_classical}
+
+\paragraph{Learned} A learned detector is more effective. We extract, per
+frame, 340 coefficient-domain features (per-position magnitude histograms,
+odd-magnitude rates for $|\mathit{level}|\ge4$, adjacent-position magnitude
+co-occurrences and per-position sign shares) and 500 pixel-domain features
+from a reduced spatial rich model~\cite{ref:srm} (quantized first- and
+second-order residual co-occurrences), and train logistic regression and an
+ensemble of shrinkage Fisher linear discriminants on random 30\,\% feature
+subspaces (51 members), in the spirit of~\cite{ref:ensemble}. The attacker is
+strong: it trains on exact cover/stego pairs from the same encoder settings
+and knows which frames carry bits; only modified frames are used. We report
+the minimum average error $P_E=\min(P_{\mathrm{FA}}+P_{\mathrm{MD}})/2$. With
+leave-one-clip-out evaluation over five CIF clips (1\,300 frame pairs), the
+best detector reaches $P_E=0.40$ with coefficient features and $0.45$ with
+pixel features; with clips seen in training (a random split of pairs), the
+combined features reach $0.36$ (Table~\ref{tab:steg-ml}). The embedding is
+thus detectable per frame at a moderate level in its own domain and barely
+in the pixel domain. These are per-frame figures; a detector that pools the
+evidence of all modified frames of a video~\cite{ref:ker06} would do better
+(Section~\ref{sec:discussion}). A CNN detector~\cite{ref:srnet} trained on
+the same protocol is \todo{CNN steganalysis $P_E$ (roadmap A6)}, and the
+learned evaluation over all clips including 4CIF is \todo{final ML
+evaluation including 4CIF clips}.
+
+\input{tables/paper_steg_ml}
 
 \subsection{Carrier choice}
 \label{sec:carrier}
-We compared the magnitude-parity carrier with the trailing-one (T1) sign flip
-used by earlier CAVLC schemes, through the same pipeline, on four CIF clips,
-both at the same frame count as the magnitude carrier and packed into 100
-frames. All twelve runs verify. Sign carriers are an order of magnitude more
-plentiful (470--550\,kbit per 100 frames) and always patch as a single bit.
-At equal frame count they give higher luma PSNR on modified frames
-(43.3--48.8 vs.\ 40.0--45.4\,dB; worst frame 38.5--44.6 vs.\ 32.7--38.8\,dB) but
-slightly lower whole-video SSIM, and they are much harder to see in the
-coefficient domain (leave-one-clip-out $P_E=0.47$ vs.\ $0.39$) yet easier in
-the pixel domain ($0.40$ vs.\ $0.46$); combined features give $0.40$ vs.\
-$0.42$. Packed into 100 frames, sign flips are clearly detectable ($P_E=0.31$
-with pixel features, and a per-position sign test flags one clip at
-$p=0.001$). Verification with sign carriers is 4--8 times slower because the
-reduced stable-carrier analysis does not apply. We keep the magnitude carrier
-as the default for its verification speed and pixel-domain behaviour, and
-expose the sign carrier as an option when quality matters more than speed.
+We compared the magnitude carrier with the trailing-one sign carrier used by
+earlier CAVLC schemes~\cite{ref:liao12}, through the same pipeline, on four
+CIF clips, both at the same number of modified frames as the magnitude
+carrier and packed into 100 frames (Table~\ref{tab:carrier}). All twelve runs
+verify. Sign carriers are an order of magnitude more plentiful
+(468--550\,kbit per 100 frames). At equal frame count they give higher PSNR
+on modified frames (43.3--48.8 vs.\ 40.0--45.4\,dB; worst frame 38.5--44.6
+vs.\ 32.7--38.8\,dB) but slightly lower whole-video SSIM, and they are much
+harder to see in the coefficient domain (leave-one-clip-out $P_E=0.47$ vs.\
+$0.39$) yet easier in the pixel domain ($0.40$ vs.\ $0.46$); with combined
+features the two are close ($0.40$ vs.\ $0.42$). Packed into 100 frames,
+sign flips are clearly detectable ($P_E=0.31$ with pixel features, and a
+per-position sign test flags one clip at $p=0.001$). Sign carriers were
+4--8 times slower to verify at equal frame count (2--3 times when packed into
+100 frames), because the reduced stable-carrier analysis does not apply to
+them; \todo{timing of the optimized sign-carrier analysis
+(t1-sign-video-only-v2) once measured on an idle host}. We keep the magnitude carrier as the
+default for verification speed and pixel-domain behaviour, and expose the
+sign carrier as an option when visual quality matters more.
 
-\subsection{Density}
+\input{tables/paper_carrier}
+
+\subsection{Embedding rule and density}
 \label{sec:density}
-Simulated on the same clips and detector, using 50, 25 and 10\,\% of the
-carriers of each segment raises the coefficient-feature $P_E$ from 0.32 to
-0.40, 0.44 and 0.47. LSB matching instead of LSB replacement is more
-detectable ($P_E=0.26$) and was not adopted. Measured density results on the
-4CIF clips are reported in the artifact.
+Table~\ref{tab:density} uses simulated embedding on the real carrier
+positions of the five CIF clips to compare rules and densities with the same
+detector. LSB matching ($\pm1$ chosen at random) is \emph{more} detectable
+than replacement ($P_E=0.27$ vs.\ $0.32$), so replacement is kept. Using 50,
+25 and 10\,\% of the carriers raises $P_E$ to 0.40, 0.44 and 0.47; the
+envelope can be spread by lowering the chunk size, at the cost of touching
+more frames. The simulation ignores the patchability filter and is therefore
+more detectable than the real runs; it supports relative comparisons only.
+Measured density results on the 4CIF clips are
+\todo{measured 4CIF density curve at 100/50/25\,\%}.
 
-\subsection{Comparison with baselines}
-Table~\ref{tab:baselines} compares proof systems that could carry the claim.
-Groth16 is two orders of magnitude smaller but not post-quantum and needs a
-circuit-specific trusted setup. ML-DSA-44 is post-quantum and smaller but
-proves nothing about a hidden payload. ISW21 is a lattice zkSNARK with a
-designated verifier whose knowledge assumption is broken by quantum oblivious
-sampling.
-\input{tables/baselines}
+\input{tables/paper_density}
 
+\subsection{Comparison with alternative proof systems}
+Table~\ref{tab:baselines} compares schemes that could carry the claim.
+Groth16 is about fifty times smaller but not post-quantum and needs a
+circuit-specific trusted setup. ML-DSA signatures are post-quantum and
+smaller, but a signature reveals the signed data or binds a public value; it
+proves nothing about a hidden payload and supports neither later linkage nor
+selective disclosure. ISW21 is a lattice zkSNARK with a designated verifier,
+statistical zero knowledge of only $2^{-40}$ in the configuration we ran, a
+2.4\,MB verifier key, and an analysis based on an assumption invalidated
+against quantum adversaries~\cite{ref:dfs24}; its envelope is also larger.
+The BDLOP opening proof is the smallest transparent, publicly verifiable,
+zero-knowledge option we found that fits the measured capacity.
+
+\input{tables/paper_baselines}
+
+% =====================================================================
 \section{Discussion and limitations}
 \label{sec:discussion}
 
-Soundness is relaxed; payload binding holds with respect to relaxed openings.
-The implementation is not constant time and has not been audited. The
-carrier order is keyed by a symmetric synchronization (stego) key shared with
-the verifier. This is inherent to steganography: without a secret, anyone who
-knows the scheme can locate the carriers and test for an envelope. The key
-affects only where bits are found; soundness and zero knowledge of the proof
-do not depend on it. Where undetectability is not required, the key can be
-derived from the public carrier profile, making verification public. Proofs that each payload bit is
-binary require a fully splitting ring and the product proofs of
-ALS20/ENS20. Capacity limits the scheme to clips of a few hundred frames at
-CIF and fewer at higher resolution.
+\paragraph{Relaxed soundness} The extractor yields a relaxed opening
+$(\bar r,f)$ rather than a ternary opening, so the payload is bound only
+through binding with respect to relaxed openings. This is standard for
+Fiat--Shamir-with-aborts proofs, but the statement ``the holder knows the
+payload'' must be read in this relaxed sense.
 
+\paragraph{Random-oracle model} The argument is in the classical
+random-oracle model with a non-tight forking reduction. We do not claim
+security in the quantum random-oracle model; generic results for
+Fiat--Shamir~\cite{ref:dfms19,ref:lz19} make a post-quantum interpretation
+plausible but do not give concrete bounds for our parameters.
+
+\paragraph{Implementation} The code is a research prototype implemented by
+us from the published protocol. It has not been audited and is not constant
+time (Python big-integer arithmetic and data-dependent rejection loops);
+timing side channels are out of scope.
+
+\paragraph{Framing malleability} The envelope bytes are integrity-protected:
+changing any of them makes the proof or the statement fail. The chunk
+framing around them is not fully bound. When the envelope fits in a single
+chunk, up to about 48 carrier bits of the chunk header (including the
+redundant chunk-size field) can currently be changed without the video
+being rejected; the extracted envelope, and hence
+what is verified, is unchanged, but the stego video is then not unique.
+Binding the header into the CRC or the statement is a pending fix;
+\todo{update after the chunk-framing fix is merged}.
+
+\paragraph{Stego key versus public order} Undetectability requires a
+symmetric key shared with the verifier, which makes verification
+designated in practice. The public-order mode makes verification public and
+gives up undetectability. The keyed permutation that orders carriers is
+derived from an HMAC-SHA-256 seed but uses a chaotic-map shuffle, which is
+not a cryptographic pseudorandom permutation; replacing it with a standard
+keyed permutation is straightforward and does not affect the proof.
+
+\paragraph{Per-frame versus per-video detection} The learned detector's
+per-frame error of 0.40 means that each modified frame leaks a little; a
+video carries 100--1\,200 modified frames, and pooling their scores would
+likely detect the embedding with high confidence. We have not quantified a
+pooled detector. Spreading the envelope over more frames lowers per-frame
+density but increases the number of frames that leak, so cost-aware carrier
+selection is the more promising direction.
+
+\paragraph{Capacity and codec scope} Only all-intra Baseline streams are
+supported, which is a real deployment restriction. A registered envelope
+needs 61\,kbit, which smooth content and high QP do not provide within a few
+hundred frames. Proving that each payload bit is binary, or that the payload
+lies in a range, would need a fully splitting ring and the product proofs
+of~\cite{ref:als20,ref:ens20}, which this parameter set does not provide.
+
+\paragraph{What is claimed} An accepted video shows that its producer knew a
+(relaxed) opening of the bound commitment for this exact carrier-normalized
+video, carrier layout, registry entry and session; in registered mode, that
+the producer holds the registered credential. It does not show that the
+payload is true, that a camera recorded the video, or, in in-band mode, who
+produced it. The session challenge is not secret, so it should be delivered
+over an authenticated channel if the holder's identity matters.
+
+% =====================================================================
+\section{Threats to validity}
+\label{sec:threats}
+
+\paragraph{Internal validity} The protocol, parser and patcher were
+implemented by the authors; correctness is supported by unit and negative
+tests, known-answer vectors and the end-to-end verification itself, but not
+by an independent implementation. Quality is measured against the decoded
+cover, not the raw source, which isolates the embedding from the encoder.
+Timings come from a single host; two long runs were executed concurrently
+and are marked. The density and rule comparisons are simulations that omit
+the patchability filter.
+
+\paragraph{Construct validity} $P_E$ is a per-frame measure on modified
+frames only, which favours the attacker within a frame but ignores pooling
+across frames. PSNR on modified frames depends on how many frames an
+envelope touches, which in turn depends on the chosen chunk size. Capacity
+for partly scanned clips is extrapolated from the scanned segments.
+
+\paragraph{External validity} The evaluation uses a small set of standard
+CIF and 4CIF sequences, one encoder (x264), the Baseline profile, all-intra
+coding and fixed QP. Results may differ for camera footage, other encoders,
+rate control, P-slices or higher resolutions. The detectors are
+feature-based; a stronger learned detector may lower $P_E$.
+
+\paragraph{Conclusion validity} Learned results are averaged over five
+held-out clips with no confidence intervals; we report the range over folds
+instead. With few clips, differences of a few hundredths in $P_E$ between
+configurations should not be over-interpreted.
+
+% =====================================================================
 \section{Conclusion}
+\label{sec:conclusion}
 
-We showed that a post-quantum zero-knowledge proof can travel inside an
-H.264 bitstream, bound to that bitstream and to a verifier session, and be
-verified from the video alone.
+A post-quantum zero-knowledge proof can travel inside an H.264 CAVLC
+bitstream, bound to that bitstream through a carrier-normalized commitment
+and to a verifier session, and be verified from the video alone. With a
+7.6\,kB registered envelope and a 14.3\,kB in-band envelope, textured CIF
+and 4CIF content carries the proof in one to three hundred frames at
+40--45\,dB on modified frames, and classical targeted steganalysis does not
+detect it. A learned per-frame detector does better than chance, and the
+security argument rests on relaxed soundness in the classical random-oracle
+model. The next steps are cost-aware carrier selection against learned and
+pooled detectors, binary and range proofs on a fully splitting ring, support
+for P-slices and higher resolutions, and an independent review of the
+cryptographic argument.
+
+% =====================================================================
+\section*{Artifact availability}
+The implementation, the specification with known-answer vectors, the
+parameter-estimation scripts, all result files used in this paper and the
+script that regenerates its tables are available in an anonymized
+repository: \todo{anonymized repository URL}. Test videos are derived from
+the public Xiph sequences with the provided encoding commands; the large
+intermediate files are not redistributed.
+
+% Proofs of the security section (workstream A5), when present.
+\IfFileExists{sections/security_appendix.tex}{%
+\appendices
+\input{sections/security_appendix}}{}
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}

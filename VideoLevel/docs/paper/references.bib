@@ -1,125 +1,417 @@
-% Entries marked TODO need their bibliographic details checked against the
-% publisher record before submission.
+% Every entry below was checked on 2026-10-21 against a primary record
+% (publisher DOI metadata via Crossref, Springer LNCS volume pages, IACR
+% ePrint, arXiv, NIST, ITU-T, C2PA, or the GitHub repository).  Keep it that
+% way: do not add an entry that has not been checked.
+
+% ---------------------------------------------------------------- lattice ZK
 
 @inproceedings{ref:bdlop,
   author    = {Carsten Baum and Ivan Damg{\aa}rd and Vadim Lyubashevsky and Sabine Oechsner and Chris Peikert},
   title     = {More Efficient Commitments from Structured Lattice Assumptions},
-  booktitle = {Security and Cryptography for Networks (SCN)},
-  series    = {LNCS}, volume = {11035}, pages = {368--385}, year = {2018}
+  booktitle = {Security and Cryptography for Networks (SCN 2018)},
+  series    = {Lecture Notes in Computer Science}, volume = {11035},
+  pages     = {368--385}, publisher = {Springer}, year = {2018},
+  doi       = {10.1007/978-3-319-98113-0_20}
 }
 @inproceedings{ref:lyu09,
   author    = {Vadim Lyubashevsky},
-  title     = {Fiat-Shamir with Aborts: Applications to Lattice and Factoring-Based Signatures},
-  booktitle = {ASIACRYPT}, series = {LNCS}, volume = {5912}, pages = {598--616}, year = {2009}
+  title     = {{Fiat-Shamir} with Aborts: Applications to Lattice and Factoring-Based Signatures},
+  booktitle = {Advances in Cryptology -- ASIACRYPT 2009},
+  series    = {Lecture Notes in Computer Science}, volume = {5912},
+  pages     = {598--616}, publisher = {Springer}, year = {2009},
+  doi       = {10.1007/978-3-642-10366-7_35}
 }
 @inproceedings{ref:lyu12,
   author    = {Vadim Lyubashevsky},
   title     = {Lattice Signatures without Trapdoors},
-  booktitle = {EUROCRYPT}, series = {LNCS}, volume = {7237}, pages = {738--755}, year = {2012}
+  booktitle = {Advances in Cryptology -- EUROCRYPT 2012},
+  series    = {Lecture Notes in Computer Science}, volume = {7237},
+  pages     = {738--755}, publisher = {Springer}, year = {2012},
+  doi       = {10.1007/978-3-642-29011-4_43}
 }
 @inproceedings{ref:ls18,
   author    = {Vadim Lyubashevsky and Gregor Seiler},
   title     = {Short, Invertible Elements in Partially Splitting Cyclotomic Rings and Applications to Lattice-Based Zero-Knowledge Proofs},
-  booktitle = {EUROCRYPT}, series = {LNCS}, volume = {10820}, year = {2018}
+  booktitle = {Advances in Cryptology -- EUROCRYPT 2018},
+  series    = {Lecture Notes in Computer Science}, volume = {10820},
+  pages     = {204--224}, publisher = {Springer}, year = {2018},
+  doi       = {10.1007/978-3-319-78381-9_8}
 }
 @inproceedings{ref:als20,
   author    = {Thomas Attema and Vadim Lyubashevsky and Gregor Seiler},
   title     = {Practical Product Proofs for Lattice Commitments},
-  booktitle = {CRYPTO}, year = {2020}
+  booktitle = {Advances in Cryptology -- CRYPTO 2020},
+  series    = {Lecture Notes in Computer Science}, volume = {12171},
+  pages     = {470--499}, publisher = {Springer}, year = {2020},
+  doi       = {10.1007/978-3-030-56880-1_17}
 }
 @inproceedings{ref:ens20,
   author    = {Muhammed F. Esgin and Ngoc Khanh Nguyen and Gregor Seiler},
   title     = {Practical Exact Proofs from Lattices: New Techniques to Exploit Fully-Splitting Rings},
-  booktitle = {ASIACRYPT}, year = {2020}
+  booktitle = {Advances in Cryptology -- ASIACRYPT 2020},
+  series    = {Lecture Notes in Computer Science}, volume = {12492},
+  pages     = {259--288}, publisher = {Springer}, year = {2020},
+  doi       = {10.1007/978-3-030-64834-3_9}
 }
 @inproceedings{ref:lnp22,
   author    = {Vadim Lyubashevsky and Ngoc Khanh Nguyen and Maxime Plan{\c{c}}on},
   title     = {Lattice-Based Zero-Knowledge Proofs and Applications: Shorter, Simpler, and More General},
-  booktitle = {CRYPTO}, year = {2022}
+  booktitle = {Advances in Cryptology -- CRYPTO 2022},
+  series    = {Lecture Notes in Computer Science}, volume = {13508},
+  pages     = {71--101}, publisher = {Springer}, year = {2022},
+  doi       = {10.1007/978-3-031-15979-4_3}
 }
-@inproceedings{ref:barbosa,
-  author    = {Manuel Barbosa and Gilles Barthe and Christian Doczkal and Jelle Don and Serge Fehr and Benjamin Gr{\'e}goire and Yu-Hsuan Huang and Andreas H{\"u}lsing and Yi Lee and Xiaodi Wu},
-  title     = {Fixing and Mechanizing the Security Proof of {Fiat-Shamir} with Aborts and {Dilithium}},
-  booktitle = {CRYPTO}, year = {2023}
+@inproceedings{ref:labrador,
+  author    = {Ward Beullens and Gregor Seiler},
+  title     = {{LaBRADOR}: Compact Proofs for {R1CS} from {Module-SIS}},
+  booktitle = {Advances in Cryptology -- CRYPTO 2023},
+  series    = {Lecture Notes in Computer Science}, volume = {14085},
+  pages     = {518--548}, publisher = {Springer}, year = {2023},
+  doi       = {10.1007/978-3-031-38554-4_17}
 }
-@inproceedings{ref:devevey,
-  author    = {Julien Devevey and Pouria Fallahpour and Alain Passel{\`e}gue and Damien Stehl{\'e}},
-  title     = {A Detailed Analysis of {Fiat-Shamir} with Aborts},
-  booktitle = {CRYPTO}, year = {2023}
+@inproceedings{ref:latticefold,
+  author    = {Dan Boneh and Binyi Chen},
+  title     = {{LatticeFold}: A Lattice-Based Folding Scheme and Its Applications to Succinct Proof Systems},
+  booktitle = {Advances in Cryptology -- ASIACRYPT 2025},
+  series    = {Lecture Notes in Computer Science}, volume = {16247},
+  pages     = {330--362}, publisher = {Springer}, year = {2025},
+  doi       = {10.1007/978-981-95-5099-9_11}
 }
-@inproceedings{ref:dfms19,
-  author    = {Jelle Don and Serge Fehr and Christian Majenz and Christian Schaffner},
-  title     = {Security of the {Fiat-Shamir} Transformation in the Quantum Random-Oracle Model},
-  booktitle = {CRYPTO}, year = {2019}
+@misc{ref:rokoko,
+  author       = {Michael Klooss and Russell W. F. Lai and Ngoc Khanh Nguyen and Micha{\l} Osadnik and Lorenzo Tucci},
+  title        = {{RoKoko}: Lattice-based Succinct Arguments, a Committed Refinement},
+  howpublished = {Cryptology ePrint Archive, Paper 2026/575},
+  year         = {2026},
+  url          = {https://eprint.iacr.org/2026/575}
 }
-@techreport{ref:fips204,
-  author      = {{National Institute of Standards and Technology}},
-  title       = {Module-Lattice-Based Digital Signature Standard},
-  institution = {NIST}, type = {FIPS}, number = {204}, year = {2024}
+@misc{ref:salsaa,
+  author       = {Shuto Kuriyama and Russell W. F. Lai and Micha{\l} Osadnik and Lorenzo Tucci},
+  title        = {{SALSAA} -- Sumcheck-Aided Lattice-based Succinct Arguments and Applications},
+  howpublished = {Cryptology ePrint Archive, Paper 2025/2124},
+  year         = {2025},
+  url          = {https://eprint.iacr.org/2025/2124}
 }
-@inproceedings{ref:groth16,
-  author    = {Jens Groth},
-  title     = {On the Size of Pairing-Based Non-interactive Arguments},
-  booktitle = {EUROCRYPT}, year = {2016}
+@inproceedings{ref:lazer,
+  author    = {Vadim Lyubashevsky and Gregor Seiler and Patrick Steuer},
+  title     = {The {LaZer} Library: Lattice-Based Zero Knowledge and Succinct Proofs for Quantum-Safe Privacy},
+  booktitle = {Proceedings of the 2024 ACM SIGSAC Conference on Computer and Communications Security (CCS)},
+  pages     = {3125--3137}, publisher = {ACM}, year = {2024},
+  doi       = {10.1145/3658644.3690330}
 }
 @inproceedings{ref:isw21,
   author    = {Yuval Ishai and Hang Su and David J. Wu},
   title     = {Shorter and Faster Post-Quantum Designated-Verifier {zkSNARKs} from Lattices},
-  booktitle = {ACM CCS}, year = {2021}
+  booktitle = {Proceedings of the 2021 ACM SIGSAC Conference on Computer and Communications Security (CCS)},
+  pages     = {212--234}, publisher = {ACM}, year = {2021},
+  doi       = {10.1145/3460120.3484572}
 }
+@inproceedings{ref:luna,
+  author    = {Ron Steinfeld and Amin Sakzad and Muhammed F. Esgin and Veronika Kuchta and Mert Yassi and Raymond K. Zhao},
+  title     = {{LUNA}: Quasi-Optimally Succinct Designated-Verifier Zero-Knowledge Arguments from Lattices},
+  booktitle = {Proceedings of the 2024 ACM SIGSAC Conference on Computer and Communications Security (CCS)},
+  pages     = {3167--3181}, publisher = {ACM}, year = {2024},
+  doi       = {10.1145/3658644.3670345}
+}
+@inproceedings{ref:dfs24,
+  author    = {Thomas Debris-Alazard and Pouria Fallahpour and Damien Stehl{\'e}},
+  title     = {Quantum Oblivious {LWE} Sampling and Insecurity of Standard Model Lattice-Based {SNARKs}},
+  booktitle = {Proceedings of the 56th Annual ACM Symposium on Theory of Computing (STOC)},
+  pages     = {423--434}, publisher = {ACM}, year = {2024},
+  doi       = {10.1145/3618260.3649766}
+}
+@article{ref:ls15,
+  author  = {Adeline Langlois and Damien Stehl{\'e}},
+  title   = {Worst-Case to Average-Case Reductions for Module Lattices},
+  journal = {Designs, Codes and Cryptography},
+  volume  = {75}, number = {3}, pages = {565--599}, year = {2015},
+  doi     = {10.1007/s10623-014-9938-4}
+}
+
+% ------------------------------------------------- signatures, FS, estimates
+
+@article{ref:dilithium,
+  author  = {L{\'e}o Ducas and Eike Kiltz and Tancr{\`e}de Lepoint and Vadim Lyubashevsky and Peter Schwabe and Gregor Seiler and Damien Stehl{\'e}},
+  title   = {{CRYSTALS-Dilithium}: A Lattice-Based Digital Signature Scheme},
+  journal = {IACR Transactions on Cryptographic Hardware and Embedded Systems},
+  volume  = {2018}, number = {1}, pages = {238--268}, year = {2018},
+  doi     = {10.46586/tches.v2018.i1.238-268}
+}
+@techreport{ref:fips204,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {Module-Lattice-Based Digital Signature Standard},
+  institution = {U.S. Department of Commerce}, type = {Federal Information Processing Standards Publication},
+  number      = {FIPS 204}, month = aug, year = {2024},
+  doi         = {10.6028/NIST.FIPS.204}
+}
+@inproceedings{ref:fs86,
+  author    = {Amos Fiat and Adi Shamir},
+  title     = {How to Prove Yourself: Practical Solutions to Identification and Signature Problems},
+  booktitle = {Advances in Cryptology -- CRYPTO '86},
+  series    = {Lecture Notes in Computer Science}, volume = {263},
+  pages     = {186--194}, publisher = {Springer}, year = {1987},
+  doi       = {10.1007/3-540-47721-7_12}
+}
+@article{ref:ps00,
+  author  = {David Pointcheval and Jacques Stern},
+  title   = {Security Arguments for Digital Signatures and Blind Signatures},
+  journal = {Journal of Cryptology},
+  volume  = {13}, number = {3}, pages = {361--396}, year = {2000},
+  doi     = {10.1007/s001450010003}
+}
+% ref:bn06 and ref:kls18 are cited by sections/security*.tex (workstream A5);
+% they replace sections/security_refs.bib so that one .bib file suffices.
+@inproceedings{ref:bn06,
+  author    = {Mihir Bellare and Gregory Neven},
+  title     = {Multi-Signatures in the Plain Public-Key Model and a General Forking Lemma},
+  booktitle = {Proceedings of the 13th ACM Conference on Computer and Communications Security (CCS)},
+  pages     = {390--399}, publisher = {ACM}, year = {2006},
+  doi       = {10.1145/1180405.1180453}
+}
+@inproceedings{ref:kls18,
+  author    = {Eike Kiltz and Vadim Lyubashevsky and Christian Schaffner},
+  title     = {A Concrete Treatment of {Fiat-Shamir} Signatures in the Quantum Random-Oracle Model},
+  booktitle = {Advances in Cryptology -- EUROCRYPT 2018},
+  series    = {Lecture Notes in Computer Science}, volume = {10822},
+  pages     = {552--586}, publisher = {Springer}, year = {2018},
+  doi       = {10.1007/978-3-319-78372-7_18}
+}
+@inproceedings{ref:barbosa,
+  author    = {Manuel Barbosa and Gilles Barthe and Christian Doczkal and Jelle Don and Serge Fehr and Benjamin Gr{\'e}goire and Yu-Hsuan Huang and Andreas H{\"u}lsing and Yi Lee and Xiaodi Wu},
+  title     = {Fixing and Mechanizing the Security Proof of {Fiat-Shamir} with Aborts and {Dilithium}},
+  booktitle = {Advances in Cryptology -- CRYPTO 2023},
+  series    = {Lecture Notes in Computer Science}, volume = {14085},
+  pages     = {358--389}, publisher = {Springer}, year = {2023},
+  doi       = {10.1007/978-3-031-38554-4_12}
+}
+@inproceedings{ref:devevey,
+  author    = {Julien Devevey and Pouria Fallahpour and Alain Passel{\`e}gue and Damien Stehl{\'e}},
+  title     = {A Detailed Analysis of {Fiat-Shamir} with Aborts},
+  booktitle = {Advances in Cryptology -- CRYPTO 2023},
+  series    = {Lecture Notes in Computer Science}, volume = {14085},
+  pages     = {327--357}, publisher = {Springer}, year = {2023},
+  doi       = {10.1007/978-3-031-38554-4_11}
+}
+@inproceedings{ref:dfms19,
+  author    = {Jelle Don and Serge Fehr and Christian Majenz and Christian Schaffner},
+  title     = {Security of the {Fiat-Shamir} Transformation in the Quantum Random-Oracle Model},
+  booktitle = {Advances in Cryptology -- CRYPTO 2019},
+  series    = {Lecture Notes in Computer Science}, volume = {11693},
+  pages     = {356--383}, publisher = {Springer}, year = {2019},
+  doi       = {10.1007/978-3-030-26951-7_13}
+}
+@inproceedings{ref:lz19,
+  author    = {Qipeng Liu and Mark Zhandry},
+  title     = {Revisiting Post-quantum {Fiat-Shamir}},
+  booktitle = {Advances in Cryptology -- CRYPTO 2019},
+  series    = {Lecture Notes in Computer Science}, volume = {11693},
+  pages     = {326--355}, publisher = {Springer}, year = {2019},
+  doi       = {10.1007/978-3-030-26951-7_12}
+}
+@article{ref:aps15,
+  author  = {Martin R. Albrecht and Rachel Player and Sam Scott},
+  title   = {On the Concrete Hardness of Learning with Errors},
+  journal = {Journal of Mathematical Cryptology},
+  volume  = {9}, number = {3}, pages = {169--203}, year = {2015},
+  doi     = {10.1515/jmc-2015-0016}
+}
+@misc{ref:crystalsestimates,
+  author       = {{CRYSTALS team}},
+  title        = {{security-estimates}: Core-{SVP} Security Estimation Scripts for {Kyber} and {Dilithium}},
+  howpublished = {\url{https://github.com/pq-crystals/security-estimates}, commit \texttt{75c26949}},
+  year         = {2021}
+}
+@misc{ref:latticeestimator,
+  author       = {Martin R. Albrecht and others},
+  title        = {{lattice-estimator}: Security Estimates for Lattice Problems},
+  howpublished = {\url{https://github.com/malb/lattice-estimator}},
+  note         = {Accessed 2026-10-21},
+  year         = {2026}
+}
+@inproceedings{ref:groth16,
+  author    = {Jens Groth},
+  title     = {On the Size of Pairing-Based Non-interactive Arguments},
+  booktitle = {Advances in Cryptology -- EUROCRYPT 2016},
+  series    = {Lecture Notes in Computer Science}, volume = {9666},
+  pages     = {305--326}, publisher = {Springer}, year = {2016},
+  doi       = {10.1007/978-3-662-49896-5_11}
+}
+
+% ------------------------------------------------ proof-carrying media
+
 @inproceedings{ref:photoproof,
   author    = {Assa Naveh and Eran Tromer},
   title     = {{PhotoProof}: Cryptographic Image Authentication for Any Set of Permissible Transformations},
-  booktitle = {IEEE Symposium on Security and Privacy}, year = {2016}
+  booktitle = {2016 IEEE Symposium on Security and Privacy (SP)},
+  pages     = {255--271}, publisher = {IEEE}, year = {2016},
+  doi       = {10.1109/SP.2016.23}
 }
 @misc{ref:zkimg,
-  author = {Daniel Kang and Tatsunori Hashimoto and Ion Stoica and Yi Sun},
-  title  = {{ZK-IMG}: Attested Images via Zero-Knowledge Proofs to Fight Disinformation},
-  howpublished = {arXiv:2211.04775}, year = {2022}
+  author       = {Daniel Kang and Tatsunori Hashimoto and Ion Stoica and Yi Sun},
+  title        = {{ZK-IMG}: Attested Images via Zero-Knowledge Proofs to Fight Disinformation},
+  howpublished = {arXiv:2211.04775},
+  year         = {2022},
+  url          = {https://arxiv.org/abs/2211.04775}
 }
-@misc{ref:veritas,
-  author = {Trisha Datta and Binyi Chen and Dan Boneh},
-  title  = {{VerITAS}: Verifying Image Transformations at Scale},
-  howpublished = {Cryptology ePrint Archive, Paper 2024/1066}, year = {2024}
+@inproceedings{ref:veritas,
+  author    = {Trisha Datta and Binyi Chen and Dan Boneh},
+  title     = {{VerITAS}: Verifying Image Transformations at Scale},
+  booktitle = {2025 IEEE Symposium on Security and Privacy (SP)},
+  pages     = {4606--4623}, publisher = {IEEE}, year = {2025},
+  doi       = {10.1109/SP61157.2025.00097}
 }
 @article{ref:vimz,
   author  = {Stefan Dziembowski and Shahriar Ebrahimi and Parisa Hassanizadeh},
   title   = {{VIMz}: Private Proofs of Image Manipulation using Folding-based {zkSNARKs}},
-  journal = {Proceedings on Privacy Enhancing Technologies}, year = {2025}
+  journal = {Proceedings on Privacy Enhancing Technologies},
+  volume  = {2025}, number = {2}, pages = {344--362}, year = {2025},
+  doi     = {10.56553/popets-2025-0065}
 }
-@misc{ref:eva,
-  title  = {Eva: proofs of authenticity for edited {H.264} video},
-  note   = {TODO: verify full title and authors; Cryptology ePrint Archive, Paper 2024/1436; IEEE S\&P 2025},
-  year   = {2024}
+@inproceedings{ref:eva,
+  author    = {Chengru Zhang and Xiao Yang and David Oswald and Mark Ryan and Philipp Jovanovic},
+  title     = {Eva: Efficient Privacy-Preserving Proof of Authenticity for Lossily Encoded Videos},
+  booktitle = {2025 IEEE Symposium on Security and Privacy (SP)},
+  pages     = {4643--4662}, publisher = {IEEE}, year = {2025},
+  doi       = {10.1109/SP61157.2025.00237}
 }
-@misc{ref:zkwagon,
-  title  = {{ZK-WAGON}},
-  note   = {TODO: verify full title and authors; arXiv:2510.01967},
-  year   = {2025}
+@inproceedings{ref:zkwagon,
+  author    = {Aadarsh Anantha Ramakrishnan and Shubham Agarwal and Selvanayagam S and Kunwar Singh},
+  title     = {{ZK-WAGON}: Imperceptible Watermark for Image Generation Models using {ZK-SNARKs}},
+  booktitle = {AI-ML Systems 2025},
+  note      = {arXiv:2510.01967},
+  year      = {2025},
+  url       = {https://arxiv.org/abs/2510.01967}
 }
 @inproceedings{ref:adelsbach,
   author    = {Andr{\'e} Adelsbach and Ahmad-Reza Sadeghi},
   title     = {Zero-Knowledge Watermark Detection and Proof of Ownership},
-  booktitle = {Information Hiding}, series = {LNCS}, volume = {2137}, year = {2001}
+  booktitle = {Information Hiding (IH 2001)},
+  series    = {Lecture Notes in Computer Science}, volume = {2137},
+  pages     = {273--288}, publisher = {Springer}, year = {2001},
+  doi       = {10.1007/3-540-45496-9_20}
 }
-@misc{ref:h264stego,
-  title = {TODO: cite a survey of H.264 compressed-domain steganography},
-  year  = {2020}
+@techreport{ref:c2pa,
+  author      = {{Coalition for Content Provenance and Authenticity}},
+  title       = {Content Credentials: {C2PA} Technical Specification, Version 2.2},
+  institution = {C2PA}, month = may, year = {2025},
+  url         = {https://spec.c2pa.org/specifications/specifications/2.2/specs/C2PA_Specification.html}
+}
+
+% ------------------------------------------- H.264 and video steganography
+
+@techreport{ref:h264,
+  author      = {{ITU-T}},
+  title       = {Advanced Video Coding for Generic Audiovisual Services},
+  institution = {International Telecommunication Union},
+  type        = {Recommendation}, number = {H.264 (06/2026)}, year = {2026},
+  url         = {https://www.itu.int/rec/T-REC-H.264}
+}
+@article{ref:wiegand03,
+  author  = {Thomas Wiegand and Gary J. Sullivan and Gisle Bj{\o}ntegaard and Ajay Luthra},
+  title   = {Overview of the {H.264/AVC} Video Coding Standard},
+  journal = {IEEE Transactions on Circuits and Systems for Video Technology},
+  volume  = {13}, number = {7}, pages = {560--576}, year = {2003},
+  doi     = {10.1109/TCSVT.2003.815165}
+}
+@article{ref:liu19review,
+  author  = {Yunxia Liu and Shuyang Liu and Yonghao Wang and Hongguo Zhao and Si Liu},
+  title   = {Video Steganography: A Review},
+  journal = {Neurocomputing},
+  volume  = {335}, pages = {238--250}, year = {2019},
+  doi     = {10.1016/j.neucom.2018.09.091}
+}
+@article{ref:kunhoth23,
+  author  = {Jayakanth Kunhoth and Nandhini Subramanian and Somaya Al-Maadeed and Ahmed Bouridane},
+  title   = {Video Steganography: Recent Advances and Challenges},
+  journal = {Multimedia Tools and Applications},
+  volume  = {82}, number = {27}, pages = {41943--41985}, year = {2023},
+  doi     = {10.1007/s11042-023-14844-w}
+}
+@article{ref:mstafa16,
+  author  = {Ramadhan J. Mstafa and Khaled M. Elleithy},
+  title   = {Compressed and Raw Video Steganography Techniques: A Comprehensive Survey and Analysis},
+  journal = {Multimedia Tools and Applications},
+  volume  = {76}, number = {20}, pages = {21749--21786}, year = {2017},
+  doi     = {10.1007/s11042-016-4055-1}
+}
+@article{ref:ma10,
+  author  = {Xiaojing Ma and Zhitang Li and Hao Tu and Bochao Zhang},
+  title   = {A Data Hiding Algorithm for {H.264/AVC} Video Streams Without Intra-Frame Distortion Drift},
+  journal = {IEEE Transactions on Circuits and Systems for Video Technology},
+  volume  = {20}, number = {10}, pages = {1320--1330}, year = {2010},
+  doi     = {10.1109/TCSVT.2010.2070950}
+}
+@article{ref:liao12,
+  author  = {Ke Liao and Shiguo Lian and Zhichuan Guo and Jinlin Wang},
+  title   = {Efficient Information Hiding in {H.264/AVC} Video Coding},
+  journal = {Telecommunication Systems},
+  volume  = {49}, number = {2}, pages = {261--269}, year = {2012},
+  doi     = {10.1007/s11235-010-9372-5}
+}
+@article{ref:bouzegza22,
+  author  = {Mourad Bouzegza and Ammar Belatreche and Ahmed Bouridane and Mohamed Tounsi},
+  title   = {A Comprehensive Review of Video Steganalysis},
+  journal = {IET Image Processing},
+  volume  = {16}, number = {13}, pages = {3407--3425}, year = {2022},
+  doi     = {10.1049/ipr2.12573}
+}
+@article{ref:wang14mv,
+  author  = {Keren Wang and Hong Zhao and Hongxia Wang},
+  title   = {Video Steganalysis Against Motion Vector-Based Steganography by Adding or Subtracting One Motion Vector Value},
+  journal = {IEEE Transactions on Information Forensics and Security},
+  volume  = {9}, number = {5}, pages = {741--751}, year = {2014},
+  doi     = {10.1109/TIFS.2014.2308633}
+}
+
+% ------------------------------------------------------------ steganalysis
+
+@inproceedings{ref:simmons,
+  author    = {Gustavus J. Simmons},
+  title     = {The Prisoners' Problem and the Subliminal Channel},
+  booktitle = {Advances in Cryptology: Proceedings of CRYPTO '83},
+  pages     = {51--67}, publisher = {Plenum Press}, year = {1984},
+  doi       = {10.1007/978-1-4684-4730-9_5}
 }
 @inproceedings{ref:westfeld,
   author    = {Andreas Westfeld and Andreas Pfitzmann},
   title     = {Attacks on Steganographic Systems},
-  booktitle = {Information Hiding}, series = {LNCS}, volume = {1768}, year = {1999}
+  booktitle = {Information Hiding (IH'99)},
+  series    = {Lecture Notes in Computer Science}, volume = {1768},
+  pages     = {61--76}, publisher = {Springer}, year = {2000},
+  doi       = {10.1007/10719724_5}
+}
+@article{ref:spa,
+  author  = {Sorina Dumitrescu and Xiaolin Wu and Zhe Wang},
+  title   = {Detection of {LSB} Steganography via Sample Pair Analysis},
+  journal = {IEEE Transactions on Signal Processing},
+  volume  = {51}, number = {7}, pages = {1995--2007}, year = {2003},
+  doi     = {10.1109/TSP.2003.812753}
 }
 @article{ref:srm,
   author  = {Jessica Fridrich and Jan Kodovsk{\'y}},
   title   = {Rich Models for Steganalysis of Digital Images},
   journal = {IEEE Transactions on Information Forensics and Security},
-  volume  = {7}, number = {3}, pages = {868--882}, year = {2012}
+  volume  = {7}, number = {3}, pages = {868--882}, year = {2012},
+  doi     = {10.1109/TIFS.2012.2190402}
 }
 @article{ref:ensemble,
   author  = {Jan Kodovsk{\'y} and Jessica Fridrich and Vojt{\v{e}}ch Holub},
   title   = {Ensemble Classifiers for Steganalysis of Digital Media},
   journal = {IEEE Transactions on Information Forensics and Security},
-  volume  = {7}, number = {2}, pages = {432--444}, year = {2012}
+  volume  = {7}, number = {2}, pages = {432--444}, year = {2012},
+  doi     = {10.1109/TIFS.2011.2175919}
+}
+@article{ref:srnet,
+  author  = {Mehdi Boroumand and Mo Chen and Jessica Fridrich},
+  title   = {Deep Residual Network for Steganalysis of Digital Images},
+  journal = {IEEE Transactions on Information Forensics and Security},
+  volume  = {14}, number = {5}, pages = {1181--1193}, year = {2019},
+  doi     = {10.1109/TIFS.2018.2871749}
+}
+@inproceedings{ref:ker06,
+  author    = {Andrew D. Ker},
+  title     = {Batch Steganography and Pooled Steganalysis},
+  booktitle = {Information Hiding (IH 2006)},
+  series    = {Lecture Notes in Computer Science}, volume = {4437},
+  pages     = {265--281}, publisher = {Springer}, year = {2007},
+  doi       = {10.1007/978-3-540-74124-4_18}
 }
