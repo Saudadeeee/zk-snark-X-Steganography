@@ -53,7 +53,7 @@ zero-knowledge proof directly in the CAVLC residuals of an H.264 Baseline
 bitstream and verifies it from the received video, without side files,
 metadata boxes or access to the cover. The proof is a Fiat--Shamir-with-aborts
 proof of knowledge of an opening of a BDLOP commitment, instantiated at an
-estimated 138--140-bit classical (125--127-bit quantum) core-SVP level. Its
+estimated 135-bit classical (123-bit quantum) core-SVP level. Its
 statement binds a carrier-normalized digest of the video, the
 verifier-recomputed carrier positions, a one-use verifier challenge and an
 issuer-signed relation registry; carrier normalization breaks the circularity
@@ -465,9 +465,16 @@ rather than reused from~\cite{ref:bdlop}. The per-attempt acceptance
 probability is $((2B+1)/2\gamma)^{kN}\approx0.215$ (4.65 expected attempts;
 4.68 measured over 50 runs). Core-SVP costs were computed with the CRYSTALS
 estimation scripts~\cite{ref:crystalsestimates}, ignoring reduction losses as
-for ML-DSA; an independent cross-check with the
-lattice-estimator~\cite{ref:aps15,ref:latticeestimator} is
-\todo{cross-check M-SIS/M-LWE estimates with lattice-estimator}.
+for ML-DSA. An independent cross-check with the
+lattice-estimator~\cite{ref:aps15,ref:latticeestimator} (commit
+\texttt{e4333d9}, same core-SVP model) reproduces the M-SIS estimate
+($\beta=480$, 140/127 bits) and the primal M-LWE estimate ($\beta=473$,
+138/125 bits). Its dual-hybrid attack on M-LWE is slightly cheaper
+($\beta=463$, $2^{135}$ classical; $2^{123}$ quantum), so we take 135/123 bits
+for hiding (Table~\ref{tab:params}). The $\ell_2$ relaxation of the binding
+bound exceeds $q$, so binding rests on the $\ell_\infty$ estimate. Under the
+estimator's default cost model, every attack on either instance costs at
+least $2^{161}$.
 
 \subsection{Envelopes, registry and sessions}
 The envelope is

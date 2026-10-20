@@ -47,8 +47,11 @@ CRYSTALS security-estimates model (commit `75c26949`), core-SVP cost:
 |---|---|---|---|---|
 | M-SIS (binding) | `B1 ∈ R_q^{n×k}`, `ℓ∞` bound `8κB ≈ 2^25.9` | 480 | 140 | 127 |
 | M-LWE (hiding) | rank `λ`, `n+1` samples, ternary secret and error | 474 | 138 | 125 |
+| M-LWE, dual hybrid (lattice-estimator `e4333d9`) | same | 463 | **135** | **123** |
 
-Reduction losses are ignored, as for ML-DSA.
+Reduction losses are ignored, as for ML-DSA. The claimed hiding level is the
+lower dual-hybrid figure; the cross-check also reproduces the M-SIS and primal
+M-LWE rows (`research/bdlop_params/CROSSCHECK.md`).
 
 ## 3. Algorithms
 
