@@ -13,12 +13,18 @@ Extraction gives relaxed openings of both commitments with one challenge
 difference ``f`` and ``f (t2_a - t2_b) = <b2, rbar_a - rbar_b>``, so both
 extracted messages coincide.  It adds no communication beyond the two opening
 proofs it replaces.
+
+Either witness may be the all-zero vector (it is ternary): with
+``C_b = Com(m; 0) = (0, m)`` the proof shows that ``C_a`` hides the public
+message ``m`` without revealing ``r_a``, which is how payloads are disclosed
+(``video_proof.create_disclosure``).
 """
 
 from __future__ import annotations
 
 import hashlib
 import hmac
+import math
 import struct
 
 import numpy as np
@@ -26,7 +32,6 @@ import numpy as np
 from . import codec, ring, sampling
 from .bdlop import Commitment, derive_key, ternary_randomness
 from .opening_proof import (
-    MAX_ATTEMPTS,
     ProofResult,
     _canonical_or_none,
     _challenge_times,
@@ -38,6 +43,25 @@ from .params import CHALLENGE_SEED_BYTES, BdlopParams
 
 _CHALLENGE_DOMAIN = b"zkstego/lattice-zk/bdlop-equal/v1/fiat-shamir\0"
 _MASK_DOMAIN = b"zkstego/lattice-zk/bdlop-equal/v1/mask\0"
+# Both responses must be accepted, so an attempt succeeds with probability
+# p_acc^2 (about 0.046 for the production set).  The opening proof's cap of
+# 512 would leave a 2^-35 failure probability; 4096 attempts give about
+# 2^-279.  A larger cap leaks nothing: acceptance does not depend on the witness.
+MAX_ATTEMPTS = 4096
+COMPLETENESS_ERROR_BITS = 128
+
+
+def abort_probability_log2(params: BdlopParams, attempts: int | None = None) -> float:
+    """log2 of the probability that ``attempts`` (default: the cap) all abort.
+
+    Each response is accepted independently with the exact probability
+    ``params.acceptance_probability``, whatever the witness.
+    """
+    attempts = MAX_ATTEMPTS if attempts is None else attempts
+    accepted = params.acceptance_probability ** 2
+    if accepted >= 1.0:
+        return -math.inf
+    return attempts * math.log2(1.0 - accepted)
 
 
 def proof_bytes(params: BdlopParams) -> int:

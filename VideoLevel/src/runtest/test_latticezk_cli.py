@@ -255,3 +255,92 @@ def test_corrupted_credential_secret_is_refused_before_embedding(tmp_path, capsy
                             "--registry", registry, "--issuer-public", issuer_public,
                             "--minimum-epoch", 1)
         assert code == 2 and "error:" in report["stderr"] and not stego.exists()
+
+
+# -- holder identity and zero-knowledge disclosure ------------------------ #
+
+def test_holder_id_must_match_wherever_pins_are_resolved(tmp_path, capsys) -> None:
+    issuer_public, issuer_private = _issuer(tmp_path, capsys)
+    payload = tmp_path / "device.bin"
+    payload.write_bytes(b"device 42")
+    public, private = tmp_path / "holder.pub.json", tmp_path / "holder.key.json"
+    _run(capsys, "credential-new", "--payload-file", payload, "--public", public, "--private", private)
+    registry, database = tmp_path / "registry.json", tmp_path / "sessions.sqlite3"
+    code, signed = _run(capsys, "registry-sign", "--issuer-private", issuer_private, "--epoch", 1,
+                        "--credential", public, "--holder-id", "alice@example.org", "--out", registry)
+    assert code == 0 and signed["holder_id"] == "alice@example.org"
+    base = ("--registry", registry, "--issuer-public", issuer_public, "--minimum-epoch", 1)
+    verifier = (*base, "--credential", public)
+    alice = ("--holder-id", "alice@example.org")
+
+    for holder in ((), ("--holder-id", "bob@example.org")):
+        assert _run(capsys, "session-issue", "--database", database, *verifier, *holder)[0] == 2
+    _, grant = _run(capsys, "session-issue", "--database", database, *verifier, *alice)
+    stego = tmp_path / "stego.h264"
+    embed = ("embed", "--video", _cover(tmp_path), "--output", stego,
+             "--session", grant["challenge"], "--credential-private", private, *base)
+    assert _run(capsys, *embed)[0] == 2 and not stego.exists()
+    assert _run(capsys, *embed, *alice)[0] == 0
+
+    assert _run(capsys, "verify", "--video", stego, "--database", database, *verifier)[0] == 2
+    code, verified = _run(capsys, "verify", "--video", stego, "--database", database,
+                          *verifier, *alice)
+    assert code == 0 and verified["valid"] and verified["holder_id"] == "alice@example.org"
+    # A holder id is meaningless without a registered credential.
+    assert _run(capsys, "registry-sign", "--issuer-private", issuer_private, "--epoch", 1,
+                "--holder-id", "alice", "--out", tmp_path / "in-band.json")[0] == 2
+
+
+def test_in_band_disclosure_reveals_the_payload_but_not_the_opening(tmp_path, capsys) -> None:
+    verifier, challenge = _registry_and_grant(tmp_path, capsys)
+    payload = tmp_path / "payload.bin"
+    payload.write_bytes(b"hidden record")
+    stego, opening = tmp_path / "stego.h264", tmp_path / "opening.json"
+    _, embedded = _run(capsys, "embed", "--video", _cover(tmp_path), "--output", stego,
+                       "--session", challenge, "--payload-file", payload,
+                       "--opening-out", opening, *verifier)
+    envelope = tmp_path / "envelope.bin"
+    code, verified = _run(capsys, "verify", "--video", stego, "--database",
+                          tmp_path / "sessions.sqlite3", "--envelope-out", envelope, *verifier)
+    assert code == 0 and verified["valid"] and envelope.exists()
+
+    nonce = "5a" * 32  # recipient-chosen
+    disclosure = tmp_path / "disclosure.bin"
+    code, made = _run(capsys, "disclose", "--opening", opening, "--statement-id",
+                      embedded["statement_id"], "--nonce", nonce, "--out", disclosure)
+    assert code == 0 and made["payload_bytes"] == len(b"hidden record")
+    randomness = bytes.fromhex(json.loads(opening.read_text())["randomness"])
+    assert randomness not in disclosure.read_bytes()
+
+    check = ("disclosure-verify", "--envelope", envelope, "--disclosure", disclosure,
+             "--statement-id", verified["statement_id"])
+    code, report = _run(capsys, *check, "--nonce", nonce)
+    assert code == 0 and report["valid"] and report["payload_hex"] == b"hidden record".hex()
+    code, report = _run(capsys, *check, "--nonce", "5b" * 32)
+    assert code == 1 and not report["valid"] and report["payload_hex"] is None
+    assert _run(capsys, *check, "--nonce", "zz")[0] == 2
+    assert _run(capsys, "disclose", "--opening", opening, "--statement-id",
+                embedded["statement_id"], "--nonce", nonce, "--out", disclosure)[0] == 2
+
+
+def test_credential_disclosure_is_checked_against_the_public_credential(tmp_path, capsys) -> None:
+    payload = tmp_path / "device.bin"
+    payload.write_bytes(b"device 42")
+    keys = []
+    for name in ("holder", "stranger"):
+        public, private = tmp_path / f"{name}.pub.json", tmp_path / f"{name}.key.json"
+        _run(capsys, "credential-new", "--payload-file", payload, "--public", public, "--private", private)
+        keys.append((public, private))
+    disclosure, statement_id, nonce = tmp_path / "d.bin", "11" * 32, "22" * 32
+    assert _run(capsys, "disclose", "--opening", keys[0][1], "--statement-id", statement_id,
+                "--nonce", nonce, "--out", disclosure)[0] == 0
+    check = ("disclosure-verify", "--disclosure", disclosure, "--statement-id", statement_id,
+             "--nonce", nonce)
+    assert _run(capsys, *check, "--credential", keys[0][0])[1]["valid"]
+    assert _run(capsys, *check, "--credential", keys[1][0])[0] == 1
+    assert _run(capsys, *check)[0] == 2  # needs exactly one commitment source
+    mixed = tmp_path / "mixed.json"
+    mixed.write_text(json.dumps({**json.loads(keys[0][1].read_text()),
+                                 "commitment": json.loads(keys[1][0].read_text())["commitment"]}))
+    assert _run(capsys, "disclose", "--opening", mixed, "--statement-id", statement_id,
+                "--nonce", nonce, "--out", tmp_path / "m.bin")[0] == 2

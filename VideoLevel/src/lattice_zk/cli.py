@@ -3,13 +3,17 @@
 Each command touches only the files its role owns:
 
     issuer    issuer-keygen, registry-sign
-    holder    credential-new, embed
-    verifier  session-issue, verify
+    holder    credential-new, embed, disclose
+    verifier  session-issue, verify, disclosure-verify
 
 The verifier needs the stego video, the signed registry, the issuer public
 key, its own session database and the shared sync key (hex, in the
 ``ZKSTEGO_LATTICEZK_SYNC_KEY_HEX`` environment variable); it never reads a
-sidecar, the cover video or any holder secret.
+sidecar, the cover video or any holder secret.  ``--holder-id`` binds a
+registered credential to a holder identity in the signed registry; the same
+value must then be given wherever pins are resolved.  ``disclose`` reveals a
+payload to one recipient with a zero-knowledge proof (the opening's randomness
+never leaves the holder); the recipient checks it with ``disclosure-verify``.
 
     python -m src.lattice_zk.cli <command> --help
 """
@@ -31,7 +35,7 @@ from ..blind_sync import BlindOperatingContract
 from ..lattice_pq import LatticeSigner
 from ..zkp_registry import SignedZkpRelationRegistry
 from ..zkp_sessions import SessionChallengeStore
-from . import bdlop, codec
+from . import bdlop, codec, video_proof
 from . import video_pipeline as pipeline
 from .params import BDLOP_OPEN_128, BdlopParams
 
@@ -88,10 +92,14 @@ def _sync_key(arguments: argparse.Namespace | None = None, profile=None) -> byte
     return bytes.fromhex(value)
 
 
-def _challenge(value: str) -> bytes:
+def _hex_32(value: str, name: str) -> bytes:
     if _HEX_32.fullmatch(value) is None:
-        raise ValueError("session challenge must be 64 hex characters")
+        raise ValueError(f"{name} must be 64 hex characters")
     return bytes.fromhex(value)
+
+
+def _challenge(value: str) -> bytes:
+    return _hex_32(value, "session challenge")
 
 
 def _profile(arguments: argparse.Namespace, *, registered: bool) -> pipeline.CarrierProfile:
@@ -118,6 +126,7 @@ def _verifier_pins(arguments: argparse.Namespace):
     pins = pipeline.pins_from_registry(
         registry, arguments.issuer_public.read_bytes(), PARAMS, profile,
         minimum_epoch=arguments.minimum_epoch, credential=credential,
+        holder_id=arguments.holder_id,
     )
     return pins, profile, credential
 
@@ -135,13 +144,16 @@ def _issuer_keygen(arguments: argparse.Namespace) -> dict[str, Any]:
 def _registry_sign(arguments: argparse.Namespace) -> dict[str, Any]:
     credential = _public_credential(arguments.credential)
     profile = _profile(arguments, registered=credential is not None)
-    descriptor = pipeline.relation_descriptor(PARAMS, profile, credential)
+    descriptor = pipeline.relation_descriptor(
+        PARAMS, profile, credential, holder_id=arguments.holder_id
+    )
     registry = SignedZkpRelationRegistry.create(epoch=arguments.epoch, relations=[descriptor]).sign(
         arguments.issuer_private.read_bytes(), signer_id=arguments.signer_id
     )
     _write_json(arguments.out, registry.to_dict())
     return {"registry": str(arguments.out), "epoch": registry.epoch, "root": registry.root(),
-            "mode": "registered" if credential is not None else "in-band"}
+            "mode": "registered" if credential is not None else "in-band",
+            "holder_id": arguments.holder_id}
 
 
 # -- holder --------------------------------------------------------------- #
@@ -159,19 +171,26 @@ def _credential_new(arguments: argparse.Namespace) -> dict[str, Any]:
     return {"credential_public": str(arguments.public)}
 
 
-def _private_credential(path: Path) -> pipeline.Credential:
-    record = _read_json(path)
-    commitment = _public_credential(path)
+def _read_opening(record: dict[str, Any]) -> video_proof.PayloadOpening:
+    """Payload and ternary randomness from a holder-private JSON record."""
     if not isinstance(record.get("randomness"), str) or not isinstance(record.get("payload"), str):
-        raise ValueError("credential secret is malformed")
+        raise ValueError("holder secret is malformed")
     raw = np.frombuffer(bytes.fromhex(record["randomness"]), dtype=np.int8)
-    if commitment is None or raw.size != PARAMS.width * PARAMS.degree:
-        raise ValueError("credential secret is malformed")
+    if raw.size != PARAMS.width * PARAMS.degree:
+        raise ValueError("holder secret is malformed")
     randomness = raw.astype(np.int64).reshape(PARAMS.width, PARAMS.degree)
-    message = codec.encode_payload(PARAMS, bytes.fromhex(record["payload"]))
-    if not bdlop.verify_opening(PARAMS, commitment, message, randomness):
+    return video_proof.PayloadOpening(bytes.fromhex(record["payload"]), randomness)
+
+
+def _private_credential(path: Path) -> pipeline.Credential:
+    commitment = _public_credential(path)
+    if commitment is None:
+        raise ValueError("credential secret is malformed")
+    opening = _read_opening(_read_json(path))
+    message = codec.encode_payload(PARAMS, opening.payload)
+    if not bdlop.verify_opening(PARAMS, commitment, message, opening.randomness):
         raise ValueError("credential secret does not open its commitment")
-    return pipeline.Credential(commitment, randomness)
+    return pipeline.Credential(commitment, opening.randomness)
 
 
 def _embed(arguments: argparse.Namespace) -> dict[str, Any]:
@@ -190,6 +209,7 @@ def _embed(arguments: argparse.Namespace) -> dict[str, Any]:
         registry, arguments.issuer_public.read_bytes(), PARAMS, profile,
         minimum_epoch=arguments.minimum_epoch,
         credential=None if credential is None else credential.commitment,
+        holder_id=arguments.holder_id,
     )
     payload = None if credential is not None else arguments.payload_file.read_bytes()
     result = pipeline.embed_video_proof(
@@ -207,6 +227,25 @@ def _embed(arguments: argparse.Namespace) -> dict[str, Any]:
             "segments_used": result.segments_used}
 
 
+def _disclose(arguments: argparse.Namespace) -> dict[str, Any]:
+    """Reveal the payload of an opening file (or credential secret) with a proof."""
+    _require_absent(arguments.out)
+    record = _read_json(arguments.opening)
+    opening = _read_opening(record)
+    commitment = bdlop.commit(PARAMS, codec.encode_payload(PARAMS, opening.payload), opening.randomness)
+    pinned = _public_credential(arguments.opening) if "commitment" in record else commitment
+    if pinned is None or pinned.to_bytes(PARAMS) != commitment.to_bytes(PARAMS):
+        raise ValueError("holder secret does not open its commitment")
+    disclosure = video_proof.create_commitment_disclosure(
+        PARAMS, commitment, opening,
+        statement_id=_hex_32(arguments.statement_id, "statement id"),
+        nonce=_hex_32(arguments.nonce, "disclosure nonce"),
+    )
+    _write_new(arguments.out, disclosure)
+    return {"disclosure": str(arguments.out), "disclosure_bytes": len(disclosure),
+            "payload_bytes": len(opening.payload)}
+
+
 # -- verifier ------------------------------------------------------------- #
 
 def _session_issue(arguments: argparse.Namespace) -> dict[str, Any]:
@@ -217,15 +256,39 @@ def _session_issue(arguments: argparse.Namespace) -> dict[str, Any]:
 
 
 def _verify(arguments: argparse.Namespace) -> dict[str, Any]:
+    _require_absent(arguments.envelope_out)
     pins, profile, credential = _verifier_pins(arguments)
+    if arguments.envelope_out is not None and credential is not None:
+        raise ValueError("--envelope-out applies to in-band mode only")
     store = SessionChallengeStore(arguments.database, ttl_seconds=arguments.ttl_seconds)
     result = pipeline.verify_video_proof(
         arguments.video, params=PARAMS, pins=pins, profile=profile, sync_key=_sync_key(arguments, profile),
-        session_store=store, credential=credential,
+        session_store=store, credential=credential, holder_id=arguments.holder_id,
     )
+    if result.valid and arguments.envelope_out is not None:
+        _write_new(arguments.envelope_out, result.envelope)
     return {"valid": result.valid, "reason": result.reason, "carriers_used": result.carriers_used,
             "statement_id": None if result.statement_id is None else result.statement_id.hex(),
-            "mode": "registered" if credential is not None else "in-band"}
+            "mode": "registered" if credential is not None else "in-band",
+            "holder_id": arguments.holder_id}
+
+
+def _disclosure_verify(arguments: argparse.Namespace) -> dict[str, Any]:
+    """Check a disclosure against a verified envelope or a registered credential."""
+    if (arguments.envelope is None) == (arguments.credential is None):
+        raise ValueError("supply exactly one of --envelope or --credential")
+    if arguments.envelope is not None:
+        commitment = video_proof.decode_envelope(PARAMS, arguments.envelope.read_bytes()).commitment
+    else:
+        commitment = _public_credential(arguments.credential)
+    data = arguments.disclosure.read_bytes()
+    valid = video_proof.verify_commitment_disclosure(
+        PARAMS, commitment, data,
+        statement_id=_hex_32(arguments.statement_id, "statement id"),
+        nonce=_hex_32(arguments.nonce, "disclosure nonce"),
+    )
+    payload = video_proof.decode_disclosure(PARAMS, data).payload if valid else None
+    return {"valid": valid, "payload_hex": None if payload is None else payload.hex()}
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -246,6 +309,9 @@ def _build_parser() -> argparse.ArgumentParser:
         command.add_argument("--issuer-public", type=Path, required=True)
         command.add_argument("--minimum-epoch", type=int, required=True)
         command.add_argument(
+            "--holder-id", help="holder identity the issuer bound to the registered credential",
+        )
+        command.add_argument(
             "--public-carrier-order", action="store_true",
             help="derive the carrier order from the public profile instead of the secret stego key "
                  "(public verification; gives up undetectability). Embedder and verifier must "
@@ -262,6 +328,7 @@ def _build_parser() -> argparse.ArgumentParser:
     command.add_argument("--epoch", type=int, required=True)
     command.add_argument("--signer-id", default="issuer")
     command.add_argument("--credential", type=Path, help="public credential; selects registered mode")
+    command.add_argument("--holder-id", help="registered mode: bind the credential to this holder")
     command.add_argument("--out", type=Path, required=True)
     carrier_options(command)
 
@@ -279,6 +346,14 @@ def _build_parser() -> argparse.ArgumentParser:
     command.add_argument("--credential-private", type=Path, help="registered mode: credential secret")
     registry_options(command)
 
+    command = add("disclose", _disclose, "Reveal a committed payload to one recipient, in zero knowledge.")
+    command.add_argument("--opening", type=Path, required=True,
+                         help="embed --opening-out file, or a credential secret")
+    command.add_argument("--statement-id", required=True,
+                         help="hex: verified video statement id, or the id the recipient names")
+    command.add_argument("--nonce", required=True, help="recipient-chosen 32-byte nonce (hex)")
+    command.add_argument("--out", type=Path, required=True)
+
     for name, handler, summary in (
         ("session-issue", _session_issue, "Issue a one-use session challenge."),
         ("verify", _verify, "Verify a stego video from the video alone."),
@@ -290,6 +365,15 @@ def _build_parser() -> argparse.ArgumentParser:
         registry_options(command)
         if name == "verify":
             command.add_argument("--video", type=Path, required=True)
+            command.add_argument("--envelope-out", type=Path,
+                                 help="in-band mode: keep the verified envelope for disclosure-verify")
+
+    command = add("disclosure-verify", _disclosure_verify, "Check a payload disclosure.")
+    command.add_argument("--envelope", type=Path, help="envelope saved by verify --envelope-out")
+    command.add_argument("--credential", type=Path, help="public credential (registered mode)")
+    command.add_argument("--statement-id", required=True, help="hex statement id the holder used")
+    command.add_argument("--nonce", required=True, help="the nonce this recipient chose (hex)")
+    command.add_argument("--disclosure", type=Path, required=True)
     return parser
 
 

@@ -7,7 +7,7 @@ import random
 
 import pytest
 
-from src.lattice_zk import video_proof
+from src.lattice_zk import equality_proof, video_proof
 from src.lattice_zk.params import BDLOP_OPEN_128, TOY
 from src.runtest.test_latticezk_bdlop import random_corruptions
 
@@ -19,6 +19,7 @@ PINS = video_proof.VerifierPins(
     carrier_profile_id=b"P" * 32,
 )
 SESSION = b"S" * 32
+NONCE = b"N" * 32
 
 
 def _statement(**overrides) -> video_proof.VideoStatement:
@@ -77,9 +78,9 @@ def test_envelope_round_trip_verifies_and_hides_the_payload() -> None:
     assert len(data) == video_proof.envelope_size(TOY) == len(video_proof.placeholder_envelope(TOY))
     assert video_proof.verify_envelope(TOY, statement, data)
     assert payload not in data
-    assert video_proof.verify_disclosure(TOY, data, opening)
+    assert video_proof.self_check_opening(TOY, data, opening)
     forged = dataclasses.replace(opening, payload=b"another record")
-    assert not video_proof.verify_disclosure(TOY, data, forged)
+    assert not video_proof.self_check_opening(TOY, data, forged)
 
 
 @pytest.mark.parametrize(
@@ -143,7 +144,14 @@ def test_production_envelope_has_the_registered_wire_size() -> None:
     data, opening = video_proof.create_envelope(BDLOP_OPEN_128, statement, b"p" * 100)
     assert len(data) == 14_309
     assert video_proof.verify_envelope(BDLOP_OPEN_128, statement, data)
-    assert video_proof.verify_disclosure(BDLOP_OPEN_128, data, opening)
+    assert video_proof.self_check_opening(BDLOP_OPEN_128, data, opening)
+    disclosure = video_proof.create_disclosure(
+        BDLOP_OPEN_128, data, opening, statement_id=statement.statement_id, nonce=NONCE
+    )
+    assert len(disclosure) == 39 + 100 + equality_proof.proof_bytes(BDLOP_OPEN_128)
+    assert video_proof.verify_disclosure_proof(
+        BDLOP_OPEN_128, data, disclosure, statement_id=statement.statement_id, nonce=NONCE
+    )
 
 
 # -- registered-commitment (proof-only) envelope -------------------------- #
@@ -233,7 +241,7 @@ def test_verifiers_return_false_for_non_statement_or_non_opening_inputs() -> Non
         dataclasses.replace(opening, randomness=opening.randomness.tolist()),
         dataclasses.replace(opening, payload="payload"),
     ):
-        assert video_proof.verify_disclosure(TOY, data, bogus_opening) is False  # type: ignore[arg-type]
+        assert video_proof.self_check_opening(TOY, data, bogus_opening) is False  # type: ignore[arg-type]
 
 
 def test_envelope_constructors_refuse_malformed_inputs() -> None:
@@ -296,3 +304,124 @@ def test_random_statements_verify_only_their_own_envelope() -> None:
     for i, statement in enumerate(statements):
         for j, data in enumerate(envelopes):
             assert video_proof.verify_envelope(TOY, statement, data) is (i == j)
+
+
+# -- zero-knowledge disclosure (no randomness handed over) ----------------- #
+
+def _disclosed(payload: bytes = b"secret provenance record"):
+    statement = _statement()
+    data, opening = video_proof.create_envelope(TOY, statement, payload)
+    disclosure = video_proof.create_disclosure(
+        TOY, data, opening, statement_id=statement.statement_id, nonce=NONCE
+    )
+    return statement, data, opening, disclosure
+
+
+def _accepts(data: bytes, disclosure: bytes, statement_id: bytes, nonce: bytes = NONCE) -> bool:
+    return video_proof.verify_disclosure_proof(
+        TOY, data, disclosure, statement_id=statement_id, nonce=nonce
+    )
+
+
+def test_disclosure_reveals_the_payload_and_verifies() -> None:
+    statement, data, _, disclosure = _disclosed()
+    assert _accepts(data, disclosure, statement.statement_id)
+    decoded = video_proof.decode_disclosure(TOY, disclosure)
+    assert decoded.payload == b"secret provenance record"
+    assert video_proof.encode_disclosure(TOY, decoded) == disclosure
+
+
+def test_disclosure_does_not_contain_the_randomness() -> None:
+    _, _, opening, disclosure = _disclosed()
+    decoded = video_proof.decode_disclosure(TOY, disclosure)
+    # The wire format is exactly header, payload and an equality proof.
+    assert len(disclosure) == 39 + len(decoded.payload) + equality_proof.proof_bytes(TOY)
+    assert set(vars(decoded)) == {"payload", "proof"}
+    for encoding in (opening.randomness.astype(">i8").tobytes(),
+                     opening.randomness.astype("i1").tobytes(),
+                     (opening.randomness + 1).astype("u1").tobytes()):
+        assert encoding not in disclosure
+
+
+def test_disclosure_rejects_wrong_payload_context_or_envelope() -> None:
+    statement, data, opening, disclosure = _disclosed()
+    decoded = video_proof.decode_disclosure(TOY, disclosure)
+    for payload in (b"secret provenance recorD", b"", b"secret provenance record!"):
+        swapped = video_proof.encode_disclosure(TOY, video_proof.Disclosure(payload, decoded.proof))
+        assert not _accepts(data, swapped, statement.statement_id)
+    assert not _accepts(data, disclosure, statement.statement_id, nonce=b"M" * 32)
+    assert not _accepts(data, disclosure, _statement(carrier_count=7).statement_id)
+    other, _ = video_proof.create_envelope(TOY, statement, b"secret provenance record")
+    assert not _accepts(other, disclosure, statement.statement_id)
+    with pytest.raises(ValueError):  # the holder cannot disclose a payload it did not commit
+        video_proof.create_disclosure(
+            TOY, data, dataclasses.replace(opening, payload=b"another record"),
+            statement_id=statement.statement_id, nonce=NONCE,
+        )
+    with pytest.raises(ValueError):  # another envelope's opening does not open this one
+        video_proof.create_disclosure(
+            TOY, other, opening, statement_id=statement.statement_id, nonce=NONCE
+        )
+
+
+def test_tampered_or_malformed_disclosures_are_rejected() -> None:
+    rng = random.Random(0x5EED0025)
+    statement, data, _, disclosure = _disclosed()
+    for offset in (0, 4, 5, 36, 37, 38, 39, 50, len(disclosure) - 1):
+        mutated = bytearray(disclosure)
+        mutated[offset] ^= 0x01
+        assert not _accepts(data, bytes(mutated), statement.statement_id)
+    for corrupted in random_corruptions(disclosure, rng, 200):
+        assert not _accepts(data, corrupted, statement.statement_id)
+    for bogus in (disclosure[:-1], disclosure + b"\x00", b"", disclosure[:38], "ZKLD"):
+        assert not _accepts(data, bogus, statement.statement_id)  # type: ignore[arg-type]
+    assert not _accepts(data[:-1], disclosure, statement.statement_id)
+    for statement_id, nonce in ((b"x", NONCE), (statement.statement_id, b"n" * 31),
+                                (statement.statement_id, "N" * 32)):
+        assert not _accepts(data, disclosure, statement_id, nonce)  # type: ignore[arg-type]
+    oversized = bytearray(disclosure)
+    oversized[37:39] = (TOY.max_payload_bytes + 1).to_bytes(2, "big")
+    with pytest.raises(ValueError):
+        video_proof.decode_disclosure(TOY, bytes(oversized))
+
+
+def test_disclosure_is_bound_to_the_parameter_set_and_kind() -> None:
+    statement, data, opening, disclosure = _disclosed()
+    other = dataclasses.replace(TOY, name="bdlop-open-toy-v2")
+    assert not video_proof.verify_disclosure_proof(
+        other, data, disclosure, statement_id=statement.statement_id, nonce=NONCE
+    )
+    linkage_like = equality_proof.verify(  # not usable as an equality proof elsewhere
+        TOY, statement.statement_id, video_proof.decode_envelope(TOY, data).commitment,
+        video_proof._public_commitment(TOY, opening.payload)[0],
+        video_proof.decode_disclosure(TOY, disclosure).proof,
+    )
+    assert not linkage_like
+    with pytest.raises(TypeError):
+        video_proof.create_disclosure(
+            TOY, data, (opening.payload, opening.randomness),  # type: ignore[arg-type]
+            statement_id=statement.statement_id, nonce=NONCE,
+        )
+    with pytest.raises(ValueError):
+        video_proof.create_disclosure(
+            TOY, data, opening, statement_id=statement.statement_id, nonce=b"short"
+        )
+
+
+def test_registered_credential_disclosure_works_on_the_commitment() -> None:
+    commitment, randomness = _credential()
+    opening = video_proof.PayloadOpening(b"device credential", randomness)
+    relation = b"R" * 32
+    disclosure = video_proof.create_commitment_disclosure(
+        TOY, commitment, opening, statement_id=relation, nonce=NONCE
+    )
+    assert video_proof.verify_commitment_disclosure(
+        TOY, commitment, disclosure, statement_id=relation, nonce=NONCE
+    )
+    stranger, _ = _credential(b"d" * 32)
+    assert not video_proof.verify_commitment_disclosure(
+        TOY, stranger, disclosure, statement_id=relation, nonce=NONCE
+    )
+    assert not video_proof.verify_commitment_disclosure(
+        TOY, b"commitment", disclosure, statement_id=relation, nonce=NONCE  # type: ignore[arg-type]
+    )

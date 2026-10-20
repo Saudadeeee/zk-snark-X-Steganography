@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import hmac
 import json
+import struct
 import subprocess
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from ..zkp_registry import BDLOP_OPEN_ZKP_SUITE, SignedZkpRelationRegistry
+from ..zkp_registry import BDLOP_OPEN_ZKP_SUITE, RelationRecord, SignedZkpRelationRegistry
 from ..zkp_sessions import SessionChallengeStore
 from . import bdlop, video_proof
 from .params import BdlopParams
@@ -29,6 +32,7 @@ REGISTERED_CONSTRAINT_MODULE = (
 )
 DEFAULT_FRAMES_PER_SEGMENT = 100
 DEFAULT_CHUNK_BYTES = 1_250
+MAX_HOLDER_ID_BYTES = 256
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
@@ -106,21 +110,54 @@ def policy_hash(params: BdlopParams, profile: CarrierProfile) -> str:
     ).hexdigest()
 
 
+def holder_id_digest(holder_id: str) -> bytes:
+    """Domain-separated digest of a holder identifier.
+
+    The identifier is a non-empty NFC-normalized string of at most
+    ``MAX_HOLDER_ID_BYTES`` UTF-8 bytes; anything else is refused, so one
+    identity has exactly one encoding.
+    """
+    if not isinstance(holder_id, str) or not holder_id:
+        raise ValueError("holder id must be a non-empty string")
+    if not unicodedata.is_normalized("NFC", holder_id):
+        raise ValueError("holder id must be NFC-normalized")
+    try:
+        encoded = holder_id.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise ValueError("holder id must be valid Unicode text") from error
+    if len(encoded) > MAX_HOLDER_ID_BYTES:
+        raise ValueError(f"holder id must be at most {MAX_HOLDER_ID_BYTES} UTF-8 bytes")
+    return hashlib.sha256(
+        _DOMAIN + b"holder-id\0" + struct.pack(">H", len(encoded)) + encoded
+    ).digest()
+
+
 def relation_descriptor(
-    params: BdlopParams, profile: CarrierProfile, credential: bdlop.Commitment | None = None
+    params: BdlopParams, profile: CarrierProfile, credential: bdlop.Commitment | None = None,
+    *, holder_id: str | None = None,
 ) -> dict[str, str]:
     """Descriptor an issuer signs into the relation registry for this backend.
 
     For a registered profile the issuer's signature also covers the holder's
     credential commitment, which is what makes the proof authenticate them.
+    With ``holder_id`` it also covers "this commitment belongs to holder X":
+    the identifier's digest is hashed into ``verifier_key_hash`` after the
+    commitment, so the registry field set is unchanged and ``holder_id=None``
+    gives the same descriptor as before.
     """
     if profile.registered != (credential is not None):
         raise ValueError("a credential commitment is required exactly for registered profiles")
+    if holder_id is not None and credential is None:
+        raise ValueError("a holder id can only be bound to a registered credential")
     key = bdlop.derive_key(params)
     key_bytes = key.b1_tail.astype(">u8").tobytes() + key.b2_tail.astype(">u8").tobytes()
     module = CONSTRAINT_MODULE
     if credential is not None:
+        # Every part has a length fixed by ``params``, so the optional digest
+        # at the end keeps the concatenation unambiguous.
         key_bytes += credential.to_bytes(params)
+        if holder_id is not None:
+            key_bytes += holder_id_digest(holder_id)
         module = REGISTERED_CONSTRAINT_MODULE
     return {
         "zkp_suite": BDLOP_OPEN_ZKP_SUITE,
@@ -131,15 +168,26 @@ def relation_descriptor(
     }
 
 
+def relation_id(
+    params: BdlopParams, profile: CarrierProfile, credential: bdlop.Commitment | None = None,
+    *, holder_id: str | None = None,
+) -> bytes:
+    """Registry relation identifier of :func:`relation_descriptor`."""
+    descriptor = relation_descriptor(params, profile, credential, holder_id=holder_id)
+    return bytes.fromhex(RelationRecord.from_descriptor(descriptor).relation_id)
+
+
 def pins_from_registry(
     registry: SignedZkpRelationRegistry, issuer_public_key: bytes,
     params: BdlopParams, profile: CarrierProfile, *, minimum_epoch: int,
     allow_toy_parameters: bool = False, credential: bdlop.Commitment | None = None,
+    holder_id: str | None = None,
 ) -> VerifierPins:
     """Resolve verifier pins from an issuer-signed registry; fail closed.
 
     ``minimum_epoch`` is the verifier's rollback floor.  Parameter sets with a
-    challenge space below 2^256 are refused unless a test opts in.
+    challenge space below 2^256 are refused unless a test opts in.  A
+    credential registered with a holder id resolves only with that same id.
     """
     if not allow_toy_parameters:
         params.require_production_strength()
@@ -147,10 +195,12 @@ def pins_from_registry(
         raise ValueError("relation registry signature did not verify against the issuer key")
     if registry.epoch < minimum_epoch:
         raise ValueError("relation registry is older than the verifier minimum epoch")
-    descriptor = relation_descriptor(params, profile, credential)
+    descriptor = relation_descriptor(params, profile, credential, holder_id=holder_id)
     matches = [record for record in registry.relations if record.descriptor() == descriptor]
     if len(matches) != 1:
-        raise ValueError("this parameter set and carrier profile are not registered")
+        raise ValueError(
+            "this parameter set, carrier profile, credential and holder id are not registered"
+        )
     root, epoch = registry.resolve(
         matches[0].relation_id, BDLOP_OPEN_ZKP_SUITE, descriptor["policy_hash"]
     )
@@ -248,8 +298,9 @@ def embed_video_proof(
 
 
 def _require_verifier_configuration(
-    params: BdlopParams, profile: CarrierProfile, session_store: SessionChallengeStore | None,
-    expected_session: bytes | None, credential: bdlop.Commitment | None,
+    params: BdlopParams, pins: VerifierPins, profile: CarrierProfile,
+    session_store: SessionChallengeStore | None, expected_session: bytes | None,
+    credential: bdlop.Commitment | None, holder_id: str | None,
 ) -> None:
     """Reject verifier misconfiguration loudly; video content never reaches here."""
     if (session_store is None) == (expected_session is None):
@@ -264,21 +315,38 @@ def _require_verifier_configuration(
         isinstance(credential, bdlop.Commitment) and credential.is_canonical(params)
     ):
         raise ValueError("the pinned credential is not a canonical commitment for this parameter set")
+    if not isinstance(pins, VerifierPins):
+        raise ValueError("pins must be VerifierPins")
+    # The pins must name the relation of exactly this credential (and holder);
+    # otherwise an unregistered credential would be verified under them.
+    expected = relation_id(params, profile, credential, holder_id=holder_id)
+    if not hmac.compare_digest(expected, pins.relation_id):
+        raise ValueError(
+            "pinned relation id does not match this parameter set, profile, credential and holder id"
+        )
 
 
 def verify_video_proof(
     video_path: str | Path, *,
     params: BdlopParams, pins: VerifierPins, profile: CarrierProfile, sync_key: bytes,
     session_store: SessionChallengeStore | None = None, expected_session: bytes | None = None,
-    credential: bdlop.Commitment | None = None,
+    credential: bdlop.Commitment | None = None, holder_id: str | None = None,
     transport: Transport | None = None, progress_callback: ProgressCallback | None = None,
 ) -> VerifyResult:
     """Blind-extract the envelope and verify it against a verifier-built statement.
 
     Exactly one of ``session_store`` (one-use, replay-protected) or
     ``expected_session`` (stateless; no replay protection) must be supplied.
+
+    Raises ``ValueError`` on verifier misconfiguration, before reading the
+    video: in particular when ``pins.relation_id`` is not the relation of
+    ``(params, profile, credential, holder_id)``, e.g. pins resolved for one
+    credential used with another, or in-band pins used for a registered
+    profile and vice versa.  Video content only ever yields ``valid=False``.
     """
-    _require_verifier_configuration(params, profile, session_store, expected_session, credential)
+    _require_verifier_configuration(
+        params, pins, profile, session_store, expected_session, credential, holder_id
+    )
     channel = transport or _default_transport()
     try:
         extracted = channel.extract_chunked_video_payload(

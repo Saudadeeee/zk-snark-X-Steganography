@@ -172,11 +172,14 @@ def test_carrier_change_or_missing_envelope_is_rejected(tmp_path, pins) -> None:
 def test_verifier_with_other_pins_rejects(tmp_path, pins) -> None:
     stego = _embed(tmp_path, pins, b"\x07" * 32)
     for field, value in (
-        ("relation_id", b"\x02" * 32), ("registry_root", b"\x02" * 32),
-        ("registry_epoch", 4), ("carrier_profile_id", b"\x02" * 32),
+        ("registry_root", b"\x02" * 32), ("registry_epoch", 4), ("carrier_profile_id", b"\x02" * 32),
     ):
         changed = dataclasses.replace(pins, **{field: value})
         assert not _verify(stego, changed, expected_session=b"\x07" * 32).valid
+    # A relation id that is not this configuration's is verifier misconfiguration.
+    with pytest.raises(ValueError, match="relation id"):
+        _verify(stego, dataclasses.replace(pins, relation_id=b"\x02" * 32),
+                expected_session=b"\x07" * 32)
 
 
 def test_transport_failures_are_reported_as_rejection(tmp_path, pins) -> None:
@@ -242,8 +245,11 @@ def test_registered_credential_round_trip_authenticates_the_holder(tmp_path, iss
     )
     assert verify(credential=credential.commitment).valid
 
-    _, _, stranger = _registered_setup(issuer, b"d" * 32)
-    assert not verify(credential=stranger.commitment).valid
+    _, stranger_pins, stranger = _registered_setup(issuer, b"d" * 32)
+    # Under the stranger's own registered relation, this holder's proof fails.
+    assert not verify(credential=stranger.commitment, pins=stranger_pins).valid
+    with pytest.raises(ValueError, match="relation id"):
+        verify(credential=stranger.commitment)  # pins of one credential, another passed
     with pytest.raises(ValueError):
         verify()  # a registered profile always needs the pinned commitment
 
@@ -283,7 +289,15 @@ def test_verified_envelope_supports_later_linkage_and_disclosure(tmp_path, pins)
     )
     verified = _verify(stego, pins, expected_session=b"\x07" * 32)
     assert verified.valid and verified.envelope is not None
-    assert video_proof.verify_disclosure(TOY, verified.envelope, embedded.opening)
+    assert video_proof.self_check_opening(TOY, verified.envelope, embedded.opening)
+    nonce = b"\x5a" * 32  # chosen by the recipient
+    disclosure = video_proof.create_disclosure(
+        TOY, verified.envelope, embedded.opening, statement_id=verified.statement_id, nonce=nonce
+    )
+    assert video_proof.verify_disclosure_proof(
+        TOY, verified.envelope, disclosure, statement_id=verified.statement_id, nonce=nonce
+    )
+    assert video_proof.decode_disclosure(TOY, disclosure).payload == b"device 42"
 
     randomness = bdlop.sample_randomness(TOY, b"c" * 32)
     credential = bdlop.commit(TOY, codec.encode_payload(TOY, b"device 42"), randomness)
@@ -375,3 +389,116 @@ def test_random_carrier_corruptions_never_verify(tmp_path, pins) -> None:
         mutated[bit // 8] ^= 0x80 >> (bit % 8)
         stego.write_bytes(body + marker + bytes(mutated))
         assert not _verify(stego, pins, expected_session=b"\x07" * 32).valid, index
+
+
+# -- pins must match the credential (D6) ---------------------------------- #
+
+def test_in_band_and_registered_pins_are_not_interchangeable(tmp_path, pins, issuer) -> None:
+    _, registered_pins, credential = _registered_setup(issuer)
+    in_band = _embed(tmp_path, pins, b"\x07" * 32)
+    other = tmp_path / "registered"
+    other.mkdir()
+    registered = _embed_registered(other, registered_pins, credential, b"\x07" * 32)
+    with pytest.raises(ValueError, match="relation id"):
+        _verify(in_band, registered_pins, expected_session=b"\x07" * 32)
+    with pytest.raises(ValueError, match="relation id"):
+        pipeline.verify_video_proof(
+            registered, params=TOY, pins=pins, profile=REGISTERED_PROFILE, sync_key=SYNC_KEY,
+            transport=FakeTransport(), expected_session=b"\x07" * 32,
+            credential=credential.commitment,
+        )
+    with pytest.raises(ValueError):
+        _verify(in_band, (pins.relation_id, pins.registry_root), expected_session=b"\x07" * 32)
+
+
+# -- holder identity in the registered descriptor (D2) -------------------- #
+
+def _holder_setup(issuer, holder_id, seed: bytes = b"h" * 32):
+    from src.lattice_zk import bdlop, codec
+
+    randomness = bdlop.sample_randomness(TOY, seed)
+    commitment = bdlop.commit(TOY, codec.encode_payload(TOY, b"device 7"), randomness)
+    descriptor = pipeline.relation_descriptor(
+        TOY, REGISTERED_PROFILE, commitment, holder_id=holder_id
+    )
+    registry = SignedZkpRelationRegistry.create(epoch=6, relations=[descriptor]).sign(
+        issuer[1], signer_id="test-issuer"
+    )
+    return registry, pipeline.Credential(commitment, randomness)
+
+
+def _resolve_holder(registry, issuer, commitment, holder_id):
+    return pipeline.pins_from_registry(
+        registry, issuer[0], TOY, REGISTERED_PROFILE, minimum_epoch=6,
+        allow_toy_parameters=True, credential=commitment, holder_id=holder_id,
+    )
+
+
+def test_holder_id_is_covered_by_the_issuer_signature(issuer) -> None:
+    registry, credential = _holder_setup(issuer, "alice@example.org")
+    pins = _resolve_holder(registry, issuer, credential.commitment, "alice@example.org")
+    assert pins.relation_id == pipeline.relation_id(
+        TOY, REGISTERED_PROFILE, credential.commitment, holder_id="alice@example.org"
+    )
+    for wrong in (None, "mallory@example.org", "alice@example.org "):
+        with pytest.raises(ValueError, match="not registered"):
+            _resolve_holder(registry, issuer, credential.commitment, wrong)
+    plain_registry, _ = _holder_setup(issuer, None)
+    with pytest.raises(ValueError, match="not registered"):
+        _resolve_holder(plain_registry, issuer, credential.commitment, "alice@example.org")
+
+
+def test_holder_id_default_keeps_the_previous_descriptor() -> None:
+    from src.lattice_zk import bdlop, codec
+
+    randomness = bdlop.sample_randomness(TOY, b"h" * 32)
+    commitment = bdlop.commit(TOY, codec.encode_payload(TOY, b"device 7"), randomness)
+    key = bdlop.derive_key(TOY)
+    key_bytes = key.b1_tail.astype(">u8").tobytes() + key.b2_tail.astype(">u8").tobytes()
+    plain = pipeline.relation_descriptor(TOY, REGISTERED_PROFILE, commitment)
+    assert plain["verifier_key_hash"] == hashlib.sha256(
+        key_bytes + commitment.to_bytes(TOY)
+    ).hexdigest()
+    bound = pipeline.relation_descriptor(TOY, REGISTERED_PROFILE, commitment, holder_id="alice")
+    assert bound["verifier_key_hash"] == hashlib.sha256(
+        key_bytes + commitment.to_bytes(TOY) + pipeline.holder_id_digest("alice")
+    ).hexdigest()
+    assert {k: v for k, v in bound.items() if k != "verifier_key_hash"} == {
+        k: v for k, v in plain.items() if k != "verifier_key_hash"
+    }
+
+
+@pytest.mark.parametrize(
+    "holder_id",
+    ["", b"alice", 7, "e\u0301", "x" * (pipeline.MAX_HOLDER_ID_BYTES + 1), "\ud800",
+     "\u00e9" * (pipeline.MAX_HOLDER_ID_BYTES // 2 + 1)],
+)
+def test_malformed_holder_ids_are_refused(holder_id) -> None:
+    from src.lattice_zk import bdlop, codec
+
+    randomness = bdlop.sample_randomness(TOY, b"h" * 32)
+    commitment = bdlop.commit(TOY, codec.encode_payload(TOY, b"device 7"), randomness)
+    with pytest.raises(ValueError):
+        pipeline.relation_descriptor(TOY, REGISTERED_PROFILE, commitment, holder_id=holder_id)
+
+
+def test_holder_id_needs_a_registered_credential() -> None:
+    with pytest.raises(ValueError, match="holder id"):
+        pipeline.relation_descriptor(TOY, PROFILE, holder_id="alice")
+    assert len(pipeline.holder_id_digest("x" * pipeline.MAX_HOLDER_ID_BYTES)) == 32
+    assert pipeline.holder_id_digest("alice") != pipeline.holder_id_digest("alicf")
+
+
+def test_holder_bound_video_verifies_only_with_its_holder_id(tmp_path, issuer) -> None:
+    registry, credential = _holder_setup(issuer, "alice")
+    pins = _resolve_holder(registry, issuer, credential.commitment, "alice")
+    stego = _embed_registered(tmp_path, pins, credential, b"\x07" * 32)
+    verify = functools.partial(
+        pipeline.verify_video_proof, stego, params=TOY, pins=pins, profile=REGISTERED_PROFILE,
+        sync_key=SYNC_KEY, transport=FakeTransport(), expected_session=b"\x07" * 32,
+        credential=credential.commitment,
+    )
+    assert verify(holder_id="alice").valid
+    for wrong in (None, "bob"):
+        with pytest.raises(ValueError, match="relation id"):
+            verify(holder_id=wrong)
