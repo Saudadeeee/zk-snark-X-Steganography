@@ -1,0 +1,19 @@
+[
+  {
+    "video": "coastguard_cif_q22_g1.h264",
+    "frames": 300,
+    "segments_total": 3,
+    "segments_scanned": 3,
+    "carrier_bits_per_segment": [
+      31404,
+      39899,
+      37691
+    ],
+    "min_chunk_bytes_supported": 3888,
+    "scan_seconds": 635.8,
+    "registered_segments_needed_at_min_chunk": 2,
+    "registered_fits_estimate": true,
+    "in_band_segments_needed_at_min_chunk": 4,
+    "in_band_fits_estimate": false
+  }
+]

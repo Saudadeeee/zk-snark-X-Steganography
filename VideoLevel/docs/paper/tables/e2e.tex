@@ -1,0 +1,14 @@
+\begin{table}[t]
+\centering
+\caption{End-to-end embedding and video-only verification.}
+\label{tab:e2e}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lllllllllllll}
+\toprule
+Case & Mode & Envelope (B) & Carriers & Verified & Replay rej. & Tamper rej. & PSNR mod. (dB) & Worst (dB) & Frames mod. & SSIM & Embed (s) & Verify (s) \\
+\midrule
+coastguard3000f\_q22\_reg & registered & 7589 & 62784 & yes & yes & yes & -- & -- & --/-- & 0.99996 & 2164 & 740 \\
+deadline\_cif\_q22\_reg & registered & 7589 & 62784 & yes & yes & yes & -- & -- & --/-- & 0.99984 & 1793 & 1261 \\
+\bottomrule
+\end{tabular}}
+\end{table}

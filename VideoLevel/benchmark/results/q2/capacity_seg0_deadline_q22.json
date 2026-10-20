@@ -1,0 +1,17 @@
+[
+  {
+    "video": "deadline_cif_q22_g1.h264",
+    "frames": 1374,
+    "segments_total": 14,
+    "segments_scanned": 1,
+    "carrier_bits_per_segment": [
+      46589
+    ],
+    "min_chunk_bytes_supported": 5786,
+    "scan_seconds": 183.9,
+    "registered_segments_needed_at_min_chunk": 2,
+    "registered_fits_estimate": true,
+    "in_band_segments_needed_at_min_chunk": 3,
+    "in_band_fits_estimate": true
+  }
+]

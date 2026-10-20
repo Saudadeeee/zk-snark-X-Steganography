@@ -1,0 +1,61 @@
+{
+  "parameter_set": "bdlop-open-128-v1",
+  "parameter_id": "c33f36970d896c7c47b8ba319ae8625e33eb9e7be11e45b7dbf6b318d2a0a26b",
+  "runs": 50,
+  "host": {
+    "machine": "AMD64",
+    "processor": "Intel64 Family 6 Model 154 Stepping 3, GenuineIntel",
+    "python": "3.12.10",
+    "system": "Windows-11-10.0.26100-SP0"
+  },
+  "sizes_bytes": {
+    "commitment": 6720,
+    "opening_proof": 7520,
+    "equality_proof": 15008,
+    "in_band_envelope": 14309,
+    "baseline_groth16_proof": 129,
+    "baseline_ML-DSA-44_signature": 2420,
+    "baseline_ML-DSA-65_signature": 3309
+  },
+  "timings_ms": {
+    "commit": {
+      "mean": 21.49,
+      "median": 21.33,
+      "p95": 22.9,
+      "max": 23.07
+    },
+    "prove": {
+      "mean": 137.49,
+      "median": 119.84,
+      "p95": 301.9,
+      "max": 490.93
+    },
+    "verify": {
+      "mean": 21.9,
+      "median": 21.77,
+      "p95": 22.86,
+      "max": 23.78
+    },
+    "equality_prove": {
+      "mean": 1394.69,
+      "median": 968.44,
+      "p95": 3651.81,
+      "max": 4245.01
+    },
+    "equality_verify": {
+      "mean": 46.46,
+      "median": 46.12,
+      "p95": 50.35,
+      "max": 53.46
+    }
+  },
+  "mean_attempts": {
+    "prove": 4.68,
+    "equality_prove": 25.96
+  },
+  "expected_attempts": {
+    "prove": 4.65,
+    "equality_prove": 21.61
+  },
+  "note": "single-threaded pure-Python reference implementation; not constant time"
+}

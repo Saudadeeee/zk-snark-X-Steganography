@@ -32,7 +32,7 @@ not a proof that every video lacks sufficient capacity. The retained raw
 capacity scan for the same 3,000-frame Coastguard asset measured 541,570 bytes
 before patchability/quality losses. Proof-only figures do not include the
 verifier's public commitment and statement. The full run details are in
-[`ringo_opening_proof_wire_recheck_20260930.md`](../results/ringo_opening_proof_wire_recheck_20260930.md).
+[`docs/LATTICE_BACKEND_SURVEY.md`](../../docs/LATTICE_BACKEND_SURVEY.md) (detailed wire recheck in git history before 2026-10-19).
 
 A follow-up field profile attributed 639,289 bytes to the 13 Buckler witness
 commitments and 1,014,194 bytes to the Jindo evaluation proof; its `Encode`
@@ -105,7 +105,7 @@ commitments into Fiat-Shamir but omitted the `PublicWitness` values. Two
 diagnostics reproduced the resulting substitution behavior: a minimal circuit
 accepted a mathematically false statement, and the application opening circuit
 accepted a changed commitment with the original proof. Historical results are
-recorded in the [wire recheck report](../results/ringo_opening_proof_wire_recheck_20260930.md).
+recorded in the [backend survey](../../docs/LATTICE_BACKEND_SURVEY.md).
 
 ```powershell
 go test -run 'TestRejectStatementSubstitutionAfterFiatShamir|TestOpeningRejectsStatementSubstitutionAfterFiatShamir' -count=10 -v
@@ -147,6 +147,6 @@ or of the opening relation, and needs external review plus further
 soundness/ZK analysis. The registry still has no authenticated issuance API
 or durable replay state, and there is no H.264 extraction path; those remain
 blockers for the full system goal. Historical findings and run details are in
-[`ringo_opening_proof_wire_recheck_20260930.md`](../results/ringo_opening_proof_wire_recheck_20260930.md).
+[`docs/LATTICE_BACKEND_SURVEY.md`](../../docs/LATTICE_BACKEND_SURVEY.md) (detailed wire recheck in git history before 2026-10-19).
 
-On this Windows/amd64 host, plain `go test -race` aborts at an upstream CRT assembly `checkptr` alignment check. `go test -race -gcflags=all=-d=checkptr=0 -count=1 ./...` passed with the complete current test, but disabling `checkptr` does **not** resolve or exonerate the dependency issue. See [the recorded assessment](../results/ringo_opening_probe_20260929.md).
+On this Windows/amd64 host, plain `go test -race` aborts at an upstream CRT assembly `checkptr` alignment check. `go test -race -gcflags=all=-d=checkptr=0 -count=1 ./...` passed with the complete current test, but disabling `checkptr` does **not** resolve or exonerate the dependency issue. See the [backend survey](../../docs/LATTICE_BACKEND_SURVEY.md).

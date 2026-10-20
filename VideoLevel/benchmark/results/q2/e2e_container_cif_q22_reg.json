@@ -1,0 +1,43 @@
+{
+  "blind_video_only_verification": true,
+  "carriers_used": 61304,
+  "chunk_bytes": 3800,
+  "commitment_bytes_in_video": 0,
+  "credential_linkage": null,
+  "decoded_quality": {
+    "psnr_average_db": 45.590384,
+    "psnr_is_lossless": false,
+    "ssim_all": 0.999753
+  },
+  "envelope_bytes": 7589,
+  "expected_envelope_bytes": 7589,
+  "frame_quality": {
+    "frames": 300,
+    "frames_modified": 200,
+    "frames_modified_fraction": 0.6667,
+    "luma_psnr_all_frames_db": 43.829,
+    "luma_psnr_modified_frames_db": 42.068,
+    "luma_psnr_worst_frame_db": 34.023
+  },
+  "frames_per_segment": 100,
+  "input_video": "container_cif_q22_g1.h264",
+  "input_video_sha256": "897f51c26a3d28d23386828a5c4a1e33c43d70cad3afb3c4bdddcb85ccfb95a5",
+  "mode": "registered-commitment",
+  "output_video_sha256": "290d0c638c3c7ad31761e54f92df2507d221385b0f710c6f1ea8b9fab452f8e9",
+  "parameter_id": "c33f36970d896c7c47b8ba319ae8625e33eb9e7be11e45b7dbf6b318d2a0a26b",
+  "parameter_set": "bdlop-open-128-v1",
+  "payload_absent_from_output": true,
+  "proof_bytes": 7520,
+  "protocol": "bdlop-open-v1 in-band H.264 CAVLC",
+  "replay_rejected": true,
+  "security_status": "research prototype; self-implemented published protocol; unaudited",
+  "segments_used": 2,
+  "statement_id": "3dc25d5c359da106e1815f98789e4ead50ac19b3be92aaf9e64b7a592284be56",
+  "tamper_reason": "extraction or envelope rejected: RuntimeError: Refusing to use untrusted CAVLC parse offsets for embedding. The local parser required heuristic recovery, so its macroblock-to-bit offsets are not authoritative; this does not imply that the input H.264 stream is invalid. NAL index 149; integrity issues: heuristic_resync:mb=195:reason=chroma_pred_desync: intra_chroma_pred_mode=6:bit=112717; heuristic_resync:mb=207:reason=qp_delta_desync: mb_qp_delta=-39:bit=113716; heuristic_resync:mb=224:reason=chroma_pred_desync: intra_chroma_pred_mode=7:bit=115989; luma_residual_error:mb=225:block=2:Invalid run_before VLC with zeros_left=7 at bit 116077: Invalid VLC code: 00001101101 (no match in table); heuristic_resync:mb=231:reason=chroma_pred_desync: intra_chroma_pred_mode=5:bit=116539",
+  "tamper_rejected": true,
+  "timings_s": {
+    "embed_s": 579.749,
+    "verify_s": 182.12
+  },
+  "verify_reason": "ok"
+}

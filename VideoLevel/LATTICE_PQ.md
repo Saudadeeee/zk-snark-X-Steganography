@@ -16,6 +16,17 @@ H.264 CAVLC payload.
 This is a lattice-based **attestation** path, not a general lattice ZK proof.
 It does not claim the zero-knowledge property offered by Groth16.
 
+## Lattice zero-knowledge backend
+
+A separate research backend in `src/lattice_zk/` does carry a lattice ZK proof
+inside the video: a BDLOP commitment with a Fiat-Shamir-with-aborts proof of
+knowledge of its opening, bound to the carrier-normalized video, the session
+challenge and the signed relation registry, and verified from the stego video
+alone. Protocol, parameters, claims, limits and status are in
+[docs/LATTICE_ZK_BDLOP_PLAN.md](docs/LATTICE_ZK_BDLOP_PLAN.md). It is
+self-implemented from the published protocol and unaudited. The ML-DSA path
+below is unchanged.
+
 ## Use
 
 ```python

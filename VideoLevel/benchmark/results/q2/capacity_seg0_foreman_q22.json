@@ -1,0 +1,17 @@
+[
+  {
+    "video": "foreman_cif_q22_g1.h264",
+    "frames": 300,
+    "segments_total": 3,
+    "segments_scanned": 1,
+    "carrier_bits_per_segment": [
+      14071
+    ],
+    "min_chunk_bytes_supported": 1721,
+    "scan_seconds": 52.2,
+    "registered_segments_needed_at_min_chunk": 5,
+    "registered_fits_estimate": false,
+    "in_band_segments_needed_at_min_chunk": 9,
+    "in_band_fits_estimate": false
+  }
+]

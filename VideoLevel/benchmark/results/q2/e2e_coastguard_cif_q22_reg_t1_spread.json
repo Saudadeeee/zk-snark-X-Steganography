@@ -1,0 +1,45 @@
+{
+  "blind_video_only_verification": true,
+  "carrier": "t1",
+  "carrier_contract": "t1-sign-video-only-v1",
+  "carriers_used": 61304,
+  "chunk_bytes": 3800,
+  "commitment_bytes_in_video": 0,
+  "credential_linkage": null,
+  "decoded_quality": {
+    "psnr_average_db": 46.800094,
+    "psnr_is_lossless": false,
+    "ssim_all": 0.998054
+  },
+  "envelope_bytes": 7589,
+  "expected_envelope_bytes": 7589,
+  "frame_quality": {
+    "frames": 300,
+    "frames_modified": 200,
+    "frames_modified_fraction": 0.6667,
+    "luma_psnr_all_frames_db": 45.039,
+    "luma_psnr_modified_frames_db": 43.279,
+    "luma_psnr_worst_frame_db": 38.488
+  },
+  "frames_per_segment": 100,
+  "input_video": "coastguard_cif_q22_g1.h264",
+  "input_video_sha256": "9745d20964bda7d938ce0f5ccd4adda5c08ebe57a5a6b89ad6ac17ffe7a1b2ec",
+  "mode": "registered-commitment",
+  "output_video_sha256": "b11cbd1ff7c96231c72a498d0cb20dfcbdc0ddb96a7c7938f8f67a0cd18eda36",
+  "parameter_id": "c33f36970d896c7c47b8ba319ae8625e33eb9e7be11e45b7dbf6b318d2a0a26b",
+  "parameter_set": "bdlop-open-128-v1",
+  "payload_absent_from_output": true,
+  "proof_bytes": 7520,
+  "protocol": "bdlop-open-v1 in-band H.264 CAVLC",
+  "replay_rejected": null,
+  "security_status": "research prototype; self-implemented published protocol; unaudited",
+  "segments_used": 2,
+  "statement_id": "04f42dd6429904bf840f5b3bb8e7410435d01a274ef97b31dffd7d3cd4b01513",
+  "tamper_reason": "not run (--skip-security-checks)",
+  "tamper_rejected": null,
+  "timings_s": {
+    "embed_s": 1570.486,
+    "verify_s": 1056.874
+  },
+  "verify_reason": "ok"
+}

@@ -1,0 +1,49 @@
+{
+  "blind_video_only_verification": true,
+  "carriers_used": 115360,
+  "chunk_bytes": 5000,
+  "commitment_bytes_in_video": 6720,
+  "credential_linkage": {
+    "disclosure_verifies": true,
+    "linked_to_credential": true,
+    "other_credential_rejected": true,
+    "proof_bytes": 15008,
+    "prove_s": 0.193
+  },
+  "decoded_quality": {
+    "psnr_average_db": 42.025365,
+    "psnr_is_lossless": false,
+    "ssim_all": 0.999493
+  },
+  "envelope_bytes": 14309,
+  "expected_envelope_bytes": 14309,
+  "frame_quality": {
+    "frames": 300,
+    "frames_modified": 300,
+    "frames_modified_fraction": 1.0,
+    "luma_psnr_all_frames_db": 40.264,
+    "luma_psnr_modified_frames_db": 40.264,
+    "luma_psnr_worst_frame_db": 32.134
+  },
+  "frames_per_segment": 100,
+  "input_video": "container_cif_q22_g1.h264",
+  "input_video_sha256": "897f51c26a3d28d23386828a5c4a1e33c43d70cad3afb3c4bdddcb85ccfb95a5",
+  "mode": "in-band-commitment",
+  "output_video_sha256": "d53051c706bef4bbbd2eea025db9a633e8f592c3bc6632101497c6580998a60f",
+  "parameter_id": "c33f36970d896c7c47b8ba319ae8625e33eb9e7be11e45b7dbf6b318d2a0a26b",
+  "parameter_set": "bdlop-open-128-v1",
+  "payload_absent_from_output": true,
+  "proof_bytes": 7520,
+  "protocol": "bdlop-open-v1 in-band H.264 CAVLC",
+  "replay_rejected": true,
+  "security_status": "research prototype; self-implemented published protocol; unaudited",
+  "segments_used": 3,
+  "statement_id": "5399943cec04d0d5d6820774ff73e877098b8fb09ccf040566a259521c55ffa3",
+  "tamper_reason": "extraction or envelope rejected: RuntimeError: Refusing to use untrusted CAVLC parse offsets for embedding. The local parser required heuristic recovery, so its macroblock-to-bit offsets are not authoritative; this does not imply that the input H.264 stream is invalid. NAL index 149; integrity issues: heuristic_resync:mb=195:reason=chroma_pred_desync: intra_chroma_pred_mode=6:bit=112717; heuristic_resync:mb=207:reason=qp_delta_desync: mb_qp_delta=-39:bit=113716; heuristic_resync:mb=224:reason=chroma_pred_desync: intra_chroma_pred_mode=7:bit=115989; luma_residual_error:mb=225:block=2:Invalid run_before VLC with zeros_left=7 at bit 116077: Invalid VLC code: 00001101101 (no match in table); heuristic_resync:mb=231:reason=chroma_pred_desync: intra_chroma_pred_mode=5:bit=116539",
+  "tamper_rejected": true,
+  "timings_s": {
+    "embed_s": 718.985,
+    "verify_s": 466.22
+  },
+  "verify_reason": "ok"
+}

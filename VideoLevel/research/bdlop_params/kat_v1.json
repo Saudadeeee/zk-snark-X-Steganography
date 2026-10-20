@@ -1,0 +1,40 @@
+{
+  "parameter_set": "bdlop-open-128-v1",
+  "parameter_id": "c33f36970d896c7c47b8ba319ae8625e33eb9e7be11e45b7dbf6b318d2a0a26b",
+  "key_sha256": "545ad76180e7125dc379dc913dc54b577c9b3ef362a10a09a789184d93e3c56e",
+  "vectors": [
+    {
+      "name": "empty-payload",
+      "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "payload_bytes": 0,
+      "statement_hex": "",
+      "commitment_sha256": "d0148df32544abd26ef39d1c503d93a6d51e95178ffe69e0f4e7d468b8d16677",
+      "opening_proof_sha256": "01f16cf827d63d6243b40beeb0568b0783d52cab4cf55bc4dfad1f28da45a937",
+      "opening_attempts": 10,
+      "equality_proof_sha256": "125e03f2522fc6ddaf2a1b51b3297aa98d738eee0ce4302661ad05c1b3162be0",
+      "equality_attempts": 5
+    },
+    {
+      "name": "short-payload",
+      "payload_sha256": "bd32fc129825ccf4bb09408c6afadcfd549ae4cefbec97c7336e37aab65ae4a8",
+      "payload_bytes": 7,
+      "statement_hex": "6b61742073746174656d656e742031",
+      "commitment_sha256": "b4d76bec1c2eca75ce23483eb56502adf2d7b7362817a308757950b0181e5c4e",
+      "opening_proof_sha256": "836cfe7ebcf8e1c1ad1f2a32bfd9bf8e5b63692fe2e988b2eec497f3030fb3b5",
+      "opening_attempts": 1,
+      "equality_proof_sha256": "4938a7408fe6d0b2d589053f93111ca7071eb593f79e7eb143a7dafadf304650",
+      "equality_attempts": 39
+    },
+    {
+      "name": "max-payload",
+      "payload_sha256": "3a20f86f589272ced3f8f23251557d6ba981e4b9262e873baa3fa244e08b4a8a",
+      "payload_bytes": 766,
+      "statement_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "commitment_sha256": "7193ea3c0a02317ee50aec876845cc0f164069838a313b52089ab73dda33b97e",
+      "opening_proof_sha256": "7ad1566c1961a871d233ec7e0d0cd2f75b3b59d38ab2c2aeaba35f358e0dd7e9",
+      "opening_attempts": 6,
+      "equality_proof_sha256": "2fc18a7c8d933944d870f95d8b516ac7aef3d601ef8c241b2172c0b7d3ae4aa7",
+      "equality_attempts": 44
+    }
+  ]
+}

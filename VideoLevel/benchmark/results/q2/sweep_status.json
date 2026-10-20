@@ -1,0 +1,32 @@
+[
+  {
+    "name": "coastguard_cif_q22_reg_t1",
+    "e2e": true,
+    "steg": true,
+    "mlfeat": true
+  },
+  {
+    "name": "container_cif_q22_reg_t1_spread",
+    "e2e": true,
+    "steg": true,
+    "mlfeat": true
+  },
+  {
+    "name": "coastguard_cif_q22_reg_t1_spread",
+    "e2e": true,
+    "steg": true,
+    "mlfeat": true
+  },
+  {
+    "name": "city_cif_q22_reg_t1_spread",
+    "e2e": true,
+    "steg": true,
+    "mlfeat": true
+  },
+  {
+    "name": "hall_cif_q22_reg_t1_spread",
+    "e2e": true,
+    "steg": true,
+    "mlfeat": true
+  }
+]

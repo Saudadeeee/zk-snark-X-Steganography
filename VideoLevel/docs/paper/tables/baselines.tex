@@ -1,0 +1,17 @@
+\begin{table}[t]
+\centering
+\caption{Comparison with baseline proof and signature schemes.}
+\label{tab:baselines}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lllllll}
+\toprule
+Scheme & PQ & ZK & In-video bytes & Prove (ms) & Verify (ms) & Setup \\
+\midrule
+BDLOP (this work, registered) & yes & yes & 7589 & 187 & 41.9 & transparent \\
+BDLOP (this work, in-band) & yes & yes & 14309 & 187 & 41.9 & transparent \\
+Groth16 (BN128) & no & yes & 147 & 7222 & 2550 & trusted, per circuit \\
+ML-DSA-44 (signature) & yes & no & 2420 & 18.6 & 0.33 & none \\
+ISW21 (recorded) & broken KS assumption & stat. 2^-40 & 23907 & 328 & 0.6 & trusted, designated verifier \\
+\bottomrule
+\end{tabular}}
+\end{table}

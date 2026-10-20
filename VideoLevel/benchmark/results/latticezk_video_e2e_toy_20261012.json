@@ -1,0 +1,28 @@
+{
+  "blind_video_only_verification": true,
+  "carriers_used": 6160,
+  "chunk_bytes": 1250,
+  "commitment_bytes": 320,
+  "envelope_bytes": 733,
+  "expected_envelope_bytes": 733,
+  "frames_per_segment": 100,
+  "input_video": "coastguard_cif_q22_g1.h264",
+  "input_video_sha256": "9745d20964bda7d938ce0f5ccd4adda5c08ebe57a5a6b89ad6ac17ffe7a1b2ec",
+  "output_video_sha256": "2672e73e5c1178c6df2d2ae4f46d6ad6a3175394d7ad3b4178e7d23dbc37c719",
+  "parameter_id": "32a3ea764b429b9fc73704f90d05d0dad9bd1944dc844353078333ec9b32f3f2",
+  "parameter_set": "bdlop-open-toy-v1",
+  "payload_absent_from_output": true,
+  "proof_bytes": 344,
+  "protocol": "bdlop-open-v1 in-band H.264 CAVLC",
+  "replay_rejected": true,
+  "security_status": "research prototype; self-implemented published protocol; unaudited",
+  "segments_used": 1,
+  "statement_id": "9a7f03a795a7b48b2d37ea5088ac8be158f246a14dfb2ae1a19efef68ebe666d",
+  "tamper_reason": "proof, statement binding, or session challenge rejected",
+  "tamper_rejected": true,
+  "timings_s": {
+    "embed_s": 338.015,
+    "verify_s": 145.076
+  },
+  "verify_reason": "ok"
+}

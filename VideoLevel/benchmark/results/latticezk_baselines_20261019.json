@@ -1,0 +1,136 @@
+{
+  "host_note": "Windows 11, Intel i7-12700H; single-threaded; BDLOP is pure Python",
+  "bdlop_open_128": {
+    "proof_bytes": 7520,
+    "commitment_bytes": 6720,
+    "in_video_envelope_bytes": {
+      "registered": 7589,
+      "in_band": 14309
+    },
+    "timings_ms": {
+      "commit": {
+        "mean": 39.06,
+        "median": 40.07,
+        "p95": 43.53,
+        "max": 86.74
+      },
+      "prove": {
+        "mean": 246.2,
+        "median": 186.85,
+        "p95": 573.81,
+        "max": 581.34
+      },
+      "verify": {
+        "mean": 39.75,
+        "median": 41.85,
+        "p95": 48.03,
+        "max": 48.14
+      },
+      "equality_prove": {
+        "mean": 2439.78,
+        "median": 2059.22,
+        "p95": 8941.63,
+        "max": 12151.71
+      },
+      "equality_verify": {
+        "mean": 83.87,
+        "median": 87.31,
+        "p95": 100.59,
+        "max": 105.69
+      }
+    },
+    "mean_attempts": {
+      "prove": 4.83,
+      "equality_prove": 24.93
+    }
+  },
+  "ml_dsa": {
+    "ml_dsa_44": {
+      "signature_bytes": 2420,
+      "public_key_bytes": 1312,
+      "keygen": {
+        "median_ms": 0.341,
+        "p95_ms": 0.556
+      },
+      "sign": {
+        "median_ms": 18.617,
+        "p95_ms": 19.479
+      },
+      "verify": {
+        "median_ms": 0.332,
+        "p95_ms": 0.517
+      }
+    },
+    "ml_dsa_65": {
+      "signature_bytes": 3309,
+      "public_key_bytes": 1952,
+      "keygen": {
+        "median_ms": 0.573,
+        "p95_ms": 0.612
+      },
+      "sign": {
+        "median_ms": 25.306,
+        "p95_ms": 26.219
+      },
+      "verify": {
+        "median_ms": 0.523,
+        "p95_ms": 0.563
+      }
+    }
+  },
+  "groth16_bn128": {
+    "proof_size_bytes": 129,
+    "proof_bearing_payload_bytes": 147,
+    "prove_time_ms": 7221.549733333329,
+    "verify_time_ms": 2550.3067666665324,
+    "trusted_setup": true,
+    "universal_setup": false,
+    "simulated": false,
+    "trials": 3,
+    "measurement_scope": "end-to-end Python bridge wall time, including subprocess overhead"
+  },
+  "isw21_recorded": {
+    "source": "repository run 2026-10-01, Ubuntu 24.04 container on the same i7-12700H; docs/lattice_zk_backend_candidate_isw21_20261001.md at commit 07c02d9; not re-run here",
+    "proof_bytes": 21331,
+    "in_video_envelope_bytes": 23907,
+    "verifier_key_bytes": 2419872,
+    "setup_ms": 9026,
+    "prove_ms": 328,
+    "verify_ms": 0.6,
+    "peak_rss_mib": 470
+  },
+  "properties": {
+    "bdlop_open_128_registered": {
+      "post_quantum_assumption": "M-SIS / M-LWE",
+      "zero_knowledge": true,
+      "setup": "transparent (seeded key)",
+      "verifier": "public key material only",
+      "binds_video_statement_here": true,
+      "hides_payload": true
+    },
+    "groth16_bn128": {
+      "post_quantum_assumption": "none (pairings; broken by Shor)",
+      "zero_knowledge": true,
+      "setup": "circuit-specific trusted setup",
+      "verifier": "public",
+      "binds_video_statement_here": false,
+      "hides_payload": false
+    },
+    "ml_dsa_44": {
+      "post_quantum_assumption": "M-SIS / M-LWE (FIPS 204)",
+      "zero_knowledge": false,
+      "setup": "none",
+      "verifier": "public",
+      "binds_video_statement_here": "if the signed message includes it",
+      "hides_payload": false
+    },
+    "isw21": {
+      "post_quantum_assumption": "LWE; knowledge assumption broken by quantum oblivious sampling",
+      "zero_knowledge": "statistical, 2^-40",
+      "setup": "trusted, designated verifier",
+      "verifier": "designated (secret key)",
+      "binds_video_statement_here": "toy context only",
+      "hides_payload": true
+    }
+  }
+}

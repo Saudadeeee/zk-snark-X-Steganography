@@ -1,0 +1,19 @@
+[
+  {
+    "video": "container_cif_q18_g1.h264",
+    "frames": 300,
+    "segments_total": 3,
+    "segments_scanned": 3,
+    "carrier_bits_per_segment": [
+      89107,
+      89487,
+      86320
+    ],
+    "min_chunk_bytes_supported": 10753,
+    "scan_seconds": 553.8,
+    "registered_segments_needed_at_min_chunk": 1,
+    "registered_fits_estimate": true,
+    "in_band_segments_needed_at_min_chunk": 2,
+    "in_band_fits_estimate": true
+  }
+]

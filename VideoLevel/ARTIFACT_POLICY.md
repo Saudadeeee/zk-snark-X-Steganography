@@ -29,13 +29,14 @@ and which files are rebuildable diagnostics or local cache.
 ### Main documentation
 
 - `README.md`
-- `plan.md`
-- `system.txt`
+- `LATTICE_PQ.md`
 - `PAPER_EVIDENCE.md`
 - `OPERATING_ENVELOPE.md`
 - `ARTIFACT_POLICY.md`
-- `COMPARATIVE_ANALYSIS.md`
-- `COMPLETION.md`
+- `REALTIME.md`
+- `docs/LATTICE_ZK_BDLOP_PLAN.md`
+- `docs/LATTICE_ZK_BDLOP_SPEC.md`
+- `docs/LATTICE_BACKEND_SURVEY.md`
 - `doc/trust_corpus_onboarding.md`
 - `doc/system_video_embedding_walkthrough.tex`
 - `doc/system_video_embedding_walkthrough.pdf`

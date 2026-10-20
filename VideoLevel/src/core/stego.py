@@ -389,6 +389,8 @@ class CAVLCSafetyFilter:
         cif_mb_count: int = 396,
         stable_carriers_only: bool = False,
         interleave_positions: bool = True,
+        signbit_only: bool = False,
+        verify_each_sign: bool = False,
     ) -> List[Tuple[int, int, int]]:
         """
         Get list of safe embedding positions across all blocks
@@ -509,7 +511,11 @@ class CAVLCSafetyFilter:
                     original_bit_lengths[cache_key] = None
             return original_bit_lengths[cache_key]
 
-        for mb_idx, block_idx, coeffs in coefficients:
+        if signbit_only and stable_carriers_only:
+            raise SafetyFilterError("signbit_only and stable_carriers_only are mutually exclusive")
+        # signbit_only skips the magnitude-carrier pass: its per-coefficient length
+        # checks dominate the cost and its positions would be discarded anyway.
+        for mb_idx, block_idx, coeffs in (() if signbit_only else coefficients):
             total_coeffs = sum(1 for c in coeffs if c != 0)
             if total_coeffs == 0:
                 continue  # All-zero block: nothing to embed
@@ -716,6 +722,13 @@ class CAVLCSafetyFilter:
             else:
                 trailing_positions = self._detect_trailing_ones(coeffs)
             for coeff_idx in sorted(trailing_positions):
+                if t1_override is None and not verify_each_sign:
+                    # A genuine trailing one's sign is the 1-bit trailing_ones_sign_flag;
+                    # coeff_token, suffixLength and every other level code depend on the
+                    # trailing-one count, not its signs, so the flip is length-invariant.
+                    # The block's own re-encode was checked against the NAL above.
+                    safe_positions.append((mb_idx, block_idx, ~coeff_idx))
+                    continue
                 # Verify bit-length invariance for sign flip before adding
                 modified_block = list(coeffs)
                 modified_block[coeff_idx] = -modified_block[coeff_idx]

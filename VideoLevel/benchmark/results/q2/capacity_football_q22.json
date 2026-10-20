@@ -1,0 +1,19 @@
+[
+  {
+    "video": "football_cif_q22_g1.h264",
+    "frames": 260,
+    "segments_total": 3,
+    "segments_scanned": 3,
+    "carrier_bits_per_segment": [
+      24059,
+      14295,
+      26309
+    ],
+    "min_chunk_bytes_supported": 1749,
+    "scan_seconds": 419.1,
+    "registered_segments_needed_at_min_chunk": 5,
+    "registered_fits_estimate": false,
+    "in_band_segments_needed_at_min_chunk": 9,
+    "in_band_fits_estimate": false
+  }
+]

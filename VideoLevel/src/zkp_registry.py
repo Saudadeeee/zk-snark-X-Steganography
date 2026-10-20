@@ -22,6 +22,8 @@ REGISTRY_VERSION = "1.0.0"
 REGISTRY_PROTOCOL = "zkstego-pq-zkp-relation-registry-v1"
 REGISTRY_SIGNATURE_ALGORITHM = LATTICE_SIGNATURE_ALGORITHM
 REGISTRY_ZKP_SUITE = "lazer-v1"
+BDLOP_OPEN_ZKP_SUITE = "bdlop-open-v1"
+SUPPORTED_ZKP_SUITES = frozenset({REGISTRY_ZKP_SUITE, BDLOP_OPEN_ZKP_SUITE})
 _DOMAIN = b"zkstego/pq-zkp-relation-registry/v1/"
 _HEX_256 = re.compile(r"[0-9a-f]{64}")
 _DESCRIPTOR_FIELDS = {
@@ -68,7 +70,7 @@ class RelationRecord:
     def from_descriptor(cls, value: dict[str, Any]) -> "RelationRecord":
         if not isinstance(value, dict) or set(value) != _DESCRIPTOR_FIELDS:
             raise ValueError("relation descriptor has an invalid field set")
-        if value["zkp_suite"] != REGISTRY_ZKP_SUITE:
+        if value["zkp_suite"] not in SUPPORTED_ZKP_SUITES:
             raise ValueError("relation record uses an unsupported ZKP suite")
         return cls(
             zkp_suite=value["zkp_suite"],
@@ -146,7 +148,7 @@ class SignedZkpRelationRegistry:
 
     def resolve(self, relation_id: str, zkp_suite: str, expected_policy_hash: str) -> tuple[str, int]:
         relation_id = _digest(relation_id, "relation_id")
-        if zkp_suite != REGISTRY_ZKP_SUITE:
+        if zkp_suite not in SUPPORTED_ZKP_SUITES:
             raise ValueError("unsupported ZKP suite")
         expected_policy_hash = _digest(expected_policy_hash, "expected_policy_hash")
         if not any(

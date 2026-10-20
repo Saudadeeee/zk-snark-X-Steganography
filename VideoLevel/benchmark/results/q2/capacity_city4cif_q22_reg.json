@@ -1,0 +1,19 @@
+[
+  {
+    "video": "city_4cif_q22_g1.h264",
+    "frames": 600,
+    "segments_total": 6,
+    "segments_scanned": 3,
+    "carrier_bits_per_segment": [
+      104190,
+      74520,
+      68084
+    ],
+    "min_chunk_bytes_supported": 8473,
+    "scan_seconds": 1413.4,
+    "registered_segments_needed_at_min_chunk": 1,
+    "registered_fits_estimate": true,
+    "in_band_segments_needed_at_min_chunk": 2,
+    "in_band_fits_estimate": true
+  }
+]

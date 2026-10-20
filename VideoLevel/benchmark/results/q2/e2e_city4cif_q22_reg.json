@@ -1,0 +1,45 @@
+{
+  "blind_video_only_verification": true,
+  "carrier": "magnitude",
+  "carrier_contract": "stable-carriers-video-only-v1",
+  "carriers_used": 61008,
+  "chunk_bytes": 8218,
+  "commitment_bytes_in_video": 0,
+  "credential_linkage": null,
+  "decoded_quality": {
+    "psnr_average_db": 53.19784,
+    "psnr_is_lossless": false,
+    "ssim_all": 0.999947
+  },
+  "envelope_bytes": 7589,
+  "expected_envelope_bytes": 7589,
+  "frame_quality": {
+    "frames": 600,
+    "frames_modified": 100,
+    "frames_modified_fraction": 0.1667,
+    "luma_psnr_all_frames_db": 51.437,
+    "luma_psnr_modified_frames_db": 43.656,
+    "luma_psnr_worst_frame_db": 39.306
+  },
+  "frames_per_segment": 100,
+  "input_video": "city_4cif_q22_g1.h264",
+  "input_video_sha256": "6fa56d1d3a64eb76baf5c8fdc6c2b1df794f62aa32daf06ae774212a7741d2a1",
+  "mode": "registered-commitment",
+  "output_video_sha256": "4bdf0e0b9ac06d2d6d30292357d9c6f0caab5b037f0d161026097f79539babf0",
+  "parameter_id": "c33f36970d896c7c47b8ba319ae8625e33eb9e7be11e45b7dbf6b318d2a0a26b",
+  "parameter_set": "bdlop-open-128-v1",
+  "payload_absent_from_output": true,
+  "proof_bytes": 7520,
+  "protocol": "bdlop-open-v1 in-band H.264 CAVLC",
+  "replay_rejected": true,
+  "security_status": "research prototype; self-implemented published protocol; unaudited",
+  "segments_used": 1,
+  "statement_id": "4f734752abb7bb25f23ff09ddb81e822269750ae9b23fd24aa3eccfa1e9ba225",
+  "tamper_reason": "proof, statement binding, or session challenge rejected",
+  "tamper_rejected": true,
+  "timings_s": {
+    "embed_s": 881.442,
+    "verify_s": 584.334
+  },
+  "verify_reason": "ok"
+}

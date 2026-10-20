@@ -518,6 +518,8 @@ def derive_blind_positions_operating_contract(
         stable_blind_only=(
             contract.stable_carriers_only and not contract.signbit_only
         ),
+        # Sign-bit contracts only ever use trailing-one sign positions.
+        signbit_only=contract.signbit_only,
     )
     stable_profile = contract.stable_carriers_only and not contract.signbit_only
     stable_candidates_override = (

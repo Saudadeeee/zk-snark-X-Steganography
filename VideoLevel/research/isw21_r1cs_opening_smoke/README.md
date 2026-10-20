@@ -2,7 +2,7 @@
 
 This isolated experiment exercises a small, explicit opening relation through
 the upstream ISW21 lattice zkSNARK implementation. It is not the production
-relation in `docs/LATTICE_VIDEO_ZKP_RELATION_v0.1.md` and does not select a
+relation (now specified in `docs/LATTICE_ZK_BDLOP_SPEC.md`) and does not select a
 secure commitment suite.
 
 ## Relation in this smoke test

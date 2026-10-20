@@ -52,6 +52,17 @@ PYTEST_PHASES = [
     ("Phase 31", "Loopback session challenge HTTP CLI", "test_zkp_session_http.py"),
     ("Phase 32", "LNP22 video session replay enforcement", "test_lnp22_video_session.py"),
     ("Phase 33", "LNP22 video CLI regression", "test_lnp22_video_e2e.py"),
+    ("Phase 34", "Lattice-ZK ring and samplers", "test_latticezk_ring.py"),
+    ("Phase 35", "Lattice-ZK BDLOP opening proof", "test_latticezk_bdlop.py"),
+    ("Phase 36", "Lattice-ZK equality proof", "test_latticezk_equality.py"),
+    ("Phase 37", "Lattice-ZK known-answer vectors", "test_latticezk_kat.py"),
+    ("Phase 38", "Lattice-ZK video statement and envelope", "test_latticezk_video_proof.py"),
+    ("Phase 39", "Lattice-ZK video pipeline", "test_latticezk_video_pipeline.py"),
+    ("Phase 40", "Lattice-ZK linkage proof", "test_latticezk_linkage.py"),
+    ("Phase 41", "Lattice-ZK role-separated CLI", "test_latticezk_cli.py"),
+    ("Phase 42", "Lattice-ZK learned steganalysis protocol", "test_latticezk_ml_steganalysis.py"),
+    ("Phase 43", "Lattice-ZK evaluation sweep chunk sizing", "test_latticezk_q2_sweep.py"),
+    ("Phase 44", "Non-CIF stable carrier coverage", "test_non_cif_carrier_capacity.py"),
 ]
 
 SEP  = '-' * 58

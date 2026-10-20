@@ -1,0 +1,34 @@
+{
+  "blind_video_only_verification": true,
+  "carriers_used": 62784,
+  "chunk_bytes": 1250,
+  "commitment_bytes_in_video": 0,
+  "decoded_quality": {
+    "psnr_average_db": 48.400868,
+    "psnr_is_lossless": false,
+    "ssim_all": 0.999835
+  },
+  "envelope_bytes": 7589,
+  "expected_envelope_bytes": 7589,
+  "frames_per_segment": 100,
+  "input_video": "deadline_cif_q22_g1_1000f.h264",
+  "input_video_sha256": "ff35e477538ef97ec96be7153cf943abfdd602a80d7f3835dc0c968deea072bd",
+  "mode": "registered-commitment",
+  "output_video_sha256": "91e67dd6cce954139eeda361f387b8023c16460ea7258a537f356cf3fedd87d6",
+  "parameter_id": "c33f36970d896c7c47b8ba319ae8625e33eb9e7be11e45b7dbf6b318d2a0a26b",
+  "parameter_set": "bdlop-open-128-v1",
+  "payload_absent_from_output": true,
+  "proof_bytes": 7520,
+  "protocol": "bdlop-open-v1 in-band H.264 CAVLC",
+  "replay_rejected": true,
+  "security_status": "research prototype; self-implemented published protocol; unaudited",
+  "segments_used": 7,
+  "statement_id": "0dbfee5cba852c723285fd92e64fc90f77d015a4bd4ef041909f47206fe1ca68",
+  "tamper_reason": "extraction or envelope rejected: RuntimeError: Refusing to use untrusted CAVLC parse offsets for embedding. The local parser required heuristic recovery, so its macroblock-to-bit offsets are not authoritative; this does not imply that the input H.264 stream is invalid. NAL index 8; integrity issues: chroma_ac_error:mb=204:block=16:total_zeros=15 exceeds valid range [0,14] for TC=1 at bit 128561; heuristic_resync:mb=210:reason=mb_type_desync: mb_type=97 slice_type=2:bit=129016; heuristic_resync:mb=213:reason=mb_type_desync: mb_type=30 slice_type=2:bit=129676; heuristic_resync:mb=216:reason=chroma_pred_desync: intra_chroma_pred_mode=8:bit=129854; heuristic_resync:mb=220:reason=chroma_pred_desync: intra_chroma_pred_mode=46:bit=131311",
+  "tamper_rejected": true,
+  "timings_s": {
+    "embed_s": 1792.686,
+    "verify_s": 1260.779
+  },
+  "verify_reason": "ok"
+}

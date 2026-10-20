@@ -132,6 +132,7 @@ def load_or_build_video_analysis(
     force_refresh: bool = False,
     cache_dir: str | Path | None = None,
     stable_blind_only: bool = False,
+    signbit_only: bool = False,
 ) -> tuple:
     """Return trusted analysis, optionally validating only blind-stable carriers.
 
@@ -147,8 +148,12 @@ def load_or_build_video_analysis(
     video_fingerprint = _video_fingerprint(path)
     fingerprint = {
         **video_fingerprint,
-        "analysis_profile": "stable-blind-v1" if stable_blind_only else "full-v1",
+        "analysis_profile": (
+            "stable-blind-v1" if stable_blind_only else "signbit-v1" if signbit_only else "full-v1"
+        ),
     }
+    if stable_blind_only and signbit_only:
+        raise ValueError("stable_blind_only and signbit_only are mutually exclusive")
     with _LOCK:
         cached = _VIDEO_ANALYSIS_CACHE.get(key)
         if use_cache and not force_refresh and cached and cached[0] == fingerprint:
@@ -165,18 +170,27 @@ def load_or_build_video_analysis(
         raise RuntimeError(
             "stable blind analysis requires trusted CAVLC offsets and patchability metadata"
         )
+    context = _build_reconstruction_context(path, parser=parser)
+    sps = context.get("sps")
+    if sps is not None and not getattr(sps, "frame_mbs_only_flag", True):
+        # Map units would be macroblock pairs, so the per-picture macroblock count
+        # (and every IDR offset derived from it) would be wrong. Fail closed.
+        raise RuntimeError("interlaced H.264 (frame_mbs_only_flag=0) is not supported")
     safe_positions = CAVLCSafetyFilter().get_safe_positions(
         coefficients,
         nC_map=n_c_map,
         nal_length_map=nal_length_map,
         t1_override_map=t1_override_map,
         frame_verified_data=frame_verified_data,
+        # Macroblocks per picture from the SPS; the CIF default would map every
+        # macroblock past the first 396 of a larger frame to a missing IDR.
+        cif_mb_count=int(context.get("mb_count_per_slice") or 396),
         stable_carriers_only=stable_blind_only,
+        signbit_only=signbit_only,
     )
     data = (coefficients, frame_verified_data, n_c_map, nal_length_map, t1_override_map, safe_positions)
 
     if use_cache:
-        context = _build_reconstruction_context(path, parser=parser)
         with _LOCK:
             _evict_other_cached_videos(key)
             _VIDEO_ANALYSIS_CACHE[key] = (fingerprint, data)

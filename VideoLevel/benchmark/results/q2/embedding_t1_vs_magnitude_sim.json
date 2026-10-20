@@ -1,0 +1,81 @@
+{
+  "protocol": "leave-one-clip-out, coefficient features, FLD ensemble, simulated embedding",
+  "replacement": {
+    "p_e_mean": 0.3158,
+    "auc_mean": 0.7413,
+    "folds": {
+      "city_cif_q22_reg": {
+        "p_e": 0.32,
+        "auc": 0.7383
+      },
+      "coastguard_cif_q22_reg": {
+        "p_e": 0.3025,
+        "auc": 0.767
+      },
+      "container_cif_q22_reg": {
+        "p_e": 0.27,
+        "auc": 0.7937
+      },
+      "deadline_cif_q22_reg": {
+        "p_e": 0.4067,
+        "auc": 0.6207
+      },
+      "hall_cif_q22_reg": {
+        "p_e": 0.28,
+        "auc": 0.7866
+      }
+    }
+  },
+  "matching": {
+    "p_e_mean": 0.26,
+    "auc_mean": 0.8029,
+    "folds": {
+      "city_cif_q22_reg": {
+        "p_e": 0.2833,
+        "auc": 0.7819
+      },
+      "coastguard_cif_q22_reg": {
+        "p_e": 0.2375,
+        "auc": 0.8285
+      },
+      "container_cif_q22_reg": {
+        "p_e": 0.1925,
+        "auc": 0.8911
+      },
+      "deadline_cif_q22_reg": {
+        "p_e": 0.38,
+        "auc": 0.6576
+      },
+      "hall_cif_q22_reg": {
+        "p_e": 0.2067,
+        "auc": 0.8555
+      }
+    }
+  },
+  "t1_sign": {
+    "p_e_mean": 0.4745,
+    "auc_mean": 0.5125,
+    "folds": {
+      "city_cif_q22_reg": {
+        "p_e": 0.4767,
+        "auc": 0.5149
+      },
+      "coastguard_cif_q22_reg": {
+        "p_e": 0.4825,
+        "auc": 0.4945
+      },
+      "container_cif_q22_reg": {
+        "p_e": 0.46,
+        "auc": 0.5262
+      },
+      "deadline_cif_q22_reg": {
+        "p_e": 0.4783,
+        "auc": 0.5099
+      },
+      "hall_cif_q22_reg": {
+        "p_e": 0.475,
+        "auc": 0.5168
+      }
+    }
+  }
+}

@@ -97,3 +97,9 @@ check_*.py
 *_output.txt
 tmpclaude-*/
 tmpclaude-*-cwd
+
+# Local build trees and generated demo/E2E outputs
+native/*-build/
+demo/runs/
+demo/native_walkthrough/runs/
+tmp/

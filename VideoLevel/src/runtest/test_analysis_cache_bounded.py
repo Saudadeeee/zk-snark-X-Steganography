@@ -59,3 +59,33 @@ def test_new_video_evicts_previous_analysis_before_parsing(
     assert list(analysis_cache._VIDEO_ANALYSIS_CACHE) == [new_key]
     assert list(analysis_cache._RECONSTRUCTION_CONTEXT_CACHE) == [new_key]
     analysis_cache.clear_video_analysis_cache()
+
+
+def test_interlaced_stream_is_rejected(tmp_path: Path, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    video = tmp_path / "interlaced.h264"
+    video.write_bytes(b"x")
+
+    class FakeParser:
+        def __init__(self, _path: str) -> None:
+            self.nal_units = []
+
+        def parse(self) -> None:
+            return None
+
+    monkeypatch.setattr(analysis_cache, "H264BitstreamParser", FakeParser)
+    monkeypatch.setattr(
+        analysis_cache, "extract_all_idr_blocks", lambda *_args, **_kwargs: ([], {}, {}, {}, {})
+    )
+    monkeypatch.setattr(
+        analysis_cache,
+        "_build_reconstruction_context",
+        lambda _path, parser=None: {
+            "parser": parser, "mb_count_per_slice": 396,
+            "sps": SimpleNamespace(frame_mbs_only_flag=False),
+        },
+    )
+    analysis_cache.clear_video_analysis_cache()
+    with pytest.raises(RuntimeError, match="interlaced"):
+        analysis_cache.load_or_build_video_analysis(video, use_cache=False)

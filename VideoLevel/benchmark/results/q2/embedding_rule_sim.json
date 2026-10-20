@@ -1,0 +1,55 @@
+{
+  "protocol": "leave-one-clip-out, coefficient features, FLD ensemble, simulated embedding",
+  "replacement": {
+    "p_e_mean": 0.3187,
+    "auc_mean": 0.7381,
+    "folds": {
+      "city_cif_q22_reg": {
+        "p_e": 0.32,
+        "auc": 0.7412
+      },
+      "coastguard_cif_q22_reg": {
+        "p_e": 0.2975,
+        "auc": 0.7592
+      },
+      "container_cif_q22_reg": {
+        "p_e": 0.2725,
+        "auc": 0.7978
+      },
+      "deadline_cif_q22_reg": {
+        "p_e": 0.4083,
+        "auc": 0.6168
+      },
+      "hall_cif_q22_reg": {
+        "p_e": 0.295,
+        "auc": 0.7754
+      }
+    }
+  },
+  "matching": {
+    "p_e_mean": 0.2668,
+    "auc_mean": 0.8015,
+    "folds": {
+      "city_cif_q22_reg": {
+        "p_e": 0.2883,
+        "auc": 0.7859
+      },
+      "coastguard_cif_q22_reg": {
+        "p_e": 0.2425,
+        "auc": 0.8242
+      },
+      "container_cif_q22_reg": {
+        "p_e": 0.19,
+        "auc": 0.8891
+      },
+      "deadline_cif_q22_reg": {
+        "p_e": 0.39,
+        "auc": 0.6547
+      },
+      "hall_cif_q22_reg": {
+        "p_e": 0.2233,
+        "auc": 0.8534
+      }
+    }
+  }
+}

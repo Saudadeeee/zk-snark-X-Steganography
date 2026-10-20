@@ -1,0 +1,43 @@
+{
+  "blind_video_only_verification": true,
+  "carriers_used": 61008,
+  "chunk_bytes": 8000,
+  "commitment_bytes_in_video": 0,
+  "credential_linkage": null,
+  "decoded_quality": {
+    "psnr_average_db": 50.47177,
+    "psnr_is_lossless": false,
+    "ssim_all": 0.999888
+  },
+  "envelope_bytes": 7589,
+  "expected_envelope_bytes": 7589,
+  "frame_quality": {
+    "frames": 300,
+    "frames_modified": 100,
+    "frames_modified_fraction": 0.3333,
+    "luma_psnr_all_frames_db": 48.711,
+    "luma_psnr_modified_frames_db": 43.94,
+    "luma_psnr_worst_frame_db": 36.411
+  },
+  "frames_per_segment": 100,
+  "input_video": "container_cif_q18_g1.h264",
+  "input_video_sha256": "30f025603f59243e4c9ddfe9623afa17778e139cae6eb6cd286739d195ea2c3f",
+  "mode": "registered-commitment",
+  "output_video_sha256": "87cef1f6ec95e9985f9b63c48218bb411f0398361c7a1c2ad12cb17d1e250c35",
+  "parameter_id": "c33f36970d896c7c47b8ba319ae8625e33eb9e7be11e45b7dbf6b318d2a0a26b",
+  "parameter_set": "bdlop-open-128-v1",
+  "payload_absent_from_output": true,
+  "proof_bytes": 7520,
+  "protocol": "bdlop-open-v1 in-band H.264 CAVLC",
+  "replay_rejected": null,
+  "security_status": "research prototype; self-implemented published protocol; unaudited",
+  "segments_used": 1,
+  "statement_id": "0b4a42defdeeb715f95b192f9c3d7ed7d0c123921dfcf749c116354be2755ab9",
+  "tamper_reason": "not run (--skip-security-checks)",
+  "tamper_rejected": null,
+  "timings_s": {
+    "embed_s": 334.264,
+    "verify_s": 126.602
+  },
+  "verify_reason": "ok"
+}

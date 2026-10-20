@@ -1,0 +1,232 @@
+{
+  "frame_pairs": 1300,
+  "clips": [
+    "city",
+    "coastguard",
+    "container",
+    "deadline",
+    "hall_monitor"
+  ],
+  "protocols": {
+    "paired_half_split": {
+      "coefficient/logistic": {
+        "p_e_mean": 0.4138,
+        "auc_mean": 0.6165,
+        "folds": [
+          {
+            "p_e": 0.4138,
+            "auc": 0.6165
+          }
+        ]
+      },
+      "coefficient/fld_ensemble": {
+        "p_e_mean": 0.3938,
+        "auc_mean": 0.6377,
+        "folds": [
+          {
+            "p_e": 0.3938,
+            "auc": 0.6377
+          }
+        ]
+      },
+      "pixel/logistic": {
+        "p_e_mean": 0.4238,
+        "auc_mean": 0.6079,
+        "folds": [
+          {
+            "p_e": 0.4238,
+            "auc": 0.6079
+          }
+        ]
+      },
+      "pixel/fld_ensemble": {
+        "p_e_mean": 0.41,
+        "auc_mean": 0.6267,
+        "folds": [
+          {
+            "p_e": 0.41,
+            "auc": 0.6267
+          }
+        ]
+      },
+      "combined/logistic": {
+        "p_e_mean": 0.4008,
+        "auc_mean": 0.6332,
+        "folds": [
+          {
+            "p_e": 0.4008,
+            "auc": 0.6332
+          }
+        ]
+      },
+      "combined/fld_ensemble": {
+        "p_e_mean": 0.3569,
+        "auc_mean": 0.6849,
+        "folds": [
+          {
+            "p_e": 0.3569,
+            "auc": 0.6849
+          }
+        ]
+      }
+    },
+    "leave_one_clip_out": {
+      "coefficient/logistic": {
+        "p_e_mean": 0.4073,
+        "auc_mean": 0.6042,
+        "folds": [
+          {
+            "p_e": 0.3883,
+            "auc": 0.6409
+          },
+          {
+            "p_e": 0.355,
+            "auc": 0.6759
+          },
+          {
+            "p_e": 0.39,
+            "auc": 0.6102
+          },
+          {
+            "p_e": 0.4683,
+            "auc": 0.5237
+          },
+          {
+            "p_e": 0.435,
+            "auc": 0.5703
+          }
+        ]
+      },
+      "coefficient/fld_ensemble": {
+        "p_e_mean": 0.399,
+        "auc_mean": 0.6281,
+        "folds": [
+          {
+            "p_e": 0.3833,
+            "auc": 0.6604
+          },
+          {
+            "p_e": 0.34,
+            "auc": 0.7047
+          },
+          {
+            "p_e": 0.385,
+            "auc": 0.6353
+          },
+          {
+            "p_e": 0.4517,
+            "auc": 0.562
+          },
+          {
+            "p_e": 0.435,
+            "auc": 0.5782
+          }
+        ]
+      },
+      "pixel/logistic": {
+        "p_e_mean": 0.4535,
+        "auc_mean": 0.5379,
+        "folds": [
+          {
+            "p_e": 0.48,
+            "auc": 0.5007
+          },
+          {
+            "p_e": 0.47,
+            "auc": 0.52
+          },
+          {
+            "p_e": 0.4425,
+            "auc": 0.5492
+          },
+          {
+            "p_e": 0.4633,
+            "auc": 0.525
+          },
+          {
+            "p_e": 0.4117,
+            "auc": 0.5946
+          }
+        ]
+      },
+      "pixel/fld_ensemble": {
+        "p_e_mean": 0.458,
+        "auc_mean": 0.5361,
+        "folds": [
+          {
+            "p_e": 0.4883,
+            "auc": 0.4993
+          },
+          {
+            "p_e": 0.4725,
+            "auc": 0.512
+          },
+          {
+            "p_e": 0.4475,
+            "auc": 0.5513
+          },
+          {
+            "p_e": 0.465,
+            "auc": 0.5256
+          },
+          {
+            "p_e": 0.4167,
+            "auc": 0.5925
+          }
+        ]
+      },
+      "combined/logistic": {
+        "p_e_mean": 0.4367,
+        "auc_mean": 0.5748,
+        "folds": [
+          {
+            "p_e": 0.44,
+            "auc": 0.568
+          },
+          {
+            "p_e": 0.4125,
+            "auc": 0.5974
+          },
+          {
+            "p_e": 0.4325,
+            "auc": 0.5829
+          },
+          {
+            "p_e": 0.47,
+            "auc": 0.5308
+          },
+          {
+            "p_e": 0.4283,
+            "auc": 0.595
+          }
+        ]
+      },
+      "combined/fld_ensemble": {
+        "p_e_mean": 0.422,
+        "auc_mean": 0.5827,
+        "folds": [
+          {
+            "p_e": 0.4333,
+            "auc": 0.5559
+          },
+          {
+            "p_e": 0.43,
+            "auc": 0.571
+          },
+          {
+            "p_e": 0.4,
+            "auc": 0.6109
+          },
+          {
+            "p_e": 0.445,
+            "auc": 0.5557
+          },
+          {
+            "p_e": 0.4017,
+            "auc": 0.62
+          }
+        ]
+      }
+    }
+  }
+}

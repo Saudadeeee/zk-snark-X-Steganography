@@ -42,10 +42,21 @@ ML-DSA-65 authenticates the payload hash and the manifest binds the final stego 
 
 The source tree retains an experimental Fiat-Shamir lattice preimage prototype for research-only testing. Public `embed()` and `verify()` reject `proof_backend="lattice_zkp"`; a reviewed lattice-ZK library/protocol with a verifier-known, non-trivial statement and an audited parameter set is required before enabling any lattice-ZKP path.
 
-The pinned Linux-only LaZer research adapter is in [`lazer/`](lazer/README.md). Its current hardware assessment is recorded in [`lazer/EVALUATION.md`](lazer/EVALUATION.md); it is not part of the active video pipeline.
+The pinned Linux-only LaZer research adapter is in [`lazer/`](lazer/README.md); it needs AVX-512 and is not part of the active video pipeline.
 
-The executable research roadmap and canonical statement contract for a future
-reviewed PQ video-ZKP are in [`PQ_VIDEO_ZKP_PLAN.md`](PQ_VIDEO_ZKP_PLAN.md).
+### Lattice zero-knowledge backend (research)
+
+`src/lattice_zk/` carries a lattice zero-knowledge proof inside the video
+itself: a BDLOP commitment with a Fiat-Shamir-with-aborts proof of knowledge
+of its opening, bound to the carrier-normalized H.264 stream, a one-use
+verifier session challenge and an ML-DSA-signed relation registry, and
+verified from the stego video alone. The envelope is 7 589 bytes (registered
+credential) or 14 309 bytes (in-band commitment). It is self-implemented from
+the published protocol and unaudited.
+
+- [`docs/LATTICE_ZK_BDLOP_PLAN.md`](docs/LATTICE_ZK_BDLOP_PLAN.md) - plan, status, measurements, CLI usage (Vietnamese)
+- [`docs/LATTICE_ZK_BDLOP_SPEC.md`](docs/LATTICE_ZK_BDLOP_SPEC.md) - protocol specification and security argument
+- [`docs/LATTICE_BACKEND_SURVEY.md`](docs/LATTICE_BACKEND_SURVEY.md) - why existing lattice proof systems were not adopted
 
 ---
 
@@ -189,7 +200,7 @@ VideoLevel/
 |   |-- verifier_blind.py         Near-blind verification
 |   |-- lattice_pq.py             ML-KEM/ML-DSA receipts + disabled research ZKP prototype
 |   `-- zk_proof.py               Legacy Groth16 migration bridge
-|-- plan.md                       Current freeze plan
+|-- docs/                         Lattice-ZK plan, specification, backend survey
 `-- README.md
 ```
 
@@ -550,15 +561,15 @@ npm run verify-artifacts
 ## Documentation
 
 ### Project Documentation
-- [`plan.md`](plan.md) - Paper-readiness tracking and roadmap
-- [`system.txt`](system.txt) - Plain-text current-system design summary
-- [`PAPER_EVIDENCE.md`](PAPER_EVIDENCE.md) - Claim-to-evidence staging notes
-- [`COMPLETION.md`](COMPLETION.md) - Completion summary checklist
+- [`docs/LATTICE_ZK_BDLOP_PLAN.md`](docs/LATTICE_ZK_BDLOP_PLAN.md) - Lattice-ZK plan, status and measurements
+- [`docs/LATTICE_ZK_BDLOP_SPEC.md`](docs/LATTICE_ZK_BDLOP_SPEC.md) - Lattice-ZK protocol specification
+- [`docs/LATTICE_BACKEND_SURVEY.md`](docs/LATTICE_BACKEND_SURVEY.md) - Lattice backend survey
+- [`LATTICE_PQ.md`](LATTICE_PQ.md) - ML-DSA / ML-KEM attestation path
+- [`PAPER_EVIDENCE.md`](PAPER_EVIDENCE.md) - Claim-to-evidence staging notes (Groth16 baseline)
 - [`OPERATING_ENVELOPE.md`](OPERATING_ENVELOPE.md) - Supported codec/GOP/QP ranges
 - [`REALTIME.md`](REALTIME.md) - Live Annex-B transport contract and native-backend boundary
 - [`native/README.md`](native/README.md) - C17 build, relay, and selected x264 profile
 - [`ARTIFACT_POLICY.md`](ARTIFACT_POLICY.md) - Cleanup and artifact management
-- [`COMPARATIVE_ANALYSIS.md`](COMPARATIVE_ANALYSIS.md) - Comparison with existing systems
 - [`doc/system_video_embedding_walkthrough.tex`](doc/system_video_embedding_walkthrough.tex) - Detailed Vietnamese system walkthrough
 
 ### Benchmark Documentation

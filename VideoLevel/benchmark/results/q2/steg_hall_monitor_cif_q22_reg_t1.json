@@ -1,0 +1,39 @@
+{
+  "frames_analysed": 100,
+  "trailing_one_signs": {
+    "cover_count": 912847,
+    "stego_count": 912847,
+    "cover_positive_fraction": 0.483726,
+    "stego_positive_fraction": 0.484439,
+    "two_sample_chi_square": 1.859,
+    "p_value": 0.1727378369451409
+  },
+  "per_scan_position_signs": {
+    "chi_square": 38.9539,
+    "p_value": 0.0011044174980013393
+  },
+  "pairs_of_values_attack": {
+    "cover": {
+      "chi_square": 6618.9165,
+      "pairs": 30,
+      "embedding_probability": 0.0
+    },
+    "stego": {
+      "chi_square": 6618.9165,
+      "pairs": 30,
+      "embedding_probability": 0.0
+    }
+  },
+  "magnitude_histogram": {
+    "identical": true,
+    "chi_square": 0.0,
+    "p_value": 1.0
+  },
+  "pixel_reference_detectors": {
+    "spa_cover": 0.250327,
+    "spa_stego": 0.25419,
+    "rs_delta_cover": 0.0,
+    "rs_delta_stego": 0.0
+  },
+  "note": "two-sample tests compare against the exact cover; p < 0.05 means detectable"
+}

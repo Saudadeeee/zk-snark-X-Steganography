@@ -155,7 +155,7 @@ def _estimate_cascade_impact(gop_size: int, sequence_name: str) -> float:
 
 def _estimate_psnr(gop_size: int, sequence_name: str) -> float:
     """Estimate PSNR based on GOP and sequence."""
-    # Base PSNR from plan.md data
+    # Base PSNR from the earlier GOP=1 measurements
     base_psnr = {
         "foreman": 55.0,
         "coastguard": 51.0,
