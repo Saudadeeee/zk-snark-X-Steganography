@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import List, Tuple
 
-from .bitstream_io import BitstreamWriter
+from .bitstream_io import BitstreamReader, BitstreamWriter
 
 logger = logging.getLogger(__name__)
 
@@ -968,14 +968,17 @@ def _build_vlc_trie(vlc_table: dict) -> dict:
 
 def _vlc_trie(vlc_table: dict) -> dict | None:
     """Return a cached decode trie for an immutable module-owned VLC table."""
-    if _VLC_BUILTIN_TABLES.get(id(vlc_table)) is not vlc_table:
-        return None
-
     table_id = id(vlc_table)
     cached = _VLC_TRIE_CACHE.get(table_id)
     if cached is not None and cached[0] is vlc_table:
-        _VLC_TRIE_CACHE.move_to_end(table_id)
+        # Only built-in tables are ever inserted (strongly referenced, so the
+        # id cannot be reused), and all of them fit in the cache, so LRU
+        # recency bookkeeping can never change which entry is evicted.
+        if len(_VLC_BUILTIN_TABLES) > _VLC_TRIE_CACHE_MAX_ENTRIES:
+            _VLC_TRIE_CACHE.move_to_end(table_id)
         return cached[1]
+    if _VLC_BUILTIN_TABLES.get(table_id) is not vlc_table:
+        return None
 
     trie = _build_vlc_trie(vlc_table)
     if len(_VLC_TRIE_CACHE) >= _VLC_TRIE_CACHE_MAX_ENTRIES:
@@ -1025,6 +1028,8 @@ def _decode_vlc_slow(reader, vlc_table: dict, max_bits: int, debug: bool) -> tup
 
 
 def _decode_vlc_trie(reader, vlc_table: dict, trie: dict, max_bits: int) -> tuple:
+    if type(reader) is BitstreamReader:
+        return _decode_vlc_trie_direct(reader, vlc_table, trie, max_bits)
     start_pos = reader.tell()
     node = trie
     longest_match = None
@@ -1051,6 +1056,47 @@ def _decode_vlc_trie(reader, vlc_table: dict, trie: dict, max_bits: int) -> tupl
         return longest_match
 
     # Preserve the slow decoder's exact invalid-code cursor and error behavior.
+    reader.seek(start_pos)
+    return _decode_vlc_slow(reader, vlc_table, max_bits, False)
+
+
+def _decode_vlc_trie_direct(
+    reader: BitstreamReader, vlc_table: dict, trie: dict, max_bits: int
+) -> tuple:
+    """``_decode_vlc_trie`` reading bits straight from ``BitstreamReader.data``.
+
+    Each bit is computed exactly as ``read_bits(1)`` does, a read at or past
+    the end stops the walk like its ``EOFError``, and the cursor ends where
+    the generic loop leaves it, so results and errors are identical.
+    """
+    start_pos = reader.pos
+    data = reader.data
+    total_bits = len(data) << 3
+    position = start_pos
+    node = trie
+    longest_match = None
+    longest_match_len = 0
+
+    for code_len in range(1, max_bits + 1):
+        if position >= total_bits:
+            break
+        bit = (data[position >> 3] >> (7 - (position & 7))) & 1
+        position += 1
+
+        node = node.get(bit)
+        if node is None:
+            break
+
+        if _VLC_TRIE_VALUE_KEY in node:
+            longest_match = node[_VLC_TRIE_VALUE_KEY]
+            longest_match_len = code_len
+            if 0 not in node and 1 not in node:
+                break
+
+    if longest_match is not None:
+        reader.seek(start_pos + longest_match_len)
+        return longest_match
+
     reader.seek(start_pos)
     return _decode_vlc_slow(reader, vlc_table, max_bits, False)
 
@@ -1508,14 +1554,35 @@ class CAVLCDecoder:
         else:
             suffixLength = 0
 
+        reader = self.reader
+        direct = type(reader) is BitstreamReader
         for i in range(count):
-            level_start = self.reader.position
+            level_start = reader.position
             # Decode level_prefix (unary code)
             level_prefix = 0
-            while self.reader.read_bits(1) == 0:
-                level_prefix += 1
-                if level_prefix > 24:  # Hard cap - values >24 indicate bitstream desync
-                    raise ValueError(f"level_prefix overflow ({level_prefix}>24) at level {i}/{count} - bitstream desync")
+            if direct:
+                # Same bits, cursor and errors as the read_bits(1) loop below.
+                data = reader.data
+                total_bits = len(data) << 3
+                position = reader.pos
+                while True:
+                    if position >= total_bits:
+                        reader.pos = position
+                        raise EOFError("End of bitstream")
+                    bit = (data[position >> 3] >> (7 - (position & 7))) & 1
+                    position += 1
+                    if bit:
+                        break
+                    level_prefix += 1
+                    if level_prefix > 24:  # Hard cap - values >24 indicate bitstream desync
+                        reader.pos = position
+                        raise ValueError(f"level_prefix overflow ({level_prefix}>24) at level {i}/{count} - bitstream desync")
+                reader.pos = position
+            else:
+                while reader.read_bits(1) == 0:
+                    level_prefix += 1
+                    if level_prefix > 24:  # Hard cap - values >24 indicate bitstream desync
+                        raise ValueError(f"level_prefix overflow ({level_prefix}>24) at level {i}/{count} - bitstream desync")
             
             # Decode level_suffix if needed
             if suffixLength == 0:
