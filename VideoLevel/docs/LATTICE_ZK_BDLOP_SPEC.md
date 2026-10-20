@@ -285,12 +285,13 @@ them and compares the session challenge with its own store. Changing any
 non-carrier syntax that `D` covers changes `D`; changing a carrier changes
 the envelope. Both are rejected
 (`test_envelope_is_rejected_under_any_other_statement`, the tamper checks in
-the E2E runs). Exception: when the whole envelope fits in one chunk, the
-16-bit `chunk_size` field of the chunk header can take any value from the
-envelope length to 65 535 and the verifier does not compare it with the
-pinned profile, so up to 48 carrier bits (that field and the outer CRC-32)
-can be changed without rejection. With two or more chunks the field is
-determined. Proofs and bounds: `docs/paper/sections/security.tex`.
+the E2E runs). The verifier also re-chunks the extracted envelope under the
+pinned `chunk_bytes` and rejects unless the extracted pieces equal that
+encoding byte for byte, so the carrier bits are the unique encoding of the
+envelope. Without this check a single-chunk envelope left the 16-bit
+`chunk_size` header field free (any value from the envelope length to
+65 535); `test_rewritten_single_chunk_header_is_rejected` covers it.
+Proofs and bounds: `docs/paper/sections/security.tex`.
 
 ### 4.8 What the proof establishes
 

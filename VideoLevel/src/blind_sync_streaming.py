@@ -63,6 +63,9 @@ class ChunkedVideoPayloadResult:
     positions_hash: str
     canonical_video_sha256: str
     global_positions: tuple[tuple[int, int, int], ...]
+    # Framed pieces exactly as extracted, so a verifier can require them to be
+    # the canonical chunking of ``payload`` under its pinned chunk size.
+    chunks: tuple[bytes, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -633,4 +636,5 @@ def extract_chunked_video_payload(
             segment_digests, frames_per_segment
         ),
         global_positions=tuple(global_positions),
+        chunks=tuple(pieces),
     )

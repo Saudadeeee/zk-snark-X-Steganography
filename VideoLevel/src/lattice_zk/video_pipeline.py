@@ -356,8 +356,15 @@ def verify_video_proof(
         in_band_session = video_proof.envelope_session(
             params, extracted.payload, registered=profile.registered
         )
+        canonical_chunks = tuple(_chunks(extracted.payload, profile))
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
         return VerifyResult(False, f"extraction or envelope rejected: {type(error).__name__}: {error}")
+    # The carriers must be the unique encoding of the envelope under the pinned
+    # chunk size; otherwise free header fields (e.g. chunk_size of a single
+    # chunk) would let carriers change while the proof still verifies.
+    extracted_chunks = getattr(extracted, "chunks", None)
+    if not isinstance(extracted_chunks, (tuple, list)) or tuple(extracted_chunks) != canonical_chunks:
+        return VerifyResult(False, "carrier framing is not the canonical chunking of the envelope")
 
     def statement_for(challenge: bytes) -> video_proof.VideoStatement:
         return video_proof.build_statement(

@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.blind_payload_chunks import assemble_payload_chunks
+from src.blind_payload_chunks import CHUNK_HEADER, assemble_payload_chunks, pack_payload_chunks
 from src.blind_sync import BlindOperatingContract
 from src.lattice_pq import LatticeSigner
 from src.lattice_zk import video_pipeline as pipeline
@@ -47,16 +47,31 @@ class FakeTransport:
         payload_bytes = len(assemble_payload_chunks(chunks))
         return self._context(Path(video_path).read_bytes(), payload_bytes)
 
-    def embed_chunked_video_payload(self, cover, output, payload, sync_key, contract, **_options):
-        Path(output).write_bytes(Path(cover).read_bytes() + MARKER + payload)
-        return SimpleNamespace(carriers_used=len(payload) * 8, segments_used=1)
+    def embed_chunked_video_payload(self, cover, output, payload, sync_key, contract, *, chunk_size,
+                                    **_options):
+        chunks = pack_payload_chunks(payload, chunk_size=chunk_size)
+        Path(output).write_bytes(Path(cover).read_bytes() + MARKER + b"".join(chunks))
+        return SimpleNamespace(carriers_used=len(payload) * 8, segments_used=len(chunks))
 
     def extract_chunked_video_payload(self, video_path, sync_key, contract, **_options):
-        body, found, payload = Path(video_path).read_bytes().partition(MARKER)
+        body, found, framed = Path(video_path).read_bytes().partition(MARKER)
         if not found:
             raise ValueError("no carriers found")
+        chunks = []
+        while framed:  # chunk boundaries come from the (carrier-borne) headers
+            if len(framed) < CHUNK_HEADER.size:
+                raise ValueError("truncated chunk header")
+            _, _, index, count, total, size, _, _ = CHUNK_HEADER.unpack_from(framed)
+            length = CHUNK_HEADER.size + (size if index < count - 1 else total - size * index)
+            if length <= CHUNK_HEADER.size or length > len(framed):
+                raise ValueError("chunk header declares an impossible length")
+            chunks.append(framed[:length])
+            framed = framed[length:]
+        payload = assemble_payload_chunks(chunks)
         context = self._context(body, len(payload))
-        return SimpleNamespace(payload=payload, carriers_used=len(payload) * 8, **vars(context))
+        return SimpleNamespace(
+            payload=payload, carriers_used=len(payload) * 8, chunks=tuple(chunks), **vars(context)
+        )
 
 
 @pytest.fixture(scope="module")
@@ -180,6 +195,77 @@ def test_verifier_with_other_pins_rejects(tmp_path, pins) -> None:
     with pytest.raises(ValueError, match="relation id"):
         _verify(stego, dataclasses.replace(pins, relation_id=b"\x02" * 32),
                 expected_session=b"\x07" * 32)
+
+
+def _embed_with_profile(tmp_path: Path, issuer, profile: pipeline.CarrierProfile):
+    """Embed under ``profile``; return the stego path and a verifier for it."""
+    signed = SignedZkpRelationRegistry.create(
+        epoch=3, relations=[pipeline.relation_descriptor(TOY, profile)]
+    ).sign(issuer[1], signer_id="test-issuer")
+    profile_pins = pipeline.pins_from_registry(
+        signed, issuer[0], TOY, profile, minimum_epoch=3, allow_toy_parameters=True
+    )
+    cover, stego = tmp_path / "cover.h264", tmp_path / "stego.h264"
+    cover.write_bytes(b"non-carrier syntax" * 50)
+    pipeline.embed_video_proof(
+        cover, stego, b"hidden record", params=TOY, pins=profile_pins, profile=profile,
+        session_challenge=b"\x07" * 32, sync_key=SYNC_KEY, transport=FakeTransport(),
+    )
+
+    def verify(video: Path) -> pipeline.VerifyResult:
+        return pipeline.verify_video_proof(
+            video, params=TOY, pins=profile_pins, profile=profile, sync_key=SYNC_KEY,
+            transport=FakeTransport(), expected_session=b"\x07" * 32,
+        )
+
+    return stego, verify
+
+
+def test_rewritten_single_chunk_header_is_rejected(tmp_path, issuer) -> None:
+    """D1: with one chunk, the chunk_size field is free unless the verifier pins it."""
+    stego, verify = _embed_with_profile(
+        tmp_path, issuer, dataclasses.replace(PROFILE, chunk_bytes=65_535)
+    )
+    assert verify(stego).valid
+    body, _, chunk = stego.read_bytes().partition(MARKER)
+    fields = list(CHUNK_HEADER.unpack_from(chunk))
+    assert fields[3] == 1 and fields[5] == 65_535
+    fields[5] = fields[4] + 7  # still one chunk, still a well-formed frame
+    rewritten = CHUNK_HEADER.pack(*fields) + chunk[CHUNK_HEADER.size :]
+    assert assemble_payload_chunks([rewritten]) == assemble_payload_chunks([chunk])
+    stego.write_bytes(body + MARKER + rewritten)
+    result = verify(stego)
+    assert not result.valid and "canonical chunking" in result.reason
+
+
+def test_rechunked_multi_chunk_envelope_is_rejected(tmp_path, issuer) -> None:
+    profile = dataclasses.replace(PROFILE, chunk_bytes=256)
+    stego, verify = _embed_with_profile(tmp_path, issuer, profile)
+    assert verify(stego).valid
+    body, _, _ = stego.read_bytes().partition(MARKER)
+    honest = FakeTransport().extract_chunked_video_payload(stego, SYNC_KEY, profile.contract)
+    assert len(honest.chunks) > 1
+    # A different, self-consistent chunking of the same envelope still assembles.
+    rechunked = pack_payload_chunks(honest.payload, chunk_size=profile.chunk_bytes + 1)
+    assert assemble_payload_chunks(rechunked) == honest.payload
+    stego.write_bytes(body + MARKER + b"".join(rechunked))
+    result = verify(stego)
+    assert not result.valid and "canonical chunking" in result.reason
+
+
+def test_transport_without_framed_chunks_is_rejected(tmp_path, pins) -> None:
+    class ChunklessTransport(FakeTransport):
+        def extract_chunked_video_payload(self, *arguments, **options):
+            extracted = super().extract_chunked_video_payload(*arguments, **options)
+            del extracted.chunks
+            return extracted
+
+    stego = _embed(tmp_path, pins, b"\x07" * 32)
+    result = pipeline.verify_video_proof(
+        stego, params=TOY, pins=pins, profile=PROFILE, sync_key=SYNC_KEY,
+        transport=ChunklessTransport(), expected_session=b"\x07" * 32,
+    )
+    assert not result.valid and "canonical chunking" in result.reason
 
 
 def test_transport_failures_are_reported_as_rejection(tmp_path, pins) -> None:
