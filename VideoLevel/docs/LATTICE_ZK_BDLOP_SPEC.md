@@ -109,10 +109,20 @@ with every digest 32 bytes. The verifier builds it only from its pinned
 configuration (relation, registry root and epoch, codec policy, carrier
 profile) and from values it recomputes from the received H.264 stream:
 the carrier list (hence `carrier_count` and `positions_hash`) and
-`video_commitment = SHA-256("zkstego/video-zk/video-commitment/v1\0" ‖ D)`,
-where `D` is the digest of the stream with every carrier coefficient replaced
-by a canonical value. Because `D` normalizes exactly the positions that carry
+`video_commitment = SHA-256("zkstego/video-zk/video-commitment/v1\0" ‖ D)`.
+`D` is computed over the stream split by `ffmpeg -c:v copy -f segment` into
+segments of `frames_per_segment` frames:
+`D = SHA-256("zkstego/canonical-h264-segmented/v1\0" ‖ u32 F ‖ u32 L ‖
+(u32 i ‖ u32 frames_i ‖ d_i)_{i<L})`. For a segment that carries envelope
+chunks, `d_i` is the SHA-256 of a tagged, length-delimited serialization of its
+parsed NAL units (header fields, RBSP of NAL units without carriers, and for
+carrier-bearing IDR NAL units the RBSP bits between carrier blocks up to the
+stop bit, with each carrier block replaced by its coefficient vector in which
+every carrier is normalized); for the other segments `d_i` is the SHA-256 of
+the segment file. Because `D` normalizes exactly the positions that carry
 the envelope, the proof can bind the video without depending on its own bits.
+What `D` does not bind is listed in the paper's security section
+(`docs/paper/sections/security.tex`, integrity limits).
 
 ### 3.7 Envelope
 
@@ -145,6 +155,10 @@ Throughout, `‖c·v‖∞ ≤ ‖c‖₁·‖v‖∞`.
 inverse (4.65 for the production set; measured 4.68 over 50 runs), and an
 accepted `z` satisfies the verification equation because `t1 = B1·r`.
 The probability that 512 attempts all abort is `(1 − 0.215)^{512} < 2^{-178}`.
+The equality proof (3.5) accepts with probability `0.215^2 ≈ 0.046` per
+attempt (mean 21.6 attempts) and shares the cap of 512, so it fails with
+probability about `2^{-35}`; a larger cap would not affect zero knowledge,
+because acceptance is independent of the witness.
 
 ### 4.2 Honest-verifier zero knowledge of accepted transcripts
 
@@ -192,10 +206,10 @@ Section 2. The constructor of `BdlopParams` rejects any set in which
 
 Write `r = (r1, r2, r3) ∈ R^n × R × R^λ` and `B1' = [B1'_2 | B1'_3]`. Then
 `t2 − m = r2 + b2'·r3` and `t1 − B1'_2·(t2 − m) = r1 + (B1'_3 − B1'_2·b2')·r3`.
-The map `(t1, t2) ↦ (t1 − B1'_2·t2, t2)` is a public bijection, and the right
-side is an M-LWE instance with secret `r3` of rank `λ`, `n + 1` ring samples,
-ternary error `(r1, r2)` and a uniform matrix. This is the instance estimated
-in Section 2.
+For each fixed `m`, the map `(t1, t2) ↦ (t1 − B1'_2·(t2 − m), t2 − m)` is a
+public bijection, and its image is an M-LWE instance with secret `r3` of rank
+`λ`, `n + 1` ring samples, ternary error `(r1, r2)` and the uniform matrix
+`[B1'_3 − B1'_2·b2' ; b2']`. This is the instance estimated in Section 2.
 
 ### 4.6 Equality proof
 
@@ -208,22 +222,37 @@ both responses.
 ### 4.7 Binding to the video and the session
 
 All of `parameter_id`, `x` and the full commitment enter the hash before `c`
-is derived, with length prefixes, so a proof verifies only for the exact
-statement and commitment it was made for. The verifier never reads statement
-values from the video: it recomputes them and compares the session challenge
-with its own store. Changing any non-carrier syntax changes `D`; changing a
-carrier corrupts the envelope. Both are rejected
+is derived. `x` is length-prefixed; `parameter_id`, the commitment and `w`
+have lengths fixed by `parameter_id`, so the hash input is uniquely decodable
+and a proof verifies only for the exact statement and commitment it was made
+for. The verifier never reads statement values from the video: it recomputes
+them and compares the session challenge with its own store. Changing any
+non-carrier syntax that `D` covers changes `D`; changing a carrier changes
+the envelope. Both are rejected
 (`test_envelope_is_rejected_under_any_other_statement`, the tamper checks in
-the E2E runs).
+the E2E runs). Exception: when the whole envelope fits in one chunk, the
+16-bit `chunk_size` field of the chunk header can take any value from the
+envelope length to 65 535 and the verifier does not compare it with the
+pinned profile, so up to 48 carrier bits (that field and the outer CRC-32)
+can be changed without rejection. With two or more chunks the field is
+determined. Proofs and bounds: `docs/paper/sections/security.tex`.
 
 ### 4.8 What the proof establishes
 
 - **In-band mode**: the creator of this video, for this session, knows an
   opening of the commitment it carries. The payload stays hidden and can be
   disclosed later to a chosen party. This does not identify the creator.
+  Disclosure as implemented (`verify_disclosure`) reveals the randomness `r`,
+  after which the recipient can also prove knowledge of the opening for new
+  statements; disclose with a proof (an equality proof against
+  `(0, encode(payload))` with zero randomness) when that matters.
 - **Registered mode**: the creator knows the opening of a credential
   commitment that the issuer registered, so only the credential holder can
-  produce the proof.
+  produce the proof. The argument needs, besides binding, that a relaxed
+  opening of an honestly generated commitment is hard to find (M-SIS, or
+  M-LWE when the opening found is the holder's own `r`). The registered
+  descriptor binds the commitment, not a holder identity; the link from a
+  commitment to a person comes from outside the signed registry.
 - **Linkage**: two carried commitments, or a carried commitment and a
   credential, hide the same payload.
 
