@@ -54,6 +54,11 @@ CASE_SETS: dict[str, tuple[str, ...]] = {
                   "hall_cif_q22_reg", "deadline_cif_q22_reg"),
     "t1_spread": ("container_cif_q22_reg_t1_spread", "coastguard_cif_q22_reg_t1_spread",
                   "city_cif_q22_reg_t1_spread", "hall_cif_q22_reg_t1_spread"),
+    # B1 comparison on 200-frame cuts (benchmark/latticezk_adaptive_e2e.py).
+    "b1_magnitude": ("container_cif_q22_reg_b1mag", "coastguard_cif_q22_reg_b1mag",
+                     "deadline_cif_q22_reg_b1mag"),
+    "b1_adaptive": ("container_cif_q22_reg_b1adapt", "coastguard_cif_q22_reg_b1adapt",
+                    "deadline_cif_q22_reg_b1adapt"),
 }
 
 

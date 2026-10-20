@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.blind_sync import BlindOperatingContract  # noqa: E402
+from src.blind_sync import AdaptiveOperatingContract, BlindOperatingContract  # noqa: E402
 from src.lattice_pq import LatticeSigner  # noqa: E402
 from src.lattice_zk import params as parameter_sets  # noqa: E402
 from src.lattice_zk import video_pipeline as pipeline  # noqa: E402
@@ -58,7 +58,10 @@ T1_SIGN_CONTRACT = BlindOperatingContract(
     max_modifications_per_block=1,
     stable_carriers_only=True,
 )
-CARRIER_CONTRACTS = {"magnitude": CONTRACT, "t1": T1_SIGN_CONTRACT}
+# Same stable magnitude carriers, cost-adaptive syndrome-trellis coded
+# (docs/ADAPTIVE_CARRIERS.md): fewer, cheaper changes for the same envelope.
+ADAPTIVE_CONTRACT = AdaptiveOperatingContract()
+CARRIER_CONTRACTS = {"magnitude": CONTRACT, "t1": T1_SIGN_CONTRACT, "adaptive": ADAPTIVE_CONTRACT}
 DEMO_PAYLOAD = b"zkstego lattice-ZK demo payload: hidden provenance record #0001"
 
 
@@ -252,7 +255,8 @@ def main() -> int:
     parser.add_argument("--chunk-bytes", type=int, default=pipeline.DEFAULT_CHUNK_BYTES)
     parser.add_argument(
         "--carrier", choices=sorted(CARRIER_CONTRACTS), default="magnitude",
-        help="magnitude: LSB of the first |level|>=4 AC coefficient; t1: trailing-one sign flip",
+        help="magnitude: LSB of the first |level|>=4 AC coefficient; t1: trailing-one sign flip; "
+        "adaptive: the magnitude carriers, cost-adaptive syndrome-trellis coded",
     )
     parser.add_argument(
         "--skip-security-checks", action="store_true",

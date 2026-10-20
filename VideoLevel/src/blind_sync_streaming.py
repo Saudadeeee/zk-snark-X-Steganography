@@ -278,6 +278,8 @@ def derive_chunked_video_context(
 
     from .blind_sync import (
         derive_blind_positions_operating_contract,
+        derive_coded_carrier_positions,
+        is_syndrome_coded,
         pack_blind_payload,
     )
     from .manifest import hash_positions
@@ -321,13 +323,20 @@ def derive_chunked_video_context(
                 carriers_used = 0
                 if index < len(chunks):
                     required_bits = len(pack_blind_payload(chunks[index])) * 8
-                    positions, _metadata = derive_blind_positions_operating_contract(
-                        str(segment),
-                        sync_key,
-                        required_bits,
-                        contract,
-                        use_analysis_cache=True,
-                    )
+                    if is_syndrome_coded(contract):
+                        # Syndrome-coded segments use every stable carrier.
+                        positions, _metadata = derive_coded_carrier_positions(
+                            str(segment), sync_key, required_bits, contract
+                        )
+                        required_bits = len(positions)
+                    else:
+                        positions, _metadata = derive_blind_positions_operating_contract(
+                            str(segment),
+                            sync_key,
+                            required_bits,
+                            contract,
+                            use_analysis_cache=True,
+                        )
                     if len(positions) != required_bits:
                         raise ValueError(
                             f"segment {index} has insufficient patchable stable carriers: "

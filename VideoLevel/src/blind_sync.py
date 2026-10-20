@@ -16,6 +16,7 @@ import hmac
 import json
 import os
 import struct
+import sys
 import tempfile
 import zlib
 from dataclasses import dataclass
@@ -127,6 +128,197 @@ class BlindOperatingContract:
     patchability_headroom: int = 256
     max_modifications_per_block: int = 1
     stable_carriers_only: bool = False
+
+
+SYNDROME_CODING_STC = "stc"
+ADAPTIVE_MAGNITUDE_CONTRACT_VERSION = "adaptive-stc-magnitude-video-only-v1"
+
+
+@dataclass
+class AdaptiveOperatingContract(BlindOperatingContract):
+    """Stable magnitude carriers with cost-adaptive syndrome-trellis coding.
+
+    The carrier set and its keyed order are exactly those of the stable
+    magnitude contract; only the bit mapping differs.  The envelope header is
+    the syndrome of the first ``header_carriers_per_bit * 112`` carriers and
+    the body the syndrome of all remaining carriers of the segment, so the
+    extractor needs only the pinned code parameters.  The extra fields make
+    ``dataclasses.asdict`` (and hence the carrier profile id) differ from
+    every direct contract, while leaving those contracts' serialisation as is.
+    """
+
+    version: str = ADAPTIVE_MAGNITUDE_CONTRACT_VERSION
+    require_bitstream_patchable: bool = True
+    patchability_headroom: int = 64
+    stable_carriers_only: bool = True
+    carrier_coding: str = SYNDROME_CODING_STC
+    stc_constraint_height: int = 10
+    # 1: the header code uses exactly 112 carriers, so the contract fits
+    # exactly the segments the direct magnitude contract fits.
+    header_carriers_per_bit: int = 1
+    cost_model: str = "texture-magnitude-v1"
+
+
+def is_syndrome_coded(contract: BlindOperatingContract) -> bool:
+    """True for contracts whose carriers carry a syndrome, not direct bits."""
+    coding = getattr(contract, "carrier_coding", None)
+    if coding is None:
+        return False
+    if coding != SYNDROME_CODING_STC:
+        raise ValueError(f"unsupported carrier coding: {coding!r}")
+    return True
+
+
+def _require_coded_contract(contract: BlindOperatingContract) -> None:
+    from .core.adaptive_carriers import COST_MODELS, MAX_CONSTRAINT_HEIGHT, MIN_CONSTRAINT_HEIGHT
+
+    if not (contract.stable_carriers_only and contract.require_bitstream_patchable):
+        raise ValueError("syndrome coding requires stable, patchability-checked carriers")
+    if contract.signbit_only:
+        raise ValueError("syndrome coding is defined for magnitude carriers only")
+    if contract.max_modifications_per_block != 1 or not contract.dedup_per_block:
+        raise ValueError("syndrome coding requires one carrier per block")
+    if contract.max_bits_per_idr != 0 or contract.bottom_rows != 0:
+        raise ValueError("syndrome coding uses every stable carrier of a segment")
+    height = contract.stc_constraint_height
+    if isinstance(height, bool) or not isinstance(height, int) or not (
+        MIN_CONSTRAINT_HEIGHT <= height <= MAX_CONSTRAINT_HEIGHT
+    ):
+        raise ValueError("stc_constraint_height is out of range")
+    per_bit = contract.header_carriers_per_bit
+    if isinstance(per_bit, bool) or not isinstance(per_bit, int) or per_bit < 1:
+        raise ValueError("header_carriers_per_bit must be a positive integer")
+    if contract.cost_model not in COST_MODELS:
+        raise ValueError(f"unknown cost model: {contract.cost_model!r}")
+
+
+def coded_carrier_layout(
+    contract: BlindOperatingContract, envelope_bits: int, available_carriers: int
+) -> tuple[int, int]:
+    """Carriers of the header code and of the body code for one envelope.
+
+    The header code is fixed by the contract; the body uses every remaining
+    carrier, which both parties know because the carrier set is invariant.
+    """
+    header_bits = BLIND_ENVELOPE_HEADER_BYTES * 8
+    header_carriers = header_bits * contract.header_carriers_per_bit
+    if envelope_bits < header_bits:
+        raise ValueError("an envelope is at least its header")
+    body_bits = envelope_bits - header_bits
+    body_carriers = available_carriers - header_carriers
+    if body_carriers < max(body_bits, 0) or body_carriers < 0:
+        raise ValueError(
+            f"insufficient stable carriers for syndrome coding: need more than "
+            f"{header_carriers + body_bits}, got {available_carriers}"
+        )
+    return header_carriers, body_carriers
+
+
+def derive_coded_carrier_positions(
+    video_path: str,
+    sync_key: bytes,
+    envelope_bits: int,
+    contract: BlindOperatingContract,
+) -> tuple[list[tuple[int, int, int]], BlindPublicMetadata]:
+    """All stable carriers in keyed order, checked to fit ``envelope_bits``."""
+    _require_coded_contract(contract)
+    positions, metadata = derive_blind_positions_operating_contract(
+        video_path, sync_key, sys.maxsize, contract, use_analysis_cache=True
+    )
+    coded_carrier_layout(contract, envelope_bits, len(positions))
+    return positions, metadata
+
+
+def _bits_of(data: bytes) -> list[int]:
+    return [(byte >> shift) & 1 for byte in data for shift in range(7, -1, -1)]
+
+
+def _bytes_of(bits: list[int]) -> bytes:
+    if len(bits) % 8:
+        raise ValueError("bit string is not byte aligned")
+    return bytes(
+        sum(bit << (7 - offset) for offset, bit in enumerate(bits[start:start + 8]))
+        for start in range(0, len(bits), 8)
+    )
+
+
+def syndrome_code_envelope(
+    envelope: bytes,
+    positions: list[tuple[int, int, int]],
+    coefficients: list[tuple[int, int, list[int]]],
+    contract: BlindOperatingContract,
+) -> list[int]:
+    """Stego carrier bits whose header and body syndromes spell ``envelope``."""
+    from .core.adaptive_carriers import carrier_costs, stc_embed
+
+    _require_coded_contract(contract)
+    levels = {(int(mb), int(blk)): values for mb, blk, values in coefficients}
+    cover = [abs(int(levels[(mb, blk)][index])) & 1 for mb, blk, index in positions]
+    costs = carrier_costs(positions, coefficients, contract.cost_model)
+    bits = _bits_of(envelope)
+    header_bits = BLIND_ENVELOPE_HEADER_BYTES * 8
+    header_carriers, _body = coded_carrier_layout(contract, len(bits), len(positions))
+    height = contract.stc_constraint_height
+    stego = stc_embed(cover[:header_carriers], bits[:header_bits], costs[:header_carriers], height)
+    if len(bits) > header_bits:
+        stego += stc_embed(
+            cover[header_carriers:], bits[header_bits:], costs[header_carriers:], height
+        )
+    else:
+        stego += cover[header_carriers:]
+    return stego
+
+
+def _read_carrier_bits(
+    positions: list[tuple[int, int, int]], frame_verified_data: dict
+) -> list[int]:
+    """Carrier bits of a video's own decoded levels; every carrier must be present."""
+    from bisect import bisect_right
+
+    offsets = sorted(frame_verified_data)
+    bits = []
+    for mb, blk, index in positions:
+        frame = bisect_right(offsets, mb) - 1
+        levels = frame_verified_data[offsets[frame]][1].get((mb, blk)) if frame >= 0 else None
+        if levels is None or not 0 <= index < len(levels):
+            raise ValueError(f"carrier {(mb, blk, index)} is missing from the video analysis")
+        bits.append(abs(int(levels[index])) & 1)
+    return bits
+
+
+def _extract_syndrome_coded_payload(
+    video_path: str,
+    sync_key: bytes,
+    contract: BlindOperatingContract,
+    frame_verified_data: dict,
+) -> BlindVideoPayloadResult:
+    from .core.adaptive_carriers import stc_extract
+
+    _require_coded_contract(contract)
+    header_bits = BLIND_ENVELOPE_HEADER_BYTES * 8
+    positions, metadata = derive_coded_carrier_positions(
+        video_path, sync_key, header_bits, contract
+    )
+    carrier_bits = _read_carrier_bits(positions, frame_verified_data)
+    height = contract.stc_constraint_height
+    header_carriers, _body = coded_carrier_layout(contract, header_bits, len(positions))
+    header = _bytes_of(stc_extract(carrier_bits[:header_carriers], header_bits, height))
+    payload_length = parse_blind_payload_header(header)
+    envelope_size = BLIND_ENVELOPE_HEADER_BYTES + payload_length
+    envelope_bits = envelope_size * 8
+    coded_carrier_layout(contract, envelope_bits, len(positions))
+    body = (
+        stc_extract(carrier_bits[header_carriers:], envelope_bits - header_bits, height)
+        if payload_length else []
+    )
+    payload = unpack_blind_payload(header + _bytes_of(body))
+    return BlindVideoPayloadResult(
+        payload=payload,
+        metadata=metadata,
+        envelope_size_bytes=envelope_size,
+        carriers_used=len(positions),
+        carrier_positions=tuple(positions),
+    )
 
 
 DEFAULT_VALIDATED_POOL_PROXY_CONTRACT = BlindOperatingContract(
@@ -625,30 +817,45 @@ def embed_blind_video_payload(
         stable_blind_only=True,
     )
     coefficients, frame_data, n_c_map, nal_lengths, t1_overrides = analysis[:5]
-    positions, metadata = derive_blind_positions_operating_contract(
-        cover_video_path,
-        sync_key,
-        required_bits,
-        contract,
-        use_analysis_cache=True,
-    )
-    if len(positions) != required_bits:
-        raise ValueError(
-            f"insufficient stable patchable capacity: need {required_bits} carriers, got {len(positions)}"
-        )
-
     embedder = PayloadEmbedder(
         max_modifications_per_block=contract.max_modifications_per_block
     )
-    modified, embedded_bits = embedder.embed_payload(
-        coefficients,
-        envelope,
-        nC_map=n_c_map,
-        nal_length_map=nal_lengths,
-        t1_override_map=t1_overrides,
-        frame_verified_data=frame_data,
-        pre_validated_positions=positions,
-    )
+    if is_syndrome_coded(contract):
+        positions, metadata = derive_coded_carrier_positions(
+            cover_video_path, sync_key, required_bits, contract
+        )
+        # Every carrier is rewritten with its coded bit; most keep their value.
+        required_bits = len(positions)
+        modified, embedded_bits = embedder.embed_bits(
+            coefficients,
+            syndrome_code_envelope(envelope, positions, coefficients, contract),
+            nC_map=n_c_map,
+            nal_length_map=nal_lengths,
+            t1_override_map=t1_overrides,
+            frame_verified_data=frame_data,
+            pre_validated_positions=positions,
+        )
+    else:
+        positions, metadata = derive_blind_positions_operating_contract(
+            cover_video_path,
+            sync_key,
+            required_bits,
+            contract,
+            use_analysis_cache=True,
+        )
+        if len(positions) != required_bits:
+            raise ValueError(
+                f"insufficient stable patchable capacity: need {required_bits} carriers, got {len(positions)}"
+            )
+        modified, embedded_bits = embedder.embed_payload(
+            coefficients,
+            envelope,
+            nC_map=n_c_map,
+            nal_length_map=nal_lengths,
+            t1_override_map=t1_overrides,
+            frame_verified_data=frame_data,
+            pre_validated_positions=positions,
+        )
     if embedded_bits != required_bits:
         raise RuntimeError(f"short embed: wrote {embedded_bits} of {required_bits} bits")
 
@@ -745,6 +952,10 @@ def extract_blind_video_payload(
     )
     frame_verified_data = analysis[1]
     n_c_map = analysis[2]
+    if is_syndrome_coded(contract):
+        return _extract_syndrome_coded_payload(
+            video_path, sync_key, contract, frame_verified_data
+        )
 
     header_bits = BLIND_ENVELOPE_HEADER_BYTES * 8
     header_positions, metadata = derive_blind_positions_operating_contract(
