@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import re
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,17 @@ def _write_new(path: Path, data: bytes, *, private: bool = False) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600 if private else 0o644)
     with os.fdopen(descriptor, "wb") as handle:
         handle.write(data)
+
+
+def _require_absent(*paths: Path | None) -> None:
+    """Fail before any work if an output would be overwritten.
+
+    Writing still uses ``O_EXCL``; this pre-check only prevents creating one
+    half of a key pair, or embedding a video whose opening cannot be kept.
+    """
+    for path in paths:
+        if path is not None and os.path.lexists(path):
+            raise FileExistsError(f"{path} already exists; refusing to overwrite it")
 
 
 def _write_json(path: Path, value: dict[str, Any], *, private: bool = False) -> None:
@@ -110,9 +122,10 @@ def _verifier_pins(arguments: argparse.Namespace):
 # -- issuer --------------------------------------------------------------- #
 
 def _issuer_keygen(arguments: argparse.Namespace) -> dict[str, Any]:
+    _require_absent(arguments.public, arguments.private)
     public_key, private_key = LatticeSigner.generate_keypair()
-    _write_new(arguments.public, public_key)
     _write_new(arguments.private, private_key, private=True)
+    _write_new(arguments.public, public_key)
     return {"issuer_public": str(arguments.public), "algorithm": "ML-DSA-65"}
 
 
@@ -131,28 +144,40 @@ def _registry_sign(arguments: argparse.Namespace) -> dict[str, Any]:
 # -- holder --------------------------------------------------------------- #
 
 def _credential_new(arguments: argparse.Namespace) -> dict[str, Any]:
+    _require_absent(arguments.public, arguments.private)
     payload = arguments.payload_file.read_bytes()
     randomness = bdlop.sample_randomness(PARAMS)
     commitment = bdlop.commit(PARAMS, codec.encode_payload(PARAMS, payload), randomness)
     public = {"parameter_id": PARAMS.parameter_id.hex(), "commitment": commitment.to_bytes(PARAMS).hex()}
     secret = {**public, "payload": payload.hex(), "randomness": randomness.astype(np.int8).tobytes().hex()}
-    _write_json(arguments.public, public)
+    # Secret first: a public credential must never exist without its opening.
     _write_json(arguments.private, secret, private=True)
+    _write_json(arguments.public, public)
     return {"credential_public": str(arguments.public)}
 
 
 def _private_credential(path: Path) -> pipeline.Credential:
     record = _read_json(path)
     commitment = _public_credential(path)
+    if not isinstance(record.get("randomness"), str) or not isinstance(record.get("payload"), str):
+        raise ValueError("credential secret is malformed")
     raw = np.frombuffer(bytes.fromhex(record["randomness"]), dtype=np.int8)
     if commitment is None or raw.size != PARAMS.width * PARAMS.degree:
         raise ValueError("credential secret is malformed")
-    return pipeline.Credential(commitment, raw.astype(np.int64).reshape(PARAMS.width, PARAMS.degree))
+    randomness = raw.astype(np.int64).reshape(PARAMS.width, PARAMS.degree)
+    message = codec.encode_payload(PARAMS, bytes.fromhex(record["payload"]))
+    if not bdlop.verify_opening(PARAMS, commitment, message, randomness):
+        raise ValueError("credential secret does not open its commitment")
+    return pipeline.Credential(commitment, randomness)
 
 
 def _embed(arguments: argparse.Namespace) -> dict[str, Any]:
     if (arguments.payload_file is None) == (arguments.credential_private is None):
         raise ValueError("supply exactly one of --payload-file or --credential-private")
+    if arguments.payload_file is not None and arguments.opening_out is None:
+        raise ValueError("--opening-out is required to keep the payload opening")
+    # Checked before proving: a stego video whose opening cannot be saved is lost.
+    _require_absent(arguments.output, arguments.opening_out)
     credential = None
     if arguments.credential_private is not None:
         credential = _private_credential(arguments.credential_private)
@@ -170,8 +195,6 @@ def _embed(arguments: argparse.Namespace) -> dict[str, Any]:
         credential=credential,
     )
     if result.opening is not None:
-        if arguments.opening_out is None:
-            raise ValueError("--opening-out is required to keep the payload opening")
         _write_json(arguments.opening_out, {
             "payload": result.opening.payload.hex(),
             "randomness": result.opening.randomness.astype(np.int8).tobytes().hex(),
@@ -271,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
     arguments = _build_parser().parse_args(argv)
     try:
         report = arguments.handler(arguments)
-    except (ValueError, OSError, KeyError) as error:
+    except (ValueError, TypeError, OSError, KeyError, RuntimeError, sqlite3.Error) as error:
         sys.stderr.write(f"error: {type(error).__name__}: {error}\n")
         return 2
     sys.stdout.write(json.dumps(report, sort_keys=True) + "\n")
