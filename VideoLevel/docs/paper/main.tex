@@ -503,9 +503,12 @@ payload with the equality proof (15\,008 bytes), bound to the two
 commitments and to a context such as the two statement identifiers. This
 links two in-band videos to one payload, or links an in-band video to a
 registered credential after the fact, without revealing the payload. A
-holder can also disclose the payload and its randomness to a chosen party,
-who checks the opening against the commitment extracted from a verified
-video.
+holder can also disclose the payload to a chosen party without revealing
+the randomness: the disclosure is the payload with an equality proof between
+the extracted commitment and the deterministic commitment to the payload
+under zero randomness, bound to the recipient's statement identifier and
+nonce (15\,008 bytes of proof). The recipient learns the payload but cannot
+reuse the commitment in new proofs.
 
 \subsection{Carrier ordering key}
 \label{sec:orderkey}
@@ -714,12 +717,18 @@ combined features reach $0.36$ (Table~\ref{tab:steg-ml}). The embedding is
 thus detectable per frame at a moderate level in its own domain and barely
 in the pixel domain. These are per-frame figures; a detector that pools the
 evidence of all modified frames of a video~\cite{ref:ker06} would do better
-(Section~\ref{sec:discussion}). A CNN detector~\cite{ref:srnet} trained on
-the same protocol is \todo{CNN steganalysis $P_E$ (roadmap A6)}, and the
-learned evaluation over all clips including 4CIF is \todo{final ML
-evaluation including 4CIF clips}.
+(Section~\ref{sec:discussion}). A GPU-trained CNN with a fixed SRM
+front end (163k parameters, in the style of Yedrouj-Net~\cite{ref:yedroudj18}, 256$\times$256
+paired crops, curriculum from an amplified change) does no better: frame
+$P_E=0.466$ leave-one-clip-out on 1\,700 frame pairs and $0.46$--$0.47$ on a
+random paired split (two seeds), and $0.41$ when its scores are pooled over
+each 100-frame segment (Table~\ref{tab:steg-cnn}). The margin is small:
+trained and tested on twice the real change, the same network reaches
+$P_E=0.18$. The learned evaluation over all clips including 4CIF is
+\todo{final ML evaluation including 4CIF clips}.
 
 \input{tables/paper_steg_ml}
+\input{tables/steg_cnn}
 
 \subsection{Carrier choice}
 \label{sec:carrier}
@@ -733,15 +742,20 @@ on modified frames (43.3--48.8 vs.\ 40.0--45.4\,dB; worst frame 38.5--44.6
 vs.\ 32.7--38.8\,dB) but slightly lower whole-video SSIM, and they are much
 harder to see in the coefficient domain (leave-one-clip-out $P_E=0.47$ vs.\
 $0.39$) yet easier in the pixel domain ($0.40$ vs.\ $0.46$); with combined
-features the two are close ($0.40$ vs.\ $0.42$). Packed into 100 frames,
+features the two are close ($0.40$ vs.\ $0.42$). The CNN separates them
+clearly: on sign carriers at the same payload and frame count it reaches
+$P_E=0.27$--$0.28$ leave-one-clip-out and $0.14$--$0.17$ on the paired split,
+against $0.47$ for the magnitude carrier (Table~\ref{tab:steg-cnn}); sign
+carriers should therefore not be presented as secure against learned
+steganalysis. Packed into 100 frames,
 sign flips are clearly detectable ($P_E=0.31$ with pixel features, and a
 per-position sign test flags one clip at $p=0.001$). Sign carriers were
 4--8 times slower to verify at equal frame count (2--3 times when packed into
 100 frames), because the reduced stable-carrier analysis does not apply to
 them; \todo{timing of the optimized sign-carrier analysis
 (t1-sign-video-only-v2) once measured on an idle host}. We keep the magnitude carrier as the
-default for verification speed and pixel-domain behaviour, and expose the
-sign carrier as an option when visual quality matters more.
+default for verification speed and resistance to learned detectors, and
+expose the sign carrier as an option when visual quality matters more.
 
 \input{tables/paper_carrier}
 
@@ -798,13 +812,11 @@ timing side channels are out of scope.
 
 \paragraph{Framing malleability} The envelope bytes are integrity-protected:
 changing any of them makes the proof or the statement fail. The chunk
-framing around them is not fully bound. When the envelope fits in a single
-chunk, up to about 48 carrier bits of the chunk header (including the
-redundant chunk-size field) can currently be changed without the video
-being rejected; the extracted envelope, and hence
-what is verified, is unchanged, but the stego video is then not unique.
-Binding the header into the CRC or the statement is a pending fix;
-\todo{update after the chunk-framing fix is merged}.
+framing around them is bound as well: the verifier re-chunks the extracted
+envelope under the pinned chunk size and rejects unless the extracted chunks
+are exactly that encoding. Without this check, an envelope that fits in a
+single chunk left the 16-bit chunk-size field free, so carrier bits could be
+changed while the same envelope verified.
 
 \paragraph{Stego key versus public order} Undetectability requires a
 symmetric key shared with the verifier, which makes verification

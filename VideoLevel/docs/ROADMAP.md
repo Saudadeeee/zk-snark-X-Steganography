@@ -49,3 +49,7 @@ gộp trên nhánh.
   lỗ hổng D1–D6; A7 đang sửa D2/D3/D4/D6; D1 (chunk header khả biến khi chỉ có
   một chunk) sửa sau khi merge A2. Còn chạy: A2, A6, A7, A0 (mật độ 4CIF,
   Soccer/Crew).
+- 2026-10-21 (tối): A7 (D2/D3/D4/D6) và A2 (verify 4,8×, embed 7,8×, đầu ra
+  giống hệt) đã merge. D1 sửa: verifier chia lại envelope theo `chunk_bytes`
+  đã pin và đòi chunk trích ra trùng từng byte; có test âm. Bản thảo cập nhật
+  cho disclosure mới và trạng thái D1–D6. Còn chạy: A6, A0.

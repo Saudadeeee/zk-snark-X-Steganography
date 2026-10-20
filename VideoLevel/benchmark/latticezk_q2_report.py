@@ -79,6 +79,36 @@ def capacity_rows() -> list[dict[str, Any]]:
     return rows
 
 
+def _span(values: list[float]) -> str:
+    low, high = min(values), max(values)
+    return f"{low:.3f}" if abs(high - low) < 5e-4 else f"{low:.3f}-{high:.3f}"
+
+
+def cnn_rows() -> list[dict[str, Any]]:
+    """Group CNN runs by (carrier, protocol, change) and report seed ranges."""
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for report in _load("cnn_*.json").values():
+        amplify = float(report["config"].get("amplify") or 1.0)
+        change = "real" if amplify == 1.0 else f"{amplify:g}x amplified"
+        key = (report["case_set"].replace("_", "-"), report["protocol"], change)
+        groups.setdefault(key, []).append(report)
+    rows = []
+    for (carrier, protocol, change), reports in sorted(groups.items(), key=lambda item: (item[0][0], item[0][2] != "real", item[0][1])):
+        summaries = [report["summary"] for report in reports]
+        rows.append({
+            "carrier": carrier,
+            "protocol": "leave-one-clip-out" if protocol == "loco" else "paired split",
+            "change": change,
+            "pairs": reports[0]["frame_pairs"],
+            "seeds": len(reports),
+            "p_e": _span([s["frame_p_e_mean"] for s in summaries]),
+            "auc": _span([s["frame_auc_mean"] for s in summaries]),
+            "p_e_full": _span([s["frame_full_logit_p_e_mean"] for s in summaries]),
+            "p_e_segment": _span([s["video_segment_pooled"]["p_e"] for s in summaries]),
+        })
+    return rows
+
+
 def _markdown(headers: list[str], rows: list[list[str]]) -> str:
     lines = ["| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
     lines += ["| " + " | ".join(row) + " |" for row in rows]
@@ -148,6 +178,19 @@ def build() -> str:
                      f"{', '.join(ml['clips'])})\n", _markdown(headers, rows)]
         tables["steg_ml"] = _latex(headers, rows, "Learned steganalysis on modified frames (P\\_E = 0.5 is chance).",
                                    "tab:steg-ml")
+
+    cnn = cnn_rows()
+    if cnn:
+        headers = ["Carrier", "Protocol", "Change", "Pairs", "Seeds", "P_E frame", "AUC frame",
+                   "P_E full frame", "P_E segment"]
+        rows = [[r["carrier"], r["protocol"], r["change"], _fmt(r["pairs"]), _fmt(r["seeds"]),
+                 r["p_e"], r["auc"], r["p_e_full"], r["p_e_segment"]] for r in cnn]
+        sections += ["## CNN steganalysis\n", _markdown(headers, rows)]
+        tables["steg_cnn"] = _latex(
+            headers, rows,
+            "CNN steganalysis (SRM front end, Yedroudj-style); P\\_E = 0.5 is chance. Ranges are over "
+            "seeds; amplified rows scale the real change to give a detection margin.",
+            "tab:steg-cnn")
 
     baselines = sorted(RESULTS.glob("baselines*.json"))
     if baselines:

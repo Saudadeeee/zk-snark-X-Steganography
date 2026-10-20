@@ -540,3 +540,15 @@ and \texttt{cli.py} are in \texttt{lattice\_zk/}.
   specification, Appendix~B'' for the zero-knowledge argument; this reference
   should be checked.
 \end{description}
+
+\paragraph{Status after the review.} D1--D4 and D6 are fixed in the code
+evaluated in Section~\ref{sec:evaluation}, each with a negative test: the
+verifier compares the extracted chunks with the canonical chunking of $E$
+under the pinned chunk size (D1); the registered descriptor can bind a
+holder-identifier digest (D2); disclosure is the zero-randomness equality
+proof of Section~\ref{sec:sec-soundness} and the randomness-revealing API was
+removed (D3); the equality proof has its own 4\,096-attempt cap (D4); and
+\texttt{verify\_video\_proof} recomputes the relation identifier of the
+supplied parameters, profile, credential and holder identifier and refuses
+mismatching pins (D6). D8 is mitigated: every verifier entry point checks that
+a pinned commitment is canonical. D5, D7 and D9--D11 remain as described.

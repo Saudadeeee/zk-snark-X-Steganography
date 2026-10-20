@@ -334,12 +334,16 @@ accepted in-band video is bound to the message $\bar m$ the extractor
 computes, and any later disclosure that $\mathsf{VerDisc}$ accepts reveals a
 payload $p$ with $\mathsf{enc}(p)=\bar m$, unless M-SIS is broken.
 
-\emph{Disclosure corrupts the commitment.} $\mathsf{VerDisc}$ takes the
-randomness $r$ itself, so the recipient of a disclosure can afterwards prove
-knowledge of an opening of $t$ for any new statement and re-embed it in any
-video; for a credential this hands over the credential. The theorems below
-therefore exclude disclosed commitments. Disclosing $p$ with a proof instead
-of $r$ avoids this (item~D3 in Appendix~\ref{app:code-check}).
+\emph{Disclosure keeps the randomness private.} A disclosure is the payload
+$p$ together with an equality proof between $t$ and the deterministic
+commitment $\mathsf{Com}(\mathsf{enc}(p);0)$, bound by Fiat--Shamir to a
+recipient-chosen context (statement identifier and nonce). The recipient
+learns $p$ but no opening of $t$, so it cannot produce new opening proofs for
+$t$; by soundness of the equality proof, an accepted disclosure still
+satisfies $\mathsf{enc}(p)=\bar m$ unless M-SIS is broken. An earlier version
+revealed $r$ itself; this was item~D3 in Appendix~\ref{app:code-check} and is
+fixed. The theorems below still treat commitments whose \emph{opening} has
+leaked (e.g.\ by key compromise) as disclosed.
 
 \begin{lemma}[One-wayness of honest commitments]
 \label{lem:row}
@@ -454,9 +458,11 @@ fixed-length inputs $B_1'\|b_2'\|t^*$ and $B_1'\|b_2'\|t'$ for some
 $t'\in T_{\mathsf{reg}}$, since the matching descriptor contains that digest. In case (b), Theorem~\ref{thm:se} applied
 to the simulated game extracts a relaxed opening of an honest credential,
 which Lemma~\ref{lem:row} rules out.
-The theorem is about credentials, not people: the signed descriptor contains
-no holder identifier, so the link between $t^*$ and a named holder comes from
-outside the registry (Appendix~\ref{app:code-check}, item~D2).
+The theorem is about credentials; the link to a person is only as strong as
+the issuer's check of the holder before signing. When the issuer binds a
+holder identifier, the signed descriptor contains a domain-separated digest
+of it next to the commitment, so the verifier's pinned relation names both
+(Appendix~\ref{app:code-check}, item~D2, fixed).
 
 \subsection{Linkage}
 \label{sec:sec-linkage}
@@ -539,10 +545,11 @@ programmed-point case of Theorem~\ref{thm:se} gives an M-SIS solution.
   anyone holding a live $N_s$ can re-embed any edited video with a fresh
   commitment of its own, and it will be accepted.
 \item Carriers are protected only as envelope bits. Theorem~\ref{thm:integrity}
-  needs the carrier bits to be the unique encoding of $E$; this holds when the
-  envelope spans at least two chunks, but with a single chunk the 16-bit
-  \texttt{chunk\_size} field is free and up to 48 carrier bits can be changed
-  without rejection (item~D1 in Appendix~\ref{app:code-check}).
+  needs the carrier bits to be the unique encoding of $E$. The verifier
+  re-chunks $E$ under the pinned chunk size and rejects unless the extracted
+  pieces are exactly that encoding; without this check a single-chunk
+  envelope left its 16-bit \texttt{chunk\_size} field free (item~D1 in
+  Appendix~\ref{app:code-check}, fixed).
 \item Not bound: bytes that do not survive the pinned segmenter (container
   data, other streams, data outside NAL units); RBSP alignment bits after the
   stop bit in carrier-bearing IDR NAL units; alternative CAVLC codewords for
