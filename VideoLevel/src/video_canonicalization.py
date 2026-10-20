@@ -44,6 +44,16 @@ def canonicalize_carrier_coefficients(
     if magnitude_pair not in ("even_down", "native_odd_anchor_v1"):
         raise ValueError("unknown magnitude pair profile")
     for item in coefficients:
+        if type(item) is tuple and len(item) == 3:
+            macroblock, block, levels = item
+            # Fast path for the parser's own (int, int, list) entries; any
+            # other shape goes through the full checks below unchanged.
+            if type(macroblock) is int and type(block) is int and type(levels) is list:
+                key = (macroblock, block)
+                if key in coefficient_lookup:
+                    raise ValueError(f"duplicate coefficient block: {key}")
+                coefficient_lookup[key] = levels
+                continue
         if not isinstance(item, (tuple, list)) or len(item) != 3:
             raise ValueError("coefficient entries must be (macroblock, block, levels)")
         macroblock, block, levels = item
@@ -321,7 +331,15 @@ def _update_raw_bit_segment(digest: Any, bitstream: Any, start: int, end: int) -
     """Add one length-delimited packed raw RBSP segment to a digest."""
     import numpy as np
 
-    bits = bitstream[start:end]
     digest.update(b"BITS\x00" + struct.pack(">Q", end - start))
+    raw_bits = getattr(bitstream, "bits", None)
+    if isinstance(raw_bits, np.ndarray) and raw_bits.dtype == np.uint8 and raw_bits.ndim == 1:
+        # BitArray slicing returns ``bits[start:end].tolist()``; packing the
+        # array slice directly yields the same bytes without the list round trip.
+        bits = raw_bits[start:end]
+        if bits.size:
+            digest.update(np.packbits(bits).tobytes())
+        return
+    bits = bitstream[start:end]
     if bits:
         digest.update(np.packbits(np.asarray(bits, dtype=np.uint8)).tobytes())
