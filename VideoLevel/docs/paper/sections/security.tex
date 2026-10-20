@@ -1,0 +1,571 @@
+% Security model and analysis of the composed lattice-ZK video system.
+%
+% Intended use in main.tex: replace the informal "Security analysis" section
+% by \input{sections/security}, and after \appendices add
+% \input{sections/security_appendix}. Requires amsmath, amssymb, amsthm and the
+% theorem environments definition, lemma, theorem defined in main.tex. Extra
+% bibliography entries are in sections/security_refs.bib
+% (\bibliography{references,sections/security_refs}).
+%
+% Every code reference is to commit ea96d60 of feature/lattice-pq-stack.
+
+\providecommand{\Rq}{\mathcal{R}_q}
+\providecommand{\norm}[1]{\lVert #1 \rVert}
+\providecommand{\Adv}{\mathsf{Adv}}
+\providecommand{\pid}{\mathit{pid}}
+\providecommand{\Cset}{\mathcal{C}}
+\providecommand{\Cdiff}{\bar{\mathcal{C}}}
+\providecommand{\Com}{\mathsf{Com}}
+\providecommand{\vid}{\mathsf{vid}}
+\providecommand{\Hfs}{H_{\mathsf{fs}}}
+\providecommand{\Stmt}{\mathsf{Stmt}}
+\providecommand{\Canon}{\mathsf{Canon}}
+\providecommand{\MSIS}{\textsf{M-SIS}}
+\providecommand{\MLWE}{\textsf{M-LWE}}
+\providecommand{\epszk}{\varepsilon_{\mathsf{zk}}}
+\providecommand{\Amax}{A_{\max}}
+
+\section{Security model and analysis}
+\label{sec:security-model}
+
+This section states what the system proves and under which assumptions. All
+results are in the classical random-oracle model (ROM). No theorem in the
+quantum random-oracle model (QROM) is claimed (Section~\ref{sec:sec-qrom}).
+Full proofs are in Appendix~\ref{app:security-proofs}; the cross-check of
+every definition against the implementation is in
+Appendix~\ref{app:code-check}.
+
+\subsection{Notation, parameters and assumptions}
+\label{sec:sec-notation}
+
+Let $\mathcal R=\mathbb Z[X]/(X^N+1)$ and $\Rq=\mathcal R/q\mathcal R$, with
+$N=256$ and the prime $q=2^{30}-35\equiv5\pmod 8$. The commitment key is
+$\mathsf{ck}=(B_1,b_2)$ with $B_1=[I_n\,|\,B_1']\in\Rq^{n\times k}$,
+$b_2=[0^n\,|\,1\,|\,b_2']\in\Rq^{1\times k}$, $k=n+\lambda+1$, $n=\lambda=6$.
+$S_1$ is the set of polynomials with coefficients in $\{-1,0,1\}$. For a
+message $m\in\Rq$ and $r\in S_1^k$,
+$\Com(m;r)=(t_1,t_2)=(B_1r,\ \langle b_2,r\rangle+m)$. The challenge set is
+$\Cset=\{c\in\mathcal R:\norm{c}_\infty=1,\ \norm{c}_1=\kappa\}$ with
+$\kappa=60$, so $|\Cset|=\binom{256}{60}2^{60}=2^{257.01}$; its difference set
+is $\Cdiff=\{c-c':c\neq c'\in\Cset\}$. Masks are uniform on
+$Y=[-\gamma+1,\gamma]^{kN}$ with $\gamma=2^{17}$; responses are accepted iff
+they lie in $Z=[-B,B]^{kN}$, $B=\gamma-\kappa-1$. We use
+$\norm{fv}_\infty\le\norm{f}_1\norm{v}_\infty$ throughout. The concrete
+quantities used in the bounds are collected in Table~\ref{tab:sec-numbers}.
+
+\begin{table}[t]
+\centering
+\caption{Concrete quantities for \texttt{bdlop-open-128-v1}}
+\label{tab:sec-numbers}
+\footnotesize
+\begin{tabular}{@{}lr@{}}
+\toprule
+Quantity & Value \\
+\midrule
+$|\Cset|$ & $2^{257.01}$\\
+Fiat--Shamir seed length & 256 bits\\
+$p_{\mathrm{acc}}=((2B+1)/2\gamma)^{kN}$ (opening) & $0.2151$\\
+$p_{\mathrm{acc}}^2$ (equality proof) & $0.0463$\\
+Attempt cap $\Amax$ & $512$\\
+$(1-p_{\mathrm{acc}})^{\Amax}$; $(1-p_{\mathrm{acc}}^2)^{\Amax}$ & $2^{-178.9}$; $2^{-35.0}$\\
+$\eta=nN\log_2(2B+1)$ (min-entropy of $w$) & $27\,646.98$ bits\\
+$\beta=8\kappa B$ (M-SIS bound) & $62\,885\,280\approx2^{25.91}$\\
+$2\kappa+2B$ (one honest, one relaxed opening) & $262\,142\approx2^{18.0}$\\
+$\sqrt{q/2}$ (invertibility threshold) & $23\,170.5$\\
+$3^{kN}q^{-(n+1)N}$ & $\approx2^{-48\,485}$\\
+Statement $x$ & 274 bytes\\
+Envelope, in-band / registered & 14\,309 / 7\,589 bytes\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{lemma}[Invertible challenge differences]
+\label{lem:invertible}
+Every $f\in\Cdiff$ is invertible in $\Rq$.
+\end{lemma}
+\begin{proof}
+Since $q\equiv5\pmod8$, $X^N+1$ splits modulo $q$ into exactly two
+irreducible factors, and every nonzero $y\in\Rq$ with
+$\norm{y}_\infty<q^{1/2}/\sqrt2$ is invertible
+(Lyubashevsky--Seiler~\cite{ref:ls18}, Corollary~1.2 with $k=2$). Any
+$f\in\Cdiff$ is nonzero with $\norm{f}_\infty\le2<23\,170$. The constructor of
+the parameter set enforces both conditions (\texttt{params.py:49--51},
+\texttt{ring.py:52--58}).
+\end{proof}
+
+\begin{definition}[Openings]
+\label{def:relaxed}
+A \emph{relaxed opening} of $t=(t_1,t_2)$ is a pair $(\bar r,f)$ with
+$f\in\Cdiff$, $\norm{\bar r}_\infty\le2B$ and $ft_1=B_1\bar r$. It defines the
+message $\bar m=t_2-f^{-1}\langle b_2,\bar r\rangle$, the unique $\bar m$ with
+$ft_2=\langle b_2,\bar r\rangle+f\bar m$ (Lemma~\ref{lem:invertible}). An
+\emph{honest opening} is $(r,1)$ with $r\in S_1^k$ and $t_1=B_1r$, with message
+$t_2-\langle b_2,r\rangle$; it is what a disclosure reveals.
+\end{definition}
+
+\paragraph{Assumptions}
+$\Adv^{\MSIS}$ is the advantage of finding $x\in\mathcal R^k$ with
+$B_1x\equiv0\pmod q$, $0<\norm{x}_\infty\le\beta=8\kappa B$, for uniform $B_1'$.
+$\Adv^{\MLWE}$ is the advantage of distinguishing $(A,As+e)$ from uniform for
+uniform $A\in\Rq^{(n+1)\times\lambda}$ and $s\in S_1^\lambda$, $e\in S_1^{n+1}$.
+These are the two instances estimated at 140/127 and 138/125 bits (classical/
+quantum core-SVP, Table~\ref{tab:params}). Every M-SIS solution in this
+section has norm at most $\beta$, so no further lattice assumption is needed.
+$\Adv^{\mathsf{cr}}_{\mathsf{SHA2}}$ and $\Adv^{\mathsf{cr}}_{\mathsf{SHA3}}$ are
+collision-finding advantages against SHA-256 and SHA3-256, and
+$\Adv^{\mathsf{euf\text{-}cma}}_{\mathsf{ML\text{-}DSA}}$ is the EUF-CMA advantage
+against ML-DSA-65~\cite{ref:fips204}.
+
+\paragraph{Random oracles}
+We model as independent random oracles the SHAKE-256 instances used for the
+Fiat--Shamir challenge seed $\Hfs$ (and $H_{\mathsf{eq}}$ for the equality
+proof), the challenge expansion $G:\{0,1\}^{256}\to\Cset$
+(\textsf{SampleInBall}), the mask stream, the key expansion, and the SHA3-256
+hedging hash. Their domain tags are pairwise prefix-free
+(Appendix~\ref{app:code-check}), so one SHAKE-256 oracle splits into
+independent oracles. $G$ is exactly uniform on $\Cset$ on a fresh input: the
+signs and the Fisher--Yates indices are drawn by exact rejection sampling.
+The key expansion as a random oracle makes $\mathsf{ck}$ uniform; it is a
+single global key derived from a public seed (no per-user key). $Q_H$ denotes
+the total number of random-oracle queries of the adversary, including those
+made on its behalf by verification queries, plus one.
+
+\subsection{Syntax of the composed scheme}
+\label{sec:sec-syntax}
+
+The transport layer is a set of deterministic functions of a pinned carrier
+profile $\mathsf{prof}$ and a synchronization key $k_s$:
+$\mathsf{Place}(\vid,\ell)$ returns the ordered carrier positions $P$ for an
+$\ell$-byte envelope; $\Canon(\vid,P)$ returns the carrier-normalized digest
+$D$; $\mathsf{Write}(\vid,P,E)$ writes envelope $E$ into the carriers;
+$\mathsf{Read}(\vid)$ returns $(E,P,D)$ or $\bot$. \emph{Transport
+correctness} means $\mathsf{Read}(\mathsf{Write}(\vid,P,E))=(E,P,\Canon(\vid,P))$
+for $P=\mathsf{Place}(\vid,|E|)$; it is a functional property, and its failure
+only causes rejection.
+
+\begin{itemize}
+\item $\mathsf{Setup}$: fixes the parameter set, $\pid$ (a SHA3-256 digest of
+  all parameters and the setup seed) and $\mathsf{ck}$.
+\item $\mathsf{RegKeyGen}$, $\mathsf{RegSign}$: the issuer holds an ML-DSA-65
+  key pair $(\mathit{pk}_I,\mathit{sk}_I)$ and signs a registry
+  $\mathsf{Reg}=(e,\Delta)$: an epoch and a set of relation descriptors. A
+  descriptor hashes $\pid$, the key, the relation module and the policy
+  (codec policy and carrier profile); in registered mode it also hashes a
+  credential commitment $t_c$.
+\item $\mathsf{Pins}$: given $\mathsf{Reg}$, $\mathit{pk}_I$, $\mathsf{prof}$,
+  a rollback floor $e_{\min}$ and (registered mode) $t_c$, verifies the
+  signature, recomputes the expected descriptor, requires exactly one match,
+  and outputs $\mathsf{pins}=(\mathit{rid},\mathit{root},e,\mathit{cpid},
+  \mathit{prof\_id})$, or fails.
+\item $\mathsf{Issue}$: draws a uniform 32-byte challenge $N_s$ and stores it
+  with the binding $\mathsf{bind}(\mathsf{pins})$ and an expiry.
+\item $\mathsf{Embed}$: on cover $\vid$, payload $p$ (in-band) or credential
+  $(t_c,r_c)$ (registered), $\mathsf{pins}$ and $N_s$: compute
+  $P=\mathsf{Place}(\vid,\ell)$ from a zero placeholder of the final length
+  $\ell$, $D=\Canon(\vid,P)$ and $x=\Stmt(\mathsf{pins},N_s,P,D)$; in-band,
+  sample $r\leftarrow S_1^k$, set $t=\Com(\mathsf{enc}(p);r)$; prove
+  $\pi\leftarrow\mathsf{P}(x,t,r)$; form $E=\texttt{"ZKLB"}\|1\|\pid\|N_s\|t\|\pi$
+  (or $\texttt{"ZKLR"}\|1\|\pid\|N_s\|\pi$) and output
+  $\mathsf{Write}(\vid,P,E)$ and, in-band, the opening $(p,r)$.
+\item $\mathsf{Verify}$: on $\vid^*$: $(E^*,P^*,D^*)=\mathsf{Read}(\vid^*)$;
+  parse $E^*$ strictly; take $N_s^*$ from $E^*$ (store mode) or use a fixed
+  $N_s$ (stateless mode); $x^*=\Stmt(\mathsf{pins},N_s^*,P^*,D^*)$; accept iff
+  $\mathsf{V}(x^*,t^*,\pi^*)=1$ with $t^*$ from $E^*$ (in-band) or the pinned
+  $t_c$ (registered) and, in store mode, $N_s^*$ is live for
+  $\mathsf{bind}(\mathsf{pins})$ and is atomically consumed.
+\item $\mathsf{VerDisc}$: accepts $(E,p,r)$ iff $(r,1)$ is an honest opening
+  of the commitment in $E$ to $\mathsf{enc}(p)$.
+\item $\mathsf{Link}$, $\mathsf{VerLink}$: the equality proof
+  $\Pi_{\mathsf{eq}}$ on two commitments, bound to a context digest
+  $\mathit{lx}=\mathrm{SHA3}(\text{tag}\|\pid\|\text{length-prefixed context})$.
+\end{itemize}
+
+The statement is the 274-byte string
+\begin{multline*}
+\Stmt=\mathtt{u16}(1)\|\mathit{rid}\|\pid\|\mathit{root}\|\mathtt{u64}(e)\|N_s\|
+\mathit{cpid}\|\mathit{prof\_id}\\
+\|\mathtt{u64}(|P|)\|\mathrm{SHA256}(P)\|V,\quad
+V=\mathrm{SHA256}(\text{tag}\|D),
+\end{multline*}
+with $\mathrm{SHA256}(P)$ taken over a canonical JSON encoding of the ordered
+positions. The opening proof $\Pi_{\mathsf{open}}$ outputs $\pi=(h,z)$ with
+$h=\Hfs(\text{tag}\|\pid\|\mathtt{u64}(|x|)\|x\|\mathsf{enc}(t)\|\mathsf{enc}(w))$,
+$w=B_1y$, $c=G(h)$, $z=y+cr\in Z$; the verifier recomputes $w'=B_1z-ct_1$ and
+checks $h$. Every field after $x$ has a length fixed by $\pid$, so the hash
+input is uniquely decodable.
+
+\subsection{Adversary model}
+\label{sec:sec-adversary}
+
+The adversary $\mathcal A$ is a classical probabilistic algorithm. It controls
+every channel, chooses covers and payloads, knows $k_s$ (no property below
+depends on its secrecy), and has the following oracles. $\mathcal O_{\mathsf{Iss}}$
+returns a fresh $N_s$. $\mathcal O_{\mathsf{Emb}}(\vid,p,N_s)$ runs an honest
+in-band $\mathsf{Embed}$ and returns the stego video;
+$\mathcal O_{\mathsf{EmbR}}(j,\vid,N_s)$ does the same for honest holder $j$'s
+registered credential. We let these oracles prove arbitrary statements $x$
+chosen by $\mathcal A$, which only strengthens the results. Their outputs form the list
+$L$ of triples $(x,t,\pi)$. $\mathcal O_{\mathsf{Ver}}$ runs $\mathsf{Verify}$
+with the shared store. $\mathcal O_{\mathsf{Link}}$ returns honest linkage
+proofs between recorded commitments. $\mathcal O_{\mathsf{Disc}}(i)$ returns
+the opening of the $i$-th honest commitment and marks it \emph{disclosed}.
+$\mathcal O_{\mathsf{Reg}}(e,\Delta,T)$ has the issuer sign a registry with
+epoch $e$ whose descriptors are the in-band descriptors $\Delta$ and the
+registered descriptors that the issuer computes from the credential
+commitments in $T$, all of $\mathcal A$'s choice; $T_{\mathsf{reg}}$ is the
+union of all queried $T$. (An issuer signs a registered descriptor only for a
+credential it has vetted, so registered descriptors enter only through $T$.)
+$Q_P$ bounds
+the number of proofs produced by honest parties.
+
+The issuer and verifier are honest; the session store is linearizable and
+durable. Holder corruption is static (the adversary registers its own
+credentials through $\mathcal O_{\mathsf{Reg}}$); disclosure is the only form
+of adaptive corruption, and disclosed commitments are excluded from winning
+conditions. Side channels, codec bugs, and the transport's correctness are out
+of scope.
+
+\subsection{Zero knowledge of the Fiat--Shamir-with-aborts proof}
+\label{sec:sec-zk}
+
+\begin{lemma}[Witness-independent acceptance]
+\label{lem:hvzk}
+For every $r\in S_1^k$ and $c\in\Cset$, an attempt with $y\leftarrow Y$ is
+accepted with probability exactly $p_{\mathrm{acc}}$, and conditioned on
+acceptance $z=y+cr$ is uniform on $Z$.
+\end{lemma}
+\noindent
+Each coefficient $v$ of $cr$ satisfies $|v|\le\kappa$, so the $2B+1$ values
+$z_i\in[-B,B]$ correspond to masks $z_i-v\in[-\gamma+1,\gamma-1]\subset
+[-\gamma+1,\gamma]$, each of probability $1/2\gamma$.
+
+\begin{lemma}[Simulation]
+\label{lem:sim}
+There is a simulator that, given only $(x,t)$ and programming access to
+$\Hfs$, outputs proofs whose joint distribution with the random oracles is
+within
+\begin{multline*}
+\epszk(Q_P,Q_H)=2Q_P(Q_H+Q_P)2^{-256}\\
++(\Amax+1)Q_P\bigl(Q_H+(\Amax+1)Q_P\bigr)2^{-\eta}
+\end{multline*}
+of $Q_P$ real proofs, for any adversary making $Q_H$ queries. The same holds
+for $\Pi_{\mathsf{eq}}$ with $p_{\mathrm{acc}}^2$ in place of $p_{\mathrm{acc}}$.
+\end{lemma}
+\noindent
+The simulator samples the attempt count from the truncated geometric
+distribution with parameter $p_{\mathrm{acc}}$, outputs $\bot$ with probability
+$(1-p_{\mathrm{acc}})^{\Amax}$, and otherwise samples $h\leftarrow\{0,1\}^{256}$,
+$z\leftarrow Z$, sets $w=B_1z-G(h)t_1$ and programs $\Hfs$ at
+$(\pid,x,t,w)$. The delicate step is the random-oracle queries that the real
+prover makes in rejected attempts and never reveals: the earlier analyses of
+Fiat--Shamir with aborts mishandled the corresponding reprogramming in the
+CMA-to-NMA step, as identified and repaired by Barbosa et
+al.~\cite{ref:barbosa} and analysed in detail by Devevey et
+al.~\cite{ref:devevey}. Here the step is discharged in the classical ROM by
+two facts specific to this instantiation: acceptance is \emph{exactly}
+independent of the witness and of $c$ (Lemma~\ref{lem:hvzk}), and every hidden
+query point contains $w=B_1y$ of min-entropy at least $\eta$ (because
+$B_1=[I_n|B_1']$). Exact independence also means the attempt count leaks
+nothing, although the implementation is not constant time otherwise.
+
+\subsection{Knowledge soundness and binding to the video}
+\label{sec:sec-soundness}
+
+\begin{definition}[Simulation-extractable video binding]
+\label{def:se}
+In experiment $\mathsf{SE}$, $\mathcal A$ interacts with all oracles and
+outputs $\vid^*$. Let $x^*$ be the statement the verifier recomputes from
+$\vid^*$ and its own pins, and $(t^*,\pi^*)$ the commitment and proof it
+verifies. $\mathcal A$ \emph{wins} if $\mathsf{Verify}$ accepts and
+$(x^*,t^*,\pi^*)\notin L$. An extractor $\mathcal E^{\mathcal A}$
+\emph{succeeds} if it outputs $x^*$ and a relaxed opening of $t^*$, where
+$x^*$ is the verifier's statement in a winning run of $\mathcal A$.
+\end{definition}
+
+\begin{theorem}[Knowledge soundness bound to the statement]
+\label{thm:se}
+Let $\mathcal A$ win $\mathsf{SE}$ with probability $\varepsilon$. There is
+an extractor $\mathcal E$ that runs $\mathcal A$ twice with simulated oracles
+and succeeds with probability $\varepsilon_{\mathsf{ext}}$ such that
+\begin{multline*}
+\varepsilon\le\epszk(Q_P,Q_H)+\Adv^{\MSIS}+Q_H2^{-256}\\
++\sqrt{Q_H\bigl(\varepsilon_{\mathsf{ext}}+Q_H2^{-256}+2^{-257}\bigr)}.
+\end{multline*}
+\end{theorem}
+\noindent
+\emph{Proof idea.} Replace honest proofs by simulated ones
+(Lemma~\ref{lem:sim}). If $\mathcal A$ re-uses a programmed point, i.e.\
+$(x^*,t^*)=(x_i,t_i)$ and $w^*=w_i$, then $h^*=h_i$, hence $c^*=c_i$ and
+$B_1(z^*-z_i)=0$ with $0<\norm{z^*-z_i}_\infty\le2B$: an M-SIS solution.
+Otherwise the verifier's query $(\pid,x^*,t^*,w^*)$ is answered by a fresh
+random value, and the general forking lemma of Bellare and
+Neven~\cite{ref:bn06} (Lemma~1) with output space $2^{256}$ yields two
+accepting proofs with the same $(x^*,t^*,w^*)$ and seeds $h\neq h'$. Then
+$c=G(h)\neq G(h')=c'$ except with probability $2^{-257}+Q_H2^{-256}$, and
+$B_1(z-z')=(c-c')t_1^*$ gives the relaxed opening $(z-z',c-c')$. The
+challenge difference is invertible by Lemma~\ref{lem:invertible}, which is
+what makes the opening define a unique message. Because the forked query
+contains $x^*$, the opening is bound to exactly the verifier-recomputed
+statement: its video commitment, carrier positions, session challenge,
+registry root and epoch, relation and policy. \qed
+
+The square-root loss is the usual price of rewinding. For $Q_H=2^{64}$ the
+bound converts an extraction probability of $2^{-128}$ into $\varepsilon
+\lesssim2^{-32}$. For authenticity (Theorem~\ref{thm:auth}) a tight bound
+is available by the SelfTargetMSIS route of Kiltz, Lyubashevsky and
+Schaffner~\cite{ref:kls18}, at the cost of that non-standard assumption.
+
+\begin{theorem}[Binding with respect to relaxed openings]
+\label{thm:binding}
+No adversary can output $t$ and two openings of $t$, each honest or relaxed,
+with different messages, except with probability $\Adv^{\MSIS}$.
+\end{theorem}
+\noindent
+Given $(\bar r,f,m)$ and $(\bar r',f',m')$, the vector
+$x=f'\bar r-f\bar r'$ satisfies $B_1x=0$; if $x=0$ then
+$\langle b_2,x\rangle=ff'(m-m')=0$, contradicting invertibility. Its norm is at
+most $2\cdot2\kappa\cdot2B=\beta$ for two relaxed openings, $2\kappa+2B$ for
+one honest and one relaxed, and $2$ for two honest ones, all below $q/2$
+(\texttt{params.py:53}), so $x\not\equiv0$ is an M-SIS solution.
+
+\noindent
+Together, Theorems~\ref{thm:se} and~\ref{thm:binding} say: whoever produces an
+accepted in-band video is bound to the message $\bar m$ the extractor
+computes, and any later disclosure that $\mathsf{VerDisc}$ accepts reveals a
+payload $p$ with $\mathsf{enc}(p)=\bar m$, unless M-SIS is broken.
+
+\emph{Disclosure corrupts the commitment.} $\mathsf{VerDisc}$ takes the
+randomness $r$ itself, so the recipient of a disclosure can afterwards prove
+knowledge of an opening of $t$ for any new statement and re-embed it in any
+video; for a credential this hands over the credential. The theorems below
+therefore exclude disclosed commitments. Disclosing $p$ with a proof instead
+of $r$ avoids this (item~D3 in Appendix~\ref{app:code-check}).
+
+\begin{lemma}[One-wayness of honest commitments]
+\label{lem:row}
+Given $\mathsf{ck}$ and $t^{(j)}=\Com(m_j;r_j)$, $j\le Q$, for
+$r_j\leftarrow S_1^k$ and messages $m_j$ chosen adaptively before each
+$t^{(j)}$ is drawn, no adversary outputs a relaxed opening of any $t^{(j)}$
+except with probability
+$\Adv^{\mathsf{row}}_Q=\Adv^{\MSIS}+Q\bigl(\Adv^{\MLWE}+3^{kN}q^{-(n+1)N}\bigr)$.
+\end{lemma}
+\noindent
+Put $x=fr_j-\bar r$, so $B_1x=0$ and $\norm{x}_\infty\le2\kappa+2B$. If
+$x\neq0$ it is an M-SIS solution (the reduction generated every $t^{(j)}$ and
+knows $r_j$). If $x=0$ the adversary has found $r_j=f^{-1}\bar r$, which a
+distinguisher that planted its M-LWE sample at a guessed $j$ checks against
+$t^{(j)}$; for uniform $t^{(j)}$ a ternary opening exists with probability at
+most $3^{kN}q^{-(n+1)N}$. Binding alone does not suffice here: an adversary
+that recovers $r_j$ opens $t^{(j)}$ to the right message.
+
+\subsection{Payload hiding}
+\label{sec:sec-hiding}
+
+\begin{definition}[Payload indistinguishability]
+\label{def:hiding}
+In $\mathsf{IND}^b$, $\mathcal A$ has all oracles and submits once
+$(\vid,p_0,p_1,N_s)$ with $|p_0|,|p_1|\le766$ bytes; the challenger returns
+$\mathcal O_{\mathsf{Emb}}(\vid,p_b,N_s)$. $\mathcal A$ may not query
+$\mathcal O_{\mathsf{Disc}}$ or $\mathcal O_{\mathsf{Link}}$ on the challenge
+commitment. $\Adv^{\mathsf{ind}}=|\Pr[\mathsf{IND}^1=1]-\Pr[\mathsf{IND}^0=1]|$.
+\end{definition}
+
+\begin{theorem}[Hiding]
+\label{thm:hiding}
+$\Adv^{\mathsf{ind}}\le2\,\epszk(Q_P+1,Q_H)+2\Adv^{\MLWE}$.
+\end{theorem}
+\noindent
+The stego video depends on $b$ only through $E$: $P$ and $D$ are fixed from a
+placeholder before proving, and the envelope has a fixed size, so the payload
+length is hidden too. Simulate the challenge proof (Lemma~\ref{lem:sim}), then
+replace $t$ by a uniform pair: with
+$B_1'=[B_{1,2}'\,|\,B_{1,3}']$ and $r=(r_1,r_2,r_3)$,
+$(t_1-B_{1,2}'(t_2-m),\,t_2-m)=A r_3+(r_1,r_2)$ with
+$A=\bigl[\begin{smallmatrix}B_{1,3}'-B_{1,2}'b_2'\\ b_2'\end{smallmatrix}\bigr]$
+uniform, an M-LWE sample of rank $\lambda$ with $n+1$ ring samples; the map is
+a bijection for each fixed $m$. The experiment is then independent of $b$.
+Hiding is computational and is the only property that rests on M-LWE; it
+holds for the payload, not for the fact that a payload exists, which is a
+steganographic property evaluated empirically.
+
+\subsection{Replay resistance}
+\label{sec:sec-replay}
+
+\begin{definition}[Replay]
+\label{def:replay}
+In $\mathsf{RPL}$, $\mathcal A$ has all oracles against a verifier with a
+session store and wins if (i) two calls of $\mathcal O_{\mathsf{Ver}}$ accept
+with the same $N_s$; or (ii) a call accepts with an $N_s$ that was not issued
+for $\mathsf{bind}(\mathsf{pins})$, or is expired; or (iii) a call accepts
+$\vid^*$ whose triple $(x^*,t^*,\pi^*)\notin L$ and $\mathcal A$ queried
+$\Hfs$ at the verifier's point $(\pid,x^*,t^*,w^*)$ before $N_s^*$ was issued.
+\end{definition}
+
+\begin{theorem}[Replay resistance]
+\label{thm:replay}
+$\Pr[\text{(i) or (ii)}]\le\Adv^{\mathsf{cr}}_{\mathsf{SHA2}}+Q_I^22^{-257}$ and
+$\Pr[\text{(iii)}]\le Q_HQ_I2^{-256}$, with $Q_I$ issued sessions.
+\end{theorem}
+\noindent
+(i) and (ii) follow from the store semantics: rows exist only for issued
+challenges (keyed by a SHA-256 digest of $N_s$), and consumption is a single
+conditional \texttt{UPDATE \dots\ WHERE consumed\_at IS NULL AND expires\_at>now}
+inside one write transaction, so at most one caller observes one updated row
+(\texttt{zkp\_sessions.py:181--241}). For (iii), $N_s^*$ is a substring of
+$x^*$, so a query made earlier predicts a uniform 256-bit value. Together
+with Theorem~\ref{thm:se}, an accepted session corresponds to a party that
+knew an opening and computed the proof after the session was issued.
+
+\emph{What a stateless verifier cannot give.} With a fixed $N_s$
+(\texttt{expected\_session}), (i) fails: any copy of an accepted video is
+accepted again, by anyone and any number of times, since a non-interactive
+proof is transferable. If $N_s$ is reused across verifications, (iii) fails
+as well and only video binding (Theorem~\ref{thm:se}) remains. No variant
+prevents relaying: in-band mode does not bind $N_s$ to a prover, so whoever
+first presents a valid video consumes the session.
+
+\subsection{Registered-mode authenticity}
+\label{sec:sec-auth}
+
+\begin{definition}[Authenticity]
+\label{def:auth}
+In $\mathsf{AUTH}$, the challenger creates honest credentials
+$t_c^{(j)}=\Com(m_j;r_j)$, $j\le Q_C$, with $m_j$ chosen by $\mathcal A$, and
+$\mathcal A$ has all oracles. $\mathcal A$ outputs $(\mathsf{Reg}^*,\vid^*,t^*)$
+and wins if a verifier pinning $\mathit{pk}_I$ and $t^*$ accepts $\vid^*$ with
+pins from $\mathsf{Reg}^*$, the triple $(x^*,t^*,\pi^*)\notin L$, and either
+(a) $t^*\notin T_{\mathsf{reg}}$ (never registered by the issuer), or
+(b) $t^*=t_c^{(j)}$ for an undisclosed honest $j$.
+\end{definition}
+
+\begin{theorem}[Authenticity]
+\label{thm:auth}
+\begin{multline*}
+\Adv^{\mathsf{auth}}\le\Adv^{\mathsf{euf\text{-}cma}}_{\mathsf{ML\text{-}DSA}}
++\Adv^{\mathsf{cr}}_{\mathsf{SHA2}}+\epszk(Q_P,Q_H)\\
++\Adv^{\MSIS}+Q_H2^{-256}\\
++\sqrt{Q_H\bigl(\Adv^{\mathsf{row}}_{Q_C}+Q_H2^{-256}+2^{-257}\bigr)}.
+\end{multline*}
+\end{theorem}
+\noindent
+Case (a) gives an ML-DSA forgery on the registry signing bytes or, if
+$\mathsf{Reg}^*$ was signed, a SHA-256 collision between the
+fixed-length inputs $B_1'\|b_2'\|t^*$ and $B_1'\|b_2'\|t'$ for some
+$t'\in T_{\mathsf{reg}}$, since the matching descriptor contains that digest. In case (b), Theorem~\ref{thm:se} applied
+to the simulated game extracts a relaxed opening of an honest credential,
+which Lemma~\ref{lem:row} rules out.
+The theorem is about credentials, not people: the signed descriptor contains
+no holder identifier, so the link between $t^*$ and a named holder comes from
+outside the registry (Appendix~\ref{app:code-check}, item~D2).
+
+\subsection{Linkage}
+\label{sec:sec-linkage}
+
+\begin{definition}[Linkage soundness and hiding]
+\label{def:link}
+In $\mathsf{LNK\text{-}S}$, $\mathcal A$ outputs a context, $t_a,t_b$, an
+accepted $\pi_{\mathsf{eq}}$ not output by $\mathcal O_{\mathsf{Link}}$ for
+that triple, and openings (honest or relaxed) of $t_a$ and $t_b$ with
+different messages. In $\mathsf{LNK\text{-}H}^b$, $\mathcal A$ submits
+$(p_0,p_1,\mathit{ctx})$ and receives $t_a=\Com(p_b;r_a)$,
+$t_b=\Com(p_b;r_b)$ and $\pi_{\mathsf{eq}}$ for $\mathit{ctx}$.
+\end{definition}
+
+\begin{theorem}[Linkage]
+\label{thm:link}
+$\Adv^{\mathsf{lnk\text{-}s}}$ obeys the bound of Theorem~\ref{thm:se} with
+$\varepsilon_{\mathsf{ext}}\le\Adv^{\MSIS}$, and
+$\Adv^{\mathsf{lnk\text{-}h}}\le2\,\epszk(Q_P+1,Q_H)+4\Adv^{\MLWE}$.
+\end{theorem}
+\noindent
+Two forked transcripts with one announcement $(w_a,w_b,u)$ give relaxed
+openings $(\bar r_a,f)$, $(\bar r_b,f)$ with a \emph{common} $f$ and
+$f(t_{2,a}-t_{2,b})=\langle b_2,\bar r_a-\bar r_b\rangle$, hence
+$\bar m_a=\bar m_b$; the adversary's two openings then contradict
+Theorem~\ref{thm:binding} for $t_a$ or for $t_b$. Linkage to a registered
+credential additionally authenticates its holder, as in
+Theorem~\ref{thm:auth}, because extraction also yields a relaxed opening of
+$t_c$. Hiding uses the simulator for $\Pi_{\mathsf{eq}}$ and two M-LWE hybrids;
+equality of the two payloads is revealed by design.
+
+\subsection{Integrity of the video content}
+\label{sec:sec-integrity}
+
+$\Canon$ splits the stream with the pinned segmenter (\texttt{ffmpeg -c:v copy
+-f segment}, $F$ frames per segment) and combines per-segment digests with
+$F$ and the frame counts. A segment that carries envelope chunks is hashed
+through a length-delimited, tagged serialization: for every NAL unit its
+index, type, \texttt{forbidden\_zero\_bit}, \texttt{nal\_ref\_idc} and
+start-code size; the RBSP verbatim for NAL units without carriers; and, inside
+an IDR NAL unit with carriers, the RBSP bits between carrier blocks up to the
+stop bit, with each carrier block replaced by its coefficient vector in which
+every carrier is normalized (magnitude rounded down to even, sign kept). Other
+segments are hashed byte for byte.
+
+\begin{lemma}[What the digest and the envelope determine]
+\label{lem:canon}
+The serialization is uniquely decodable, so equal $V$ implies equal
+$\Canon$ except with probability $3\Adv^{\mathsf{cr}}_{\mathsf{SHA2}}$. Under
+the stable carrier rule ($|\ell|\ge4$, one parity bit) a carrier level is
+$\mathrm{sgn}(\ell)(2\lfloor|\ell|/2\rfloor+b)$, so $(\Canon,P)$ and the
+carrier bits determine the complete coefficient vector of every carrier block.
+If the carrier bit string is the unique encoding of $E$ under the pinned
+profile, $(\Canon,P,E)$ determines: the segmentation and frame counts; every
+byte of segments without carriers; every NAL header field and RBSP bit outside
+carrier blocks; and the coefficient vectors of carrier blocks.
+\end{lemma}
+
+\begin{theorem}[Integrity]
+\label{thm:integrity}
+Suppose an honest embedding produced $\vid_h$ for session $N_s$ with
+commitment $t$ (or credential $t_c$), and $\mathcal A$ outputs $\vid^*$ that
+is accepted for $N_s$ with the same commitment (or credential), not
+disclosed. Then $\Canon(\vid^*)=\Canon(\vid_h)$, $P^*=P_h$ and $E^*=E_h$,
+except with probability at most
+\begin{multline*}
+4\Adv^{\mathsf{cr}}_{\mathsf{SHA2}}+\epszk(Q_P,Q_H)+\Adv^{\MSIS}+Q_H2^{-256}\\
++\sqrt{Q_H\bigl(\Adv^{\mathsf{row}}_{Q_P}+Q_H2^{-256}+2^{-257}\bigr)}.
+\end{multline*}
+\end{theorem}
+\noindent
+If $x^*\neq x_h$, the triple is fresh and extraction yields a relaxed opening
+of an honest commitment. If $x^*=x_h$, the positions hash and $V$ agree, and
+Lemma~\ref{lem:canon} applies; the proof is then the honest one, otherwise the
+programmed-point case of Theorem~\ref{thm:se} gives an M-SIS solution.
+
+\paragraph{Limits of the integrity claim}
+\begin{itemize}
+\item In-band mode binds content to a \emph{commitment}, not to a person:
+  anyone holding a live $N_s$ can re-embed any edited video with a fresh
+  commitment of its own, and it will be accepted.
+\item Carriers are protected only as envelope bits. Theorem~\ref{thm:integrity}
+  needs the carrier bits to be the unique encoding of $E$; this holds when the
+  envelope spans at least two chunks, but with a single chunk the 16-bit
+  \texttt{chunk\_size} field is free and up to 48 carrier bits can be changed
+  without rejection (item~D1 in Appendix~\ref{app:code-check}).
+\item Not bound: bytes that do not survive the pinned segmenter (container
+  data, other streams, data outside NAL units); RBSP alignment bits after the
+  stop bit in carrier-bearing IDR NAL units; alternative CAVLC codewords for
+  the same coefficient vector of a carrier block; the emulation-prevention
+  layer (the digest covers the RBSP); and the segmenter version, which the
+  codec policy names but does not pin.
+\item No codec-correctness claim: the digest covers syntax, not decoded
+  pixels. No provenance claim: nothing says a camera recorded $\vid_h$ or that
+  the payload is true.
+\end{itemize}
+
+\subsection{Quantum adversaries}
+\label{sec:sec-qrom}
+
+All theorems above are classical-ROM statements. Rewinding
+(Theorem~\ref{thm:se}) and adaptive programming (Lemma~\ref{lem:sim}) do not
+carry over to the QROM as stated. Barbosa et al.~\cite{ref:barbosa} give QROM
+proofs of the CMA-to-NMA step for Fiat--Shamir with aborts, and Don et
+al.~\cite{ref:dfms19} and Liu and Zhandry~\cite{ref:lz19} show that the
+Fiat--Shamir transform preserves (knowledge) soundness of suitable
+$\Sigma$-protocols against quantum adversaries with polynomial loss. We have
+not verified that their hypotheses hold for the relaxed extractor and the
+aborting prover used here, so we claim no QROM theorem. Our wording is
+``plausibly post-quantum'': the reductions target M-SIS, M-LWE, ML-DSA and
+hash collisions, none of which has a known efficient quantum attack at these
+parameters.
