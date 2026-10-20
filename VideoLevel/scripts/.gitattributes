@@ -1,0 +1,3 @@
+# POSIX shell scripts must keep LF endings even on Windows checkouts
+# (core.autocrlf=true would otherwise break them under sh/dash).
+*.sh text eol=lf

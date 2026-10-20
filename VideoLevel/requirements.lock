@@ -1,10 +1,15 @@
-# Locked Python runtime dependencies for the current audited baseline.
-# Generated from the local environment on 2026-06-08.
+# Locked Python dependencies (direct requirements) of the lattice-ZK evaluation.
+# Taken on 2026-10-21 from the Python 3.12.10 environment that produced
+# benchmark/results/q2; transitive versions are listed in ARTIFACT.md.
+# scikit-learn: learned steganalysis (benchmark/latticezk_ml_steganalysis.py).
+# pytest: test runner for scripts/run_unit_tests and CI.
 
-numpy==2.2.6
-matplotlib==3.10.8
-scipy==1.17.0
+numpy==2.5.3
+matplotlib==3.11.2
+scipy==1.18.1
 scikit-image==0.26.0
-cryptography==46.0.5
+scikit-learn==1.7.2
+cryptography==50.0.1
 pqcrypto==1.0.0
 psutil==7.2.2
+pytest==9.1.1

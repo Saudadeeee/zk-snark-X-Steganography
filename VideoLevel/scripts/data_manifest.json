@@ -1,0 +1,46 @@
+{
+  "description": "Raw sources and encoded covers of the lattice-ZK evaluation. Hashes were taken from the tree that produced benchmark/results/q2 (2026-10-21).",
+  "derf_base_url": "https://media.xiph.org/video/derf/y4m/",
+  "encoder": {
+    "ffmpeg": "8.0.1 (gyan.dev essentials build)",
+    "x264": "core 165 r3223 0480cb0",
+    "note": "x264 writes its option string, including the thread count, into an SEI NAL; the pinned -threads values reproduce the reference bytes. Other x264 builds or thread counts give the same decoded pixels for these all-intra encodes but a different SEI, hence a different SHA-256."
+  },
+  "sources": [
+    {"name": "akiyo_cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/akiyo_cif.y4m", "size": 45621044, "frames": 300, "sha256": "0f7a1f997930217d601ab324b1428859fdb599dde8d33772a24bfe2803a9b067"},
+    {"name": "city_cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/city_cif.y4m", "size": 45621038, "frames": 300, "sha256": "2f99e08e66376c0a0acc9c7349aef7f61020be8fbfe6440bdb0c7ec7d05bb30f"},
+    {"name": "coastguard_cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/coastguard_cif.y4m", "size": 45621044, "frames": 300, "sha256": "ae4052051ee9d77236ced5b231239dec97831c66faea3d7b70694e222ce00c43"},
+    {"name": "container_cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/container_cif.y4m", "size": 45621044, "frames": 300, "sha256": "45abe3a99a0e2914742b3eecf474335362e31921bc0b30eef1dd45bb42df82be"},
+    {"name": "deadline_cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/deadline_cif.y4m", "size": 208944224, "frames": 1374, "sha256": "4498852bf8f18d0c56957a4eff9611e3a851bfa9087e6ac8efffdadf2d02b964"},
+    {"name": "football_cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/football_cif.y4m", "size": 39538238, "frames": 260, "sha256": "941d255821a877a4ed476cbeb8b9a2c0c6f72cfab86927afb5e355eb46a99956"},
+    {"name": "hall_monitor_cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/hall_monitor_cif.y4m", "size": 45621044, "frames": 300, "sha256": "d0d4d6ebd137378bb5a7448c04d0cb73c20458a91d41d0f00cb090bd84bedd93"},
+    {"name": "foreman_cif_300f.y4m", "url": null, "optional": true, "size": 45621058, "frames": 300, "sha256": "8594d27de626d4ed6d76883247796b185ab31c7695bf174eedab55bd0de1adb9",
+     "note": "Not a byte copy of derf foreman_cif.y4m (header F10:1 A1:1 C420jpeg); the conversion command was not recorded. Used only by capacity_seg0_foreman_q22.json."},
+    {"name": "city_4cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/city_4cif.y4m", "size": 364957238, "frames": 600, "sha256": "06f9c001df816babf514a5713e8d4618233a217a39335e0810421a1519fd248e"},
+    {"name": "crew_4cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/crew_4cif.y4m", "size": 364957238, "frames": 600, "sha256": "5faf4fc764a683ac1b97b5016ec940f61afa20c7a914fb80b5da82f6e9b04de1"},
+    {"name": "harbour_4cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/harbour_4cif.y4m", "size": 364957238, "frames": 600, "sha256": "704c23e818baba916e28b83c193918c8e70ccc63ccf20d012017278402527950"},
+    {"name": "soccer_4cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/soccer_4cif.y4m", "size": 364957238, "frames": 600, "sha256": "fb7f392cb7b4eb8bd3bc1de5b40b927237a98ca1a25aea509238ac949106438f"}
+  ],
+  "encodes": [
+    {"name": "akiyo_cif_q22_g1.h264", "source": "akiyo_cif.y4m", "qp": 22, "threads": 9, "sha256": "82782b47cd06bf7544b3542e013a95662c4ea7810fe5bc6880656dc65cf62ab1"},
+    {"name": "city_cif_q22_g1.h264", "source": "city_cif.y4m", "qp": 22, "threads": 9, "sha256": "95924a035c9e946f0053f142eb73b9a636ea1f497fa84ffa4f1356077e592b71"},
+    {"name": "coastguard_cif_q22_g1.h264", "source": "coastguard_cif.y4m", "qp": 22, "threads": 9, "sha256": "9745d20964bda7d938ce0f5ccd4adda5c08ebe57a5a6b89ad6ac17ffe7a1b2ec"},
+    {"name": "coastguard_cif_q22_g1_3000f.h264", "source": "coastguard_cif.y4m", "qp": 22, "threads": 9, "stream_loop": 9, "sha256": "68d707171a2507993ac34baa755f913df5c8fb8131c5f878a2bccab29dead405",
+     "note": "the 300-frame source looped 10 times"},
+    {"name": "container_cif_q18_g1.h264", "source": "container_cif.y4m", "qp": 18, "threads": 9, "sha256": "30f025603f59243e4c9ddfe9623afa17778e139cae6eb6cd286739d195ea2c3f"},
+    {"name": "container_cif_q22_g1.h264", "source": "container_cif.y4m", "qp": 22, "threads": 9, "sha256": "897f51c26a3d28d23386828a5c4a1e33c43d70cad3afb3c4bdddcb85ccfb95a5"},
+    {"name": "container_cif_q28_g1.h264", "source": "container_cif.y4m", "qp": 28, "threads": 9, "sha256": "191f9c263504c90f3b5aa9348e1eb1d197a8c366e0b61a59125868b3ef044825"},
+    {"name": "deadline_cif_q22_g1.h264", "source": "deadline_cif.y4m", "qp": 22, "threads": 9, "sha256": "c210a81aa8778a7feef5734099b83da1d0b2171e41ee8957c54475dabf9f923e"},
+    {"name": "deadline_cif_q22_g1_1000f.h264", "source": "deadline_cif.y4m", "qp": 22, "threads": 9, "frames": 1000, "sha256": "ff35e477538ef97ec96be7153cf943abfdd602a80d7f3835dc0c968deea072bd"},
+    {"name": "football_cif_q22_g1.h264", "source": "football_cif.y4m", "qp": 22, "threads": 9, "sha256": "77eb4d8ec573b460d059cb1863f1011605688f1a18dc5d94fd8646ef17939e66"},
+    {"name": "foreman_cif_q22_g1.h264", "source": "foreman_cif_300f.y4m", "optional": true, "qp": 22, "threads": 9, "sha256": "21579153bc58c8d7d3f1e6a74c2223dfce8eaf032ec474606f1984617f8703d5", "reproducible": false,
+     "note": "Reference file of unknown provenance: re-encoding foreman_cif_300f.y4m with this command gives different pixels. Only capacity_seg0_foreman_q22.json depends on it."},
+    {"name": "hall_monitor_cif_q22_g1.h264", "source": "hall_monitor_cif.y4m", "qp": 22, "threads": 9, "sha256": "dc4b0d1f971cf859657f288fc5a46693ed63cfba1db8e5b83f6bc06f8bf63333"},
+    {"name": "city_4cif_q22_g1.h264", "source": "city_4cif.y4m", "qp": 22, "threads": 18, "sha256": "6fa56d1d3a64eb76baf5c8fdc6c2b1df794f62aa32daf06ae774212a7741d2a1"},
+    {"name": "city_4cif_q18_g1.h264", "source": "city_4cif.y4m", "qp": 18, "threads": 18, "sha256": null},
+    {"name": "city_4cif_q28_g1.h264", "source": "city_4cif.y4m", "qp": 28, "threads": 18, "sha256": null},
+    {"name": "crew_4cif_q22_g1.h264", "source": "crew_4cif.y4m", "qp": 22, "threads": 18, "sha256": "065d15c332cf47a6b0b8948c28089610563ee18f4ed8f80ab8ea61f104e1b673"},
+    {"name": "harbour_4cif_q22_g1.h264", "source": "harbour_4cif.y4m", "qp": 22, "threads": 18, "sha256": "89cb21e912cac144e5d8236eef4d75ea4984847023e362662e5e50a246953faf"},
+    {"name": "soccer_4cif_q22_g1.h264", "source": "soccer_4cif.y4m", "qp": 22, "threads": 18, "sha256": "ca7903a496d9dbfe1b43a333b3cad47785be0a005e629e3bf23576a70fc15a07"}
+  ]
+}

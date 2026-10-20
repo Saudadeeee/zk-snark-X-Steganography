@@ -58,6 +58,23 @@ the published protocol and unaudited.
 - [`docs/LATTICE_ZK_BDLOP_SPEC.md`](docs/LATTICE_ZK_BDLOP_SPEC.md) - protocol specification and security argument
 - [`docs/LATTICE_BACKEND_SURVEY.md`](docs/LATTICE_BACKEND_SURVEY.md) - why existing lattice proof systems were not adopted
 
+### Reproducing the lattice-ZK evaluation
+
+[`ARTIFACT.md`](ARTIFACT.md) covers the data (Xiph URLs and SHA-256 values),
+the exact encoder settings, the scripts and their run times, and which result
+file each paper table comes from. Each script below has a `.sh` and a `.ps1`
+version:
+
+```bash
+sh scripts/run_unit_tests.sh      # lattice-ZK + touched-module tests, no data needed (~90 s)
+sh scripts/prepare_data.sh        # verify/download Y4M sources, encode and verify covers
+sh scripts/reproduce_small.sh     # one registered E2E on a 100-frame cut (~10-15 min)
+sh scripts/reproduce_all.sh       # full sweep and report generation (tens of hours)
+```
+
+CI (`.github/workflows/videolevel-latticezk.yml` at the repository root) runs
+the unit-test script on Ubuntu with Python 3.12.
+
 ---
 
 ## Historic Benchmark Snapshot (not revalidated for this revision)
@@ -214,13 +231,15 @@ VideoLevel/
 - `ffmpeg` 8.x or compatible
 - Python packages from `requirements.lock`
 
-Current audited Python package set:
+Current locked Python package set (`requirements.lock`, 2026-10-21):
 
-- `numpy` 2.2.6
-- `matplotlib` 3.10.8
-- `scipy` 1.17.0
+- `numpy` 2.5.3
+- `matplotlib` 3.11.2
+- `scipy` 1.18.1
 - `scikit-image` 0.26.0
-- `cryptography` 46.0.5
+- `scikit-learn` 1.7.2
+- `cryptography` 50.0.1
+- `pqcrypto` 1.0.0, `psutil` 7.2.2, `pytest` 9.1.1
 
 Observed native toolchain on the current audit machine:
 

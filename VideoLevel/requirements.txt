@@ -2,6 +2,8 @@ numpy
 matplotlib
 scipy
 scikit-image
+scikit-learn
 cryptography
 pqcrypto==1.0.0
 psutil
+pytest
