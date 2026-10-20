@@ -1,0 +1,21 @@
+[
+  {
+    "video": "harbour_4cif_q22_g1.h264",
+    "carrier": "magnitude",
+    "frames": 600,
+    "segments_total": 6,
+    "segments_scanned": 4,
+    "carrier_bits_per_segment": [
+      49742,
+      49514,
+      48816,
+      51833
+    ],
+    "min_chunk_bytes_supported": 6065,
+    "scan_seconds": 2600.3,
+    "registered_segments_needed_at_min_chunk": 2,
+    "registered_fits_estimate": true,
+    "in_band_segments_needed_at_min_chunk": 3,
+    "in_band_fits_estimate": true
+  }
+]

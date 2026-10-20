@@ -40,6 +40,8 @@ def _fmt(value: Any, digits: int = 2) -> str:
 def e2e_rows() -> list[dict[str, Any]]:
     rows = []
     for stem, report in _load("e2e_*.json").items():
+        if stem.endswith(".skipped") or "input_video" not in report:
+            continue  # cases the sweep skipped for capacity have no run to report
         quality = report.get("frame_quality") or {}
         rows.append({
             "case": stem.removeprefix("e2e_"),

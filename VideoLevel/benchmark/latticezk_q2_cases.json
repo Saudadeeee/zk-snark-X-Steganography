@@ -350,5 +350,29 @@
   "macroblocks_per_frame": 396,
   "ml_features": false,
   "note": "t1-sign-video-only-v2 fast analysis; compare timings with _t1_spread"
+ },
+ {
+  "name": "soccer4cif_q22_reg_s2",
+  "clip": "soccer",
+  "video": "data/encoded/soccer_4cif_q22_g1.h264",
+  "source_y4m": "data/raw/soccer_4cif.y4m",
+  "qp": 22,
+  "registered": true,
+  "macroblocks_per_frame": 1584,
+  "chunk_bytes": "auto",
+  "scan_segments": 2,
+  "note": "capacity from the first 2 segments only"
+ },
+ {
+  "name": "crew4cif_q22_reg_s6",
+  "clip": "crew",
+  "video": "data/encoded/crew_4cif_q22_g1.h264",
+  "source_y4m": "data/raw/crew_4cif.y4m",
+  "qp": 22,
+  "registered": true,
+  "macroblocks_per_frame": 1584,
+  "chunk_bytes": "auto",
+  "scan_segments": 6,
+  "note": "capacity from the first 6 segments only"
  }
 ]

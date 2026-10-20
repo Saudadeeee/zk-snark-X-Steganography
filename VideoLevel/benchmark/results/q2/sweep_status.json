@@ -1,32 +1,22 @@
 [
   {
-    "name": "coastguard_cif_q22_reg_t1",
+    "name": "crew4cif_q22_reg",
+    "failed": "capacity"
+  },
+  {
+    "name": "harbour4cif_q22_reg",
     "e2e": true,
     "steg": true,
     "mlfeat": true
   },
   {
-    "name": "container_cif_q22_reg_t1_spread",
-    "e2e": true,
-    "steg": true,
-    "mlfeat": true
+    "name": "soccer4cif_q22_reg",
+    "failed": "capacity"
   },
   {
-    "name": "coastguard_cif_q22_reg_t1_spread",
+    "name": "harbour4cif_q22_inband",
     "e2e": true,
     "steg": true,
-    "mlfeat": true
-  },
-  {
-    "name": "city_cif_q22_reg_t1_spread",
-    "e2e": true,
-    "steg": true,
-    "mlfeat": true
-  },
-  {
-    "name": "hall_cif_q22_reg_t1_spread",
-    "e2e": true,
-    "steg": true,
-    "mlfeat": true
+    "mlfeat": false
   }
 ]
