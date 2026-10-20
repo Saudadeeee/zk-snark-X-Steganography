@@ -245,10 +245,12 @@ hybrids compose over many proofs.
 \begin{remark}[Limits]
 The theorems are classical-ROM statements; no QROM claim is made. The
 auxiliary key's \MSIS{} ($n\times23$ instead of $n\times13$) and \MLWE{}
-($17$ instead of $7$ samples) instances have not been run through the pinned
-estimator: an ADPS16 primal estimate gives the same block size (473) for both
-sample counts, and the optimal \MSIS{} sub-dimension ($\approx3\,022$) is below
-both widths, so we expect the base security levels to carry over. The
+($17$ instead of $7$ samples) instances give the same levels as the base set
+under the pinned estimator (\MSIS{} $\beta=480$, 140/127 bits; primal \MLWE{}
+$\beta=474$, 138/125 bits; dual $\beta=472$), since the optimal \MSIS{}
+sub-dimension ($\approx3\,022$) is below both widths
+(\texttt{research/bdlop\_params/bdlop\_binary\_128.estimate.json}); the
+dual-hybrid caveat of Section~\ref{sec:proof} applies equally. The
 soundness error $2^{-150}$ per round is below the $2^{-256}$ of the opening
 proof; $k=k'=9$ would match it at about 12\,KB more. The proof does not
 relate a binary commitment to the payload commitments of

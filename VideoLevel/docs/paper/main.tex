@@ -844,9 +844,14 @@ selection is the more promising direction.
 \paragraph{Capacity and codec scope} Only all-intra Baseline streams are
 supported, which is a real deployment restriction. A registered envelope
 needs 61\,kbit, which smooth content and high QP do not provide within a few
-hundred frames. Proving that each payload bit is binary, or that the payload
-lies in a range, would need a fully splitting ring and the product proofs
-of~\cite{ref:als20,ref:ens20}, which this parameter set does not provide.
+hundred frames. Appendix~\ref{sec:binary-proof} gives a proof that a commitment
+under the same parameter set hides a binary string (41\,870 bytes, 2.2\,s to
+prove and 72\,ms to verify), built from lifted constant-coefficient relations
+and an ALS20-style product step~\cite{ref:als20,ref:lnp22} that works on our
+two-slot ring. It is not yet tied to the 24-bit payload encoding, which would
+need a bit-decomposition proof, and its multi-round Fiat--Shamir-with-aborts
+composition is argued but not written out; range proofs on the payload remain
+open.
 
 \paragraph{What is claimed} An accepted video shows that its producer knew a
 (relaxed) opening of the bound commitment for this exact carrier-normalized
@@ -899,7 +904,7 @@ and 4CIF content carries the proof in one to three hundred frames at
 detect it. A learned per-frame detector does better than chance, and the
 security argument rests on relaxed soundness in the classical random-oracle
 model. The next steps are cost-aware carrier selection against learned and
-pooled detectors, binary and range proofs on a fully splitting ring, support
+pooled detectors, tying the binary proof to the payload encoding, support
 for P-slices and higher resolutions, and an independent review of the
 cryptographic argument.
 
@@ -915,7 +920,8 @@ intermediate files are not redistributed.
 % Proofs of the security section (workstream A5), when present.
 \IfFileExists{sections/security_appendix.tex}{%
 \appendices
-\input{sections/security_appendix}}{}
+\input{sections/security_appendix}
+\IfFileExists{sections/binary_proof.tex}{\input{sections/binary_proof}}{}}{}
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}
