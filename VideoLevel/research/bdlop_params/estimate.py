@@ -10,6 +10,11 @@ and Kyber specifications), which is not vendored here:
 Binding is M-SIS in the infinity norm for B1 in R_q^(n x k) with the bound
 8 * kappa * (gamma - kappa - 1) reached by two relaxed openings.  Hiding is
 M-LWE with a ternary secret of rank lam and n + 1 ring samples.
+
+``--parameter-set BINARY_128`` estimates the auxiliary commitment of the
+binary proof (``src/lattice_zk/binary_proof.py``): the same bound, the wider
+key B1' in R_q^(n x aux_width) and n + aux_slots M-LWE samples.  The base
+commitment of that proof is the unchanged BDLOP_OPEN_128 instance.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.lattice_zk import binary_proof  # noqa: E402
 from src.lattice_zk import params as parameter_sets  # noqa: E402
 from src.lattice_zk.params import BdlopParams  # noqa: E402
 
@@ -65,10 +71,35 @@ def _primal_block(model: dict, q: int, secret_dim: int, samples: int) -> int:
     return best
 
 
+class AuxInstance:
+    """The auxiliary commitment of a binary-proof set, shaped like a ``BdlopParams``."""
+
+    def __init__(self, params: binary_proof.BinaryParams) -> None:
+        base = params.base
+        self.name = params.name + "/aux"
+        self.parameter_id = params.parameter_id
+        self.modulus, self.degree = base.modulus, base.degree
+        self.msis_rank, self.mlwe_rank = base.msis_rank, base.mlwe_rank
+        self.width = params.aux_width
+        self.mlwe_samples = params.mlwe_samples
+        self.binding_norm_bound = base.binding_norm_bound
+        self.commitment_bytes = params.aux_commitment_bytes
+        self.proof_bytes = params.proof_bytes
+        self.challenge_space_bits = base.challenge_space_bits
+        self.acceptance_probability = params.acceptance_probability
+
+
+def _parameter_set(name: str):
+    if hasattr(parameter_sets, name):
+        return getattr(parameter_sets, name)
+    return AuxInstance(getattr(binary_proof, name))
+
+
 def estimate(params: BdlopParams, model: dict) -> dict:
     q, degree = params.modulus, params.degree
     secret_dim = params.mlwe_rank * degree
-    samples = (params.msis_rank + 1) * degree
+    # BdlopParams: t1 and t2 are n + 1 samples; AuxInstance: n + aux_slots.
+    samples = getattr(params, "mlwe_samples", params.msis_rank + 1) * degree
     classical, quantum = model["classical"], model["quantum"]
 
     primal = _primal_block(model, q, secret_dim, samples)
@@ -129,7 +160,7 @@ def main() -> int:
     parser.add_argument("--parameter-set", default="BDLOP_OPEN_128")
     parser.add_argument("--output", type=Path)
     arguments = parser.parse_args()
-    params = getattr(parameter_sets, arguments.parameter_set)
+    params = _parameter_set(arguments.parameter_set)
     report = json.dumps(estimate(params, _load_model(arguments.estimator)), indent=2) + "\n"
     if arguments.output is not None:
         arguments.output.write_text(report, encoding="utf-8")
