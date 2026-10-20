@@ -295,3 +295,83 @@ def test_verified_envelope_supports_later_linkage_and_disclosure(tmp_path, pins)
     assert linkage.verify_linkage(TOY, context, in_video, credential, proof)
     rejected = _verify(stego, pins, expected_session=b"\x08" * 32)
     assert rejected.envelope is None
+
+
+# -- verifier configuration and exception safety -------------------------- #
+
+def test_embed_requires_exactly_the_input_its_profile_proves(tmp_path, pins, issuer) -> None:
+    _, registered_pins, credential = _registered_setup(issuer)
+    cover = tmp_path / "cover.h264"
+    cover.write_bytes(b"non-carrier syntax" * 50)
+    for profile, payload, held, chosen_pins in (
+        (PROFILE, None, None, pins),  # in-band without a payload
+        (PROFILE, b"p", credential, pins),  # in-band with a credential
+        (REGISTERED_PROFILE, b"p", credential, registered_pins),  # registered with a payload
+        (REGISTERED_PROFILE, None, None, registered_pins),  # registered without a credential
+    ):
+        with pytest.raises(ValueError):
+            pipeline.embed_video_proof(
+                cover, tmp_path / "stego.h264", payload, params=TOY, pins=chosen_pins,
+                profile=profile, session_challenge=b"\x07" * 32, sync_key=SYNC_KEY,
+                credential=held, transport=FakeTransport(),
+            )
+    assert not (tmp_path / "stego.h264").exists()
+
+
+def test_malformed_verifier_configuration_is_refused_loudly(tmp_path, pins, issuer) -> None:
+    stego = _embed(tmp_path, pins, b"\x07" * 32)
+    for session in (b"\x07" * 31, "07" * 32, bytearray(32)):
+        with pytest.raises(ValueError):
+            _verify(stego, pins, expected_session=session)
+    _, registered_pins, credential = _registered_setup(issuer)
+    malformed = dataclasses.replace(credential.commitment, t2=credential.commitment.t2 + TOY.modulus)
+    for pinned in (malformed, credential.commitment.to_bytes(TOY)):
+        with pytest.raises(ValueError):
+            pipeline.verify_video_proof(
+                stego, params=TOY, pins=registered_pins, profile=REGISTERED_PROFILE,
+                sync_key=SYNC_KEY, transport=FakeTransport(), expected_session=b"\x07" * 32,
+                credential=pinned,
+            )
+
+
+@pytest.mark.parametrize("field", ["positions_hash", "canonical_video_sha256"])
+def test_malformed_transport_digests_reject_instead_of_raising(tmp_path, pins, field) -> None:
+    class GarblingTransport(FakeTransport):
+        def extract_chunked_video_payload(self, *arguments, **options):
+            extracted = super().extract_chunked_video_payload(*arguments, **options)
+            setattr(extracted, field, "not hex")
+            return extracted
+
+    stego = _embed(tmp_path, pins, b"\x07" * 32)
+    store = SessionChallengeStore(tmp_path / "sessions.sqlite3", ttl_seconds=60)
+    for options in ({"expected_session": b"\x07" * 32}, {"session_store": store}):
+        result = pipeline.verify_video_proof(
+            stego, params=TOY, pins=pins, profile=PROFILE, sync_key=SYNC_KEY,
+            transport=GarblingTransport(), **options,
+        )
+        assert not result.valid and result.reason.startswith("statement rejected")
+
+
+def test_registry_epoch_outside_the_statement_field_is_refused(issuer) -> None:
+    descriptor = pipeline.relation_descriptor(TOY, PROFILE)
+    record = SignedZkpRelationRegistry.create(epoch=0, relations=[descriptor]).relations
+    # An issuer-signed epoch that cannot be encoded as u64 must not yield pins.
+    oversized = SignedZkpRelationRegistry(1 << 64, record).sign(issuer[1], signer_id="test-issuer")
+    with pytest.raises(ValueError):
+        pipeline.pins_from_registry(
+            oversized, issuer[0], TOY, PROFILE, minimum_epoch=0, allow_toy_parameters=True
+        )
+
+
+def test_random_carrier_corruptions_never_verify(tmp_path, pins) -> None:
+    import random
+
+    rng = random.Random(0x5EED0031)
+    stego = _embed(tmp_path, pins, b"\x07" * 32)
+    body, marker, envelope = stego.read_bytes().partition(MARKER)
+    for index in range(40):
+        bit = rng.randrange(len(envelope) * 8)
+        mutated = bytearray(envelope)
+        mutated[bit // 8] ^= 0x80 >> (bit % 8)
+        stego.write_bytes(body + marker + bytes(mutated))
+        assert not _verify(stego, pins, expected_session=b"\x07" * 32).valid, index

@@ -247,6 +247,25 @@ def embed_video_proof(
     )
 
 
+def _require_verifier_configuration(
+    params: BdlopParams, profile: CarrierProfile, session_store: SessionChallengeStore | None,
+    expected_session: bytes | None, credential: bdlop.Commitment | None,
+) -> None:
+    """Reject verifier misconfiguration loudly; video content never reaches here."""
+    if (session_store is None) == (expected_session is None):
+        raise ValueError("supply exactly one of session_store or expected_session")
+    if expected_session is not None and (
+        not isinstance(expected_session, bytes) or len(expected_session) != 32
+    ):
+        raise ValueError("expected_session must be exactly 32 bytes")
+    if profile.registered != (credential is not None):
+        raise ValueError("a pinned credential is required exactly for registered profiles")
+    if credential is not None and not (
+        isinstance(credential, bdlop.Commitment) and credential.is_canonical(params)
+    ):
+        raise ValueError("the pinned credential is not a canonical commitment for this parameter set")
+
+
 def verify_video_proof(
     video_path: str | Path, *,
     params: BdlopParams, pins: VerifierPins, profile: CarrierProfile, sync_key: bytes,
@@ -259,10 +278,7 @@ def verify_video_proof(
     Exactly one of ``session_store`` (one-use, replay-protected) or
     ``expected_session`` (stateless; no replay protection) must be supplied.
     """
-    if (session_store is None) == (expected_session is None):
-        raise ValueError("supply exactly one of session_store or expected_session")
-    if profile.registered != (credential is not None):
-        raise ValueError("a pinned credential is required exactly for registered profiles")
+    _require_verifier_configuration(params, profile, session_store, expected_session, credential)
     channel = transport or _default_transport()
     try:
         extracted = channel.extract_chunked_video_payload(
@@ -291,11 +307,14 @@ def verify_video_proof(
             params, statement, credential, extracted.payload
         )
 
+    try:
+        # Transport-derived digests are hex strings; malformed ones reject.
+        statement = statement_for(in_band_session if expected_session is None else expected_session)
+    except (TypeError, ValueError) as error:
+        return VerifyResult(False, f"statement rejected: {type(error).__name__}: {error}")
     if session_store is None:
-        statement = statement_for(expected_session)
         accepted = check(expected_session)
     else:
-        statement = statement_for(in_band_session)
         accepted = session_store.verify_and_consume(
             in_band_session,
             context_binding=session_binding(params, pins),

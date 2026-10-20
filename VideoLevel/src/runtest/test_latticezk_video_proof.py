@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import dataclasses
+import random
 
 import pytest
 
 from src.lattice_zk import video_proof
 from src.lattice_zk.params import BDLOP_OPEN_128, TOY
+from src.runtest.test_latticezk_bdlop import random_corruptions
 
 PINS = video_proof.VerifierPins(
     relation_id=b"R" * 32,
@@ -195,3 +197,102 @@ def test_envelope_kinds_are_not_interchangeable() -> None:
     assert not video_proof.verify_registered_envelope(TOY, statement, commitment, relabelled)
     with pytest.raises(ValueError):
         video_proof.envelope_session(TOY, registered[:-1], registered=True)
+
+
+# -- input validation and randomized tampering ---------------------------- #
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"relation_id": b"r" * 31}, {"registry_root": "g" * 32}, {"codec_policy_id": None},
+        {"carrier_profile_id": b"p" * 33}, {"registry_epoch": -1}, {"registry_epoch": 1 << 64},
+        {"registry_epoch": True},
+    ],
+)
+def test_verifier_pins_reject_malformed_fields(changes: dict) -> None:
+    with pytest.raises(ValueError):
+        dataclasses.replace(PINS, **changes)
+
+
+def test_verifiers_return_false_for_non_statement_or_non_opening_inputs() -> None:
+    statement = _statement()
+    data, opening = video_proof.create_envelope(TOY, statement, b"payload")
+    commitment, randomness = _credential()
+    registered = video_proof.create_registered_envelope(TOY, statement, commitment, randomness)
+    for bogus in (None, statement.to_bytes(), dataclasses.asdict(statement)):
+        assert video_proof.verify_envelope(TOY, bogus, data) is False  # type: ignore[arg-type]
+        assert video_proof.verify_registered_envelope(
+            TOY, bogus, commitment, registered  # type: ignore[arg-type]
+        ) is False
+    for bogus_commitment in (None, b"commitment", dataclasses.replace(commitment, t2=commitment.t2[:-1])):
+        assert video_proof.verify_registered_envelope(
+            TOY, statement, bogus_commitment, registered  # type: ignore[arg-type]
+        ) is False
+    for bogus_opening in (
+        None, (opening.payload, opening.randomness),
+        dataclasses.replace(opening, randomness=opening.randomness.tolist()),
+        dataclasses.replace(opening, payload="payload"),
+    ):
+        assert video_proof.verify_disclosure(TOY, data, bogus_opening) is False  # type: ignore[arg-type]
+
+
+def test_envelope_constructors_refuse_malformed_inputs() -> None:
+    statement = _statement()
+    data, _ = video_proof.create_envelope(TOY, statement, b"payload")
+    envelope = video_proof.decode_envelope(TOY, data)
+    with pytest.raises(TypeError):
+        video_proof.create_envelope(TOY, statement.to_bytes(), b"payload")  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        video_proof.encode_envelope(TOY, (envelope.commitment, envelope.proof))  # type: ignore[arg-type]
+    for changes in ({"session_challenge": "S" * 32}, {"session_challenge": b"S" * 31},
+                    {"proof": list(envelope.proof)}, {"proof": envelope.proof[:-1]},
+                    {"parameter_id": b"\x00" * 32}):
+        with pytest.raises(ValueError):
+            video_proof.encode_envelope(TOY, dataclasses.replace(envelope, **changes))
+    assert video_proof.encode_envelope(TOY, envelope) == data
+
+
+def test_random_in_band_envelope_corruptions_never_verify() -> None:
+    rng = random.Random(0x5EED0021)
+    statement = _statement()
+    data, _ = video_proof.create_envelope(TOY, statement, b"payload")
+    for corrupted in random_corruptions(data, rng, 400):
+        assert video_proof.verify_envelope(TOY, statement, corrupted) is False
+        try:
+            video_proof.decode_envelope(TOY, corrupted)
+        except ValueError:
+            pass  # the only exception a malformed envelope may raise
+
+
+def test_random_registered_envelope_corruptions_never_verify() -> None:
+    rng = random.Random(0x5EED0022)
+    statement = _statement()
+    commitment, randomness = _credential()
+    data = video_proof.create_registered_envelope(TOY, statement, commitment, randomness)
+    for corrupted in random_corruptions(data, rng, 400):
+        assert video_proof.verify_registered_envelope(TOY, statement, commitment, corrupted) is False
+
+
+def test_random_garbage_never_decodes_as_an_envelope() -> None:
+    rng = random.Random(0x5EED0023)
+    for registered in (False, True):
+        size = video_proof.envelope_size(TOY, registered=registered)
+        for _ in range(100):
+            garbage = rng.randbytes(rng.choice((size, rng.randrange(2 * size))))
+            with pytest.raises(ValueError):
+                video_proof.envelope_session(TOY, garbage, registered=registered)
+
+
+def test_random_statements_verify_only_their_own_envelope() -> None:
+    rng = random.Random(0x5EED0024)
+    statements = [
+        _statement(
+            session_challenge=rng.randbytes(32), carrier_count=rng.randrange(1 << 64),
+            positions_hash=rng.randbytes(32), canonical_video_sha256=rng.randbytes(32),
+        )
+        for _ in range(6)
+    ]
+    envelopes = [video_proof.create_envelope(TOY, s, rng.randbytes(40))[0] for s in statements]
+    for i, statement in enumerate(statements):
+        for j, data in enumerate(envelopes):
+            assert video_proof.verify_envelope(TOY, statement, data) is (i == j)

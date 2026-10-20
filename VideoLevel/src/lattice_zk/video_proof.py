@@ -41,6 +41,21 @@ class VerifierPins:
     codec_policy_id: bytes
     carrier_profile_id: bytes
 
+    def __post_init__(self) -> None:
+        for name in ("relation_id", "registry_root", "codec_policy_id", "carrier_profile_id"):
+            _require_digest(name, getattr(self, name))
+        _require_u64("registry_epoch", self.registry_epoch)
+
+
+def _require_digest(name: str, value: object) -> None:
+    if not isinstance(value, bytes) or len(value) != 32:
+        raise ValueError(f"{name} must be exactly 32 bytes")
+
+
+def _require_u64(name: str, value: object) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value < 1 << 64:
+        raise ValueError(f"{name} must be an unsigned 64-bit integer")
+
 
 @dataclass(frozen=True)
 class VideoStatement:
@@ -57,13 +72,9 @@ class VideoStatement:
 
     def __post_init__(self) -> None:
         for name in _DIGEST_FIELDS:
-            value = getattr(self, name)
-            if not isinstance(value, bytes) or len(value) != 32:
-                raise ValueError(f"{name} must be exactly 32 bytes")
+            _require_digest(name, getattr(self, name))
         for name in ("registry_epoch", "carrier_count"):
-            value = getattr(self, name)
-            if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value < 1 << 64:
-                raise ValueError(f"{name} must be an unsigned 64-bit integer")
+            _require_u64(name, getattr(self, name))
 
     def to_bytes(self) -> bytes:
         """Fixed-width canonical encoding absorbed by the Fiat-Shamir hash."""
@@ -129,9 +140,12 @@ def build_statement(
 
 
 def encode_envelope(params: BdlopParams, envelope: Envelope) -> bytes:
-    if len(envelope.proof) != params.proof_bytes:
+    if not isinstance(envelope, Envelope):
+        raise TypeError("envelope must be an Envelope")
+    if not isinstance(envelope.proof, bytes) or len(envelope.proof) != params.proof_bytes:
         raise ValueError("proof has the wrong length for this parameter set")
-    if envelope.parameter_id != params.parameter_id or len(envelope.session_challenge) != 32:
+    _require_digest("session_challenge", envelope.session_challenge)
+    if envelope.parameter_id != params.parameter_id:
         raise ValueError("envelope header fields do not match this parameter set")
     header = _ENVELOPE_HEADER.pack(
         ENVELOPE_MAGIC, ENVELOPE_VERSION, envelope.parameter_id, envelope.session_challenge
@@ -153,6 +167,18 @@ def decode_envelope(params: BdlopParams, data: bytes) -> Envelope:
     return Envelope(parameter_id, session_challenge, commitment, data[split:])
 
 
+def _require_statement(params: BdlopParams, statement: object) -> VideoStatement:
+    if not isinstance(statement, VideoStatement):
+        raise TypeError("statement must be a VideoStatement")
+    if statement.parameter_id != params.parameter_id:
+        raise ValueError("statement is bound to a different parameter set")
+    return statement
+
+
+def _statement_matches(params: BdlopParams, statement: object) -> bool:
+    return isinstance(statement, VideoStatement) and statement.parameter_id == params.parameter_id
+
+
 def placeholder_envelope(params: BdlopParams, *, registered: bool = False) -> bytes:
     """Same-length stand-in used to fix the carrier layout before proving."""
     return bytes(envelope_size(params, registered=registered))
@@ -162,8 +188,7 @@ def create_envelope(
     params: BdlopParams, statement: VideoStatement, payload: bytes
 ) -> tuple[bytes, PayloadOpening]:
     """Commit to ``payload`` and prove knowledge of its opening for ``statement``."""
-    if statement.parameter_id != params.parameter_id:
-        raise ValueError("statement is bound to a different parameter set")
+    _require_statement(params, statement)
     message = codec.encode_payload(params, payload)
     randomness = bdlop.sample_randomness(params)
     commitment = bdlop.commit(params, message, randomness)
@@ -178,7 +203,7 @@ def verify_envelope(params: BdlopParams, statement: VideoStatement, data: bytes)
         envelope = decode_envelope(params, data)
     except ValueError:
         return False
-    if statement.parameter_id != params.parameter_id:
+    if not _statement_matches(params, statement):
         return False
     if not hmac.compare_digest(envelope.session_challenge, statement.session_challenge):
         return False
@@ -187,12 +212,12 @@ def verify_envelope(params: BdlopParams, statement: VideoStatement, data: bytes)
 
 def verify_disclosure(params: BdlopParams, data: bytes, opening: PayloadOpening) -> bool:
     """Check a later disclosure of the committed payload against an envelope."""
+    if not isinstance(opening, PayloadOpening):
+        return False
     try:
         envelope = decode_envelope(params, data)
         message = codec.encode_payload(params, opening.payload)
     except ValueError:
-        return False
-    if not isinstance(opening.randomness, np.ndarray):
         return False
     return bdlop.verify_opening(params, envelope.commitment, message, opening.randomness)
 
@@ -206,8 +231,7 @@ def create_registered_envelope(
     The envelope carries only the proof.  Because the commitment is fixed by
     the issuer-signed registry, the proof also authenticates its holder.
     """
-    if statement.parameter_id != params.parameter_id:
-        raise ValueError("statement is bound to a different parameter set")
+    _require_statement(params, statement)
     proof = opening_proof.prove(params, statement.to_bytes(), commitment, randomness)
     header = _ENVELOPE_HEADER.pack(
         REGISTERED_ENVELOPE_MAGIC, ENVELOPE_VERSION, params.parameter_id, statement.session_challenge
@@ -236,7 +260,7 @@ def verify_registered_envelope(
         session_challenge = envelope_session(params, data, registered=True)
     except ValueError:
         return False
-    if statement.parameter_id != params.parameter_id:
+    if not _statement_matches(params, statement):
         return False
     if not hmac.compare_digest(session_challenge, statement.session_challenge):
         return False
