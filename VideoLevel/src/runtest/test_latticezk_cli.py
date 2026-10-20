@@ -159,6 +159,10 @@ def test_key_pairs_are_never_half_written(tmp_path, capsys) -> None:
                 "--public", holder_public, "--private", holder_private)[0] == 2
     assert not holder_public.exists() and holder_private.read_text() == "{}"
 
+    same = tmp_path / "same.key"
+    assert _run(capsys, "issuer-keygen", "--public", same, "--private", same)[0] == 2
+    assert not same.exists()
+
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits; Windows uses ACLs")
 def test_secret_files_are_owner_only(tmp_path, capsys) -> None:

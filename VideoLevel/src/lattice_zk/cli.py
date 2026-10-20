@@ -60,6 +60,9 @@ def _require_absent(*paths: Path | None) -> None:
     Writing still uses ``O_EXCL``; this pre-check only prevents creating one
     half of a key pair, or embedding a video whose opening cannot be kept.
     """
+    given = [os.path.abspath(path) for path in paths if path is not None]
+    if len(set(given)) != len(given):
+        raise ValueError("output paths must be distinct")
     for path in paths:
         if path is not None and os.path.lexists(path):
             raise FileExistsError(f"{path} already exists; refusing to overwrite it")

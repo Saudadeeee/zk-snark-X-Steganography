@@ -50,7 +50,8 @@ def reduced_array(
 def ternary_randomness(params: BdlopParams, randomness: object) -> np.ndarray:
     """Require commitment randomness in S_1^k: a (k, N) vector over {-1, 0, 1}."""
     values = integer_array(randomness, (params.width, params.degree), "commitment randomness")
-    if int(np.abs(values).max()) > 1:
+    # Compare directly: np.abs(int64 min) overflows and stays negative.
+    if int(values.min()) < -1 or int(values.max()) > 1:
         raise ValueError("commitment randomness must be ternary")
     return values
 

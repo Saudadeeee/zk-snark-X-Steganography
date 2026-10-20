@@ -423,6 +423,8 @@ def test_commit_refuses_malformed_witness_and_message() -> None:
         (randomness.astype(np.float64), TypeError),
         (randomness.tolist(), TypeError),
         (np.full(randomness.shape, 1 << 63, dtype=np.uint64), ValueError),
+        (np.where(np.arange(randomness.size).reshape(randomness.shape) == 0,
+                  np.iinfo(np.int64).min, 0), ValueError),  # abs() overflows here
     ):
         with pytest.raises(error):
             bdlop.commit(TOY, message, value)
@@ -543,13 +545,16 @@ def test_random_commitment_corruptions_are_rejected_or_do_not_verify() -> None:
     rng = random.Random(0x5EED0003)
     _, randomness, commitment = _committed()
     proof = opening_proof.prove(TOY, STATEMENT, commitment, randomness)
+    parsed_count = 0
     for corrupted in random_corruptions(commitment.to_bytes(TOY), rng, 300):
         try:
             parsed = bdlop.Commitment.from_bytes(TOY, corrupted)
         except ValueError:
             continue
+        parsed_count += 1
         assert parsed.to_bytes(TOY) == corrupted  # decoding is canonical: one encoding per value
         assert not opening_proof.verify(TOY, STATEMENT, parsed, proof)
+    assert parsed_count > 0  # the property was exercised, not vacuously skipped
 
 
 def test_random_packed_fields_round_trip_and_decode_canonically() -> None:
