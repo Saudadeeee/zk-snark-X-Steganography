@@ -93,7 +93,10 @@ For `t_a = Com(m; r_a)` and `t_b = Com(m; r_b)` the prover samples `y_a, y_b`,
 sends `w_a = B1·y_a`, `w_b = B1·y_b`, `u = ⟨b2, y_a − y_b⟩` through the hash,
 and answers `z_a = y_a + c·r_a`, `z_b = y_b + c·r_b`, aborting unless both are
 in range. The verifier recomputes `w_a, w_b` as in 3.4 and
-`u' = ⟨b2, z_a − z_b⟩ − c·(t2_a − t2_b)`.
+`u' = ⟨b2, z_a − z_b⟩ − c·(t2_a − t2_b)`. The prover has its own cap of 4 096
+attempts (`equality_proof.MAX_ATTEMPTS`; see 4.1). Either witness may be the
+all-zero vector, which is ternary: `Com(m; 0) = (0, m)` is the public
+commitment used for disclosure (3.7).
 
 ### 3.6 Video statement
 
@@ -144,6 +147,55 @@ the relation descriptor that the issuer signs (ML-DSA-65) into the registry.
 The session challenge is a 32-byte value issued by the verifier and consumed
 once, atomically, after a successful verification.
 
+**Holder identity.** The issuer may bind the credential to a holder identifier
+`h` (a non-empty NFC-normalized UTF-8 string of at most 256 bytes; CLI
+`--holder-id`). The registry field set is unchanged: the descriptor's
+`verifier_key_hash` becomes
+
+```text
+SHA-256(B1' ‖ b2' ‖ t ‖ SHA-256("zkstego/lattice-zk/video-pipeline/v1/holder-id\0" ‖ u16 |h| ‖ h))
+```
+
+instead of `SHA-256(B1' ‖ b2' ‖ t)` (key blocks as big-endian 64-bit words,
+`t` packed as on the wire); every part has a length fixed by
+`parameter_id`, so the encoding is unambiguous, and without `h` the
+descriptor (and every existing registry) is unchanged. A holder id is refused
+for in-band profiles. Pins resolve only when the verifier supplies the same
+`h` (`pins_from_registry(..., holder_id=h)`), so the issuer's signature covers
+"commitment `t` belongs to holder `h`".
+
+**Pins and credential.** `verify_video_proof` recomputes the relation id of
+`(parameter set, carrier profile, credential, holder id)` and raises
+`ValueError` unless it equals `pins.relation_id`. A mismatch (pins resolved
+for one credential used with another, in-band pins with a registered profile
+or the reverse, a wrong or missing holder id) is verifier misconfiguration,
+reported before the video is read; video content only ever yields
+`valid = False`.
+
+**Disclosure.** The holder reveals the payload `p` of a commitment `t` to one
+recipient without handing over `r`:
+
+```text
+ctx         = "zkstego/lattice-zk/disclosure/v1\0" ‖ parameter_id ‖
+              u64 32 ‖ statement_id ‖ u64 32 ‖ nonce
+t'          = Com(encode(p); 0) = (0, encode(p))
+π_eq        = equality proof (3.5) of (t, r) and (t', 0) for statement ctx
+disclosure  = "ZKLD" ‖ 0x01 ‖ parameter_id ‖ u16 |p| ‖ p ‖ π_eq
+```
+
+`statement_id` names what is disclosed (the verified video statement id for
+an in-band envelope; for a registered credential, any 32-byte id the
+recipient names, such as the relation id) and `nonce` is a 32-byte value the
+recipient chose, so a disclosure made for one recipient or one video does not
+verify for another. The recipient recomputes `t'` from `p` and verifies `π_eq`
+against the commitment it already holds (`verify_disclosure_proof` for an
+envelope, `verify_commitment_disclosure` for a credential; CLI `disclose` and
+`disclosure-verify`). Size: 39 bytes + `|p|` + 15 008 bytes for the
+production set. The proof is transferable: a third party who trusts that the
+nonce was fresh is convinced too. `self_check_opening` (formerly
+`verify_disclosure`) checks `(p, r)` directly and is a holder-side self-check
+only: anyone given `r` can prove knowledge of the opening for new statements.
+
 ## 4. Security argument
 
 Throughout, `‖c·v‖∞ ≤ ‖c‖₁·‖v‖∞`.
@@ -156,9 +208,12 @@ inverse (4.65 for the production set; measured 4.68 over 50 runs), and an
 accepted `z` satisfies the verification equation because `t1 = B1·r`.
 The probability that 512 attempts all abort is `(1 − 0.215)^{512} < 2^{-178}`.
 The equality proof (3.5) accepts with probability `0.215^2 ≈ 0.046` per
-attempt (mean 21.6 attempts) and shares the cap of 512, so it fails with
-probability about `2^{-35}`; a larger cap would not affect zero knowledge,
-because acceptance is independent of the witness.
+attempt (mean 21.6 attempts). It has its own cap of 4 096 attempts, so it
+fails with probability `(1 − 0.046)^{4096} ≈ 2^{-280}` (the shared cap of 512
+used before gave `2^{-35}`). The larger cap does not affect zero knowledge,
+because acceptance is independent of the witness, including the zero witness
+of a disclosure. `test_equality_prover_cap_gives_negligible_completeness_error`
+checks the bound `< 2^{-128}` from the parameters.
 
 ### 4.2 Honest-verifier zero knowledge of accepted transcripts
 
@@ -242,17 +297,21 @@ determined. Proofs and bounds: `docs/paper/sections/security.tex`.
 - **In-band mode**: the creator of this video, for this session, knows an
   opening of the commitment it carries. The payload stays hidden and can be
   disclosed later to a chosen party. This does not identify the creator.
-  Disclosure as implemented (`verify_disclosure`) reveals the randomness `r`,
-  after which the recipient can also prove knowledge of the opening for new
-  statements; disclose with a proof (an equality proof against
-  `(0, encode(payload))` with zero randomness) when that matters.
+  Disclosure (3.7) is an equality proof against `(0, encode(payload))` with
+  zero randomness: extraction gives a relaxed opening `(r̄', f)` of
+  `(0, encode(p))` with `B1·r̄' = 0`, so `r̄' = 0` unless M-SIS is broken and
+  the carried commitment hides `p`. The randomness `r` is not revealed, so the
+  recipient cannot prove anything about the commitment afterwards.
 - **Registered mode**: the creator knows the opening of a credential
   commitment that the issuer registered, so only the credential holder can
   produce the proof. The argument needs, besides binding, that a relaxed
   opening of an honestly generated commitment is hard to find (M-SIS, or
-  M-LWE when the opening found is the holder's own `r`). The registered
-  descriptor binds the commitment, not a holder identity; the link from a
-  commitment to a person comes from outside the signed registry.
+  M-LWE when the opening found is the holder's own `r`). With a holder id
+  (3.7) the issuer's signature also covers "this commitment belongs to holder
+  `h`", and the proof then authenticates `h`. Without one, the registered
+  descriptor binds the commitment only and the link from a commitment to a
+  person comes from outside the signed registry. Either way the issuer is
+  trusted to have checked who `h` is.
 - **Linkage**: two carried commitments, or a carried commitment and a
   credential, hide the same payload.
 

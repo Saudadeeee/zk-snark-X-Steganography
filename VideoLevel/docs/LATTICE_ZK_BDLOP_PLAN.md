@@ -98,8 +98,9 @@ Kết quả lưu ở `research/bdlop_params/bdlop_open_128.estimate.json`.
 - Người tạo video biết opening của cam kết nằm trong video, và proof gắn với
   đúng video (đã chuẩn hóa carrier), phiên, registry và chính sách này.
 - Payload được giấu (hiding dưới M-LWE); cam kết ràng buộc (binding dưới M-SIS
-  với relaxed opening). Có thể công bố payload sau cho bên được phép
-  (`verify_disclosure`).
+  với relaxed opening). Có thể công bố payload sau cho bên được phép bằng
+  proof zero-knowledge (`create_disclosure` / `verify_disclosure_proof`),
+  không giao randomness `r`.
 - Knowledge soundness và zero-knowledge trong mô hình random oracle cổ điển;
   "plausibly post-quantum", tham số chọn theo tấn công lattice tốt nhất đã biết.
 
@@ -338,6 +339,21 @@ python -m src.lattice_zk.cli verify --video stego.h264 --database sessions.sqlit
 Chế độ in-band: bỏ mọi `--credential*`, thêm `--payload-file` và
 `--opening-out` ở lệnh `embed`.
 
+Gắn danh tính holder: thêm `--holder-id <id>` vào `registry-sign` và vào mọi
+lệnh resolve pins (`session-issue`, `embed`, `verify`). Công bố payload cho
+một bên nhận:
+
+```bash
+# verifier giữ envelope đã kiểm (chỉ in-band)
+python -m src.lattice_zk.cli verify ... --envelope-out envelope.bin
+# holder tạo disclosure với nonce do bên nhận chọn (randomness không rời holder)
+python -m src.lattice_zk.cli disclose --opening opening.json \
+    --statement-id <statement-id-hex> --nonce <nonce-hex> --out disclosure.bin
+# bên nhận kiểm (--credential holder.pub.json cho credential đã đăng ký)
+python -m src.lattice_zk.cli disclosure-verify --envelope envelope.bin \
+    --statement-id <statement-id-hex> --nonce <nonce-hex> --disclosure disclosure.bin
+```
+
 Chạy lại toàn bộ test của backend:
 
 ```bash
@@ -471,3 +487,34 @@ chấp nhận chậm. Không dồn T1 vào ít frame.
   frame 4CIF; nhanh hơn khoảng 2.3 lần. Test: `test_signbit_fast_analysis.py`.
 - Contract T1 đổi sang `t1-sign-video-only-v2` vì thứ tự ứng viên trước khi
   xáo trộn thay đổi; video T1 v1 không trích được bằng v2.
+
+### Sửa các lỗ hổng từ security review (2026-10-21)
+
+Theo mục D2, D3, D4, D6 trong phụ lục đối chiếu spec–code của bài báo
+(chi tiết: spec §3.5, §3.7, §4.1, §4.8).
+
+- **D3, disclosure zero-knowledge.** `verify_disclosure(params, envelope,
+  opening)` nhận cả randomness `r`, nên bên nhận có thể tự tạo proof mới cho
+  cam kết đó. Thay bằng `create_disclosure` / `verify_disclosure_proof`
+  (envelope) và `create_commitment_disclosure` /
+  `verify_commitment_disclosure` (credential): holder công bố `p` kèm equality
+  proof giữa `C` và `Com(encode(p); 0)`, gắn với ngữ cảnh
+  `statement_id ‖ nonce` (có domain tag, length-prefixed; nonce 32 byte do bên
+  nhận chọn). Định dạng `"ZKLD" ‖ 0x01 ‖ parameter_id ‖ u16 |p| ‖ p ‖ π_eq`
+  (39 + |p| + 15 008 byte ở bộ production), không chứa `r`. Hàm cũ đổi tên
+  thành `self_check_opening`, chỉ để holder tự kiểm. CLI thêm `disclose`,
+  `disclosure-verify` và `verify --envelope-out`; E2E
+  (`benchmark/latticezk_video_e2e.py`) dùng disclosure mới.
+- **D4, completeness của equality proof.** Cap riêng 4 096 lần thử
+  (`equality_proof.MAX_ATTEMPTS`), xác suất thất bại ≈ 2^-280 thay vì 2^-35;
+  test kiểm cận < 2^-128 từ tham số. KAT không đổi.
+- **D6, pins phải khớp credential.** `verify_video_proof` tính lại relation id
+  của `(params, profile, credential, holder_id)` và ném `ValueError` nếu khác
+  `pins.relation_id` (cấu hình verifier sai), kể cả khi dùng pins in-band cho
+  profile registered và ngược lại.
+- **D2, danh tính holder.** `relation_descriptor(..., holder_id=...)` băm
+  digest có domain tag của holder id (UTF-8, NFC, 1–256 byte) vào
+  `verifier_key_hash` sau credential; tập trường registry không đổi, mặc định
+  `None` giữ nguyên descriptor cũ. `pins_from_registry`, `verify_video_proof`
+  và CLI (`--holder-id` ở `registry-sign`, `session-issue`, `embed`, `verify`)
+  nhận cùng giá trị; sai hoặc thiếu holder id thì không resolve được pins.
