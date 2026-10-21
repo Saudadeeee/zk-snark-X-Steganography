@@ -1,0 +1,592 @@
+{
+  "description": "dry run of the adaptive ZKBC v2 plan on measured carrier capacities",
+  "framing_bytes": {
+    "v1_fixed": 37,
+    "v2_adaptive": 35
+  },
+  "cases": [
+    {
+      "case": "crew4cif_q22_reg",
+      "scan": "capacity_crew4cif_q22_reg_s6.json",
+      "video": "crew_4cif_q22_g1.h264",
+      "density": 1.0,
+      "frames": 600,
+      "segments_total": 6,
+      "segments_scanned": 6,
+      "carrier_bits_per_segment": [
+        11093,
+        11762,
+        16852,
+        9642,
+        5613,
+        8794
+      ],
+      "chunk_plan": {
+        "version": "zkbc-v2-greedy-fill-v1",
+        "min_chunk_bytes": 256,
+        "reserve_bits": 0,
+        "fill_permille": 1000,
+        "max_chunk_bytes": 65535
+      },
+      "envelopes": {
+        "bdlop-open-128-v2": {
+          "registered_envelope_bytes": 8165,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 644,
+            "segments_needed": 13,
+            "fits": false
+          },
+          "best_uniform_chunk_bytes": null,
+          "best_uniform_fits_scanned": false,
+          "adaptive": {
+            "fits": false,
+            "verdict": "does not fit the whole video",
+            "usable_bytes_scanned": 7757,
+            "shortfall_bytes": 408
+          }
+        },
+        "bdlop-open-128-v1": {
+          "registered_envelope_bytes": 7589,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 644,
+            "segments_needed": 12,
+            "fits": false
+          },
+          "best_uniform_chunk_bytes": null,
+          "best_uniform_fits_scanned": false,
+          "adaptive": {
+            "fits": true,
+            "verdict": "fits in 6 segment(s)",
+            "segments_used": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "segments_skipped": [],
+            "chunk_bytes": [
+              1351,
+              1435,
+              2071,
+              1170,
+              666,
+              896
+            ],
+            "frames_spanned": 600
+          }
+        }
+      }
+    },
+    {
+      "case": "soccer4cif_q22_reg",
+      "scan": "capacity_soccer4cif_q22_reg.json",
+      "video": "soccer_4cif_q22_g1.h264",
+      "density": 1.0,
+      "frames": 600,
+      "segments_total": 6,
+      "segments_scanned": 3,
+      "carrier_bits_per_segment": [
+        38552,
+        47977,
+        3501
+      ],
+      "chunk_plan": {
+        "version": "zkbc-v2-greedy-fill-v1",
+        "min_chunk_bytes": 256,
+        "reserve_bits": 0,
+        "fill_permille": 1000,
+        "max_chunk_bytes": 65535
+      },
+      "envelopes": {
+        "bdlop-open-128-v2": {
+          "registered_envelope_bytes": 8165,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 388,
+            "segments_needed": 22,
+            "fits": false
+          },
+          "best_uniform_chunk_bytes": 4782,
+          "best_uniform_fits_scanned": true,
+          "adaptive": {
+            "fits": true,
+            "verdict": "fits in 2 segment(s)",
+            "segments_used": [
+              0,
+              1
+            ],
+            "segments_skipped": [],
+            "chunk_bytes": [
+              4784,
+              3381
+            ],
+            "frames_spanned": 200
+          }
+        },
+        "bdlop-open-128-v1": {
+          "registered_envelope_bytes": 7589,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 388,
+            "segments_needed": 20,
+            "fits": false
+          },
+          "best_uniform_chunk_bytes": 4782,
+          "best_uniform_fits_scanned": true,
+          "adaptive": {
+            "fits": true,
+            "verdict": "fits in 2 segment(s)",
+            "segments_used": [
+              0,
+              1
+            ],
+            "segments_skipped": [],
+            "chunk_bytes": [
+              4784,
+              2805
+            ],
+            "frames_spanned": 200
+          }
+        }
+      }
+    },
+    {
+      "case": "crew4cif_q22_reg_d50",
+      "scan": "capacity_crew4cif_q22_reg_s6.json",
+      "video": "crew_4cif_q22_g1.h264",
+      "density": 0.5,
+      "frames": 600,
+      "segments_total": 6,
+      "segments_scanned": 6,
+      "carrier_bits_per_segment": [
+        11093,
+        11762,
+        16852,
+        9642,
+        5613,
+        8794
+      ],
+      "chunk_plan": {
+        "version": "zkbc-v2-greedy-fill-v1",
+        "min_chunk_bytes": 256,
+        "reserve_bits": 0,
+        "fill_permille": 500,
+        "max_chunk_bytes": 65535
+      },
+      "envelopes": {
+        "bdlop-open-128-v2": {
+          "registered_envelope_bytes": 8165,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 322,
+            "segments_needed": 26,
+            "fits": false
+          },
+          "best_uniform_chunk_bytes": null,
+          "best_uniform_fits_scanned": false,
+          "adaptive": {
+            "fits": false,
+            "verdict": "does not fit the whole video",
+            "usable_bytes_scanned": 3772,
+            "shortfall_bytes": 4393
+          }
+        },
+        "bdlop-open-128-v1": {
+          "registered_envelope_bytes": 7589,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 322,
+            "segments_needed": 24,
+            "fits": false
+          },
+          "best_uniform_chunk_bytes": null,
+          "best_uniform_fits_scanned": false,
+          "adaptive": {
+            "fits": false,
+            "verdict": "does not fit the whole video",
+            "usable_bytes_scanned": 3772,
+            "shortfall_bytes": 3817
+          }
+        }
+      }
+    },
+    {
+      "case": "crew4cif_q22_reg_d25",
+      "scan": "capacity_crew4cif_q22_reg_s6.json",
+      "video": "crew_4cif_q22_g1.h264",
+      "density": 0.25,
+      "frames": 600,
+      "segments_total": 6,
+      "segments_scanned": 6,
+      "carrier_bits_per_segment": [
+        11093,
+        11762,
+        16852,
+        9642,
+        5613,
+        8794
+      ],
+      "chunk_plan": {
+        "version": "zkbc-v2-greedy-fill-v1",
+        "min_chunk_bytes": 256,
+        "reserve_bits": 0,
+        "fill_permille": 250,
+        "max_chunk_bytes": 65535
+      },
+      "envelopes": {
+        "bdlop-open-128-v2": {
+          "registered_envelope_bytes": 8165,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 161,
+            "segments_needed": 51,
+            "fits": false
+          },
+          "best_uniform_chunk_bytes": null,
+          "best_uniform_fits_scanned": false,
+          "adaptive": {
+            "fits": false,
+            "verdict": "does not fit the whole video",
+            "usable_bytes_scanned": 1400,
+            "shortfall_bytes": 6765
+          }
+        },
+        "bdlop-open-128-v1": {
+          "registered_envelope_bytes": 7589,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 161,
+            "segments_needed": 48,
+            "fits": false
+          },
+          "best_uniform_chunk_bytes": null,
+          "best_uniform_fits_scanned": false,
+          "adaptive": {
+            "fits": false,
+            "verdict": "does not fit the whole video",
+            "usable_bytes_scanned": 1400,
+            "shortfall_bytes": 6189
+          }
+        }
+      }
+    },
+    {
+      "case": "soccer4cif_q22_reg_d50",
+      "scan": "capacity_soccer4cif_q22_reg.json",
+      "video": "soccer_4cif_q22_g1.h264",
+      "density": 0.5,
+      "frames": 600,
+      "segments_total": 6,
+      "segments_scanned": 3,
+      "carrier_bits_per_segment": [
+        38552,
+        47977,
+        3501
+      ],
+      "chunk_plan": {
+        "version": "zkbc-v2-greedy-fill-v1",
+        "min_chunk_bytes": 256,
+        "reserve_bits": 0,
+        "fill_permille": 500,
+        "max_chunk_bytes": 65535
+      },
+      "envelopes": {
+        "bdlop-open-128-v2": {
+          "registered_envelope_bytes": 8165,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 194,
+            "segments_needed": 43,
+            "fits": false
+          },
+          "best_uniform_chunk_bytes": null,
+          "best_uniform_fits_scanned": false,
+          "adaptive": {
+            "fits": null,
+            "verdict": "undetermined: 2828 B more needed from 3 unscanned segment(s)",
+            "usable_bytes_scanned": 5337,
+            "shortfall_bytes": 2828
+          }
+        },
+        "bdlop-open-128-v1": {
+          "registered_envelope_bytes": 7589,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 194,
+            "segments_needed": 40,
+            "fits": false
+          },
+          "best_uniform_chunk_bytes": null,
+          "best_uniform_fits_scanned": false,
+          "adaptive": {
+            "fits": null,
+            "verdict": "undetermined: 2252 B more needed from 3 unscanned segment(s)",
+            "usable_bytes_scanned": 5337,
+            "shortfall_bytes": 2252
+          }
+        }
+      }
+    },
+    {
+      "case": "soccer4cif_q22_reg_d25",
+      "scan": "capacity_soccer4cif_q22_reg.json",
+      "video": "soccer_4cif_q22_g1.h264",
+      "density": 0.25,
+      "frames": 600,
+      "segments_total": 6,
+      "segments_scanned": 3,
+      "carrier_bits_per_segment": [
+        38552,
+        47977,
+        3501
+      ],
+      "chunk_plan": {
+        "version": "zkbc-v2-greedy-fill-v1",
+        "min_chunk_bytes": 256,
+        "reserve_bits": 0,
+        "fill_permille": 250,
+        "max_chunk_bytes": 65535
+      },
+      "envelopes": {
+        "bdlop-open-128-v2": {
+          "registered_envelope_bytes": 8165,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 97,
+            "segments_needed": 85,
+            "fits": false
+          },
+          "best_uniform_chunk_bytes": null,
+          "best_uniform_fits_scanned": false,
+          "adaptive": {
+            "fits": null,
+            "verdict": "undetermined: 5532 B more needed from 3 unscanned segment(s)",
+            "usable_bytes_scanned": 2633,
+            "shortfall_bytes": 5532
+          }
+        },
+        "bdlop-open-128-v1": {
+          "registered_envelope_bytes": 7589,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 97,
+            "segments_needed": 79,
+            "fits": false
+          },
+          "best_uniform_chunk_bytes": null,
+          "best_uniform_fits_scanned": false,
+          "adaptive": {
+            "fits": null,
+            "verdict": "undetermined: 4956 B more needed from 3 unscanned segment(s)",
+            "usable_bytes_scanned": 2633,
+            "shortfall_bytes": 4956
+          }
+        }
+      }
+    },
+    {
+      "case": "crew4cif_q18_reg",
+      "scan": "capacity_crew4cif_q18_reg.json",
+      "video": "crew_4cif_q18_g1.h264",
+      "density": 1.0,
+      "frames": 600,
+      "segments_total": 6,
+      "segments_scanned": 6,
+      "carrier_bits_per_segment": [
+        35037,
+        38675,
+        54136,
+        32053,
+        19605,
+        28753
+      ],
+      "chunk_plan": {
+        "version": "zkbc-v2-greedy-fill-v1",
+        "min_chunk_bytes": 256,
+        "reserve_bits": 0,
+        "fill_permille": 1000,
+        "max_chunk_bytes": 65535
+      },
+      "envelopes": {
+        "bdlop-open-128-v2": {
+          "registered_envelope_bytes": 8165,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 2340,
+            "segments_needed": 4,
+            "fits": true
+          },
+          "best_uniform_chunk_bytes": 4342,
+          "best_uniform_fits_scanned": true,
+          "adaptive": {
+            "fits": true,
+            "verdict": "fits in 2 segment(s)",
+            "segments_used": [
+              0,
+              1
+            ],
+            "segments_skipped": [],
+            "chunk_bytes": [
+              4344,
+              3821
+            ],
+            "frames_spanned": 200
+          }
+        },
+        "bdlop-open-128-v1": {
+          "registered_envelope_bytes": 7589,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 2340,
+            "segments_needed": 4,
+            "fits": true
+          },
+          "best_uniform_chunk_bytes": 4342,
+          "best_uniform_fits_scanned": true,
+          "adaptive": {
+            "fits": true,
+            "verdict": "fits in 2 segment(s)",
+            "segments_used": [
+              0,
+              1
+            ],
+            "segments_skipped": [],
+            "chunk_bytes": [
+              4344,
+              3245
+            ],
+            "frames_spanned": 200
+          }
+        }
+      }
+    },
+    {
+      "case": "city4cif_q22_reg",
+      "scan": "capacity_city4cif_q22_reg.json",
+      "video": "city_4cif_q22_g1.h264",
+      "density": 1.0,
+      "frames": 600,
+      "segments_total": 6,
+      "segments_scanned": 3,
+      "carrier_bits_per_segment": [
+        104190,
+        74520,
+        68084
+      ],
+      "chunk_plan": {
+        "version": "zkbc-v2-greedy-fill-v1",
+        "min_chunk_bytes": 256,
+        "reserve_bits": 0,
+        "fill_permille": 1000,
+        "max_chunk_bytes": 65535
+      },
+      "envelopes": {
+        "bdlop-open-128-v2": {
+          "registered_envelope_bytes": 8165,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 8218,
+            "segments_needed": 1,
+            "fits": true
+          },
+          "best_uniform_chunk_bytes": 8165,
+          "best_uniform_fits_scanned": true,
+          "adaptive": {
+            "fits": true,
+            "verdict": "fits in 1 segment(s)",
+            "segments_used": [
+              0
+            ],
+            "segments_skipped": [],
+            "chunk_bytes": [
+              8165
+            ],
+            "frames_spanned": 100
+          }
+        },
+        "bdlop-open-128-v1": {
+          "registered_envelope_bytes": 7589,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 8218,
+            "segments_needed": 1,
+            "fits": true
+          },
+          "best_uniform_chunk_bytes": 7589,
+          "best_uniform_fits_scanned": true,
+          "adaptive": {
+            "fits": true,
+            "verdict": "fits in 1 segment(s)",
+            "segments_used": [
+              0
+            ],
+            "segments_skipped": [],
+            "chunk_bytes": [
+              7589
+            ],
+            "frames_spanned": 100
+          }
+        }
+      }
+    },
+    {
+      "case": "harbour4cif_q22_reg",
+      "scan": "capacity_harbour4cif_q22_reg.json",
+      "video": "harbour_4cif_q22_g1.h264",
+      "density": 1.0,
+      "frames": 600,
+      "segments_total": 6,
+      "segments_scanned": 3,
+      "carrier_bits_per_segment": [
+        49742,
+        49514,
+        48816
+      ],
+      "chunk_plan": {
+        "version": "zkbc-v2-greedy-fill-v1",
+        "min_chunk_bytes": 256,
+        "reserve_bits": 0,
+        "fill_permille": 1000,
+        "max_chunk_bytes": 65535
+      },
+      "envelopes": {
+        "bdlop-open-128-v2": {
+          "registered_envelope_bytes": 8165,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 5883,
+            "segments_needed": 2,
+            "fits": true
+          },
+          "best_uniform_chunk_bytes": 6180,
+          "best_uniform_fits_scanned": true,
+          "adaptive": {
+            "fits": true,
+            "verdict": "fits in 2 segment(s)",
+            "segments_used": [
+              0,
+              1
+            ],
+            "segments_skipped": [],
+            "chunk_bytes": [
+              6182,
+              1983
+            ],
+            "frames_spanned": 200
+          }
+        },
+        "bdlop-open-128-v1": {
+          "registered_envelope_bytes": 7589,
+          "sweep_uniform_rule": {
+            "chunk_bytes": 5883,
+            "segments_needed": 2,
+            "fits": true
+          },
+          "best_uniform_chunk_bytes": 6180,
+          "best_uniform_fits_scanned": true,
+          "adaptive": {
+            "fits": true,
+            "verdict": "fits in 2 segment(s)",
+            "segments_used": [
+              0,
+              1
+            ],
+            "segments_skipped": [],
+            "chunk_bytes": [
+              6182,
+              1407
+            ],
+            "frames_spanned": 200
+          }
+        }
+      }
+    }
+  ]
+}

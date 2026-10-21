@@ -14,7 +14,10 @@ All outputs go to ``--work`` (stego videos, logs) and ``--results`` (JSON).
 
 Optional case keys beyond the CIF/4CIF defaults: ``gop``, ``gop_policy``,
 ``frames_per_segment`` (also used by the capacity scan), ``parameter_set``,
-``x264_params``, ``stream_loop``, ``threads`` (see benchmark/latticezk_hd_cases.json).
+``x264_params``, ``stream_loop``, ``threads`` (see benchmark/latticezk_hd_cases.json),
+``adaptive_chunks`` (capacity-adaptive ZKBC v2 transport instead of a fixed chunk
+size; ``density`` then becomes the plan's ``fill_permille``, ``min_chunk_bytes``
+its skip threshold; see docs/ADAPTIVE_CHUNKING.md).
 """
 
 from __future__ import annotations
@@ -107,6 +110,17 @@ def _auto_chunk(case: dict[str, Any], video: Path, results: Path, log: Path) -> 
     return chunk
 
 
+def adaptive_chunk_arguments(case: dict[str, Any]) -> list[str]:
+    """E2E flags of an ``adaptive_chunks`` case; no capacity scan is needed."""
+    density = float(case.get("density", 1.0))
+    if not 0 < density <= 1:
+        raise ValueError("density must be in (0, 1]")
+    arguments = ["--adaptive-chunks", "--fill-permille", str(round(density * 1000))]
+    if "min_chunk_bytes" in case:
+        arguments += ["--min-chunk-bytes", str(int(case["min_chunk_bytes"]))]
+    return arguments
+
+
 def learned_steganalysis_skipped() -> bool:
     """``ZKSTEGO_SKIP_LEARNED=1`` skips learned-steganalysis feature extraction."""
     return os.environ.get("ZKSTEGO_SKIP_LEARNED", "") == "1"
@@ -125,7 +139,8 @@ def run_case(case: dict[str, Any], work: Path, results: Path) -> dict[str, Any]:
         if "source_y4m" not in case or not _encode(case, video, log):
             return {**status, "failed": "encode"}
 
-    chunk_bytes = case.get("chunk_bytes", 1250)
+    adaptive = bool(case.get("adaptive_chunks", False))
+    chunk_bytes = "adaptive" if adaptive else case.get("chunk_bytes", 1250)
     if chunk_bytes == "auto" and not report.exists():
         chunk_bytes = _auto_chunk(case, video, results, log)
         if chunk_bytes is None:
@@ -137,8 +152,12 @@ def run_case(case: dict[str, Any], work: Path, results: Path) -> dict[str, Any]:
     if not report.exists():
         _log(f"{name}: e2e start (chunk {chunk_bytes} B)")
         command = [PYTHON, "-B", "-m", "benchmark.latticezk_video_e2e", "--video", str(video),
-                   "--output", str(stego), "--report", str(report),
-                   "--chunk-bytes", str(chunk_bytes), "--carrier", case.get("carrier", "magnitude")]
+                   "--output", str(stego), "--report", str(report)]
+        if adaptive:
+            command += adaptive_chunk_arguments(case)
+        else:
+            command += ["--chunk-bytes", str(chunk_bytes)]
+        command += ["--carrier", case.get("carrier", "magnitude")]
         for key in ("frames_per_segment", "gop_policy", "parameter_set"):
             if key in case:
                 command += ["--" + key.replace("_", "-"), str(case[key])]

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from .. import gop_policy as gop_policies
+from ..adaptive_chunks import AdaptiveChunkPlan
 from ..zkp_registry import BDLOP_OPEN_ZKP_SUITE, RelationRecord, SignedZkpRelationRegistry
 from ..zkp_sessions import SessionChallengeStore
 from . import bdlop, video_proof
@@ -48,6 +49,19 @@ class Transport(Protocol):
     def extract_chunked_video_payload(self, video_path, sync_key, contract, **options): ...
 
 
+class AdaptiveTransport(Protocol):
+    """Capacity-adaptive channel; ``src.blind_sync_adaptive`` is the real one."""
+
+    def derive_adaptive_video_context(self, video_path, payload, sync_key, contract, *, plan,
+                                      **options): ...
+
+    def embed_adaptive_video_payload(self, cover, output, payload, sync_key, contract, *, plan,
+                                     expected_layout=None, **options): ...
+
+    def extract_adaptive_video_payload(self, video_path, sync_key, contract, *, plan,
+                                       payload_bytes=None, **options): ...
+
+
 @dataclass(frozen=True)
 class CarrierProfile:
     """Verifier-pinned transport configuration that fixes carrier placement."""
@@ -60,9 +74,17 @@ class CarrierProfile:
     # Slice structure the transport accepts (``src.gop_policy``). GOP > 1
     # streams need ``IDR_CARRIERS_INTER_RAW``; the default stays all-intra.
     gop_policy: str = gop_policies.ALL_INTRA
+    # Opt-in capacity-adaptive ZKBC v2 transport (docs/ADAPTIVE_CHUNKING.md).
+    # ``None`` keeps the fixed ``chunk_bytes`` ZKBC v1 transport and its ids.
+    chunk_plan: AdaptiveChunkPlan | None = None
 
     def __post_init__(self) -> None:
         gop_policies.require_policy(self.gop_policy)
+        if self.chunk_plan is not None:
+            if not isinstance(self.chunk_plan, AdaptiveChunkPlan):
+                raise ValueError("chunk_plan must be an AdaptiveChunkPlan")
+            if self.chunk_bytes != DEFAULT_CHUNK_BYTES:
+                raise ValueError("an adaptive chunk plan replaces chunk_bytes; leave it at the default")
 
     def profile_id(self, params: BdlopParams) -> bytes:
         description: dict[str, Any] = {
@@ -76,6 +98,11 @@ class CarrierProfile:
         # any other policy gives a different profile, policy hash and statement.
         if self.gop_policy != gop_policies.ALL_INTRA:
             description["gop_policy"] = self.gop_policy
+        # Likewise only adaptive profiles carry a plan, which replaces the
+        # fixed chunk size: different plan parameters, different profile.
+        if self.chunk_plan is not None:
+            del description["chunk_bytes"]
+            description["chunk_plan"] = self.chunk_plan.descriptor()
         encoded = json.dumps(description, sort_keys=True, separators=(",", ":")).encode("ascii")
         return hashlib.sha256(_DOMAIN + b"carrier-profile\0" + encoded).digest()
 
@@ -101,6 +128,9 @@ class EmbedResult:
     envelope_bytes: int
     carriers_used: int
     segments_used: int
+    # Adaptive profiles only: per-segment capacities and (segment, bytes) chunks.
+    segment_capacity_bits: tuple[int, ...] = ()
+    chunk_layout: tuple[tuple[int, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -255,6 +285,34 @@ def _default_transport() -> Transport:
     return blind_sync_streaming  # type: ignore[return-value]
 
 
+def _default_adaptive_transport() -> AdaptiveTransport:
+    from .. import blind_sync_adaptive
+
+    return blind_sync_adaptive  # type: ignore[return-value]
+
+
+def _canonical_adaptive_chunks(extracted: Any, plan: AdaptiveChunkPlan) -> tuple[bytes, ...]:
+    """Recompute the plan from the extracted capacities; return its unique encoding.
+
+    The capacities must end at the segment that completes the payload, so the
+    transport cannot report extra, unbound segments.
+    """
+    from ..adaptive_chunks import canonical_adaptive_chunks
+
+    capacities = getattr(extracted, "segment_capacity_bits", None)
+    if not isinstance(capacities, (tuple, list)) or not all(
+        isinstance(value, int) and not isinstance(value, bool) for value in capacities
+    ):
+        raise ValueError("transport did not report per-segment capacities")
+    chunks, layout = canonical_adaptive_chunks(extracted.payload, tuple(capacities), plan)
+    if layout[-1].segment_index != len(capacities) - 1:
+        raise ValueError("reported capacities extend beyond the adaptive plan")
+    reported = getattr(extracted, "layout", None)
+    if reported is not None and tuple(reported) != layout:
+        raise ValueError("transport layout differs from the recomputed adaptive plan")
+    return tuple(chunks)
+
+
 def _chunks(payload: bytes, profile: CarrierProfile) -> list[bytes]:
     from ..blind_payload_chunks import pack_payload_chunks
 
@@ -275,14 +333,23 @@ def embed_video_proof(
     """
     if profile.registered != (credential is not None) or profile.registered == (payload is not None):
         raise ValueError("supply a payload for in-band profiles or a credential for registered ones")
-    channel = transport or _default_transport()
+    plan = profile.chunk_plan
+    if plan is None:
+        channel = transport or _default_transport()
+    else:
+        channel = transport or _default_adaptive_transport()
     options = {**profile.options(), "progress_callback": progress_callback}
-    placeholder = _chunks(
-        video_proof.placeholder_envelope(params, registered=profile.registered), profile
-    )
-    context = channel.derive_chunked_video_context(
-        cover_path, placeholder, sync_key, profile.contract, **options
-    )
+    placeholder_envelope = video_proof.placeholder_envelope(params, registered=profile.registered)
+    if plan is None:
+        placeholder = _chunks(placeholder_envelope, profile)
+        context = channel.derive_chunked_video_context(
+            cover_path, placeholder, sync_key, profile.contract, **options
+        )
+    else:
+        # Positions depend only on the envelope length, which is fixed by params.
+        context = channel.derive_adaptive_video_context(
+            cover_path, placeholder_envelope, sync_key, profile.contract, plan=plan, **options
+        )
     statement = video_proof.build_statement(
         params, pins, session_challenge,
         carrier_count=len(context.global_positions),
@@ -295,6 +362,23 @@ def embed_video_proof(
         opening = None
         envelope = video_proof.create_registered_envelope(
             params, statement, credential.commitment, credential.randomness
+        )
+    if plan is not None:
+        if len(envelope) != len(placeholder_envelope):
+            raise RuntimeError("envelope changed the predetermined carrier layout")
+        layout = tuple(context.layout)
+        embedded = channel.embed_adaptive_video_payload(
+            cover_path, output_path, envelope, sync_key, profile.contract,
+            plan=plan, expected_layout=layout, **options,
+        )
+        return EmbedResult(
+            statement_id=statement.statement_id,
+            opening=opening,
+            envelope_bytes=len(envelope),
+            carriers_used=embedded.carriers_used,
+            segments_used=embedded.segments_used,
+            segment_capacity_bits=tuple(context.segment_capacity_bits),
+            chunk_layout=tuple((slot.segment_index, slot.size) for slot in layout),
         )
     if [len(chunk) for chunk in _chunks(envelope, profile)] != [len(chunk) for chunk in placeholder]:
         raise RuntimeError("envelope changed the predetermined carrier layout")
@@ -361,16 +445,28 @@ def verify_video_proof(
     _require_verifier_configuration(
         params, pins, profile, session_store, expected_session, credential, holder_id
     )
-    channel = transport or _default_transport()
+    plan = profile.chunk_plan
     try:
-        extracted = channel.extract_chunked_video_payload(
-            video_path, sync_key, profile.contract,
-            **profile.options(), progress_callback=progress_callback,
-        )
+        if plan is None:
+            channel = transport or _default_transport()
+            extracted = channel.extract_chunked_video_payload(
+                video_path, sync_key, profile.contract,
+                **profile.options(), progress_callback=progress_callback,
+            )
+        else:
+            channel = transport or _default_adaptive_transport()
+            extracted = channel.extract_adaptive_video_payload(
+                video_path, sync_key, profile.contract, plan=plan,
+                payload_bytes=video_proof.envelope_size(params, registered=profile.registered),
+                **profile.options(), progress_callback=progress_callback,
+            )
         in_band_session = video_proof.envelope_session(
             params, extracted.payload, registered=profile.registered
         )
-        canonical_chunks = tuple(_chunks(extracted.payload, profile))
+        if plan is None:
+            canonical_chunks = tuple(_chunks(extracted.payload, profile))
+        else:
+            canonical_chunks = _canonical_adaptive_chunks(extracted, plan)
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
         return VerifyResult(False, f"extraction or envelope rejected: {type(error).__name__}: {error}")
     # The carriers must be the unique encoding of the envelope under the pinned

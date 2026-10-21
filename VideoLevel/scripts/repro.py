@@ -70,6 +70,7 @@ TOUCHED_MODULE_PYTEST = (
     "test_safe_position_ordering.py",
     "test_rbsp_patch.py",
     "test_blind_payload_chunks.py",
+    "test_adaptive_chunking.py",
     "test_blind_payload_envelope.py",
     "test_blind_sync_streaming.py",
     "test_gop_and_hd_support.py",
