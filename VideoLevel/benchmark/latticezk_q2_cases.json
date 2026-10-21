@@ -386,5 +386,16 @@
   "chunk_bytes": "auto",
   "scan_segments": 6,
   "note": "QP 22 capacity is too uneven across segments for uniform chunks"
+ },
+ {
+  "name": "soccer4cif_q22_reg_adaptive",
+  "clip": "soccer",
+  "video": "data/encoded/soccer_4cif_q22_g1.h264",
+  "source_y4m": "data/raw/soccer_4cif.y4m",
+  "qp": 22,
+  "registered": true,
+  "macroblocks_per_frame": 1584,
+  "adaptive_chunks": true,
+  "note": "capacity-adaptive ZKBC v2 chunks; the uniform chunk rule does not fit Soccer"
  }
 ]
