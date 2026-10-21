@@ -34,7 +34,7 @@ Theo dõi chính: `docs/ROADMAP.md` (giai đoạn A → Q2, giai đoạn B → Q
 - **Phát hiện được bởi steganalysis học máy ở một số carrier**: magnitude khó
   phát hiện (P_E ~0.4–0.47), nhưng **t1-spread** dễ hơn (P_E ~0.27); khuếch đại
   biên độ làm lộ rõ. Số học máy hiện là **v1 và đang hoãn đo lại v2**. (ROADMAP
-  §"Việc hoãn lại"; `docs/CNN_STEGANALYSIS.md`, `docs/ADAPTIVE_CARRIERS.md`)
+  §"Việc hoãn lại"; `docs/CNN_STEGANALYSIS.md`, `docs/CARRIERS_VA_CHUNKING.md`)
 
 ## 3. Giới hạn kỹ thuật / chất lượng mã
 

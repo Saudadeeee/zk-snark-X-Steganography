@@ -102,7 +102,7 @@ hiện gửi **ngoài băng (out-of-band)**:
   xáo trộn theo khóa đồng bộ. Soundness và zero-knowledge **không** phụ thuộc
   khóa này; khóa chỉ quyết định tính không phát hiện được.
 - **STC** (syndrome-trellis codes, carrier `adaptive-stc-magnitude-video-only-v1`,
-  `src/core/adaptive_carriers.py`, `docs/ADAPTIVE_CARRIERS.md`) giảm số thay đổi
+  `src/core/adaptive_carriers.py`, `docs/CARRIERS_VA_CHUNKING.md`) giảm số thay đổi
   trên mỗi bit nhúng (giảm méo) để khó bị steganalysis học máy hơn.
 
 ## 9. Mô hình bảo mật (mức cao)
