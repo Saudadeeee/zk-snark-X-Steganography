@@ -60,7 +60,7 @@ mapped to code and tests in [CLAIMS.md](CLAIMS.md). Use
 ## Out of scope
 
 - Steganographic undetectability and the CAVLC carrier channel
-  (`src/blind_sync_streaming.py`, `src/video_canonicalization.py`). Treat
+  (`src/transport/blind_sync_streaming.py`, `src/transport/video_canonicalization.py`). Treat
   `Place`, `Canon`, `Write` and `Read` as given deterministic functions.
   Transport failure only causes rejection.
 - The ML-DSA-65 implementation (the `pqcrypto` 1.0.0 wheel). It is assumed
@@ -134,12 +134,12 @@ ffmpeg is needed: the pipeline tests use an in-memory fake transport.
 | | 216–235 | Session binding; public carrier-order key |
 | | 250–297 | Embed: placeholder layout, then statement, then proof (prover side) |
 | | 300–402 | **Verification path**: configuration checks including relation-id recomputation (D6, 300–326); extraction and canonical re-chunking (D1, 351–367); verifier-built statement (369–389); session `verify_and_consume` (390–397) |
-| `src/zkp_registry.py` | 30–101 | Descriptor field set; `relation_id` = SHA-256 over canonical JSON |
+| `src/registry/zkp_registry.py` | 30–101 | Descriptor field set; `relation_id` = SHA-256 over canonical JSON |
 | | 104–168 | Signed registry: root, signing bytes, ML-DSA-65 verify, `resolve` |
 | | 170–220 | `verify_statement_binding`: `lazer-v1` only, not used by BDLOP (D10) |
-| `src/zkp_sessions.py` | 113–155 | Challenge digest; `issue` (fresh 32 bytes from `secrets`, `BEGIN IMMEDIATE`) |
+| `src/registry/zkp_sessions.py` | 113–155 | Challenge digest; `issue` (fresh 32 bytes from `secrets`, `BEGIN IMMEDIATE`) |
 | | 157–241 | `is_active`; atomic `consume` (`UPDATE … WHERE consumed_at IS NULL AND expires_at > now`); `verify_and_consume` |
-| `src/blind_payload_chunks.py` | 10–44 | Chunk header and `payload_chunk_count` |
+| `src/transport/blind_payload_chunks.py` | 10–44 | Chunk header and `payload_chunk_count` |
 | | 47–81 | `pack_payload_chunks` (the verifier recomputes this for D1) |
 | | 84–137 | `assemble_payload_chunks` |
 

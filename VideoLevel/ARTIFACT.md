@@ -16,8 +16,8 @@ published papers and has not been audited (see `docs/LATTICE_ZK_BDLOP_SPEC.md`).
 | Path | What it is |
 |---|---|
 | `src/lattice_zk/` | BDLOP commitment, opening / equality / linkage proofs, video statement and envelope, embed/verify pipeline, role-separated CLI |
-| `src/blind_sync*.py`, `src/blind_payload_chunks.py`, `src/core/analysis_cache.py`, `src/bitstream/` | Carrier analysis, chunk framing and CAVLC patching, used by the pipeline |
-| `src/zkp_registry.py`, `src/zkp_sessions.py`, `src/lattice_pq.py` | ML-DSA-signed relation registry, one-use verifier sessions, ML-DSA/ML-KEM wrappers |
+| `src/transport/blind_sync*.py`, `src/transport/blind_payload_chunks.py`, `src/core/analysis_cache.py`, `src/bitstream/` | Carrier analysis, chunk framing and CAVLC patching, used by the pipeline |
+| `src/registry/zkp_registry.py`, `src/registry/zkp_sessions.py`, `src/registry/lattice_pq.py` | ML-DSA-signed relation registry, one-use verifier sessions, ML-DSA/ML-KEM wrappers |
 | `research/bdlop_params/` | Core-SVP parameter estimation (`estimate.py`, output `bdlop_open_128_v2.estimate.json`; v1: `bdlop_open_128.estimate.json`) and known-answer vectors (`kat.py`, `kat_v2.json`; v1: `kat_v1.json`) |
 | `benchmark/latticezk_*.py`, `benchmark/latticezk_q2_cases.json` | Evaluation drivers: capacity scan, E2E, sweep, steganalysis, simulations, baselines, reports |
 | `benchmark/results/q2/` | Results behind the paper (JSON, `SUMMARY.md`, `carrier_compare.md`) |
@@ -256,7 +256,7 @@ interrupted run resumes where it stopped:
 | Learned steganalysis | `python -m benchmark.latticezk_ml_steganalysis evaluate tmp/q2/mlfeat_{city,coastguard,container,deadline,hall}_cif_q22_reg.npz --output benchmark/results/q2/ml_eval.json` | `ml_eval.json` | minutes |
 | Rule simulation | `python -m benchmark.latticezk_embedding_sim --cases <the 5 CIF cases> --output benchmark/results/q2/embedding_t1_vs_magnitude_sim.json` | replacement / matching / T1 arms | < 1 h |
 | Density simulation | same with `--densities 1 0.5 0.25 0.1 --output .../embedding_density_sim.json` | | < 1 h |
-| Baselines | `python -m benchmark.latticezk_baselines --output benchmark/results/q2/baselines_<date>.json` | BDLOP, ML-DSA-44/65, Groth16 (needs `node`/`snarkjs` and `circuits/build`, otherwise recorded as an error), ISW21 (recorded, not rerun) | minutes |
+| Baselines | `python -m benchmark.latticezk_baselines --output benchmark/results/q2/baselines_<date>.json` | BDLOP, ML-DSA-44/65, Groth16 (needs `node`/`snarkjs` and `legacy/circuits/build`, otherwise recorded as an error), ISW21 (recorded, not rerun) | minutes |
 | Crypto micro-benchmark | `python -m benchmark.latticezk_crypto_bench --runs 50 --output benchmark/results/latticezk_crypto_bench_<date>.json` | commit/prove/verify timings | minutes |
 | Reports | `python -m benchmark.latticezk_q2_report`; `python -m benchmark.latticezk_carrier_compare --output benchmark/results/q2/carrier_compare.md`; `python -m benchmark.latticezk_density_report --output benchmark/results/q2/density_report.json` | `SUMMARY.md`, `docs/paper/tables/*.tex`, `docs/paper/figures/*.pdf` | seconds to minutes |
 

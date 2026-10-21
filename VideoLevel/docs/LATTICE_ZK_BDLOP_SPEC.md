@@ -187,7 +187,7 @@ id, policy hash, relation id and statement differ from v1. Under v2:
   code are counted, its NAL units must be canonically escaped, and NAL unit
   types the parser does not model are refused.
 
-The carrier profile also fixes a GOP policy (`src/gop_policy.py`), checked on
+The carrier profile also fixes a GOP policy (`src/transport/gop_policy.py`), checked on
 every segment before analysis: `all-intra` (default; every coded slice is IDR)
 or `idr-carriers-inter-raw-v1` (GOP > 1: carriers only in IDR slices, P and
 non-IDR I slices hashed as raw RBSP in `d_i`, every segment starting with an

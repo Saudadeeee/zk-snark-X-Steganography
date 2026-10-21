@@ -33,7 +33,7 @@ Measured on the `dddb9d5` code with CIF clips encoded with `-g 8` and `-g 25`:
 
 ## What is supported now
 
-### GOP policy (`src/gop_policy.py`)
+### GOP policy (`src/transport/gop_policy.py`)
 
 `CarrierProfile(..., gop_policy=...)` in `src/lattice_zk/video_pipeline.py`:
 

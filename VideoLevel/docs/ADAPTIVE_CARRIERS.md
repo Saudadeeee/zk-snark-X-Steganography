@@ -2,7 +2,7 @@
 
 Status: implemented behind a new carrier contract,
 `AdaptiveOperatingContract` (`version = "adaptive-stc-magnitude-video-only-v1"`,
-`src/blind_sync.py`), with the code and cost model in
+`src/transport/blind_sync.py`), with the code and cost model in
 `src/core/adaptive_carriers.py`.  The existing contracts are unchanged: their
 `dataclasses.asdict` serialisation, carrier profile ids and stego output bytes
 are identical to commit `18c5123` (pinned by tests).
@@ -88,7 +88,7 @@ threshold variants whose extractor must know the selection.
 ## Contract
 
 ```python
-AdaptiveOperatingContract(            # src/blind_sync.py
+AdaptiveOperatingContract(            # src/transport/blind_sync.py
     version="adaptive-stc-magnitude-video-only-v1",
     stable_carriers_only=True, require_bitstream_patchable=True,
     max_modifications_per_block=1, patchability_headroom=64,

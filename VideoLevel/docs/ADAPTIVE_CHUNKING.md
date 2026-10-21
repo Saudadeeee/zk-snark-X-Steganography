@@ -10,8 +10,8 @@ as at commit `10bce11`: the 98-entry baseline table is pinned by
 
 | file | role |
 |---|---|
-| `src/adaptive_chunks.py` | plan (`AdaptiveChunkPlan`, `plan_layout`), ZKBC v2 framing, canonical check |
-| `src/blind_sync_adaptive.py` | transport: per-segment capacity, context, embed, blind extract |
+| `src/transport/adaptive_chunks.py` | plan (`AdaptiveChunkPlan`, `plan_layout`), ZKBC v2 framing, canonical check |
+| `src/transport/blind_sync_adaptive.py` | transport: per-segment capacity, context, embed, blind extract |
 | `src/lattice_zk/video_pipeline.py` | `CarrierProfile.chunk_plan`, profile id, verifier canonical check |
 | `benchmark/latticezk_video_e2e.py --adaptive-chunks` | real end-to-end run |
 | `benchmark/latticezk_adaptive_chunk_plan.py` | capacity-planning dry run on the scans |

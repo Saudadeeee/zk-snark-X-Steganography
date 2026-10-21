@@ -17,10 +17,10 @@ into this file on 2026-10-19; the originals remain in git history up to commit
 
 | Candidate | Source | Decisive finding | Gate failed |
 |---|---|---|---|
-| LaZer | lazer-crypto/lazer, pinned `10eafec` | Requires Linux x86-64 with AVX-512 and AES; the host CPU has AVX2 only; preflight (`src/lazer_backend.py`) fails closed | 3 |
+| LaZer | lazer-crypto/lazer, pinned `10eafec` | Requires Linux x86-64 with AVX-512 and AES; the host CPU has AVX2 only; preflight (`src/legacy/lazer_backend.py`) fails closed | 3 |
 | LaZer Toolkit (ZK LaBRADOR) | ePrint 2026/1289 | Has a ZK variant, but the only ZK statement in source is a Merkle-membership example; not built here; same AVX-512 requirement | 2, 3 |
-| LNP22 (Go, KarpelesLab/lnp22 v0.1.1) | `benchmark/lnp22_context_probe` | Verifier accepts a proof for `s[0]=2` with `Beta=1` and a non-bit payload-opening witness (`lnp22_dependency_assessment_test.go`); exact bounds are not enforced | 1/soundness |
-| ISW21 lattice-zksnark | `48cb4cd`, `research/isw21_r1cs_opening_smoke` | Built and ran (toy 32-byte relation, 23 907-byte envelope carried through H.264). Designated verifier; its knowledge-based linear-only LWE assumption is broken by quantum oblivious sampling (LUNA; ePrint 2024/030); statistical ZK only 2^-40; upstream needed two local bug fixes | 1 (assumption), 4 at 300 frames |
+| LNP22 (Go, KarpelesLab/lnp22 v0.1.1) | KarpelesLab/lnp22 v0.1.1 (local context-binding probe removed in the Oct 2026 cleanup; in git history) | Verifier accepts a proof for `s[0]=2` with `Beta=1` and a non-bit payload-opening witness (the probe's dependency-assessment test); exact bounds are not enforced | 1/soundness |
+| ISW21 lattice-zksnark | `48cb4cd` (local R1CS opening smoke test removed in the Oct 2026 cleanup; in git history) | Built and ran (toy 32-byte relation, 23 907-byte envelope carried through H.264). Designated verifier; its knowledge-based linear-only LWE assumption is broken by quantum oblivious sampling (LUNA; ePrint 2024/030); statistical ZK only 2^-40; upstream needed two local bug fixes | 1 (assumption), 4 at 300 frames |
 | ePrint 2025/2099 (DV zkSNARK from MSIS) | crypolover1998/LatticeBased-Dv-zkSNARK `9bc41a6` | Strongest theorem (adaptive knowledge soundness in ROM), but code predates the paper and simulates only `lambda=1` without accept/reject; 20.75 KB proof, 1.3 GB CRS | 3 |
 | LUNA | ePrint 2022/1690, yassimert/LUNA | Repository implements only the HGSW encryption component, not the prover/verifier; soundness non-adaptive | 3 |
 | LaBRADOR (C, Rust ports, Lazarus) | ePrint 2022/1341 | Paper disables ZK in its size results (masking shim left for later); C code needs AVX-512; Rust R1CS reductions incomplete | 1, 3 |
@@ -32,7 +32,7 @@ into this file on 2026-10-19; the originals remain in git history up to commit
 | Ringo-SNARK / Buckler | sp301415/ringo-snark | Ran a payload-opening-shaped probe; binary proof about 1.65 MB | 4 |
 | latticezk (yarongvili1) | Baum et al. CRYPTO 2018 over `Z_(2^w)` | Experimental; interactive HVZK argument whose guarantees do not carry over directly to the FS variant used; default dimensions far exceed capacity | 2, 4 |
 | Practical sublinear R1CS (ePrint 2022/1048) | paper only | ZK with a Fiat–Shamir variant, but no implementation; 10.79 MB at 2^24 constraints | 3, 4 |
-| In-tree SIS prototype (`src/lattice_pq.py`) | this repository | Statement chosen by the prover; 131 692-byte JSON proof; kept only as a fail-closed regression fixture | 2, 4 |
+| In-tree SIS prototype (`src/registry/lattice_pq.py`) | this repository | Statement chosen by the prover; 131 692-byte JSON proof; kept only as a fail-closed regression fixture | 2, 4 |
 
 ## Conclusion
 

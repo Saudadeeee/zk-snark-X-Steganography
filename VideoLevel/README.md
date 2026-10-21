@@ -6,6 +6,7 @@ Hide a fixed commitment to an ML-DSA-65 authenticated lattice sidecar inside H.2
 **Validated Runtime:** `py -3.12`
 **Current hardening checks:** quick suite `23/23`, hardening `6/6`, and FFmpeg codec fixture `1/1` passed. Full local-asset E2E and benchmarks require revalidation after the circuit/sidecar update.
 **Benchmark Sections:** SEC1-SEC10 (Quality, Capacity, Methods, Security, Performance, Tradeoff, Real-time, Motion/GOP, Statistical, Audit)
+**Handoff (Vietnamese):** [`docs/handoff/`](docs/handoff/README.md) - maintainer onboarding set (overview, architecture, theory, operations, results, limitations, checklist)
 
 ---
 
@@ -42,7 +43,7 @@ ML-DSA-65 authenticates the payload hash and the manifest binds the final stego 
 
 The source tree retains an experimental Fiat-Shamir lattice preimage prototype for research-only testing. Public `embed()` and `verify()` reject `proof_backend="lattice_zkp"`; a reviewed lattice-ZK library/protocol with a verifier-known, non-trivial statement and an audited parameter set is required before enabling any lattice-ZKP path.
 
-The pinned Linux-only LaZer research adapter is in [`lazer/`](lazer/README.md); it needs AVX-512 and is not part of the active video pipeline.
+The pinned Linux-only LaZer research adapter is in [`legacy/lazer/`](legacy/lazer/README.md); it needs AVX-512 and is not part of the active video pipeline.
 
 ### Lattice zero-knowledge backend (research)
 
@@ -85,9 +86,21 @@ near-blind sidecar trust contract have since changed. Do not use them as claims
 for this revision until the benchmark suite is rerun with fresh signed v2
 sidecars and the rebuilt circuit artifacts.
 
+The legacy SEC1-SEC10 benchmark suite (`safe_benchmark_runner.py` and the
+`secN_*.py` scripts) was moved to `benchmark/legacy/` in the October 2026 layout
+cleanup, and most of its scripts were then removed; among the SEC scripts only
+`benchmark/legacy/sec4_security.py` and `benchmark/legacy/sec5_zkp.py` remain.
+The current evaluation is the lattice-ZK suite described in
+[`ARTIFACT.md`](ARTIFACT.md) (`scripts/repro.py`, `benchmark/latticezk_*`). See
+[`docs/CLEANUP_INVENTORY.md`](docs/CLEANUP_INVENTORY.md) for the full move/delete
+map. The command lines and result-file citations in the legacy sections below
+are kept for traceability and name scripts or result files that were moved or
+removed by that cleanup (for example `benchmark/results/sec4_security_data.json`,
+`sec5_zkp_data.json` and `sec6_performance_data.json` were removed).
+
 ```bash
 py -3.12 src/runtest/run_all.py
-py -3.12 -m benchmark.safe_benchmark_runner --sections 1 2 3 4 5 6
+# legacy SEC runner benchmark/safe_benchmark_runner.py was removed in the Oct 2026 cleanup
 ```
 
 ### SEC1: Quality At The Locked 1232-bit Operating Point
@@ -141,7 +154,7 @@ signature baseline from ZKP systems, measures Groth16 end-to-end bridge wall
 time, and writes new artifacts without overwriting history:
 
 ```powershell
-py -3.12 benchmark/sec5_zkp.py --force
+py -3.12 benchmark/legacy/sec5_zkp.py --force
 ```
 
 Outputs are `benchmark/results/sec5_zkp_data_new.json`,
@@ -182,42 +195,30 @@ Current committed SEC6 artifact (`benchmark/results/sec6_performance_data.json`)
 
 ## Project Structure
 
+The layout below reflects the October 2026 cleanup (see
+[`docs/CLEANUP_INVENTORY.md`](docs/CLEANUP_INVENTORY.md) for the full move/delete
+map). The pre-lattice-ZK embed/verify stack moved under `src/legacy/`, the
+transport and registry modules into `src/transport/` and `src/registry/`, and
+the Groth16 circuits, native relay and LaZer container under `legacy/`.
+
 ```text
 VideoLevel/
-|-- benchmark/
-|   |-- sec1_quality.py           Quality benchmark (PSNR, SSIM)
-|   |-- sec2_capacity.py          Capacity sweep
-|   |-- sec3_methods.py           Method comparison (T1 vs LSB)
-|   |-- sec4_security.py          Steganalysis (chi, SPA, RS)
-|   |-- sec4_modern_detectors.py  WS, SPAM modern features
-|   |-- sec6_performance.py       Timing analysis
-|   |-- sec6_paper_summary.py     Paper-ready timing text
-|   |-- sec7_tradeoff.py          QP/GOP tradeoff recommendations
-|   |-- sec9_motion_gop.py        Motion-aware GOP selection
-|   |-- sec10_gop_sweep.py        Explicit GOP sweep
-|   |-- statistical_benchmark.py  Error bars, 3 or more runs
-|   `-- sec1_audit.py             Quality guard audit logging
-|-- circuits/                     Legacy Groth16 migration artifacts (not used by default)
-|-- native/                       C17 Annex-B relay + optional x264 adapter
-|-- data/
-|   |-- encoded/                  Local H.264 benchmark inputs (ignored)
-|   |-- output/                   Local stego outputs + sidecars (ignored)
-|   `-- raw/                      Local raw source sequences (ignored)
 |-- src/
-|   |-- bitstream/                H.264 / CAVLC parsing and patching
-|   |-- core/
-|   |   |-- pipeline.py           IDR extraction
-|   |   |-- pipeline_optimized.py Parallel/vec optimization
-|   |   |-- stego.py              Safety filter + embed logic
-|   |   |-- chaos.py              Arnold Cat + Logistic Map
-|   |   `-- analysis_cache.py     Process-local safe video-analysis cache
-|   |-- manifest.py               v4.0.0 ML-DSA-authenticated manifest schema
-|   |-- embedder.py               Public embed API
-|   |-- verifier.py               Public verify API
-|   |-- verifier_blind.py         Near-blind verification
-|   |-- lattice_pq.py             ML-KEM/ML-DSA receipts + disabled research ZKP prototype
-|   `-- zk_proof.py               Legacy Groth16 migration bridge
-|-- docs/                         Lattice-ZK plan, specification, backend survey
+|   |-- lattice_zk/      BDLOP commitment, opening/equality/linkage proofs, video statement, CLI
+|   |-- transport/       blind carrier sync, chunk framing, GOP policy, canonical digest
+|   |-- registry/        relation registry (zkp_registry), verifier sessions, HTTP front end, ML-DSA/ML-KEM (lattice_pq)
+|   |-- core/            carrier analysis, cost model, CAVLC embed/order, analysis cache
+|   |-- bitstream/       H.264 / CAVLC parsing and patching
+|   |-- legacy/          pre-lattice-ZK embed/verify, Groth16 bridge, trust/provenance, realtime
+|   |-- runtest/         current tests; runtest/legacy/ for legacy-module tests
+|   `-- exceptions.py
+|-- benchmark/           latticezk_* drivers + case files + results/; legacy/ holds the old SEC1-SEC10 suite
+|-- research/bdlop_params/  core-SVP parameter estimates, KAT v1/v2, cross-checks
+|-- scripts/             repro.py and its .sh/.ps1 wrappers; ops/ operational run scripts
+|-- legacy/              circuits/ (Groth16), native/ (x264 fork + C relay), lazer/ (container)
+|-- docs/                design docs, paper/, review/; legacy/ for old root docs
+|-- data/                local raw/encoded/output trees (gitignored)
+|-- ARTIFACT.md
 `-- README.md
 ```
 
@@ -264,8 +265,8 @@ ffmpeg -i input.y4m -c:v libx264 -profile:v baseline -coder 0 -g 1 -qp 22 -y out
 
 ```python
 import os
-from src.embedder import embed
-from src.lattice_pq import LatticeSigner
+from src.legacy import embed
+from src.registry.lattice_pq import LatticeSigner
 
 witness_key = os.urandom(32)
 chaos_key = b"example-chaos-key"
@@ -298,7 +299,7 @@ When reproducing a benchmark-grade operating point, the API can reuse a
 pre-validated operating-position set directly:
 
 ```python
-from src.embedder import embed
+from src.legacy import embed
 
 result = embed(
     video_path="data/encoded/coastguard_cif_q22_g1.h264",
@@ -319,7 +320,7 @@ been validated end-to-end.
 ### Verify (standard mode)
 
 ```python
-from src.verifier import verify
+from src.legacy import verify
 
 result = verify(
     stego_video_path="data/output/stego.h264",
@@ -343,7 +344,7 @@ Reduced dependency on the original cover video. This mode requires:
 - the 1952-byte ML-DSA-65 public key of the manifest signer
 
 ```python
-from src.verifier_blind import verify_near_blind
+from src.legacy import verify_near_blind
 
 # Reuse the public key returned by LatticeSigner.generate_keypair() at embed time.
 manifest_public_key = lattice_public_key
@@ -377,9 +378,9 @@ result = verify_near_blind(
 ```bash
 py -3.12 src/runtest/run_all.py --quick
 py -3.12 src/runtest/test_phase4_reconstruct.py
-py -3.12 src/runtest/test_phase5_extract_verify.py
-py -3.12 src/runtest/test_phase6_near_blind_manifest.py
-py -3.12 src/runtest/test_phase7_regression_cases.py
+py -3.12 src/runtest/legacy/test_phase5_extract_verify.py
+py -3.12 src/runtest/legacy/test_phase6_near_blind_manifest.py
+py -3.12 src/runtest/legacy/test_phase7_regression_cases.py
 py -3.12 src/runtest/run_all.py
 ```
 
@@ -392,29 +393,35 @@ Test exit codes:
 
 ### Run minimal API demo
 
-```bash
-py -3.12 src/runtest/demo_embed_verify.py
-```
-
-The demo verifies the current locked operating artifact through the public
-`verify()` API. It exits with code `2` when no verified locked SEC1 operating
-contract is currently available.
+The standalone `demo_embed_verify.py` script was removed in the October 2026
+layout cleanup. The legacy public embed/verify API it exercised now lives in
+`src.legacy` (`from src.legacy import embed, verify, verify_near_blind`); its
+tests are under `src/runtest/legacy/`. See `docs/CLEANUP_INVENTORY.md`.
 
 ### Run benchmarks
+
+These are the legacy SEC1-SEC10 commands. Per the October 2026 cleanup,
+`safe_benchmark_runner.py`, `sec1_quality.py`, `sec2_capacity.py`,
+`sec6_performance.py`, `statistical_benchmark.py`, `sec10_gop_sweep.py` and
+`sec46_product_readiness.py` were removed; `sec4_security.py`,
+`lattice_in_video_feasibility` and `trust_corpus` moved under `benchmark/legacy/`
+(module path `benchmark.legacy.*`). They are retained here for traceability; the
+current evaluation path is `scripts/repro.py` / `benchmark/latticezk_*` (see
+[`ARTIFACT.md`](ARTIFACT.md)).
 
 ```bash
 # Full benchmark suite
 $env:SEC1_USE_REAL_PROOF_PIPELINE='1'
-py -3.12 benchmark/safe_benchmark_runner.py
+py -3.12 benchmark/safe_benchmark_runner.py   # removed in the Oct 2026 cleanup
 
 # Individual sections
 py -3.12 benchmark/sec1_quality.py
 py -3.12 benchmark/sec2_capacity.py
-py -3.12 benchmark/sec4_security.py
-py -3.12 benchmark/sec6_performance.py
+py -3.12 benchmark/legacy/sec4_security.py
+py -3.12 benchmark/sec6_performance.py       # removed in the Oct 2026 cleanup
 
 # Compare actual proof bytes with measured capacity for one video/configuration
-py -3.12 -m benchmark.lattice_in_video_feasibility --proof-artifact path/to/proof.bin --capacity-bits 1232 --framing-bytes 16
+py -3.12 -m benchmark.legacy.lattice_in_video_feasibility --proof-artifact path/to/proof.bin --capacity-bits 1232 --framing-bytes 16
 
 # Statistical with error bars (IEEE-valid)
 py -3.12 benchmark/statistical_benchmark.py --section sec1 --runs 3
@@ -429,10 +436,10 @@ py -3.12 -m benchmark.safe_benchmark_runner --sections 44 45 46
 py -3.12 -m benchmark.sec46_product_readiness
 
 # Validate the trust corpus promotion contract
-py -3.12 -m benchmark.trust_corpus
+py -3.12 -m benchmark.legacy.trust_corpus
 
 # Print a ready-to-paste external corpus manifest entry
-py -3.12 -m benchmark.trust_corpus register-file --id sample-001 --path data/external/trust_corpus/sample_001.h264 --source-uri https://example.org/dataset --license CC-BY-4.0 --codec h264 --container raw_h264 --frame-count 300 --resolution 352x288 --source "Example Dataset"
+py -3.12 -m benchmark.legacy.trust_corpus register-file --id sample-001 --path data/external/trust_corpus/sample_001.h264 --source-uri https://example.org/dataset --license CC-BY-4.0 --codec h264 --container raw_h264 --frame-count 300 --resolution 352x288 --source "Example Dataset"
 ```
 
 The in-video feasibility command is a strict size check, not a proof verifier.
@@ -440,19 +447,19 @@ It exits `0` when proof plus framing fits and `3` when it does not; provide a
 fresh quality-validated capacity for the exact video and embedding settings.
 
 Upgrade-v2 application-level trust workflows are exposed through
-`src.trust.workflows` for provenance anchoring, fingerprint registry lookup,
+`src.legacy.trust.workflows` for provenance anchoring, fingerprint registry lookup,
 watermark receipt, and model/device attestation.
 Every workflow output includes a versioned `schema` and `workflow` field, with
-validators in `src.trust.workflow_contracts`.
+validators in `src.legacy.trust.workflow_contracts`.
 
 CLI usage:
 
 ```bash
-py -3.12 -m src.trust.workflows provenance --manifest manifest.json --registry-uri registry://example/asset --registry-out provenance_registry.json --output provenance.json
-py -3.12 -m src.trust.workflows fingerprint --frames frames.npy --records registry.json --threshold 0 --output fingerprint.json
-py -3.12 -m src.trust.workflows watermark --frames embedded.npy --key demo-key --frame-shape 64 64 --threshold 0.5 --output watermark.json
-py -3.12 -m src.trust.workflows attestation --signer-key demo-key --video-path video.bin --model-config-path model.json --model-binary-path model.bin --policy-id policy-v1 --timestamp 2026-06-09T00:00:00Z --output attestation.json
-py -3.12 -m src.trust.workflows attestation --signer-scheme ed25519 --signer-key demo-seed --video-path video.bin --model-config-path model.json --model-binary-path model.bin --policy-id policy-v1 --timestamp 2026-06-09T00:00:00Z --output attestation_ed25519.json
+py -3.12 -m src.legacy.trust.workflows provenance --manifest manifest.json --registry-uri registry://example/asset --registry-out provenance_registry.json --output provenance.json
+py -3.12 -m src.legacy.trust.workflows fingerprint --frames frames.npy --records registry.json --threshold 0 --output fingerprint.json
+py -3.12 -m src.legacy.trust.workflows watermark --frames embedded.npy --key demo-key --frame-shape 64 64 --threshold 0.5 --output watermark.json
+py -3.12 -m src.legacy.trust.workflows attestation --signer-key demo-key --video-path video.bin --model-config-path model.json --model-binary-path model.bin --policy-id policy-v1 --timestamp 2026-06-09T00:00:00Z --output attestation.json
+py -3.12 -m src.legacy.trust.workflows attestation --signer-scheme ed25519 --signer-key demo-seed --video-path video.bin --model-config-path model.json --model-binary-path model.bin --policy-id policy-v1 --timestamp 2026-06-09T00:00:00Z --output attestation_ed25519.json
 ```
 
 Section `46` is the product-readiness source of truth. Current state:
@@ -464,11 +471,12 @@ Section `46` is the product-readiness source of truth. Current state:
 - `prototype`: software attestation, toy ZK receipt circuits.
 - `blocked`: ZKML model binding.
 
-`benchmark.trust_corpus` currently validates a two-file external CC0 seed
+`benchmark.legacy.trust_corpus` currently validates a two-file external CC0 seed
 corpus. It is enough for seed-scope evidence, but broad-public-dataset claims
 remain blocked until a larger external corpus with source, license, file
 metadata, and matching hashes is registered.
-See `doc/trust_corpus_onboarding.md` for the step-by-step corpus playbook.
+(The step-by-step corpus playbook `doc/trust_corpus_onboarding.md` was removed in
+the October 2026 cleanup; see `docs/CLEANUP_INVENTORY.md`.)
 
 ---
 
@@ -567,7 +575,7 @@ Powers-of-Tau file and freshly generated secret entropy. The build writes
 checksums to `build/artifacts.json`.
 
 ```bash
-cd circuits
+cd legacy/circuits
 npm ci
 export PTAU_FILE=/absolute/path/to/verified.ptau
 export ZKEY_ENTROPY="fresh-secret-entropy-at-least-32-characters"
@@ -583,28 +591,26 @@ npm run verify-artifacts
 - [`docs/LATTICE_ZK_BDLOP_PLAN.md`](docs/LATTICE_ZK_BDLOP_PLAN.md) - Lattice-ZK plan, status and measurements
 - [`docs/LATTICE_ZK_BDLOP_SPEC.md`](docs/LATTICE_ZK_BDLOP_SPEC.md) - Lattice-ZK protocol specification
 - [`docs/LATTICE_BACKEND_SURVEY.md`](docs/LATTICE_BACKEND_SURVEY.md) - Lattice backend survey
-- [`LATTICE_PQ.md`](LATTICE_PQ.md) - ML-DSA / ML-KEM attestation path
-- [`PAPER_EVIDENCE.md`](PAPER_EVIDENCE.md) - Claim-to-evidence staging notes (Groth16 baseline)
-- [`OPERATING_ENVELOPE.md`](OPERATING_ENVELOPE.md) - Supported codec/GOP/QP ranges
-- [`REALTIME.md`](REALTIME.md) - Live Annex-B transport contract and native-backend boundary
-- [`native/README.md`](native/README.md) - C17 build, relay, and selected x264 profile
-- [`ARTIFACT_POLICY.md`](ARTIFACT_POLICY.md) - Cleanup and artifact management
-- [`doc/system_video_embedding_walkthrough.tex`](doc/system_video_embedding_walkthrough.tex) - Detailed Vietnamese system walkthrough
+- [`ARTIFACT.md`](ARTIFACT.md) - Reproduction guide for the lattice-ZK evaluation
+- [`docs/CLEANUP_INVENTORY.md`](docs/CLEANUP_INVENTORY.md) - October 2026 move/delete map
+- [`docs/handoff/`](docs/handoff/README.md) - Vietnamese handoff documentation set
+- [`docs/legacy/LATTICE_PQ.md`](docs/legacy/LATTICE_PQ.md) - ML-DSA / ML-KEM attestation path (legacy)
+- [`docs/legacy/REALTIME.md`](docs/legacy/REALTIME.md) - Live Annex-B transport contract and native-backend boundary (legacy)
+- [`legacy/native/README.md`](legacy/native/README.md) - C17 build, relay, and selected x264 profile (legacy)
+
+The pre-lattice-ZK notes `PAPER_EVIDENCE.md`, `OPERATING_ENVELOPE.md`,
+`ARTIFACT_POLICY.md` and `doc/system_video_embedding_walkthrough.tex` were
+removed in the October 2026 cleanup (see `docs/CLEANUP_INVENTORY.md`).
 
 ### Benchmark Documentation
-- [`benchmark/sec1_quality.py`](benchmark/sec1_quality.py) - Quality benchmark
-- [`benchmark/sec2_capacity.py`](benchmark/sec2_capacity.py) - Capacity analysis
-- [`benchmark/sec3_methods.py`](benchmark/sec3_methods.py) - Method comparison
-- [`benchmark/sec4_security.py`](benchmark/sec4_security.py) - Steganalysis
-- [`benchmark/sec4_modern_detectors.py`](benchmark/sec4_modern_detectors.py) - WS/SPAM detectors
-- [`benchmark/sec6_performance.py`](benchmark/sec6_performance.py) - Performance analysis
-- [`benchmark/sec6_paper_summary.py`](benchmark/sec6_paper_summary.py) - Paper timing text
-- [`benchmark/sec7_tradeoff.py`](benchmark/sec7_tradeoff.py) - QP/GOP tradeoff
-- [`benchmark/sec10_gop_sweep.py`](benchmark/sec10_gop_sweep.py) - GOP sweep
-- [`benchmark/statistical_benchmark.py`](benchmark/statistical_benchmark.py) - Error bars wrapper
-- [`benchmark/sec1_audit.py`](benchmark/sec1_audit.py) - Quality guard audit logging
+The legacy SEC1-SEC10 benchmark scripts were moved to `benchmark/legacy/` and
+most were removed in the October 2026 cleanup (among the SEC scripts only
+[`benchmark/legacy/sec4_security.py`](benchmark/legacy/sec4_security.py) and
+[`benchmark/legacy/sec5_zkp.py`](benchmark/legacy/sec5_zkp.py) remain). The
+current evaluation drivers are `benchmark/latticezk_*.py`;
+[`ARTIFACT.md`](ARTIFACT.md) sections 4-5 map each driver to its result file.
 
 ### API Documentation
-- [`src/manifest.py`](src/manifest.py) - Authenticated manifest schema (v2.0.0)
-- [`src/verifier_blind.py`](src/verifier_blind.py) - Near-blind verification
-- [`src/verify_modes.py`](src/verify_modes.py) - Explicit verifier modes
+- [`src/legacy/manifest.py`](src/legacy/manifest.py) - Authenticated manifest schema (legacy)
+- [`src/legacy/verifier_blind.py`](src/legacy/verifier_blind.py) - Near-blind verification (legacy)
+- [`src/legacy/verify_modes.py`](src/legacy/verify_modes.py) - Explicit verifier modes (legacy)
