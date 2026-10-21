@@ -21,420 +21,422 @@
 \providecommand{\Cdiff}{\bar{\mathcal{C}}}
 \providecommand{\Amax}{A_{\max}}
 
-\section{Proving that a commitment hides a binary string}
+\section{Chứng minh rằng một cam kết giấu một chuỗi nhị phân}
 \label{sec:binary-proof}
 
-The opening proof shows knowledge of \emph{some} relaxed opening and says
-nothing about the message. This section adds a proof $\Pibin$ that a
-commitment $C=\Com(m;r)=(t_1,t_2)$ of the base scheme hides
-$m\in\{0,1\}^N$, i.e.\ a 256-bit string. $C$ is unchanged, so the
-opening, equality and disclosure proofs still apply to it.
+Chứng minh mở cho thấy hiểu biết về \emph{một} phần mở nới lỏng nào đó và không
+nói gì về thông điệp. Mục này bổ sung một chứng minh $\Pibin$ rằng một cam kết
+$C=\Com(m;r)=(t_1,t_2)$ của lược đồ cơ sở giấu $m\in\{0,1\}^N$, tức một chuỗi
+256 bit. $C$ không đổi, nên các chứng minh mở, đẳng thức và tiết lộ vẫn áp dụng
+được cho nó.
 
-\subsection{Setting and linearization}
+\subsection{Bối cảnh và tuyến tính hóa}
 
-Notation is that of Section~\ref{sec:sec-notation}. Write
-$\langle a,b\rangle=\sum_j a_jb_j$ for coefficient vectors, $\ct(a)=a_0$,
-$a\circ b$ for the coefficient-wise product, $J=\sum_{j<N}X^j$ and
-$\sigma\in\mathrm{Aut}(\Rq)$ for $X\mapsto X^{-1}$. Because $q\equiv5\pmod8$,
-$\Rq\cong\mathbb F_{q^{N/2}}\times\mathbb F_{q^{N/2}}$; there are only two
-CRT slots, so the ring-level relation $m(m-1)=0$ of
-ALS20~\cite{ref:als20} would constrain only two bits. Following the
-constant-coefficient technique of LNP22~\cite{ref:lnp22}, we instead linearize the
-coefficient-wise relation $m\circ(m-J)=0$.
+Ký hiệu là của Mục~\ref{sec:sec-notation}. Viết
+$\langle a,b\rangle=\sum_j a_jb_j$ cho các vector hệ số, $\ct(a)=a_0$,
+$a\circ b$ cho tích theo-từng-hệ-số, $J=\sum_{j<N}X^j$ và
+$\sigma\in\mathrm{Aut}(\Rq)$ cho $X\mapsto X^{-1}$. Bởi vì $q\equiv5\pmod8$,
+$\Rq\cong\mathbb F_{q^{N/2}}\times\mathbb F_{q^{N/2}}$; chỉ có hai slot CRT, nên
+quan hệ ở mức vành $m(m-1)=0$ của ALS20~\cite{ref:als20} sẽ chỉ ràng buộc hai
+bit. Theo kỹ thuật hệ-số-hằng của LNP22~\cite{ref:lnp22}, thay vào đó chúng tôi
+tuyến tính hóa quan hệ theo-từng-hệ-số $m\circ(m-J)=0$.
 
-\begin{lemma}[Linearization]
+\begin{lemma}[Tuyến tính hóa]
 \label{lem:bin-lin}
-For all $a,b\in\Rq$: (i) $\ct(\sigma(a)b)=\langle a,b\rangle$; (ii) $\sigma$ is
-an involution and $\langle\sigma(a),b\rangle=\langle a,\sigma(b)\rangle$;
-(iii) for $\gamma,\rho\in\mathbb Z_q^N$, $u\in\Rq$ and
+Với mọi $a,b\in\Rq$: (i) $\ct(\sigma(a)b)=\langle a,b\rangle$; (ii) $\sigma$ là
+một phép đối hợp (involution) và $\langle\sigma(a),b\rangle=\langle a,\sigma(b)\rangle$;
+(iii) với $\gamma,\rho\in\mathbb Z_q^N$, $u\in\Rq$ và
 $R=\sigma(\gamma\circ\sigma(\rho))$,
 \[
 \ct\bigl(\sigma(\rho)u-Rm\bigr)=\langle\rho,\,u-\sigma(\gamma\circ m)\rangle,
 \qquad
 \ct\bigl(\sigma(\gamma\circ m)(m-J)\bigr)=\langle\gamma,\,m\circ(m-J)\rangle .
 \]
-(iv) Any quadratic form $\mathbb Z_q^N\to\mathbb Z_q$ of the shape
-$m\mapsto\ct(\sum_\ell a_\ell\,\tau_\ell(m)\,b_\ell\,\tau'_\ell(m))$ with
-$a_\ell,b_\ell\in\Rq$ and $\tau_\ell,\tau'_\ell\in\{\mathrm{id},\sigma\}$ is
-$m^{\mathsf T}T_wm$ for a negacyclic Toeplitz $T_w$, whose diagonal is
+(iv) Mọi dạng toàn phương $\mathbb Z_q^N\to\mathbb Z_q$ có dạng
+$m\mapsto\ct(\sum_\ell a_\ell\,\tau_\ell(m)\,b_\ell\,\tau'_\ell(m))$ với
+$a_\ell,b_\ell\in\Rq$ và $\tau_\ell,\tau'_\ell\in\{\mathrm{id},\sigma\}$ đều là
+$m^{\mathsf T}T_wm$ cho một Toeplitz negacyclic $T_w$, có đường chéo là
 $w_0I$.
 \end{lemma}
 \begin{proof}
-(i) The constant coefficient of $\sigma(a)b$ collects $a_0b_0$ and, for
-$i\ge1$, $(-a_i)X^{N-i}\cdot b_iX^i=a_ib_i$. (ii) $\sigma$ acts on coefficient
-vectors as a symmetric signed permutation. (iii) follows from (i) and (ii).
-(iv) Multiplication by $a$ is $T_a$, $\sigma$ is the signed permutation $S$
-with $ST_aS=T_{\sigma(a)}$, and $T_a^{\mathsf T}=T_{\sigma(a)}$; products and sums
-of negacyclic Toeplitz matrices are negacyclic Toeplitz.
+(i) Hệ số hằng của $\sigma(a)b$ thu thập $a_0b_0$ và, với
+$i\ge1$, $(-a_i)X^{N-i}\cdot b_iX^i=a_ib_i$. (ii) $\sigma$ tác động lên các
+vector hệ số như một hoán vị có dấu đối xứng. (iii) suy ra từ (i) và (ii).
+(iv) Phép nhân với $a$ là $T_a$, $\sigma$ là hoán vị có dấu $S$
+với $ST_aS=T_{\sigma(a)}$, và $T_a^{\mathsf T}=T_{\sigma(a)}$; tích và tổng
+của các ma trận Toeplitz negacyclic là Toeplitz negacyclic.
 \end{proof}
 
-Item (iv) is why the prover must commit to the \emph{lifts}
-$u_i=\sigma(\gamma_i\circ m)$ once $\gamma_i$ is known: a random diagonal form
-$\sum_j\gamma_jm_j^2$ is not reachable from $m$ alone.
+Khoản (iv) là lý do bên chứng minh phải cam kết với các \emph{phần nâng} (lift)
+$u_i=\sigma(\gamma_i\circ m)$ một khi $\gamma_i$ đã biết: một dạng chéo ngẫu
+nhiên $\sum_j\gamma_jm_j^2$ không đạt được chỉ từ $m$.
 
-\subsection{The protocol}
+\subsection{Giao thức}
 
-Let $k$ (lift repetitions) and $k'$ (check repetitions) be parameters
-($k=k'=5$). An auxiliary BDLOP key $\mathsf{ck}'=(B_1',(b'_j)_j)$ with
+Gọi $k$ (số lần lặp lift) và $k'$ (số lần lặp kiểm tra) là các tham số
+($k=k'=5$). Một khóa BDLOP phụ trợ $\mathsf{ck}'=(B_1',(b'_j)_j)$ với
 $B_1'=[I_n\,|\,\cdot]\in\Rq^{n\times k_{\mathrm{aux}}}$,
-$b'_j=[0^n\,|\,e_j\,|\,\cdot]$, $k_{\mathrm{aux}}=n+(k+k'+1)+\lambda$, is
-expanded from the parameter identifier. In each proof the prover samples a
-\emph{fresh} $r'\in S_1^{k_{\mathrm{aux}}}$. The interactive protocol is:
+$b'_j=[0^n\,|\,e_j\,|\,\cdot]$, $k_{\mathrm{aux}}=n+(k+k'+1)+\lambda$, được
+mở rộng từ định danh tham số. Trong mỗi chứng minh, bên chứng minh lấy mẫu một
+$r'\in S_1^{k_{\mathrm{aux}}}$ \emph{mới}. Giao thức tương tác là:
 \begin{enumerate}
 \item $V$: $\gamma_1,\dots,\gamma_k\leftarrow\mathbb Z_q^N$.
 \item $P$: $u_i=\sigma(\gamma_i\circ m)$, $g_t\leftarrow\{g\in\Rq:\ct(g)=0\}$;
-  send $D=(B_1'r',\ \langle b'_{u_i},r'\rangle+u_i,\ \langle b'_{g_t},r'\rangle+g_t)$.
+  gửi $D=(B_1'r',\ \langle b'_{u_i},r'\rangle+u_i,\ \langle b'_{g_t},r'\rangle+g_t)$.
 \item $V$: $\rho_{t,i}\leftarrow\mathbb Z_q^N$, $\mu_{t,i}\leftarrow\mathbb Z_q$.
-\item $P$: send $h_t=g_t+E_t$ for
+\item $P$: gửi $h_t=g_t+E_t$ với
   $E_t=\sum_i\sigma(\rho_{t,i})u_i-R_{t,i}m+\mu_{t,i}u_i(m-J)$,
-  $R_{t,i}=\sigma(\gamma_i\circ\sigma(\rho_{t,i}))$. $V$ requires $\ct(h_t)=0$.
-\item $V$: $\alpha_t\leftarrow\Rq$. Both sides form
-  $P(s)=\sum_t\alpha_t(g_t+E_t-h_t)=\psi m+L(s)-H$, with
-  $\psi=\sum_i\beta_iu_i$, $\beta_i=\sum_t\alpha_t\mu_{t,i}$, $L$ linear and
+  $R_{t,i}=\sigma(\gamma_i\circ\sigma(\rho_{t,i}))$. $V$ đòi hỏi $\ct(h_t)=0$.
+\item $V$: $\alpha_t\leftarrow\Rq$. Cả hai bên lập
+  $P(s)=\sum_t\alpha_t(g_t+E_t-h_t)=\psi m+L(s)-H$, với
+  $\psi=\sum_i\beta_iu_i$, $\beta_i=\sum_t\alpha_t\mu_{t,i}$, $L$ tuyến tính và
   $H=\sum_t\alpha_th_t$.
-\item $P$: masks $y\leftarrow Y$, $y'\leftarrow Y'$; with $a_j$ the projections
-  $\langle b_j,y\rangle$ resp.\ $\langle b'_j,y'\rangle$ and
-  $\Gamma_1=-(\psi a_m+a_\psi m+L(a))$, commit $t_G=\langle b'_G,r'\rangle+\Gamma_1$
-  and announce $(t_G,w=B_1y,w'=B_1'y',v=a_\psi a_m+a_G)$.
+\item $P$: các mặt nạ $y\leftarrow Y$, $y'\leftarrow Y'$; với $a_j$ là các phép
+  chiếu $\langle b_j,y\rangle$ tương ứng $\langle b'_j,y'\rangle$ và
+  $\Gamma_1=-(\psi a_m+a_\psi m+L(a))$, cam kết $t_G=\langle b'_G,r'\rangle+\Gamma_1$
+  và thông báo $(t_G,w=B_1y,w'=B_1'y',v=a_\psi a_m+a_G)$.
 \item $V$: $c\leftarrow\Cset$.\quad
-  $P$: $z=y+cr$, $z'=y'+cr'$; abort unless both lie in $[-B,B]$.
-\item $V$ accepts iff $B_1z=w+ct_1$, $B_1'z'=w'+ct_1'$ and, with masked
-  openings $f_j=ct_j-\langle b_j,z\rangle$,
+  $P$: $z=y+cr$, $z'=y'+cr'$; loại bỏ trừ khi cả hai nằm trong $[-B,B]$.
+\item $V$ chấp nhận khi và chỉ khi $B_1z=w+ct_1$, $B_1'z'=w'+ct_1'$ và, với các
+  phần mở bị che $f_j=ct_j-\langle b_j,z\rangle$,
   \[
   v=f_\psi f_m+c\,\bigl(L(f)-cH\bigr)-f_G .
   \]
 \end{enumerate}
-Honestly $f_j=cs_j-a_j$, so the right-hand side equals
-$c^2P(s)+c(\Gamma_1-\Gamma_1)+a_\psi a_m+a_G=v$. The non-interactive version
-derives the four challenges from chained, domain-separated SHAKE-256 seeds
-over $(\pid,x,C)$, $D$, $(h_t)_t$ and $(t_G,w,w',v)$ in this order; on an abort
-only steps 6--7 are repeated. The proof is
-$(D,(h_t)_t,t_G,\mathit{seed},z,z')$; for \texttt{bdlop-binary-128-v2} it is
-43\,022 bytes.
+Một cách trung thực, $f_j=cs_j-a_j$, nên vế phải bằng
+$c^2P(s)+c(\Gamma_1-\Gamma_1)+a_\psi a_m+a_G=v$. Phiên bản không tương tác dẫn
+xuất bốn thách thức từ các hạt giống SHAKE-256 được xâu chuỗi, tách miền, trên
+$(\pid,x,C)$, $D$, $(h_t)_t$ và $(t_G,w,w',v)$ theo thứ tự này; khi loại bỏ chỉ
+các bước 6--7 được lặp lại. Chứng minh là
+$(D,(h_t)_t,t_G,\mathit{seed},z,z')$; đối với \texttt{bdlop-binary-128-v2} nó
+là 43\,022 byte.
 
-\subsection{Security}
+\subsection{An toàn}
 
-\begin{theorem}[Completeness]
+\begin{theorem}[Tính đầy đủ]
 \label{thm:bin-complete}
-If $C=\Com(m;r)$ with $m\in\{0,1\}^N$ and $r\in S_1^k$, an attempt is accepted
-with probability exactly
+Nếu $C=\Com(m;r)$ với $m\in\{0,1\}^N$ và $r\in S_1^k$, một lần thử được chấp
+nhận với xác suất đúng bằng
 $p_{\mathrm{acc}}=((2B+1)/2\gamma)^{(k+k_{\mathrm{aux}})N}$
-($0.0112$ for \texttt{bdlop-binary-128-v2}), every accepted transcript
-verifies, and the prover fails to output a proof within $\Amax=16\,384$
-attempts with probability $(1-p_{\mathrm{acc}})^{\Amax}<2^{-266}$.
+($0.0112$ cho \texttt{bdlop-binary-128-v2}), mọi bản ghi được chấp nhận đều
+kiểm chứng được, và bên chứng minh không xuất ra được một chứng minh trong
+$\Amax=16\,384$ lần thử với xác suất $(1-p_{\mathrm{acc}})^{\Amax}<2^{-266}$.
 \end{theorem}
 \begin{proof}
-$\ct(E_t)=0$ by Lemma~\ref{lem:bin-lin}(iii) with $u_i=\sigma(\gamma_i\circ m)$
-and $m\circ(m-J)=0$, so $\ct(h_t)=0$. $P(s)=0$ by construction, and the
-verification identity is the computation above. Acceptance is the
-uniform-masking argument of Lemma~\ref{lem:hvzk} applied to the
-$(k+k_{\mathrm{aux}})N$ coefficients of $(z,z')$, using
+$\ct(E_t)=0$ theo Bổ đề~\ref{lem:bin-lin}(iii) với $u_i=\sigma(\gamma_i\circ m)$
+và $m\circ(m-J)=0$, nên $\ct(h_t)=0$. $P(s)=0$ theo cách xây dựng, và đẳng
+thức kiểm chứng chính là phép tính ở trên. Sự chấp nhận là lập luận che bằng
+phân phối đều của Bổ đề~\ref{lem:hvzk} áp dụng cho
+$(k+k_{\mathrm{aux}})N$ hệ số của $(z,z')$, dùng
 $\norm{cr}_\infty,\norm{cr'}_\infty\le\kappa$.
 \end{proof}
 
-\begin{lemma}[Consistent masked openings]
+\begin{lemma}[Các phần mở bị che nhất quán]
 \label{lem:bin-consistent}
-Let three accepting transcripts share the messages of steps 1--6 and have
-pairwise distinct challenges $c,c',c''$. Then either one obtains a nonzero
-$x$ with $B_1x=0$ or $B_1'x=0$ and $\norm{x}_\infty\le8\kappa B$, or there are
-$\bar f\in\Cdiff$, relaxed openings $(\bar r,\bar f)$ of $C$ and
-$(\bar r',\bar f)$ of $D$ with messages $\bar m,\bar s$, and vectors
-$y^\star,y'^\star$ such that $z=y^\star+c\bar f^{-1}\bar r$ (likewise for
-$z'$) for all three transcripts. Consequently
-$v=c^2P(\bar s)+cX+Y$ for fixed $X,Y\in\Rq$ and all three challenges, and
+Giả sử ba bản ghi được chấp nhận chia sẻ các thông điệp của các bước 1--6 và có
+các thách thức đôi một phân biệt $c,c',c''$. Khi đó hoặc ta thu được một $x$
+khác không với $B_1x=0$ hoặc $B_1'x=0$ và $\norm{x}_\infty\le8\kappa B$, hoặc
+tồn tại $\bar f\in\Cdiff$, các phần mở nới lỏng $(\bar r,\bar f)$ của $C$ và
+$(\bar r',\bar f)$ của $D$ với các thông điệp $\bar m,\bar s$, và các vector
+$y^\star,y'^\star$ sao cho $z=y^\star+c\bar f^{-1}\bar r$ (tương tự cho
+$z'$) cho cả ba bản ghi. Do đó
+$v=c^2P(\bar s)+cX+Y$ cho các $X,Y\in\Rq$ cố định và cho cả ba thách thức, và
 $P(\bar s)=0$.
 \end{lemma}
-\begin{proof}[Proof sketch]
-The first two transcripts give relaxed openings with $\bar f=c-c'$ and
-$\bar r=z-z'$, $\bar r'=z'_{(1)}-z'_{(2)}$, as in Lemma~\ref{lem:fork} and the
-equality proof (Lemma~\ref{lem:eq-ss}). Put $y^\star_c=z_c-c\bar f^{-1}\bar r$;
-then $B_1y^\star_c=w$ for every accepting $c$, and
-$\bar f(y^\star_c-y^\star_{c''})=\bar f(z_c-z_{c''})-(c-c'')\bar r$ is a vector
-of norm at most $2\kappa\cdot2B+2\kappa\cdot2B=8\kappa B$ in the kernel of
-$B_1$; it is zero unless it is an \MSIS{} solution, and then $y^\star$ is
-independent of $c$ because $\bar f$ is invertible
-(Lemma~\ref{lem:invertible}). The same holds for $B_1'$. Substituting into
-$f_j$ gives $f_j=c\bar s_j-\bar a_j$ with $\bar a_j$ independent of $c$, so the
-verification equation is a polynomial identity of degree two in $c$ with
-leading coefficient $P(\bar s)$. Subtracting it at $c,c'$ and $c',c''$ and
-using the invertibility of $c-c'$, $c'-c''$ and $c-c''$ gives $P(\bar s)=0$.
+\begin{proof}[Phác thảo chứng minh]
+Hai bản ghi đầu cho các phần mở nới lỏng với $\bar f=c-c'$ và
+$\bar r=z-z'$, $\bar r'=z'_{(1)}-z'_{(2)}$, như trong Bổ đề~\ref{lem:fork} và
+chứng minh đẳng thức (Bổ đề~\ref{lem:eq-ss}). Đặt $y^\star_c=z_c-c\bar f^{-1}\bar r$;
+khi đó $B_1y^\star_c=w$ cho mọi $c$ được chấp nhận, và
+$\bar f(y^\star_c-y^\star_{c''})=\bar f(z_c-z_{c''})-(c-c'')\bar r$ là một vector
+có chuẩn tối đa $2\kappa\cdot2B+2\kappa\cdot2B=8\kappa B$ nằm trong hạt nhân của
+$B_1$; nó bằng không trừ khi nó là một nghiệm \MSIS{}, và khi đó $y^\star$ độc
+lập với $c$ bởi vì $\bar f$ khả nghịch
+(Bổ đề~\ref{lem:invertible}). Điều tương tự đúng cho $B_1'$. Thay vào
+$f_j$ cho $f_j=c\bar s_j-\bar a_j$ với $\bar a_j$ độc lập với $c$, nên phương
+trình kiểm chứng là một đẳng thức đa thức bậc hai theo $c$ với hệ số dẫn đầu
+$P(\bar s)$. Trừ nó tại $c,c'$ và $c',c''$ rồi dùng tính khả nghịch của
+$c-c'$, $c'-c''$ và $c-c''$ cho $P(\bar s)=0$.
 \end{proof}
 
-\begin{theorem}[Round-by-round soundness]
+\begin{theorem}[Tính đúng đắn theo từng vòng]
 \label{thm:bin-rbr}
-Let $C$ be a commitment whose relaxed-opening message $\bar m$ (unique by
-Theorem~\ref{thm:binding}) is not binary. For any prover of the interactive
-protocol, the probability that the verifier accepts and no \MSIS{} solution
-for $B_1$ or $B_1'$ of norm $\le8\kappa B$ is found is at most
+Gọi $C$ là một cam kết mà thông điệp phần-mở-nới-lỏng $\bar m$ (duy nhất theo
+Định lý~\ref{thm:binding}) không phải nhị phân. Với mọi bên chứng minh của giao
+thức tương tác, xác suất để bên kiểm chứng chấp nhận mà không tìm được nghiệm
+\MSIS{} cho $B_1$ hay $B_1'$ có chuẩn $\le8\kappa B$ là tối đa
 \[
 \erbr=q^{-k}+q^{-k'}+q^{-N/2}+2/|\Cset| ,
 \]
-and each of the four challenge rounds individually contributes at most the
-corresponding term. For \texttt{bdlop-binary-128-v2},
+và mỗi vòng trong bốn vòng thách thức đóng góp riêng rẽ tối đa số hạng tương
+ứng. Đối với \texttt{bdlop-binary-128-v2},
 $\erbr\le2^{-149.99}$.
 \end{theorem}
-\begin{proof}[Proof sketch]
-Fix the extracted messages; they are determined by $C$ and $D$ up to
-\MSIS{} (binding with respect to relaxed openings, for both keys).
-\emph{Lift round.} Let $\Delta_i=\bar u_i-\sigma(\gamma_i\circ\bar m)$,
-$Q_i=\ct(\bar u_i(\bar m-J))$ and $e=(\Delta_i,Q_i)_i$. If $e=0$ then
-$Q_i=\langle\gamma_i,\bar m\circ(\bar m-J)\rangle=0$ for all $i$ by
-Lemma~\ref{lem:bin-lin}(iii); since $\bar m$ is fixed before $\gamma$ and
-$\bar m\circ(\bar m-J)\neq0$, this has probability $q^{-k}$, whatever $D$ the
-prover sends afterwards. \emph{Check round.} By Lemma~\ref{lem:bin-lin},
-$\ct(\bar g_t+E_t(\bar s))=\delta_t+\varphi_t(e)$ with
-$\delta_t=\ct(\bar g_t)$ and
-$\varphi_t(e)=\sum_i\langle\rho_{t,i},\Delta_i\rangle+\mu_{t,i}Q_i$. Both $e\neq0$
-and $\delta_t$ are fixed by $D$ before $(\rho,\mu)$ is drawn, and
-$\varphi_t(e)$ is uniform on $\mathbb Z_q$ for each $t$, independently; hence
-$\delta_t+\varphi_t(e)=0$ for all $t$ with probability $q^{-k'}$. Otherwise some
-$t$ has $\ct(\bar g_t+E_t)\ne0=\ct(h_t)$, i.e.\ $\bar P_t=\bar g_t+E_t-h_t\neq0$.
-\emph{Combine round.} The $\bar P_t$ are fixed before $\alpha$. In a CRT slot
-$\mathbb F_{q^{N/2}}$ where some $\bar P_{t_0}\neq0$, $\sum_t\alpha_t\bar P_t$ is
-uniform, so it vanishes with probability $q^{-N/2}$. \emph{Challenge round.}
-If $P(\bar s)\ne0$, pick a slot $\phi$ where it is nonzero. The polynomial
-$c^2P(\bar s)+cX+Y-v$ is nonzero of degree two modulo $\phi$, so it has at
-most two roots in the field $\Rq/\phi$; as $c-c'$ is invertible for distinct
-challenges, $c\mapsto c\bmod\phi$ is injective on $\Cset$, and at most two
-challenges are roots. By Lemma~\ref{lem:bin-consistent} an accepting
-transcript needs a root.
+\begin{proof}[Phác thảo chứng minh]
+Cố định các thông điệp trích xuất được; chúng được xác định bởi $C$ và $D$ sai
+khác \MSIS{} (tính ràng buộc đối với các phần mở nới lỏng, cho cả hai khóa).
+\emph{Vòng lift.} Đặt $\Delta_i=\bar u_i-\sigma(\gamma_i\circ\bar m)$,
+$Q_i=\ct(\bar u_i(\bar m-J))$ và $e=(\Delta_i,Q_i)_i$. Nếu $e=0$ thì
+$Q_i=\langle\gamma_i,\bar m\circ(\bar m-J)\rangle=0$ cho mọi $i$ theo
+Bổ đề~\ref{lem:bin-lin}(iii); vì $\bar m$ được cố định trước $\gamma$ và
+$\bar m\circ(\bar m-J)\neq0$, điều này có xác suất $q^{-k}$, bất kể $D$ nào bên
+chứng minh gửi sau đó. \emph{Vòng kiểm tra.} Theo Bổ đề~\ref{lem:bin-lin},
+$\ct(\bar g_t+E_t(\bar s))=\delta_t+\varphi_t(e)$ với
+$\delta_t=\ct(\bar g_t)$ và
+$\varphi_t(e)=\sum_i\langle\rho_{t,i},\Delta_i\rangle+\mu_{t,i}Q_i$. Cả $e\neq0$
+và $\delta_t$ đều được $D$ cố định trước khi $(\rho,\mu)$ được rút, và
+$\varphi_t(e)$ đều trên $\mathbb Z_q$ cho mỗi $t$, một cách độc lập; do đó
+$\delta_t+\varphi_t(e)=0$ cho mọi $t$ với xác suất $q^{-k'}$. Ngược lại một
+$t$ nào đó có $\ct(\bar g_t+E_t)\ne0=\ct(h_t)$, tức $\bar P_t=\bar g_t+E_t-h_t\neq0$.
+\emph{Vòng kết hợp.} Các $\bar P_t$ được cố định trước $\alpha$. Trong một slot
+CRT $\mathbb F_{q^{N/2}}$ mà một $\bar P_{t_0}\neq0$ nào đó, $\sum_t\alpha_t\bar P_t$
+đều, nên nó triệt tiêu với xác suất $q^{-N/2}$. \emph{Vòng thách thức.}
+Nếu $P(\bar s)\ne0$, chọn một slot $\phi$ mà tại đó nó khác không. Đa thức
+$c^2P(\bar s)+cX+Y-v$ khác không và bậc hai theo modulo $\phi$, nên nó có tối
+đa hai nghiệm trong trường $\Rq/\phi$; vì $c-c'$ khả nghịch với các thách thức
+phân biệt, $c\mapsto c\bmod\phi$ là đơn ánh trên $\Cset$, và tối đa hai
+thách thức là nghiệm. Theo Bổ đề~\ref{lem:bin-consistent} một bản ghi được chấp
+nhận cần một nghiệm.
 \end{proof}
 
-\paragraph{The non-interactive proof.}
-Write $H_1,\dots,H_4$ for the four domain-separated oracles (lift, check,
-combine, challenge), modelled as independent random oracles, and
+\paragraph{Chứng minh không tương tác.}
+Viết $H_1,\dots,H_4$ cho bốn oracle tách miền (lift, kiểm tra, kết hợp, thách
+thức), được mô hình hóa như các oracle ngẫu nhiên độc lập, và
 $\varepsilon_1=q^{-k}$, $\varepsilon_2=q^{-k'}$, $\varepsilon_3=q^{-N/2}$,
-$\varepsilon_4=2/|\Cset|$ for the four terms of Theorem~\ref{thm:bin-rbr}
-(we model $c=\mathsf{SampleInBall}(H_4(\cdot))$ as uniform on $\Cset$). The
-seeds are chained: the input of $H_{i+1}$ contains the output $s_i$ of $H_i$.
-For a relaxed opening with messages $\bar s$ of the rows hashed into an
-$H_i$-query, call the answer of that query \emph{bad} if it is the bad event
-of round $i$ in the proof of Theorem~\ref{thm:bin-rbr}: all
-$\langle\gamma_i,\bar v\rangle=0$ while $\bar v=\bar m\circ(\bar m-J)\ne0$
-($i=1$); $\delta_t+\varphi_t(e)=0$ for all $t$ while $e\ne0$ ($i=2$);
-$\sum_t\alpha_t\bar P_t=0$ while some $\bar P_t\ne0$ ($i=3$). Each of these
-depends only on the query input (it contains $C$, the rows of $D$ sent so
-far, $(h_t)_t$ and, through the chained seed, the earlier challenges) and on
-the answer, and for every fixed $\bar s$ it has probability at most
-$\varepsilon_i$ over the answer.
+$\varepsilon_4=2/|\Cset|$ cho bốn số hạng của Định lý~\ref{thm:bin-rbr}
+(chúng tôi mô hình hóa $c=\mathsf{SampleInBall}(H_4(\cdot))$ như đều trên
+$\Cset$). Các hạt giống được xâu chuỗi: đầu vào của $H_{i+1}$ chứa đầu ra $s_i$
+của $H_i$. Đối với một phần mở nới lỏng với các thông điệp $\bar s$ của các hàng
+được băm vào một truy vấn $H_i$, gọi câu trả lời của truy vấn đó là \emph{xấu}
+nếu nó là sự kiện xấu của vòng $i$ trong chứng minh Định lý~\ref{thm:bin-rbr}:
+mọi $\langle\gamma_i,\bar v\rangle=0$ trong khi $\bar v=\bar m\circ(\bar m-J)\ne0$
+($i=1$); $\delta_t+\varphi_t(e)=0$ cho mọi $t$ trong khi $e\ne0$ ($i=2$);
+$\sum_t\alpha_t\bar P_t=0$ trong khi một $\bar P_t\ne0$ nào đó ($i=3$). Mỗi điều
+này chỉ phụ thuộc vào đầu vào của truy vấn (nó chứa $C$, các hàng của $D$ đã gửi
+cho tới nay, $(h_t)_t$ và, thông qua hạt giống xâu chuỗi, các thách thức trước
+đó) và vào câu trả lời, và với mỗi $\bar s$ cố định, nó có xác suất tối đa
+$\varepsilon_i$ trên câu trả lời.
 
-\begin{theorem}[Knowledge soundness of the non-interactive proof]
+\begin{theorem}[Tính đúng đắn tri thức của chứng minh không tương tác]
 \label{thm:bin-ks}
-Let $\mathcal A$ make at most $Q$ queries to $H_1,\dots,H_4$ in total and
-output $(x,C,\pi)$ that the verifier accepts with probability $\varepsilon$.
-There is an extractor $\mathcal E$ that runs $\mathcal A$ an expected number of
-at most $3+2Q$ times, and for $i=1,2,3$ an algorithm $\mathcal F_i$ that runs
-$\mathcal E$ twice, such that $\mathcal E$ outputs a relaxed opening of $C$
-whose message is binary with probability at least
+Giả sử $\mathcal A$ thực hiện tổng cộng tối đa $Q$ truy vấn tới $H_1,\dots,H_4$
+và xuất ra $(x,C,\pi)$ mà bên kiểm chứng chấp nhận với xác suất $\varepsilon$.
+Tồn tại một bộ trích xuất $\mathcal E$ chạy $\mathcal A$ với số lần kỳ vọng tối
+đa $3+2Q$, và với $i=1,2,3$ một thuật toán $\mathcal F_i$ chạy $\mathcal E$ hai
+lần, sao cho $\mathcal E$ xuất ra một phần mở nới lỏng của $C$ mà thông điệp của
+nó là nhị phân với xác suất ít nhất
 \[
 \varepsilon-(Q+1)\sum_{i=1}^{4}\varepsilon_i-\sum_{i=1}^{3}\sqrt{(Q+1)\,\alpha_i}
 -\beta-\frac{Q^2}{2^{256}},
 \]
-where $\beta$ (resp.\ $\alpha_i$) is the probability that $\mathcal E$
-(resp.\ $\mathcal F_i$) outputs an \MSIS{} solution of $\ell_\infty$ norm at
-most $8\kappa B$ for $B_1$ or $B_1'$. In particular, if $C$ has no relaxed
-opening with a binary message, then
-$\varepsilon\le(Q+1)\erbr+\sum_i\sqrt{(Q+1)\alpha_i}+\beta+Q^22^{-256}$ with
-$\erbr\le2^{-149.99}$ for \texttt{bdlop-binary-128-v2}.
+trong đó $\beta$ (tương ứng $\alpha_i$) là xác suất $\mathcal E$
+(tương ứng $\mathcal F_i$) xuất ra một nghiệm \MSIS{} có chuẩn $\ell_\infty$ tối
+đa $8\kappa B$ cho $B_1$ hoặc $B_1'$. Cụ thể, nếu $C$ không có phần mở nới lỏng
+nào với một thông điệp nhị phân, thì
+$\varepsilon\le(Q+1)\erbr+\sum_i\sqrt{(Q+1)\alpha_i}+\beta+Q^22^{-256}$ với
+$\erbr\le2^{-149.99}$ cho \texttt{bdlop-binary-128-v2}.
 \end{theorem}
-\begin{proof}[Proof sketch]
-\emph{Aborts.} The prover repeats only steps~6--7 after an abort; the seeds
-$s_1,s_2,s_3$, the commitment $D$ and the masks $(h_t)_t$ are fixed before
-the first attempt. To the verifier and to a cheating prover, a rejected
-attempt is an $H_4$-query whose answer is discarded, so it is counted in $Q$
-and needs no further treatment for soundness. (For zero knowledge, rounds
-1--3 never abort, so the simulator obtains $\gamma,\rho,\mu,\alpha$ by plain
-oracle queries on its simulated $D$ and $h$, and only the aborting last round
-is simulated by programming $H_4$, exactly as for the opening proof in
-Lemma~\ref{lem:sim}, following~\cite{ref:barbosa,ref:devevey}.)
+\begin{proof}[Phác thảo chứng minh]
+\emph{Loại bỏ.} Bên chứng minh chỉ lặp lại các bước~6--7 sau một lần loại bỏ;
+các hạt giống $s_1,s_2,s_3$, cam kết $D$ và các mặt nạ $(h_t)_t$ được cố định
+trước lần thử đầu tiên. Đối với bên kiểm chứng và một bên chứng minh gian lận,
+một lần thử bị loại là một truy vấn $H_4$ mà câu trả lời của nó bị bỏ đi, nên
+nó được đếm trong $Q$ và không cần xử lý thêm cho tính đúng đắn. (Đối với tính
+không tiết lộ tri thức, các vòng 1--3 không bao giờ loại bỏ, nên bộ mô phỏng
+thu được $\gamma,\rho,\mu,\alpha$ bằng các truy vấn oracle thông thường trên
+$D$ và $h$ được mô phỏng của nó, và chỉ vòng cuối có loại bỏ được mô phỏng bằng
+cách lập trình $H_4$, đúng như với chứng minh mở trong
+Bổ đề~\ref{lem:sim}, theo~\cite{ref:barbosa,ref:devevey}.)
 
-\emph{Query order.} Without loss of generality $\mathcal A$ queries the four
-oracle inputs of its output (one more query each). Because the input of
-$H_{i+1}$ contains the 256-bit output of $H_i$, except with probability
-$Q^2/2^{256}$ these four queries occur in the order $H_1,H_2,H_3,H_4$ and the
-$H_4$-query is the last of them.
+\emph{Thứ tự truy vấn.} Không mất tính tổng quát, $\mathcal A$ truy vấn bốn
+đầu vào oracle của đầu ra của nó (thêm mỗi cái một truy vấn). Bởi vì đầu vào
+của $H_{i+1}$ chứa đầu ra 256 bit của $H_i$, ngoại trừ với xác suất
+$Q^2/2^{256}$, bốn truy vấn này xảy ra theo thứ tự $H_1,H_2,H_3,H_4$ và truy
+vấn $H_4$ là truy vấn cuối cùng trong số đó.
 
-\emph{The last round.} Fix $\mathcal A$'s coins and the answers to all queries
-before the critical $H_4$-query. Its input fixes the prefix
-$\mathit{pre}=(x,C,D,(h_t)_t,s_3)$ and the announcement $(t_G,w,w',v)$, and
-the remaining protocol is a $\Sigma$-protocol for the statement $\mathit{pre}$
-with challenge $c$ and response $(z,z')$. By Lemma~\ref{lem:bin-consistent} it
-is $3$-special sound for the relation ``relaxed openings of $C$ and $D$ with
-a common $\bar f\in\Cdiff$ whose messages satisfy $P_{\mathit{pre}}(\bar s)=0$,
-or an \MSIS{} solution of norm $\le8\kappa B$''. The Fiat--Shamir extractor
-of Attema, Fehr and Klo{\ss}~\cite{ref:afk22} for $k$-special-sound
-$\Sigma$-protocols ($k=3$; it rewinds only the critical query of the
-challenge oracle and treats the statement and every other oracle as part of
-$\mathcal A$) runs $\mathcal A$ an expected $k+Q(k-1)=3+2Q$ times and
-succeeds with probability at least
+\emph{Vòng cuối.} Cố định các đồng xu của $\mathcal A$ và các câu trả lời cho
+mọi truy vấn trước truy vấn $H_4$ then chốt. Đầu vào của nó cố định tiền tố
+$\mathit{pre}=(x,C,D,(h_t)_t,s_3)$ và thông báo $(t_G,w,w',v)$, và phần giao
+thức còn lại là một $\Sigma$-protocol cho phát biểu $\mathit{pre}$ với thách
+thức $c$ và đáp ứng $(z,z')$. Theo Bổ đề~\ref{lem:bin-consistent}, nó là
+$3$-đúng-đắn-đặc-biệt cho quan hệ ``các phần mở nới lỏng của $C$ và $D$ với
+một $\bar f\in\Cdiff$ chung mà các thông điệp của chúng thỏa $P_{\mathit{pre}}(\bar s)=0$,
+hoặc một nghiệm \MSIS{} có chuẩn $\le8\kappa B$''. Bộ trích xuất Fiat--Shamir
+của Attema, Fehr và Klo{\ss}~\cite{ref:afk22} cho các
+$\Sigma$-protocol $k$-đúng-đắn-đặc-biệt ($k=3$; nó chỉ tua lại truy vấn then
+chốt của oracle thách thức và coi phát biểu cùng mọi oracle khác như một phần
+của $\mathcal A$) chạy $\mathcal A$ với số lần kỳ vọng $k+Q(k-1)=3+2Q$ và
+thành công với xác suất ít nhất
 $(\varepsilon-(Q+1)\varepsilon_4)/(1-\varepsilon_4)\ge\varepsilon-(Q+1)\varepsilon_4$.
 
-\emph{The statistical rounds.} If $\mathcal E$ outputs openings with messages
-$\bar s$ and none of the three round challenges of the output is bad for
-$\bar s$, the chain of Theorem~\ref{thm:bin-rbr} applies verbatim: a
-non-binary $\bar m$ would give $P_{\mathit{pre}}(\bar s)\ne0$. It remains to
-bound the event $\mathsf{Bad}_i$ that the round-$i$ challenge is bad for the
-extracted $\bar s$. The difficulty is that $\bar s$ is extracted \emph{after}
-the challenge and is fixed by the earlier rows only computationally (binding
-w.r.t.\ relaxed openings). Fix $j\le Q$ and everything before the $j$-th
-$H_i$-query (the ``prefix''); let $\xi$ be the rest of the randomness of
-$\mathcal E$, including the answer $\gamma^{(j)}$ to that query. For each
-message vector $m$ of the rows hashed into the query let
-$p_m=\Pr_\xi[\mathcal E \text{ outputs openings, the output uses query }j,
-\bar s|_{\mathrm{rows}}=m]$, $P=\sum_mp_m$, and let $m^\star$ maximise
-$p_m$; $m^\star$ depends on the prefix only, hence is independent of
-$\gamma^{(j)}$. Then
+\emph{Các vòng thống kê.} Nếu $\mathcal E$ xuất ra các phần mở với các thông
+điệp $\bar s$ và không vòng nào trong ba vòng thách thức của đầu ra là xấu đối
+với $\bar s$, thì chuỗi của Định lý~\ref{thm:bin-rbr} áp dụng nguyên văn: một
+$\bar m$ không nhị phân sẽ cho $P_{\mathit{pre}}(\bar s)\ne0$. Vẫn còn phải
+chặn sự kiện $\mathsf{Bad}_i$ rằng thách thức vòng-$i$ là xấu đối với $\bar s$
+được trích xuất. Khó khăn là $\bar s$ được trích xuất \emph{sau} thách thức và
+chỉ được các hàng trước đó cố định một cách tính toán (ràng buộc đối với các
+phần mở nới lỏng). Cố định $j\le Q$ và mọi thứ trước truy vấn $H_i$ thứ $j$
+(``tiền tố''); gọi $\xi$ là phần còn lại của tính ngẫu nhiên của
+$\mathcal E$, bao gồm câu trả lời $\gamma^{(j)}$ cho truy vấn đó. Với mỗi
+vector thông điệp $m$ của các hàng được băm vào truy vấn, đặt
+$p_m=\Pr_\xi[\mathcal E \text{ xuất ra các phần mở, đầu ra dùng truy vấn }j,
+\bar s|_{\mathrm{rows}}=m]$, $P=\sum_mp_m$, và gọi $m^\star$ là giá trị làm
+cực đại $p_m$; $m^\star$ chỉ phụ thuộc vào tiền tố, do đó độc lập với
+$\gamma^{(j)}$. Khi đó
 \[
-\Pr_\xi[\mathsf{Bad}_i\wedge\text{query }j]
-\le\Pr[\gamma^{(j)}\text{ bad for }m^\star]+\Pr_\xi[\bar s|_{\mathrm{rows}}\ne m^\star]
+\Pr_\xi[\mathsf{Bad}_i\wedge\text{truy vấn }j]
+\le\Pr[\gamma^{(j)}\text{ xấu đối với }m^\star]+\Pr_\xi[\bar s|_{\mathrm{rows}}\ne m^\star]
 \le\varepsilon_i+(P-p_{m^\star}).
 \]
-$\mathcal F_i$ runs $\mathcal E$, and if the output uses the $j$-th
-$H_i$-query it reruns $\mathcal E$ from that query with fresh $\xi'$; it
-succeeds if both runs use query $j$ and their messages on the hashed rows
-differ. Two relaxed openings $(\bar r,\bar f)$, $(\bar r',\bar f')$ of the
-same $t_1$ (or $t_1'$) with different messages give the \MSIS{} solution
-$\bar f'\bar r-\bar f\bar r'\ne0$ of norm $\le8\kappa B$, as in
-Theorem~\ref{thm:binding}. Given the prefix, the success probability is
-$P^2-\sum_mp_m^2\ge P(P-p_{m^\star})\ge(P-p_{m^\star})^2$. Summing over $j$,
-with Jensen's and the Cauchy--Schwarz inequality,
-$\sum_j\mathbb E[P-p_{m^\star}]\le\sqrt{(Q+1)\alpha_i}$, so
+$\mathcal F_i$ chạy $\mathcal E$, và nếu đầu ra dùng truy vấn $H_i$ thứ $j$ thì
+nó chạy lại $\mathcal E$ từ truy vấn đó với $\xi'$ mới; nó thành công nếu cả
+hai lần chạy dùng truy vấn $j$ và các thông điệp của chúng trên các hàng được
+băm khác nhau. Hai phần mở nới lỏng $(\bar r,\bar f)$, $(\bar r',\bar f')$ của
+cùng $t_1$ (hoặc $t_1'$) với các thông điệp khác nhau cho nghiệm \MSIS{}
+$\bar f'\bar r-\bar f\bar r'\ne0$ có chuẩn $\le8\kappa B$, như trong
+Định lý~\ref{thm:binding}. Với tiền tố cho trước, xác suất thành công là
+$P^2-\sum_mp_m^2\ge P(P-p_{m^\star})\ge(P-p_{m^\star})^2$. Lấy tổng theo $j$,
+với bất đẳng thức Jensen và Cauchy--Schwarz,
+$\sum_j\mathbb E[P-p_{m^\star}]\le\sqrt{(Q+1)\alpha_i}$, nên
 $\Pr[\mathsf{Bad}_i]\le(Q+1)\varepsilon_i+\sqrt{(Q+1)\alpha_i}$.
-Collecting the terms gives the bound.
+Thu thập các số hạng cho ta cận.
 \end{proof}
 
-\noindent\emph{Status and remaining gaps.} This closes the composition
-that earlier drafts left open: aborts touch only the last round, the
-statistical rounds lose the usual factor $Q+1$ of
-round-by-round soundness~\cite{ref:ccHLRR19}, and only the last oracle is
-forked. What remains is (i) the \MSIS{} terms $\sqrt{(Q+1)\alpha_i}$, which
-carry the same square-root (forking) loss as the opening proof
-(Lemma~\ref{lem:fork}) and make the reduction non-tight;
-(ii) the use of the Attema--Fehr--Klo{\ss} $\Sigma$-protocol bound with a
-statement (the prefix) chosen adaptively by $\mathcal A$ through other oracles,
-which we believe is covered by their adaptive formulation but have not
-checked line by line; (iii) the modelling of
-$\mathsf{SampleInBall}\circ H_4$ as a uniform challenge (the seed has 256
-bits and $|\Cset|=2^{257}$); and (iv) a classical-ROM argument only, as for
-every theorem here. The proof is a sketch and has not been checked
-independently.
+\noindent\emph{Trạng thái và các lỗ hổng còn lại.} Điều này khép lại phép hợp
+thành mà các bản thảo trước đã để ngỏ: việc loại bỏ chỉ chạm tới vòng cuối, các
+vòng thống kê mất đi thừa số $Q+1$ thông thường của tính đúng đắn
+theo-từng-vòng~\cite{ref:ccHLRR19}, và chỉ oracle cuối bị rẽ nhánh. Những gì
+còn lại là (i) các số hạng \MSIS{} $\sqrt{(Q+1)\alpha_i}$, vốn mang cùng tổn
+thất căn bậc hai (rẽ nhánh) như chứng minh mở
+(Bổ đề~\ref{lem:fork}) và làm cho phép rút gọn không chặt;
+(ii) việc dùng cận $\Sigma$-protocol của Attema--Fehr--Klo{\ss} với một phát
+biểu (tiền tố) được $\mathcal A$ chọn một cách thích nghi thông qua các oracle
+khác, điều mà chúng tôi tin là được bao phủ bởi cách phát biểu thích nghi của họ
+nhưng chưa kiểm tra từng dòng; (iii) việc mô hình hóa
+$\mathsf{SampleInBall}\circ H_4$ như một thách thức đều (hạt giống có 256 bit và
+$|\Cset|=2^{257}$); và (iv) chỉ là một lập luận trong ROM cổ điển, như với mọi
+định lý ở đây. Chứng minh là một phác thảo và chưa được kiểm tra một cách độc
+lập.
 
-\begin{theorem}[Honest-verifier zero knowledge]
+\begin{theorem}[Không tiết lộ tri thức với bên kiểm chứng trung thực]
 \label{thm:bin-zk}
-There is a simulator that, given $(x,C)$ only and programming the random
-oracle at four points, outputs proofs whose distribution differs from honest
-proofs by at most $\Adv^{\MLWE}_{\mathsf{aux}}$ (hiding of the auxiliary
-instance: secret rank $\lambda$, $n+k+k'+1$ ring samples, ternary secret and
-error) plus the programming-collision terms of Lemma~\ref{lem:sim}, for any
-number of proofs on the same $C$.
+Tồn tại một bộ mô phỏng mà, chỉ với $(x,C)$ và lập trình oracle ngẫu nhiên tại
+bốn điểm, xuất ra các chứng minh có phân phối khác với các chứng minh trung thực
+tối đa $\Adv^{\MLWE}_{\mathsf{aux}}$ (tính che giấu của thể hiện phụ trợ: bí mật
+hạng $\lambda$, $n+k+k'+1$ mẫu vành, bí mật và sai số bậc ba) cộng với các số
+hạng va-chạm-lập-trình của Bổ đề~\ref{lem:sim}, cho bất kỳ số chứng minh nào
+trên cùng $C$.
 \end{theorem}
-\begin{proof}[Proof sketch]
-(1) Accepted $(z,z')$ are uniform on $[-B,B]^{(k+k_{\mathrm{aux}})N}$ and
-independent of $(r,r')$ (Lemma~\ref{lem:hvzk}); sample them directly and
-program the oracles, the announcement having min-entropy through $w$ and $w'$.
-(2) $t_G$'s message $\Gamma_1$ is a function of $z'$, $c$, the public rows of
-$D$ and the witness (since $a_j=\langle b'_j,z'\rangle-c(t'_j-s_j)$), so a
-reduction that knows $m$ but not $r'$ can produce $D$ and $t_G$ from an
-\MLWE{} challenge for $\mathsf{ck}'$; replace them by uniform values.
-(3) Then $g_t$ occurs only in $h_t$, which is uniform on $\{\ct=0\}$; the
-simulator samples $h_t$ there. The verification equations determine
-$w,w',v$. The base randomness $r$ is used across proofs only through
-rejection-sampled responses, and $r'$ is fresh in each proof, so the
-hybrids compose over many proofs.
+\begin{proof}[Phác thảo chứng minh]
+(1) $(z,z')$ được chấp nhận đều trên $[-B,B]^{(k+k_{\mathrm{aux}})N}$ và
+độc lập với $(r,r')$ (Bổ đề~\ref{lem:hvzk}); lấy mẫu chúng trực tiếp và
+lập trình các oracle, với thông báo có min-entropy thông qua $w$ và $w'$.
+(2) Thông điệp $\Gamma_1$ của $t_G$ là một hàm của $z'$, $c$, các hàng công
+khai của $D$ và nhân chứng (vì $a_j=\langle b'_j,z'\rangle-c(t'_j-s_j)$), nên
+một phép rút gọn biết $m$ nhưng không biết $r'$ có thể tạo ra $D$ và $t_G$ từ
+một thách thức \MLWE{} cho $\mathsf{ck}'$; thay chúng bằng các giá trị đều.
+(3) Khi đó $g_t$ chỉ xuất hiện trong $h_t$, vốn đều trên $\{\ct=0\}$; bộ
+mô phỏng lấy mẫu $h_t$ ở đó. Các phương trình kiểm chứng xác định
+$w,w',v$. Tính ngẫu nhiên cơ sở $r$ chỉ được dùng xuyên các chứng minh thông
+qua các đáp ứng được lấy mẫu loại bỏ, và $r'$ mới trong mỗi chứng minh, nên các
+bước lai hợp thành qua nhiều chứng minh.
 \end{proof}
 
-\subsection{Binding the proof to the payload encoding}
+\subsection{Ràng buộc chứng minh với mã hóa tải trọng}
 \label{sec:payload-range}
 
-$\Pibin$ applies to a commitment of a 256-bit string, whereas the payload
-commitments of Section~\ref{sec:sec-notation} encode $\mathrm{len}(p)\,\|\,p$
-with three bytes per coefficient. A variant $\Pi_{\mathsf{pay}}$
-(\texttt{payload\_range\_proof.py}, set \texttt{bdlop-payload-range-128-v1})
-proves a statement about the payload commitment itself.
+$\Pibin$ áp dụng cho một cam kết của một chuỗi 256 bit, trong khi các cam kết
+tải trọng của Mục~\ref{sec:sec-notation} mã hóa $\mathrm{len}(p)\,\|\,p$
+với ba byte mỗi hệ số. Một biến thể $\Pi_{\mathsf{pay}}$
+(\texttt{payload\_range\_proof.py}, bộ \texttt{bdlop-payload-range-128-v1})
+chứng minh một phát biểu về chính cam kết tải trọng.
 
-\paragraph{Statement.} Public input $(x,L,C)$ with $C$ an unchanged base
-commitment and a public length $L\le128$ bytes. Write
-$\mathrm{Enc}(p)=e_L+A\beta(p)$, where $\beta(p)\in\{0,1\}^{\ell N}$ are the
-bits of $p$ (most significant first, $\ell=\lceil8L/N\rceil$ binary
-polynomials $\beta_j$), $e_L=\mathrm{Enc}(0^L)$ carries the length field, and
-$A$ is the public $\mathbb Z_q$-linear map that sends payload bit $s$ to
-coefficient $\lfloor(2+\lfloor s/8\rfloor)/3\rfloor$ with weight
-$2^{8(2-(2+\lfloor s/8\rfloor)\bmod3)+7-s\bmod8}$. $\Pi_{\mathsf{pay}}$ proves
-knowledge of a relaxed opening of $C$ whose message is $\mathrm{Enc}(p)$ for
-some $p\in\{0,1\}^{8L}$: every coefficient lies in $[0,2^{24})$ and is the
-packing of payload bytes, coefficient~$0$ carries $L$, and all coefficients
-beyond $\lceil(L+2)/3\rceil$ vanish. It reveals $L$ and nothing else about $p$.
+\paragraph{Phát biểu.} Đầu vào công khai $(x,L,C)$ với $C$ là một cam kết cơ sở
+không đổi và một độ dài công khai $L\le128$ byte. Viết
+$\mathrm{Enc}(p)=e_L+A\beta(p)$, trong đó $\beta(p)\in\{0,1\}^{\ell N}$ là các
+bit của $p$ (bit quan trọng nhất trước, $\ell=\lceil8L/N\rceil$ đa thức nhị
+phân $\beta_j$), $e_L=\mathrm{Enc}(0^L)$ mang trường độ dài, và
+$A$ là ánh xạ $\mathbb Z_q$-tuyến tính công khai gửi bit tải trọng $s$ tới
+hệ số $\lfloor(2+\lfloor s/8\rfloor)/3\rfloor$ với trọng số
+$2^{8(2-(2+\lfloor s/8\rfloor)\bmod3)+7-s\bmod8}$. $\Pi_{\mathsf{pay}}$ chứng
+minh hiểu biết về một phần mở nới lỏng của $C$ mà thông điệp của nó là
+$\mathrm{Enc}(p)$ cho một $p\in\{0,1\}^{8L}$ nào đó: mọi hệ số nằm trong
+$[0,2^{24})$ và là phép đóng gói các byte tải trọng, hệ số~$0$ mang $L$, và mọi
+hệ số vượt quá $\lceil(L+2)/3\rceil$ đều triệt tiêu. Nó tiết lộ $L$ và không gì
+khác về $p$.
 
-\paragraph{Protocol.} It is $\Pibin$ with three changes. (1) The binary
-polynomials live in the first $\ell$ slots of the auxiliary commitment $D$,
-whose rows $D_0=(t_1',t_{\beta_j})$ are hashed into $H_1$ together with
-$(\pid,x,L,C)$; the lifts and masks are added afterwards as further rows of
-$D$ under the same randomness $r'$. (2) There are $k$ lifts per binary
-polynomial, $u_{j,i}=\sigma(\gamma_{j,i}\circ\beta_j)$. (3) Each check
-functional gets a link term with a fresh $\rho^L_t\in\mathbb Z_q^N$:
-$E_t$ gains $\sigma(\rho^L_t)m-\sum_j\sigma(A_j^{\mathsf T}\rho^L_t)\beta_j
--\langle\rho^L_t,e_L\rangle$, whose constant coefficient is
-$\langle\rho^L_t,\,m-A\beta-e_L\rangle$ by Lemma~\ref{lem:bin-lin}(i). The
-combined relation is $\sum_j\psi_j\beta_j+L(s)-H'=0$ with
-$\psi_j=\sum_i\beta_{j,i}u_{j,i}$, proved with one garbage polynomial as before.
+\paragraph{Giao thức.} Nó là $\Pibin$ với ba thay đổi. (1) Các đa thức nhị
+phân nằm trong $\ell$ slot đầu tiên của cam kết phụ trợ $D$, mà các hàng
+$D_0=(t_1',t_{\beta_j})$ của nó được băm vào $H_1$ cùng với
+$(\pid,x,L,C)$; các lift và mặt nạ được thêm vào sau đó như các hàng tiếp theo
+của $D$ dưới cùng tính ngẫu nhiên $r'$. (2) Có $k$ lift cho mỗi đa thức nhị
+phân, $u_{j,i}=\sigma(\gamma_{j,i}\circ\beta_j)$. (3) Mỗi phiếm hàm kiểm tra
+nhận thêm một số hạng liên kết với một $\rho^L_t\in\mathbb Z_q^N$ mới:
+$E_t$ nhận thêm $\sigma(\rho^L_t)m-\sum_j\sigma(A_j^{\mathsf T}\rho^L_t)\beta_j
+-\langle\rho^L_t,e_L\rangle$, mà hệ số hằng của nó là
+$\langle\rho^L_t,\,m-A\beta-e_L\rangle$ theo Bổ đề~\ref{lem:bin-lin}(i). Quan
+hệ kết hợp là $\sum_j\psi_j\beta_j+L(s)-H'=0$ với
+$\psi_j=\sum_i\beta_{j,i}u_{j,i}$, được chứng minh với một đa thức rác (garbage)
+như trước.
 
-\begin{theorem}[Payload range proof]
+\begin{theorem}[Chứng minh khoảng tải trọng]
 \label{thm:pay}
-Completeness holds as in Theorem~\ref{thm:bin-complete} with
-$k_{\mathrm{aux}}=n+\ell(k+1)+k'+1+\lambda$ (acceptance $0.0100$ for
-$\ell=1$, $0.0012$ for $\ell=4$; cap $2^{17}$ attempts). Theorems
-\ref{thm:bin-rbr} and \ref{thm:bin-ks} hold for $\Pi_{\mathsf{pay}}$ with the
-same four round errors and with ``binary message'' replaced by ``message
-$\mathrm{Enc}(p)$ for some $p\in\{0,1\}^{8L}$''. Zero knowledge holds as in
-Theorem~\ref{thm:bin-zk}; the simulator is given $(x,L,C)$.
+Tính đầy đủ đúng như trong Định lý~\ref{thm:bin-complete} với
+$k_{\mathrm{aux}}=n+\ell(k+1)+k'+1+\lambda$ (sự chấp nhận $0.0100$ cho
+$\ell=1$, $0.0012$ cho $\ell=4$; ngưỡng $2^{17}$ lần thử). Các Định lý
+\ref{thm:bin-rbr} và \ref{thm:bin-ks} đúng cho $\Pi_{\mathsf{pay}}$ với cùng
+bốn sai số vòng và với ``thông điệp nhị phân'' được thay bằng ``thông điệp
+$\mathrm{Enc}(p)$ cho một $p\in\{0,1\}^{8L}$ nào đó''. Tính không tiết lộ tri
+thức đúng như trong Định lý~\ref{thm:bin-zk}; bộ mô phỏng được cho $(x,L,C)$.
 \end{theorem}
-\begin{proof}[Proof sketch]
-Lift round: if some $\bar\beta_j$ is not binary, the $k$ functionals
-$\langle\gamma_{j,i},\bar\beta_j\circ(\bar\beta_j-J)\rangle$ all vanish with
-probability $q^{-k}$, as $\bar\beta$ is fixed by $D_0$ before $\gamma$. Check
-round: the error vector $e$ now also contains
-$e_{\mathrm{link}}=\bar m-A\bar\beta-e_L$, which is fixed by $C$ and $D_0$
-before $\rho^L$, and $\varphi_t(e)$ gains
-$\langle\rho^L_t,e_{\mathrm{link}}\rangle$; it stays uniform when $e\ne0$.
-The combine and challenge rounds and the extraction are unchanged
-(Lemma~\ref{lem:bin-consistent} for $C$ and $D$). If no bad event occurs,
-$\bar\beta$ is binary and $\bar m=A\bar\beta+e_L$ holds in $\mathbb Z_q^N$;
-since $A\bar\beta+e_L$ has integer coefficients below $2^{24}<q$, $\bar m$ is
-exactly $\mathrm{Enc}(p)$ for the $p$ whose bits are the first $8L$ entries
-of $\bar\beta$.
+\begin{proof}[Phác thảo chứng minh]
+Vòng lift: nếu một $\bar\beta_j$ nào đó không nhị phân, thì $k$ phiếm hàm
+$\langle\gamma_{j,i},\bar\beta_j\circ(\bar\beta_j-J)\rangle$ đều triệt tiêu với
+xác suất $q^{-k}$, vì $\bar\beta$ được $D_0$ cố định trước $\gamma$. Vòng kiểm
+tra: vector sai số $e$ giờ cũng chứa
+$e_{\mathrm{link}}=\bar m-A\bar\beta-e_L$, vốn được $C$ và $D_0$ cố định
+trước $\rho^L$, và $\varphi_t(e)$ nhận thêm
+$\langle\rho^L_t,e_{\mathrm{link}}\rangle$; nó vẫn đều khi $e\ne0$.
+Các vòng kết hợp và thách thức cùng việc trích xuất không đổi
+(Bổ đề~\ref{lem:bin-consistent} cho $C$ và $D$). Nếu không sự kiện xấu nào xảy
+ra, $\bar\beta$ là nhị phân và $\bar m=A\bar\beta+e_L$ đúng trong $\mathbb Z_q^N$;
+vì $A\bar\beta+e_L$ có các hệ số nguyên dưới $2^{24}<q$, $\bar m$ đúng là
+$\mathrm{Enc}(p)$ cho $p$ mà các bit của nó là $8L$ mục đầu tiên
+của $\bar\beta$.
 \end{proof}
 
-For \texttt{bdlop-payload-range-128-v1} the proof has $44\,558$ bytes for
-$L\le32$ ($\ell=1$) and grows by $9\,216$ bytes per further 32 payload bytes
-(72\,206 bytes at $L=128$). The auxiliary \MSIS{} ($n\times25$ to
-$n\times43$) and \MLWE{} (18 to 36 samples) instances give the same pinned
-estimates as the base set
+Đối với \texttt{bdlop-payload-range-128-v1}, chứng minh có $44\,558$ byte cho
+$L\le32$ ($\ell=1$) và tăng thêm $9\,216$ byte cho mỗi 32 byte tải trọng thêm
+vào (72\,206 byte tại $L=128$). Các thể hiện \MSIS{} phụ trợ ($n\times25$ đến
+$n\times43$) và \MLWE{} (18 đến 36 mẫu) cho cùng các ước lượng đã ghim
+như bộ cơ sở
 (\texttt{research/bdlop\_params/bdlop\_payload\_range\_128\_l\{1,4\}.estimate.json}).
-Two alternatives are worse. Encoding the payload in binary from the start
-(one bit per coefficient) lets $\Pibin$ apply directly, at
-$6\,720+43\,022$ bytes per 32 payload bytes, but needs a new envelope format
-and disclosure encoding. A range proof of all $256$ payload coefficients
-($\ell=24$ bit-planes) would need $177$ response polynomials,
-$256\,526$ bytes and an acceptance probability of $8\cdot10^{-10}$ per attempt
-with the fixed mask bound $\gamma=2^{17}$, so it is impractical without a
-larger auxiliary mask bound and a new \MSIS{} estimate.
+Hai phương án thay thế thì tệ hơn. Mã hóa tải trọng ở dạng nhị phân ngay từ đầu
+(một bit mỗi hệ số) cho phép $\Pibin$ áp dụng trực tiếp, với
+$6\,720+43\,022$ byte cho mỗi 32 byte tải trọng, nhưng cần một định dạng
+envelope và mã hóa tiết lộ mới. Một chứng minh khoảng cho toàn bộ $256$ hệ số
+tải trọng ($\ell=24$ mặt phẳng bit) sẽ cần $177$ đa thức đáp ứng,
+$256\,526$ byte và một xác suất chấp nhận $8\cdot10^{-10}$ mỗi lần thử
+với cận mặt nạ cố định $\gamma=2^{17}$, nên nó không thực tế nếu không có một
+cận mặt nạ phụ trợ lớn hơn và một ước lượng \MSIS{} mới.
 
-\begin{remark}[Limits]
-The theorems are classical-ROM statements; no QROM claim is made. The
-auxiliary key's \MSIS{} ($n\times24$ instead of $n\times14$) and \MLWE{}
-($17$ instead of $7$ samples) instances give the same levels as the base set
-under the pinned estimator (\MSIS{} $\beta=480$, 140/127 bits; primal \MLWE{}
-$\beta=580$, 169/153 bits; dual $\beta=578$), since the optimal \MSIS{}
-sub-dimension ($\approx3\,022$) is below both widths
-(\texttt{research/bdlop\_params/bdlop\_binary\_128\_v2.estimate.json}); the
-dual-hybrid caveat of Section~\ref{sec:proof} applies equally. The
-soundness error $2^{-150}$ per round is below the $2^{-256}$ of the opening
-proof; $k=k'=9$ would match it at about 12\,KB more. $\Pi_{\mathsf{pay}}$
-makes the length $L$ public and covers payloads of at most 128 bytes; a
-hidden length would need a proof that the bytes after an unknown length are
-zero, and statements about the payload \emph{value} (beyond its encoding)
-are not proved, although any public affine constraint on the payload bits
-could be added as one more link functional.
+\begin{remark}[Các giới hạn]
+Các định lý là các phát biểu trong ROM cổ điển; không có khẳng định QROM nào.
+Các thể hiện \MSIS{} ($n\times24$ thay vì $n\times14$) và \MLWE{}
+($17$ thay vì $7$ mẫu) của khóa phụ trợ cho cùng các mức như bộ cơ sở
+dưới bộ ước lượng đã ghim (\MSIS{} $\beta=480$, 140/127 bit; \MLWE{} nguyên thủy
+$\beta=580$, 169/153 bit; đối ngẫu $\beta=578$), vì chiều con \MSIS{}
+tối ưu ($\approx3\,022$) nằm dưới cả hai độ rộng
+(\texttt{research/bdlop\_params/bdlop\_binary\_128\_v2.estimate.json}); lưu ý
+về lai đối ngẫu của Mục~\ref{sec:proof} áp dụng y như vậy. Sai số đúng đắn
+$2^{-150}$ mỗi vòng nằm dưới $2^{-256}$ của chứng minh mở; $k=k'=9$ sẽ khớp
+với nó với thêm khoảng 12\,KB. $\Pi_{\mathsf{pay}}$ làm cho độ dài $L$ công khai
+và bao phủ các tải trọng tối đa 128 byte; một độ dài ẩn sẽ cần một chứng minh
+rằng các byte sau một độ dài chưa biết đều bằng không, và các phát biểu về
+\emph{giá trị} tải trọng (ngoài mã hóa của nó) thì không được chứng minh, mặc dù
+bất kỳ ràng buộc affine công khai nào trên các bit tải trọng đều có thể được
+thêm như một phiếm hàm liên kết nữa.
 \end{remark}
 
 % Bibliography: ref:als20, ref:lnp22, ref:barbosa, ref:devevey, ref:ccHLRR19

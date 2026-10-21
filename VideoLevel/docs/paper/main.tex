@@ -1,5 +1,19 @@
 \documentclass[journal]{IEEEtran}
-\usepackage[T1]{fontenc}
+% Vietnamese rendering: build with pdfLaTeX using the T5 (Vietnamese) font
+% encoding. vntex supplies T5-encoded Times/Helvetica/Courier -- the three
+% families IEEEtran uses (\rmdefault=ptm, \sfdefault=phv, tt=pcr) -- so the
+% diacritics render while the Times look and the \IEEEPARstart drop cap are
+% preserved and \documentclass is unchanged. Supported build command:
+%   latexmk -pdf main.tex        (pdf_mode=1 in .latexmkrc)
+% A Unicode-engine branch (LuaLaTeX/XeLaTeX + fontspec) is guarded so the
+% source still compiles there, but pdfLaTeX+T5 is the supported/tested build.
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[utf8]{inputenc}
+  \usepackage[T5]{fontenc}
+\else
+  \usepackage{fontspec}
+\fi
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{booktabs}
 \usepackage{graphicx}
@@ -13,12 +27,13 @@
 \usepackage[hidelinks]{hyperref}
 
 % Theorem environments shared with sections/security.tex (do not redefine there).
-\newtheorem{definition}{Definition}
-\newtheorem{lemma}{Lemma}
-\newtheorem{theorem}{Theorem}
-\newtheorem{proposition}{Proposition}
-\newtheorem{corollary}{Corollary}
-\newtheorem{remark}{Remark}
+\newtheorem{definition}{Định nghĩa}
+\newtheorem{lemma}{Bổ đề}
+\newtheorem{theorem}{Định lý}
+\newtheorem{proposition}{Mệnh đề}
+\newtheorem{corollary}{Hệ quả}
+\newtheorem{remark}{Nhận xét}
+\renewcommand{\proofname}{Chứng minh}
 
 \newcommand{\Rq}{\mathcal{R}_q}
 \newcommand{\norm}[1]{\lVert #1 \rVert}
@@ -34,276 +49,284 @@
 
 \begin{document}
 
-\title{In-Band Lattice Zero-Knowledge Proofs for\\ Compressed-Domain H.264 Video Steganography}
+\title{Chứng minh Không tiết lộ Tri thức trên Lưới, Nhúng Trực tiếp trong Luồng (In-Band), cho\\ Giấu tin Video H.264 trong Miền Nén}
 
-\author{Anonymous authors (double-blind review)}
+\author{Tác giả ẩn danh (phản biện hai chiều)}
 
-\markboth{Manuscript submitted for review}{Anonymous: In-Band Lattice Zero-Knowledge Proofs for H.264 Video}
+\markboth{Bản thảo nộp phản biện}{Ẩn danh: Chứng minh không tiết lộ tri thức trên lưới, nhúng trực tiếp, cho video H.264}
 
 \maketitle
 
 \begin{abstract}
-Proof-carrying steganography hides a payload in a cover medium together with a
-zero-knowledge proof about it, so that a verifier can check a claim from the
-medium alone. Existing systems either rely on pairing- or
-discrete-logarithm-based SNARKs, which do not survive quantum adversaries,
-or deliver the proof beside the medium, where
-it is easily stripped or swapped. We present a system that embeds a lattice
-zero-knowledge proof directly in the CAVLC residuals of an H.264 Baseline
-bitstream and verifies it from the received video, without side files,
-metadata boxes or access to the cover. The proof is a Fiat--Shamir-with-aborts
-proof of knowledge of an opening of a BDLOP commitment, instantiated at an
-estimated core-SVP level of 140 bits classical and 127 bits quantum for
-binding (164/150 bits for hiding). Its
-statement binds a carrier-normalized digest of the video, the
-verifier-recomputed carrier positions, a one-use verifier challenge and an
-issuer-signed relation registry; carrier normalization breaks the circularity
-between a proof and the video that contains it. Two modes are supported: a
-8\,165-byte envelope proving possession of a registered credential, and a
-14\,885-byte envelope committing to a hidden payload that can later be
-disclosed or linked to another commitment. On standard CIF and 4CIF sequences
-every completed run verified from the stego video alone and, where tested,
-rejected replayed sessions and single-bit tampering; luma PSNR on modified
-frames is
-40.0--45.4\,dB\todo{v2 measurement}. Targeted classical steganalysis does not separate cover and
-stego, whereas a learned per-frame detector reaches a detection error of 0.40\todo{v2 measurement}
-across clips, which we report as a limitation. We state precisely what the
-proof does and does not establish.
+Giấu tin mang theo chứng minh (proof-carrying steganography) giấu một tải
+trọng trong một vật phủ cùng với một chứng minh không tiết lộ tri thức về nó,
+để bên kiểm chứng có thể kiểm tra một khẳng định chỉ từ vật phủ. Các hệ thống
+hiện có hoặc dựa trên SNARK xây dựng trên ghép cặp (pairing) hoặc logarithm rời
+rạc, vốn không trụ vững trước các đối thủ lượng tử, hoặc chuyển giao chứng minh
+bên cạnh vật phủ, nơi nó dễ bị bóc tách hay tráo đổi. Chúng tôi trình bày một
+hệ thống nhúng một chứng minh không tiết lộ tri thức trên lưới trực tiếp vào
+phần dư CAVLC của một luồng bit H.264 Baseline và kiểm chứng nó từ video nhận
+được, không cần tệp phụ, hộp siêu dữ liệu hay quyền truy cập vào vật phủ. Chứng
+minh là một chứng minh hiểu biết (proof of knowledge) theo kiểu
+Fiat--Shamir-with-aborts về một phần mở của một cam kết BDLOP, được hiện thực
+ở mức core-SVP ước lượng 140 bit cổ điển và 127 bit lượng tử cho tính ràng buộc
+(164/150 bit cho tính che giấu). Phát biểu của nó ràng buộc một digest đã chuẩn
+hóa theo vật mang của video, các vị trí vật mang do bên kiểm chứng tính lại, một
+thách thức dùng-một-lần của bên kiểm chứng và một sổ đăng ký quan hệ được bên
+phát hành ký; việc chuẩn hóa theo vật mang phá vỡ tính vòng tròn giữa một chứng
+minh và video chứa nó. Hai chế độ được hỗ trợ: một envelope 8\,165 byte chứng
+minh việc sở hữu một chứng chỉ đã đăng ký, và một envelope 14\,885 byte cam kết
+với một tải trọng ẩn mà về sau có thể được tiết lộ hoặc liên kết tới một cam kết
+khác. Trên các chuỗi CIF và 4CIF chuẩn, mọi lần chạy hoàn tất đều kiểm chứng
+được chỉ từ video stego và, ở những nơi được thử nghiệm, đã từ chối các phiên bị
+phát lại và việc giả mạo một bit đơn lẻ; PSNR luma trên các khung bị sửa đổi là
+40.0--45.4\,dB\todo{v2 measurement}. Phân tích giấu tin cổ điển có chủ đích không phân tách được
+gốc và stego, trong khi một bộ phát hiện học máy theo từng khung đạt sai số phát
+hiện 0.40\todo{v2 measurement} trên các clip, điều mà chúng tôi báo cáo như một hạn chế. Chúng tôi
+phát biểu chính xác chứng minh này thiết lập và không thiết lập được điều gì.
 \end{abstract}
 
 \begin{IEEEkeywords}
-Video steganography, H.264/AVC, CAVLC, zero-knowledge proofs, lattice-based
-cryptography, post-quantum cryptography, steganalysis.
+Giấu tin video, H.264/AVC, CAVLC, chứng minh không tiết lộ tri thức, mật mã
+dựa trên lưới, mật mã hậu lượng tử, phân tích giấu tin.
 \end{IEEEkeywords}
 
 % =====================================================================
-\section{Introduction}
+\section{Giới thiệu}
 \label{sec:intro}
 
-\IEEEPARstart{C}{ompressed-domain} video steganography modifies the syntax
-elements of an encoded stream, such as quantized transform coefficients or
-their entropy codes, instead of decoding and re-encoding pixels. It keeps the
-stream standard-compliant, avoids re-compression artefacts and, for H.264/AVC,
-has a long literature~\cite{ref:liu19review,ref:kunhoth23,ref:mstafa16}.
-A recent line of work attaches cryptographic evidence to media: a
-zero-knowledge proof that a hidden or withheld value satisfies a relation, so
-that a verifier learns that a claim holds without learning the
-value~\cite{ref:photoproof,ref:zkimg,ref:veritas,ref:vimz,ref:eva,ref:zkwagon}.
-Combining the two gives \emph{proof-carrying steganography}: the medium
-carries a hidden envelope that a verifier can check from the medium alone.
+\IEEEPARstart{G}{iấu} tin video trong miền nén sửa đổi các phần tử cú pháp
+của một luồng đã mã hóa, chẳng hạn các hệ số biến đổi đã lượng tử hóa hoặc mã
+entropy của chúng, thay vì giải mã rồi mã hóa lại các điểm ảnh. Nó giữ cho
+luồng tuân thủ chuẩn, tránh được các giả tượng do nén lại và, với H.264/AVC,
+có một kho tài liệu lâu đời~\cite{ref:liu19review,ref:kunhoth23,ref:mstafa16}.
+Một hướng nghiên cứu gần đây gắn bằng chứng mật mã vào phương tiện: một chứng
+minh không tiết lộ tri thức rằng một giá trị bị ẩn hoặc giữ kín thỏa mãn một
+quan hệ, để bên kiểm chứng biết được một khẳng định là đúng mà không biết chính
+giá trị đó~\cite{ref:photoproof,ref:zkimg,ref:veritas,ref:vimz,ref:eva,ref:zkwagon}.
+Kết hợp cả hai cho ta \emph{giấu tin mang theo chứng minh}: phương tiện mang
+một envelope ẩn mà bên kiểm chứng có thể kiểm tra chỉ từ phương tiện.
 
-Two problems remain open for video. First, the proof systems used in this
-setting are pre-quantum: pairing-based SNARKs such as
-Groth16~\cite{ref:groth16}, or discrete-logarithm-based folding schemes.
-Their proofs are small and easy to hide, but their soundness and the hiding
-of the commitments they prove about rest on discrete-logarithm-type
-assumptions that a large quantum computer breaks. Media evidence is often
-expected to remain checkable for years, so it is worth asking what a
-post-quantum alternative costs in a channel whose capacity is measured in
-kilobits per hundred frames.
+Hai vấn đề vẫn còn bỏ ngỏ với video. Thứ nhất, các hệ chứng minh được dùng
+trong bối cảnh này là tiền-lượng tử: các SNARK dựa trên ghép cặp như
+Groth16~\cite{ref:groth16}, hoặc các lược đồ gấp (folding) dựa trên logarithm
+rời rạc. Chứng minh của chúng nhỏ và dễ giấu, nhưng tính đúng đắn của chúng và
+tính che giấu của các cam kết mà chúng chứng minh về lại dựa trên các giả thiết
+kiểu logarithm rời rạc mà một máy tính lượng tử lớn có thể phá. Bằng chứng trên
+phương tiện thường được kỳ vọng vẫn kiểm chứng được trong nhiều năm, nên đáng
+để hỏi một phương án hậu lượng tử tốn kém bao nhiêu trong một kênh mà dung lượng
+được đo bằng kilobit trên mỗi trăm khung.
 
-Second, where the proof lives matters. A proof in a side file or a metadata
-box (as in content-credential manifests~\cite{ref:c2pa}) is removed by any
-re-muxing tool and can be swapped between videos. Moving the proof into the
-bitstream creates a circularity: the proof should bind the video, yet it
-cannot depend on a hash of a bitstream that contains the proof itself.
+Thứ hai, nơi chứng minh được lưu giữ cũng quan trọng. Một chứng minh nằm trong
+tệp phụ hoặc một hộp siêu dữ liệu (như trong các manifest chứng chỉ nội
+dung~\cite{ref:c2pa}) sẽ bị loại bỏ bởi bất kỳ công cụ ghép luồng (re-mux) nào
+và có thể bị tráo đổi giữa các video. Việc chuyển chứng minh vào trong luồng bit
+tạo ra một tính vòng tròn: chứng minh cần ràng buộc video, nhưng nó không thể
+phụ thuộc vào giá trị băm của một luồng bit đã chứa chính chứng minh đó.
 
-This paper addresses both problems for H.264 Baseline (CAVLC) video. Our
-contributions are:
+Bài báo này giải quyết cả hai vấn đề cho video H.264 Baseline (CAVLC). Các đóng
+góp của chúng tôi là:
 \begin{itemize}
-\item \textbf{An in-band design.} A lattice zero-knowledge proof travels
-  inside H.264 CAVLC residuals and is verified from the stego video alone,
-  with no side file, SEI message or cover. A \emph{carrier-normalized} video
-  commitment, computed with every carrier coefficient replaced by a canonical
-  value and with carrier positions fixed from a placeholder envelope of the
-  final length, removes the proof/video circularity
-  (Section~\ref{sec:construction}).
-\item \textbf{A verifier-built statement.} The Fiat--Shamir statement binds
-  the recomputed video commitment, the recomputed carrier positions, a
-  one-use verifier challenge, and a relation registry signed by an issuer
-  with ML-DSA-65~\cite{ref:fips204}. The verifier never reads a statement
-  field from the video, which gives replay protection and anchors trust at
-  the verifier.
-\item \textbf{Two proof modes and linkage.} A registered mode proves
-  possession of an issuer-registered credential (8\,165-byte envelope), and
-  an in-band mode commits to a hidden payload of up to 766 bytes (14\,885-byte
-  envelope) that can later be disclosed or linked, by an equality proof, to
-  another video or to a credential without being revealed.
-\item \textbf{A concrete, reproducible instantiation and evaluation.} We give
-  a parameter set with core-SVP estimates and known-answer vectors, and we
-  evaluate capacity, end-to-end embedding and video-only verification,
-  decoded quality, classical and learned steganalysis, the choice of carrier,
-  and the cost relative to Groth16, ML-DSA and a lattice zkSNARK
-  (Sections~\ref{sec:implementation}--\ref{sec:evaluation}).
+\item \textbf{Một thiết kế in-band.} Một chứng minh không tiết lộ tri thức trên
+  lưới di chuyển bên trong phần dư CAVLC của H.264 và được kiểm chứng chỉ từ
+  video stego, không cần tệp phụ, thông điệp SEI hay vật phủ. Một cam kết video
+  \emph{đã chuẩn hóa theo vật mang}, được tính với mỗi hệ số vật mang bị thay
+  bằng một giá trị chuẩn tắc và với các vị trí vật mang được cố định từ một
+  envelope giữ chỗ có độ dài cuối cùng, loại bỏ tính vòng tròn giữa chứng
+  minh và video (Mục~\ref{sec:construction}).
+\item \textbf{Một phát biểu do bên kiểm chứng dựng nên.} Phát biểu
+  Fiat--Shamir ràng buộc cam kết video đã tính lại, các vị trí vật mang đã tính
+  lại, một thách thức dùng-một-lần của bên kiểm chứng, và một sổ đăng ký quan hệ
+  được một bên phát hành ký bằng ML-DSA-65~\cite{ref:fips204}. Bên kiểm chứng
+  không bao giờ đọc một trường nào của phát biểu từ video, điều này đem lại khả
+  năng chống phát lại và neo niềm tin tại bên kiểm chứng.
+\item \textbf{Hai chế độ chứng minh và liên kết.} Một chế độ đã đăng ký chứng
+  minh việc sở hữu một chứng chỉ do bên phát hành đăng ký (envelope 8\,165
+  byte), và một chế độ in-band cam kết với một tải trọng ẩn lên tới 766 byte
+  (envelope 14\,885 byte) mà về sau có thể được tiết lộ hoặc liên kết, bằng một
+  chứng minh đẳng thức, tới một video khác hoặc tới một chứng chỉ mà không bị lộ.
+\item \textbf{Một hiện thực và đánh giá cụ thể, tái lập được.} Chúng tôi đưa ra
+  một bộ tham số kèm các ước lượng core-SVP và các vector câu-trả-lời-đã-biết
+  (known-answer), và chúng tôi đánh giá dung lượng, quá trình nhúng đầu-cuối và
+  kiểm chứng chỉ-từ-video, chất lượng sau giải mã, phân tích giấu tin cổ điển và
+  học máy, việc lựa chọn vật mang, cùng chi phí so với Groth16, ML-DSA và một
+  zkSNARK trên lưới (Mục~\ref{sec:implementation}--\ref{sec:evaluation}).
 \end{itemize}
-We are explicit about the limits (Section~\ref{sec:discussion}): soundness is
-relaxed, the security argument is in the classical random-oracle model, the
-implementation is neither audited nor constant time, and a learned per-frame
-detector does separate cover and stego better than chance.
+Chúng tôi nói rõ về các giới hạn (Mục~\ref{sec:discussion}): tính đúng đắn được
+nới lỏng, lập luận an toàn nằm trong mô hình oracle ngẫu nhiên cổ điển, phần
+hiện thực chưa được kiểm toán và không chạy trong thời gian hằng, và một bộ phát
+hiện học máy theo từng khung quả thực phân tách gốc và stego tốt hơn ngẫu nhiên.
 
 % =====================================================================
-\section{Related work}
+\section{Công trình liên quan}
 \label{sec:related}
 
-\subsection{Proof-carrying and provenance media}
-PhotoProof~\cite{ref:photoproof} introduced cryptographic image
-authentication that survives a set of permissible transformations, using
-proof-carrying data over a signed original. ZK-IMG~\cite{ref:zkimg},
-VerITAS~\cite{ref:veritas} and VIMz~\cite{ref:vimz} prove image
-transformations with SNARKs, lookup arguments or folding schemes, and
-Eva~\cite{ref:eva} proves the authenticity of lossily encoded (e.g.\ H.264)
-videos with folding-based incrementally verifiable computation and a 448-byte
-proof. These systems target provenance of edits from an attested capture;
-the proof is an object delivered with the medium, and their assumptions are
-pre-quantum. Content credentials~\cite{ref:c2pa} attach signed provenance
-manifests as metadata, which survive only as long as the container keeps
-them. Closest to us in placement is ZK-WAGON~\cite{ref:zkwagon}, which embeds
-a zk-SNARK about an image-generation model into the generated image by
-spatial-domain LSB steganography; it is image-domain, embeds a gzip-compressed Halo2 proof of about 100\,kB
-in the pixel LSBs, and relies on a pre-quantum SNARK.
-Adelsbach and Sadeghi~\cite{ref:adelsbach} proved the presence of a
-watermark in zero knowledge, which is the converse problem (a proof
-\emph{about} hidden data, kept outside it). To our knowledge no prior system
-carries a lattice zero-knowledge proof inside a compressed video bitstream
-and verifies it from the stream alone; we make no provenance claim of the
-kind PhotoProof or Eva make.
+\subsection{Phương tiện mang theo chứng minh và nguồn gốc}
+PhotoProof~\cite{ref:photoproof} giới thiệu kiểu xác thực ảnh bằng mật mã mà
+vẫn trụ vững qua một tập các phép biến đổi được cho phép, sử dụng dữ liệu mang
+theo chứng minh (proof-carrying data) trên một bản gốc đã ký.
+ZK-IMG~\cite{ref:zkimg}, VerITAS~\cite{ref:veritas} và VIMz~\cite{ref:vimz}
+chứng minh các phép biến đổi ảnh bằng SNARK, lập luận tra cứu (lookup) hoặc các
+lược đồ gấp, còn Eva~\cite{ref:eva} chứng minh tính xác thực của các video được
+mã hóa có tổn hao (ví dụ H.264) bằng tính toán kiểm chứng tăng dần dựa trên gấp
+cùng một chứng minh 448 byte. Các hệ thống này nhắm tới nguồn gốc của các chỉnh
+sửa từ một lần thu nhận đã được chứng thực; chứng minh là một đối tượng được
+chuyển giao kèm phương tiện, và các giả thiết của chúng là tiền-lượng tử. Chứng
+chỉ nội dung~\cite{ref:c2pa} gắn các manifest nguồn gốc đã ký dưới dạng siêu dữ
+liệu, vốn chỉ tồn tại chừng nào bộ chứa còn giữ chúng. Gần với chúng tôi nhất về
+vị trí đặt là ZK-WAGON~\cite{ref:zkwagon}, hệ nhúng một zk-SNARK về một mô hình
+sinh ảnh vào chính ảnh được sinh ra bằng giấu tin LSB trong miền không gian; nó
+thuộc miền ảnh, nhúng một chứng minh Halo2 nén gzip khoảng 100\,kB vào các bit
+LSB của điểm ảnh, và dựa trên một SNARK tiền-lượng tử.
+Adelsbach và Sadeghi~\cite{ref:adelsbach} chứng minh sự hiện diện của một thủy
+vân theo kiểu không tiết lộ tri thức, đây là bài toán đối ngẫu (một chứng minh
+\emph{về} dữ liệu ẩn, được giữ bên ngoài nó). Theo hiểu biết của chúng tôi,
+chưa có hệ thống nào trước đây mang một chứng minh không tiết lộ tri thức trên
+lưới vào bên trong một luồng bit video đã nén và kiểm chứng nó chỉ từ luồng đó;
+chúng tôi không đưa ra khẳng định về nguồn gốc theo kiểu mà PhotoProof hay Eva
+đưa ra.
 
-\subsection{Compressed-domain H.264 steganography and steganalysis}
-Surveys~\cite{ref:liu19review,ref:kunhoth23,ref:mstafa16} classify H.264
-schemes by the syntax they modify: intra-prediction modes, motion vectors,
-quantized DCT coefficients and the entropy-coding layer. Coefficient schemes
-must control \emph{intra-frame distortion drift}, the propagation of a
-modified block into intra-predicted neighbours~\cite{ref:ma10}. Within CAVLC,
-the signs of trailing $\pm1$ coefficients (``trailing ones'') can be flipped
-without changing the code length~\cite{ref:liao12}; we compare this carrier
-with the magnitude-parity carrier we adopt (Section~\ref{sec:carrier}).
-Video steganalysis~\cite{ref:bouzegza22} has concentrated on motion-vector
-embedding~\cite{ref:wang14mv}; for all-intra streams the natural attacks are
-image-steganalysis features applied to decoded frames, such as spatial rich
-models with ensemble classifiers~\cite{ref:srm,ref:ensemble} and CNN
-detectors~\cite{ref:srnet}, together with targeted histogram attacks on the
-modified domain~\cite{ref:westfeld,ref:spa}. Evidence pooled over many
-frames of one video is stronger than per-frame evidence~\cite{ref:ker06}, a
-point we return to in Section~\ref{sec:discussion}.
+\subsection{Giấu tin và phân tích giấu tin H.264 trong miền nén}
+Các bài khảo sát~\cite{ref:liu19review,ref:kunhoth23,ref:mstafa16} phân loại
+các lược đồ H.264 theo cú pháp mà chúng sửa đổi: các chế độ dự đoán nội khung,
+vector chuyển động, các hệ số DCT đã lượng tử hóa và tầng mã hóa entropy. Các
+lược đồ trên hệ số phải kiểm soát \emph{sự trôi méo trong khung} (intra-frame
+distortion drift), tức sự lan truyền của một khối đã bị sửa đổi sang các khối
+lân cận được dự đoán nội khung~\cite{ref:ma10}. Trong CAVLC, dấu của các hệ số
+$\pm1$ ở cuối (``trailing ones'') có thể bị lật mà không làm thay đổi độ dài
+mã~\cite{ref:liao12}; chúng tôi so sánh vật mang này với vật mang theo chẵn-lẻ
+độ lớn (magnitude-parity) mà chúng tôi áp dụng (Mục~\ref{sec:carrier}). Phân
+tích giấu tin video~\cite{ref:bouzegza22} đã tập trung vào việc nhúng trong
+vector chuyển động~\cite{ref:wang14mv}; đối với các luồng toàn-khung-nội
+(all-intra), các tấn công tự nhiên là các đặc trưng phân tích giấu tin ảnh áp
+dụng lên các khung đã giải mã, chẳng hạn các mô hình giàu không gian (spatial
+rich model) với bộ phân loại tổ hợp~\cite{ref:srm,ref:ensemble} và các bộ phát
+hiện CNN~\cite{ref:srnet}, cùng với các tấn công histogram có chủ đích trên miền
+đã bị sửa đổi~\cite{ref:westfeld,ref:spa}. Bằng chứng gộp trên nhiều khung của
+cùng một video mạnh hơn bằng chứng theo từng khung~\cite{ref:ker06}, một điểm mà
+chúng tôi sẽ trở lại trong Mục~\ref{sec:discussion}.
 
-\subsection{Lattice zero-knowledge proofs}
-BDLOP commitments~\cite{ref:bdlop} with Fiat--Shamir-with-aborts
-openings~\cite{ref:lyu09,ref:lyu12} are the basis of the exact and
-linear/product proofs of Attema et al.~\cite{ref:als20}, Esgin et
-al.~\cite{ref:ens20} and Lyubashevsky et al.~\cite{ref:lnp22}, implemented
-in LaZer~\cite{ref:lazer}; ML-DSA~\cite{ref:fips204,ref:dilithium} uses the
-same masking-and-rejection technique for signatures. Succinct lattice
-arguments, including LaBRADOR~\cite{ref:labrador},
-LatticeFold~\cite{ref:latticefold}, RoKoko~\cite{ref:rokoko} and
-SALSAA~\cite{ref:salsaa}, target proof size for large relations; the
-versions we could evaluate disable zero knowledge in their reported
-configurations, prove knowledge soundness only, or (for folding) do not
-provide a standalone zero-knowledge prover. Designated-verifier lattice
-zkSNARKs~\cite{ref:isw21,ref:luna} are compact, but the oblivious
-LWE-sampling assumption used in the analysis of the standard-model
-constructions, including ISW21, is invalidated against quantum
-adversaries~\cite{ref:dfs24} (without an attack on the constructions
-themselves). We evaluated these candidates as backends against four gates
-(zero knowledge, expressibility of the verifier-built statement, runnability
-on the target host, and fit in the measured carrier capacity); none passed
-all four, which motivates the small, self-contained BDLOP opening proof used
-here. The relation we need, knowledge of one commitment opening bound to a
-statement, is exactly the one the BDLOP opening proof covers.
+\subsection{Chứng minh không tiết lộ tri thức trên lưới}
+Các cam kết BDLOP~\cite{ref:bdlop} với các phần mở theo
+Fiat--Shamir-with-aborts~\cite{ref:lyu09,ref:lyu12} là nền tảng cho các chứng
+minh chính xác và tuyến tính/tích của Attema và cộng sự~\cite{ref:als20}, Esgin
+và cộng sự~\cite{ref:ens20} và Lyubashevsky và cộng sự~\cite{ref:lnp22}, được
+hiện thực trong LaZer~\cite{ref:lazer}; ML-DSA~\cite{ref:fips204,ref:dilithium}
+dùng cùng kỹ thuật che-mặt-nạ-và-loại-bỏ (masking-and-rejection) cho chữ ký.
+Các lập luận súc tích trên lưới, bao gồm LaBRADOR~\cite{ref:labrador},
+LatticeFold~\cite{ref:latticefold}, RoKoko~\cite{ref:rokoko} và
+SALSAA~\cite{ref:salsaa}, nhắm tới kích thước chứng minh cho các quan hệ lớn;
+các phiên bản mà chúng tôi có thể đánh giá đều tắt tính không tiết lộ tri thức
+trong các cấu hình được báo cáo, chỉ chứng minh tính đúng đắn tri thức, hoặc
+(với gấp) không cung cấp một bên chứng minh không tiết lộ tri thức độc lập. Các
+zkSNARK trên lưới với bên kiểm chứng được chỉ định~\cite{ref:isw21,ref:luna}
+gọn nhẹ, nhưng giả thiết lấy mẫu LWE theo kiểu không hay biết (oblivious) dùng
+trong phân tích của các cấu trúc trong mô hình chuẩn, bao gồm ISW21, bị vô hiệu
+trước các đối thủ lượng tử~\cite{ref:dfs24} (mà không cần một tấn công vào chính
+các cấu trúc đó). Chúng tôi đánh giá các ứng viên này làm backend dựa trên bốn
+tiêu chí (tính không tiết lộ tri thức, khả năng biểu diễn phát biểu do bên kiểm
+chứng dựng nên, khả năng chạy được trên máy đích, và vừa khít với dung lượng vật
+mang đã đo); không ứng viên nào vượt qua cả bốn, điều này thúc đẩy việc dùng
+chứng minh mở BDLOP nhỏ gọn, khép kín ở đây. Quan hệ mà chúng tôi cần, tức hiểu
+biết về một phần mở của một cam kết được ràng buộc vào một phát biểu, chính là
+quan hệ mà chứng minh mở BDLOP bao phủ.
 
 % =====================================================================
-\section{Background}
+\section{Kiến thức nền}
 \label{sec:background}
 
 \paragraph{H.264 CAVLC}
-In the Baseline profile~\cite{ref:h264,ref:wiegand03}, the residual of each
-$4\times4$ block is entropy-coded with CAVLC: a \texttt{coeff\_token} giving
-the number of non-zero coefficients and of trailing ones (up to three final
-$\pm1$ values in reverse zig-zag order), one raw sign bit per trailing one,
-variable-length level codes for the remaining coefficients with an adaptive
-suffix length, and run-length codes for the zeros. The context of
-\texttt{coeff\_token} depends on the number of non-zero coefficients in
-neighbouring blocks, so a change that alters that number propagates to the
-coding of later blocks. In intra slices each block is also a prediction
-reference for its neighbours, which is the origin of intra drift.
+Trong profile Baseline~\cite{ref:h264,ref:wiegand03}, phần dư của mỗi khối
+$4\times4$ được mã hóa entropy bằng CAVLC: một \texttt{coeff\_token} cho biết
+số hệ số khác không và số trailing ones (tối đa ba giá trị $\pm1$ ở cuối theo
+thứ tự zig-zag ngược), một bit dấu thô cho mỗi trailing one, các mã mức có độ
+dài thay đổi cho các hệ số còn lại với một độ dài hậu tố thích nghi, và các mã
+run-length cho các số không. Ngữ cảnh của \texttt{coeff\_token} phụ thuộc vào
+số hệ số khác không trong các khối lân cận, nên một thay đổi làm biến đổi con số
+đó sẽ lan truyền sang việc mã hóa các khối về sau. Trong các lát (slice) nội
+khung, mỗi khối còn là một tham chiếu dự đoán cho các khối lân cận, đây là nguồn
+gốc của sự trôi nội khung.
 
-\paragraph{BDLOP commitments}
-Let $\Rq=\mathbb{Z}_q[X]/(X^N+1)$ with $N$ a power of two and $q\equiv5
-\pmod 8$ prime, so that $X^N+1$ splits into two irreducible factors and every
-non-zero element of small norm, in particular every difference of two
-challenges, is invertible~\cite{ref:ls18}. With public
+\paragraph{Cam kết BDLOP}
+Đặt $\Rq=\mathbb{Z}_q[X]/(X^N+1)$ với $N$ là một lũy thừa của hai và $q\equiv5
+\pmod 8$ nguyên tố, sao cho $X^N+1$ tách thành hai nhân tử bất khả quy và mọi
+phần tử khác không có chuẩn nhỏ, cụ thể là mọi hiệu của hai thách thức, đều khả
+nghịch~\cite{ref:ls18}. Với các giá trị công khai
 $B_1=[I_n\,|\,B_1']\in\Rq^{n\times k}$, $b_2=[0^n\,|\,1\,|\,b_2']\in\Rq^{1\times k}$
-and $k=n+\lambda+1$, a commitment to $m\in\Rq$ with ternary randomness $r$ is
-$t_1=B_1r$, $t_2=\langle b_2,r\rangle+m$. It is computationally hiding under
-Module-LWE and binding under Module-SIS~\cite{ref:bdlop,ref:ls15}.
+và $k=n+\lambda+1$, một cam kết với $m\in\Rq$ dùng tính ngẫu nhiên bậc ba
+(ternary) $r$ là $t_1=B_1r$, $t_2=\langle b_2,r\rangle+m$. Nó che giấu theo
+nghĩa tính toán dưới Module-LWE và ràng buộc dưới Module-SIS~\cite{ref:bdlop,ref:ls15}.
 
 \paragraph{Fiat--Shamir with aborts}
-The opening proof is a $\Sigma$-protocol in which the prover masks the
-response $z=y+cr$ with a uniform $y$ and aborts unless $z$ lies in a range
-that makes its distribution independent of $r$~\cite{ref:lyu09,ref:lyu12}.
-It is made non-interactive with the Fiat--Shamir
-transform~\cite{ref:fs86}. The original reprogramming argument for this
-transform had a gap that was fixed by Barbosa et al.~\cite{ref:barbosa} and
-Devevey et al.~\cite{ref:devevey}; quantum-random-oracle results for
-Fiat--Shamir~\cite{ref:dfms19,ref:lz19} are generic and not tight for our
-setting.
+Chứng minh mở là một $\Sigma$-protocol trong đó bên chứng minh che đáp ứng
+$z=y+cr$ bằng một $y$ đều (uniform) và loại bỏ (abort) trừ khi $z$ nằm trong
+một khoảng khiến phân phối của nó độc lập với $r$~\cite{ref:lyu09,ref:lyu12}.
+Nó được biến thành không tương tác bằng phép biến đổi
+Fiat--Shamir~\cite{ref:fs86}. Lập luận tái lập trình (reprogramming) ban đầu
+cho phép biến đổi này có một lỗ hổng, về sau được Barbosa và cộng
+sự~\cite{ref:barbosa} và Devevey và cộng sự~\cite{ref:devevey} vá lại; các kết
+quả về oracle ngẫu nhiên lượng tử cho Fiat--Shamir~\cite{ref:dfms19,ref:lz19}
+mang tính tổng quát và không chặt cho bối cảnh của chúng tôi.
 
 % =====================================================================
-\section{System and threat model}
+\section{Mô hình hệ thống và mô hình đe dọa}
 \label{sec:model}
 
-\paragraph{Roles}
-An \emph{issuer} publishes a relation registry signed with ML-DSA-65. Each
-registry record pins a proof suite, the hash of the verification key
-(including, in registered mode, the holder's credential commitment), the
-parameter-set identifier and a policy hash over the codec policy and the
-carrier profile; the registry has an epoch. A \emph{holder} owns a payload or
-a credential and produces the stego video. A \emph{verifier} issues one-use
-session challenges, receives videos and decides. The \emph{adversary}
-observes all videos and challenges, replays, edits, re-encodes and re-embeds
-videos, runs its own holder instances, and performs steganalysis.
+\paragraph{Các vai trò}
+Một \emph{bên phát hành} công bố một sổ đăng ký quan hệ được ký bằng ML-DSA-65.
+Mỗi bản ghi của sổ đăng ký ghim một bộ chứng minh (proof suite), giá trị băm của
+khóa kiểm chứng (bao gồm, trong chế độ đã đăng ký, cam kết chứng chỉ của bên nắm
+giữ), định danh bộ tham số và một giá trị băm chính sách trên chính sách codec
+và hồ sơ vật mang; sổ đăng ký có một epoch. Một \emph{bên nắm giữ} sở hữu một
+tải trọng hoặc một chứng chỉ và tạo ra video stego. Một \emph{bên kiểm chứng}
+phát hành các thách thức phiên dùng-một-lần, nhận các video và ra quyết định.
+\emph{Đối thủ} quan sát mọi video và thách thức, phát lại, chỉnh sửa, mã hóa lại
+và nhúng lại các video, chạy các phiên bản bên nắm giữ của riêng nó, và thực
+hiện phân tích giấu tin.
 
-\paragraph{Trust}
-The verifier trusts only (i) the issuer public key, (ii) a minimum registry
-epoch (its rollback floor), (iii) the parameter set and carrier profile it is
-configured with, and (iv) its own session store. Nothing read from the video
-is trusted before verification succeeds. The holder and verifier share a
-symmetric carrier-ordering (stego) key when undetectability is required; the
-key can instead be derived from public configuration
-(Section~\ref{sec:orderkey}).
+\paragraph{Niềm tin}
+Bên kiểm chứng chỉ tin vào (i) khóa công khai của bên phát hành, (ii) một epoch
+tối thiểu của sổ đăng ký (ngưỡng chống quay lui của nó), (iii) bộ tham số và hồ
+sơ vật mang mà nó được cấu hình, và (iv) kho phiên của riêng nó. Không gì đọc từ
+video được tin trước khi việc kiểm chứng thành công. Bên nắm giữ và bên kiểm
+chứng chia sẻ một khóa (stego) đối xứng để sắp thứ tự vật mang khi cần tính
+không phát hiện được; thay vào đó khóa có thể được dẫn xuất từ cấu hình công khai
+(Mục~\ref{sec:orderkey}).
 
-\paragraph{Goals}
-(G1) \emph{Soundness bound to video and session}: if the verifier accepts,
-then whoever produced the video knew a (relaxed) opening of the bound
-commitment, for exactly this carrier-normalized video, carrier layout,
-registry entry and session.
-(G2) \emph{Zero knowledge}: the video reveals nothing about the payload or the
-opening beyond the statement.
-(G3) \emph{Integrity}: any change to non-carrier syntax, and any change to
-the envelope bytes carried by the carriers, is rejected. (Changes to a few
-carrier bits that hold chunk-framing fields are currently not all rejected;
-see Section~\ref{sec:discussion}.)
-(G4) \emph{Replay resistance}: an envelope is accepted at most once, and only
-for a challenge the verifier issued and has not consumed.
-(G5) \emph{Linkage and disclosure}: a holder can later show that two
-commitments hide the same payload, or open a commitment to a chosen party.
-(G6) \emph{Undetectability} against an adversary without the stego key,
-measured empirically by steganalysis.
+\paragraph{Mục tiêu}
+(G1) \emph{Tính đúng đắn ràng buộc vào video và phiên}: nếu bên kiểm chứng chấp
+nhận, thì ai tạo ra video đều đã biết một phần mở (nới lỏng) của cam kết được
+ràng buộc, cho đúng video đã chuẩn hóa theo vật mang này, bố cục vật mang, mục
+trong sổ đăng ký và phiên này.
+(G2) \emph{Không tiết lộ tri thức}: video không tiết lộ gì về tải trọng hay phần
+mở ngoài những gì phát biểu đã nêu.
+(G3) \emph{Tính toàn vẹn}: mọi thay đổi đối với cú pháp không-phải-vật-mang, và
+mọi thay đổi đối với các byte của envelope do các vật mang chứa, đều bị từ chối.
+(Hiện tại, thay đổi đối với một vài bit vật mang giữ các trường khung-chunk chưa
+bị từ chối hết; xem Mục~\ref{sec:discussion}.)
+(G4) \emph{Khả năng chống phát lại}: một envelope được chấp nhận nhiều nhất một
+lần, và chỉ cho một thách thức mà bên kiểm chứng đã phát hành và chưa tiêu thụ.
+(G5) \emph{Liên kết và tiết lộ}: về sau một bên nắm giữ có thể chỉ ra rằng hai
+cam kết giấu cùng một tải trọng, hoặc mở một cam kết cho một bên được chọn.
+(G6) \emph{Tính không phát hiện được} trước một đối thủ không có khóa stego, được
+đo bằng thực nghiệm qua phân tích giấu tin.
 
-\paragraph{Non-goals}
-The proof does not establish that the payload is true, that a camera recorded
-the video, that an encoder ran correctly, or who the creator is in in-band
-mode (anyone holding a session challenge can produce an in-band proof about a
-fresh commitment; identity requires registered mode). The channel is fragile
-by design: re-encoding or transcoding destroys the envelope, and verification
-then fails closed. Robustness is not a goal.
+\paragraph{Những điều không phải mục tiêu}
+Chứng minh không thiết lập rằng tải trọng là đúng sự thật, rằng một máy quay đã
+ghi video, rằng một bộ mã hóa đã chạy đúng, hay ai là người tạo trong chế độ
+in-band (bất kỳ ai nắm một thách thức phiên đều có thể tạo một chứng minh in-band
+về một cam kết mới; danh tính đòi hỏi chế độ đã đăng ký). Kênh này mong manh theo
+thiết kế: việc mã hóa lại hoặc chuyển mã phá hủy envelope, và khi đó việc kiểm
+chứng thất bại theo hướng đóng (fail closed). Tính bền vững (robustness) không
+phải là một mục tiêu.
 
 % =====================================================================
 \section{Construction}
 \label{sec:construction}
 
-Figure~\ref{fig:flow} summarizes the embed and verify flows. The proof system
-is specified in Section~\ref{sec:proof}; the remaining subsections describe
-how its statement is tied to the H.264 stream.
+Hình~\ref{fig:flow} tóm tắt các luồng nhúng và kiểm chứng. Hệ chứng minh được
+đặc tả trong Mục~\ref{sec:proof}; các tiểu mục còn lại mô tả cách phát biểu của
+nó được gắn vào luồng H.264.
 
 \begin{figure*}[t]
 \centering
@@ -349,90 +372,89 @@ how its statement is tied to the H.264 stream.
   \node[role, anchor=north east] at (vl.south east) {Verifier};
   \draw[pinarr] (iss.south) -- ++(0,-7mm) -| node[pos=0.25, below, font=\scriptsize]{pins: issuer key, minimum epoch, parameter set, carrier profile} (vver.south |- vl.south);
 \end{tikzpicture}
-\caption{Embedding (top) and video-only verification (bottom). Carrier
-positions and the carrier-normalized digest $D$ are fixed from a placeholder
-envelope of the final length before the proof is computed, so the statement
-can bind them without depending on the proof bits. The verifier recomputes
-every statement field from the stego video and its own pinned configuration.}
+\caption{Nhúng (phía trên) và kiểm chứng chỉ-từ-video (phía dưới). Các vị trí
+vật mang và digest đã chuẩn hóa theo vật mang $D$ được cố định từ một envelope
+giữ chỗ có độ dài cuối cùng trước khi chứng minh được tính, nên phát biểu có thể
+ràng buộc chúng mà không phụ thuộc vào các bit của chứng minh. Bên kiểm chứng
+tính lại mọi trường của phát biểu từ video stego và từ cấu hình đã ghim của
+chính nó.}
 \label{fig:flow}
 \end{figure*}
 
-\subsection{Carriers}
+\subsection{Các vật mang}
 \label{sec:carriers}
-In every eligible luma $4\times4$ block of an IDR slice, the carrier is the
-first AC coefficient in zig-zag order with $|\mathit{level}|\ge4$ that is not a
-trailing one. One bit is written into the least-significant bit of its
-magnitude by a change of $\pm1$, keeping the sign; the coefficient stays
-eligible and, because the selection rule is also required to be
-\emph{rank-stable} (no earlier candidate becomes eligible after the flip),
-a blind extractor that applies the same rule to the stego stream finds the
-same position. A block is used only if its re-encoding with the modified
-carrier round-trips through the CAVLC parser of the rewritten slice
-(\emph{patchability} check), and at most one coefficient per block is
-modified. The
-embedder writes the bits by re-encoding the affected blocks and rewriting the
-slice payload, which may change its length. An alternative profile uses the
-sign of a trailing one as the carrier (Section~\ref{sec:carrier}).
+Trong mỗi khối luma $4\times4$ đủ điều kiện của một lát IDR, vật mang là hệ số
+AC đầu tiên theo thứ tự zig-zag có $|\mathit{level}|\ge4$ và không phải là một
+trailing one. Một bit được ghi vào bit ít quan trọng nhất của độ lớn của nó
+bằng một thay đổi $\pm1$, giữ nguyên dấu; hệ số vẫn đủ điều kiện và, bởi vì quy
+tắc lựa chọn còn được yêu cầu \emph{ổn định về thứ hạng} (rank-stable) (không có
+ứng viên nào trước đó trở nên đủ điều kiện sau khi lật), một bộ trích xuất mù áp
+dụng cùng quy tắc lên luồng stego sẽ tìm thấy đúng vị trí đó. Một khối chỉ được
+dùng nếu việc mã hóa lại nó với vật mang đã sửa đổi đi vòng trọn vẹn (round-trip)
+qua bộ phân tích cú pháp CAVLC của lát đã được viết lại (kiểm tra \emph{tính vá
+được}, patchability), và tối đa một hệ số mỗi khối bị sửa đổi. Bộ nhúng ghi các
+bit bằng cách mã hóa lại các khối bị ảnh hưởng và viết lại phần dữ liệu của lát,
+điều này có thể làm thay đổi độ dài của nó. Một hồ sơ thay thế dùng dấu của một
+trailing one làm vật mang (Mục~\ref{sec:carrier}).
 
-\subsection{Carrier layout and the carrier-normalized commitment}
+\subsection{Bố cục vật mang và cam kết đã chuẩn hóa theo vật mang}
 \label{sec:order}
-The stream is divided into segments of $F=100$ frames. The envelope is
-framed into chunks of a fixed size (a 23-byte header with magic, version,
-index, count, total and chunk sizes and a CRC-32 of the chunk body) and one
-chunk is embedded per segment. Within a segment, carrier positions are
-ordered by a keyed permutation; the ordering key is derived with HMAC-SHA-256
-from the stego key. Let $P$ be the ordered list of global carrier positions
-used by all chunks.
+Luồng được chia thành các đoạn gồm $F=100$ khung. Envelope được đóng khung
+thành các chunk có kích thước cố định (một header 23 byte gồm magic, phiên bản,
+chỉ số, số lượng, tổng và các kích thước chunk cùng một CRC-32 của thân chunk)
+và mỗi đoạn nhúng một chunk. Trong một đoạn, các vị trí vật mang được sắp thứ tự
+bằng một hoán vị có khóa; khóa sắp thứ tự được dẫn xuất bằng HMAC-SHA-256 từ
+khóa stego. Gọi $P$ là danh sách có thứ tự các vị trí vật mang toàn cục được
+dùng bởi tất cả các chunk.
 
-The circularity is broken by fixing everything the statement depends on
-\emph{before} the proof exists. The embedder first frames a
-\emph{placeholder} envelope of exactly the final length; this determines the
-chunk sizes and hence $P$. It then computes, for each segment, the SHA-256
-digest of the segment bitstream with every carrier coefficient in $P$
-replaced by a canonical value (magnitude with its least-significant bit
-cleared, sign kept; a sign carrier is set to $+1$), and combines the segment
-digests into $D$ with a domain-separated hash. The video commitment is
+Tính vòng tròn được phá vỡ bằng cách cố định mọi thứ mà phát biểu phụ thuộc vào
+\emph{trước khi} chứng minh tồn tại. Bộ nhúng trước hết đóng khung một envelope
+\emph{giữ chỗ} (placeholder) có đúng độ dài cuối cùng; điều này xác định các
+kích thước chunk và do đó xác định $P$. Sau đó, với mỗi đoạn, nó tính digest
+SHA-256 của luồng bit của đoạn với mỗi hệ số vật mang trong $P$ bị thay bằng một
+giá trị chuẩn tắc (độ lớn với bit ít quan trọng nhất bị xóa, giữ dấu; một vật
+mang dấu được đặt thành $+1$), và kết hợp các digest của các đoạn thành $D$ bằng
+một hàm băm có tách miền (domain-separated). Cam kết video là
 \[
 V=\mathrm{SHA\mbox{-}256}(\mathit{dom}_V\,\|\,D),
 \]
-with the domain tag $\mathit{dom}_V$ =
+với thẻ miền $\mathit{dom}_V$ =
 \url{zkstego/video-zk/video-commitment/v1}.
-After proving, the embedder checks that the real envelope produces exactly
-the placeholder's chunk layout and aborts otherwise. Because $D$ normalizes
-exactly the positions that carry the envelope, it is the same before and
-after embedding; any change outside the carriers changes $D$, and any change
-of an envelope byte invalidates the proof or the statement. The framing
-fields themselves are a partial exception (Section~\ref{sec:discussion}).
+Sau khi chứng minh, bộ nhúng kiểm tra rằng envelope thực tạo ra đúng bố cục
+chunk của placeholder và loại bỏ nếu không. Bởi vì $D$ chuẩn hóa đúng các vị trí
+mang envelope, nó giống nhau trước và sau khi nhúng; mọi thay đổi bên ngoài các
+vật mang đều làm đổi $D$, và mọi thay đổi một byte của envelope đều làm vô hiệu
+chứng minh hoặc phát biểu. Bản thân các trường đóng khung là một ngoại lệ một
+phần (Mục~\ref{sec:discussion}).
 
-\subsection{Statement}
-The Fiat--Shamir statement $x$ is the fixed-width (274-byte) encoding
+\subsection{Phát biểu}
+Phát biểu Fiat--Shamir $x$ là mã hóa có độ rộng cố định (274 byte)
 \begin{multline*}
 x=\mathit{ver}\,\|\,\mathit{rel}\,\|\,\pid\,\|\,\mathit{root}\,\|\,\mathit{epoch}\,\|\,N_s\,\|\\
 \mathit{codec}\,\|\,\mathit{profile}\,\|\,|P|\,\|\,\Hash(P)\,\|\,V,
 \end{multline*}
-with a 16-bit version, 64-bit epoch and carrier count, and 32-byte values
-otherwise: relation identifier, parameter-set identifier, registry root,
-session challenge, codec-policy identifier, carrier-profile identifier (a hash
-of the carrier contract, segment length, chunk size, envelope length and
-mode), carrier-position hash and video commitment. The verifier builds $x$
-only from its pinned configuration and from values it recomputes from the
-received stream.
+với một phiên bản 16 bit, epoch và số đếm vật mang 64 bit, và các giá trị 32
+byte còn lại: định danh quan hệ, định danh bộ tham số, gốc sổ đăng ký, thách
+thức phiên, định danh chính sách codec, định danh hồ sơ vật mang (một giá trị
+băm của hợp đồng vật mang, độ dài đoạn, kích thước chunk, độ dài envelope và chế
+độ), giá trị băm vị trí vật mang và cam kết video. Bên kiểm chứng dựng $x$ chỉ
+từ cấu hình đã ghim của nó và từ các giá trị mà nó tính lại từ luồng nhận được.
 
-\subsection{Proof system}
+\subsection{Hệ chứng minh}
 \label{sec:proof}
-Algorithm~\ref{alg:proof} gives the opening proof and its verification for
-statement $x$ and commitment $t=(t_1,t_2)$; $\Hash$ is SHAKE-256 with domain
-separation and length prefixes, and $\SIB$ is the ML-DSA-style sampler that
-outputs $c\in\Rq$ with exactly $\kappa$ coefficients in $\{\pm1\}$ and the rest
-zero. The masks are derived deterministically from fresh entropy, the
-statement, the commitment and the witness (hedged), so a mask is never reused
-across statements. Nothing from a rejected attempt leaves the prover. The
-equality proof used for linkage runs two copies of the protocol with a common
-challenge and adds $u=\langle b_2,y_a-y_b\rangle$ to the hash, which the
-verifier recomputes as $\langle b_2,z_a-z_b\rangle-c\,(t_{2,a}-t_{2,b})$.
+Thuật toán~\ref{alg:proof} trình bày chứng minh mở và việc kiểm chứng nó cho
+phát biểu $x$ và cam kết $t=(t_1,t_2)$; $\Hash$ là SHAKE-256 với tách miền và
+tiền tố độ dài, còn $\SIB$ là bộ lấy mẫu kiểu ML-DSA xuất ra $c\in\Rq$ với đúng
+$\kappa$ hệ số thuộc $\{\pm1\}$ và phần còn lại bằng không. Các mặt nạ được dẫn
+xuất tất định từ entropy mới, phát biểu, cam kết và nhân chứng (witness) (có
+phòng hộ, hedged), nên một mặt nạ không bao giờ bị tái dùng giữa các phát biểu.
+Không gì từ một lần thử bị loại rời khỏi bên chứng minh. Chứng minh đẳng thức
+dùng cho liên kết chạy hai bản sao của giao thức với một thách thức chung và
+thêm $u=\langle b_2,y_a-y_b\rangle$ vào hàm băm, mà bên kiểm chứng tính lại
+thành $\langle b_2,z_a-z_b\rangle-c\,(t_{2,a}-t_{2,b})$.
 
 \begin{algorithm}[t]
-\caption{Opening proof (prover) and verification.}
+\caption{Chứng minh mở (bên chứng minh) và kiểm chứng.}
 \label{alg:proof}
 \small
 \begin{algorithmic}[1]
@@ -442,11 +464,11 @@ verifier recomputes as $\langle b_2,z_a-z_b\rangle-c\,(t_{2,a}-t_{2,b})$.
 \For{$i=1,\dots,512$}
   \State $y\gets$ uniform in $[-\gamma+1,\gamma]^{kN}$ from $\Hash(\texttt{mask}\,\|\,K\,\|\,i)$
   \State $w\gets B_1y$
-  \State $s\gets\Hash(\texttt{fs}\,\|\,\pid\,\|\,|x|\,\|\,x\,\|\,t\,\|\,w)$ \Comment{32 bytes}
+  \State $s\gets\Hash(\texttt{fs}\,\|\,\pid\,\|\,|x|\,\|\,x\,\|\,t\,\|\,w)$ \Comment{32 byte}
   \State $c\gets\SIB(s)$;\quad $z\gets y+cr$
   \If{$\norm{z}_\infty\le B$} \Return $\pi=(s,\mathrm{Pack}(z+B))$ \EndIf
 \EndFor
-\State \Return $\bot$ \Comment{probability $<2^{-156}$}
+\State \Return $\bot$ \Comment{xác suất $<2^{-156}$}
 \Statex
 \Statex \textbf{Verify}$(\pid, x, t, \pi)$
 \State parse $\pi=(s,z)$; reject unless $|\pi|$ is exact, every packed value
@@ -458,84 +480,85 @@ verifier recomputes as $\langle b_2,z_a-z_b\rangle-c\,(t_{2,a}-t_{2,b})$.
 
 \input{tables/params}
 
-Table~\ref{tab:params} lists the production parameter set. With uniform
-masking the accepted response is exactly uniform on $[-B,B]^{kN}$, which
-gives zero knowledge without a Gaussian sampler; the price is a larger
-extracted norm, so binding is estimated for the $\ell_\infty$ bound $8\kappa B$
-rather than reused from~\cite{ref:bdlop}. The per-attempt acceptance
-probability is $((2B+1)/2\gamma)^{kN}\approx0.191$ (5.23 expected attempts;
-4.68 measured over 50 runs with \texttt{bdlop-open-128-v1}\todo{v2 measurement}). Core-SVP costs were computed with the CRYSTALS
-estimation scripts~\cite{ref:crystalsestimates}, ignoring reduction losses as
-for ML-DSA. An independent cross-check with the
+Bảng~\ref{tab:params} liệt kê bộ tham số sản xuất. Với việc che bằng phân phối
+đều, đáp ứng được chấp nhận là đều chính xác trên $[-B,B]^{kN}$, điều này đem
+lại tính không tiết lộ tri thức mà không cần một bộ lấy mẫu Gauss; cái giá là
+chuẩn trích xuất lớn hơn, nên tính ràng buộc được ước lượng cho cận $\ell_\infty$
+$8\kappa B$ thay vì tái dùng từ~\cite{ref:bdlop}. Xác suất chấp nhận mỗi lần thử
+là $((2B+1)/2\gamma)^{kN}\approx0.191$ (kỳ vọng 5.23 lần thử; đo được 4.68 qua
+50 lần chạy với \texttt{bdlop-open-128-v1}\todo{v2 measurement}). Chi phí core-SVP được tính bằng các
+script ước lượng CRYSTALS~\cite{ref:crystalsestimates}, bỏ qua các tổn thất do
+rút gọn như với ML-DSA. Một kiểm tra chéo độc lập với
 lattice-estimator~\cite{ref:aps15,ref:latticeestimator} (commit
-\texttt{e4333d9}, same core-SVP model) reproduces the M-SIS estimate
-($\beta=480$, 140/127 bits) and the primal M-LWE estimate ($\beta=580$,
-169/154 bits; 169/153 with the CRYSTALS scripts). Its dual-hybrid attack on
-M-LWE is slightly cheaper ($\beta=564$, $2^{164.9}$ classical; $\beta=567$,
-$2^{150.3}$ quantum), so we take 164/150 bits for hiding
-(Table~\ref{tab:params}). The quantum binding estimate, 127 bits, is just
-below 128. The $\ell_2$ relaxation of the binding bound exceeds $q$, so
-binding rests on the $\ell_\infty$ estimate. Under the estimator's default
-cost model, every attack on either instance costs at least $2^{170}$. The
-earlier set \texttt{bdlop-open-128-v1} ($\lambda=6$, $k=13$) has the same
-binding estimate but only 135/123 bits for hiding (dual hybrid, $\beta=463$);
-this is why the production set raises the M-LWE rank to $\lambda=7$.
+\texttt{e4333d9}, cùng mô hình core-SVP) tái lập ước lượng M-SIS ($\beta=480$,
+140/127 bit) và ước lượng M-LWE nguyên thủy (primal) ($\beta=580$, 169/154 bit;
+169/153 với các script CRYSTALS). Tấn công lai đối ngẫu (dual-hybrid) của nó lên
+M-LWE rẻ hơn một chút ($\beta=564$, $2^{164.9}$ cổ điển; $\beta=567$,
+$2^{150.3}$ lượng tử), nên chúng tôi lấy 164/150 bit cho tính che giấu
+(Bảng~\ref{tab:params}). Ước lượng tính ràng buộc lượng tử, 127 bit, chỉ vừa
+dưới 128. Nới lỏng $\ell_2$ của cận ràng buộc vượt quá $q$, nên tính ràng buộc
+dựa trên ước lượng $\ell_\infty$. Dưới mô hình chi phí mặc định của bộ ước lượng,
+mọi tấn công vào một trong hai thể hiện đều tốn ít nhất $2^{170}$. Bộ trước đó
+\texttt{bdlop-open-128-v1} ($\lambda=6$, $k=13$) có cùng ước lượng ràng buộc
+nhưng chỉ 135/123 bit cho tính che giấu (lai đối ngẫu, $\beta=463$); đây là lý
+do bộ sản xuất nâng hạng M-LWE lên $\lambda=7$.
 
-\subsection{Envelopes, registry and sessions}
-The envelope is
+\subsection{Envelope, sổ đăng ký và phiên}
+Envelope là
 \begin{align*}
 E_{\mathrm{in}}  &= \texttt{"ZKLB"}\,\|\,\texttt{0x01}\,\|\,\pid\,\|\,N_s\,\|\,t\,\|\,\pi,\\
 E_{\mathrm{reg}} &= \texttt{"ZKLR"}\,\|\,\texttt{0x01}\,\|\,\pid\,\|\,N_s\,\|\,\pi,
 \end{align*}
-for the in-band and registered modes. In the in-band mode a fresh
-commitment $t$ (6\,720 bytes) to the payload travels in the video; the
-payload is encoded injectively into $N$ coefficients and is at most 766
-bytes. In the registered mode $t$ is the holder's credential commitment,
-whose bytes enter the verification-key hash that the issuer signs into the
-registry, so only the credential holder can produce an accepting proof and
-the video carries only $\pi$.
+cho các chế độ in-band và đã đăng ký. Trong chế độ in-band, một cam kết mới $t$
+(6\,720 byte) với tải trọng di chuyển trong video; tải trọng được mã hóa đơn
+ánh vào $N$ hệ số và dài tối đa 766 byte. Trong chế độ đã đăng ký, $t$ là cam
+kết chứng chỉ của bên nắm giữ, có các byte đi vào giá trị băm khóa-kiểm-chứng mà
+bên phát hành ký vào sổ đăng ký, nên chỉ bên nắm giữ chứng chỉ mới có thể tạo ra
+một chứng minh được chấp nhận và video chỉ mang $\pi$.
 
-The verifier resolves its pins from the registry: it checks the ML-DSA-65
-signature against the pinned issuer key, rejects epochs below its floor,
-rejects parameter sets with a challenge space below $2^{256}$, and requires
-exactly one record matching its parameter set, carrier profile and (in
-registered mode) credential. Session challenges are 32-byte random values
-stored in a SQLite database with a time-to-live and a binding digest over the
-parameter set, relation, registry root and epoch, codec policy and carrier
-profile. The verifier reads $N_s$ from the extracted envelope only to look it
-up; in a single transaction it checks that the challenge was issued, is
-unexpired, unconsumed and correctly bound, verifies the proof under the
-statement it built, and marks the challenge consumed only if verification
-succeeds.
+Bên kiểm chứng phân giải các mục ghim của nó từ sổ đăng ký: nó kiểm tra chữ ký
+ML-DSA-65 đối chiếu với khóa đã ghim của bên phát hành, từ chối các epoch dưới
+ngưỡng của nó, từ chối các bộ tham số có không gian thách thức dưới $2^{256}$,
+và đòi hỏi đúng một bản ghi khớp với bộ tham số, hồ sơ vật mang và (trong chế độ
+đã đăng ký) chứng chỉ của nó. Các thách thức phiên là các giá trị ngẫu nhiên 32
+byte được lưu trong một cơ sở dữ liệu SQLite kèm một thời-gian-sống
+(time-to-live) và một digest ràng buộc trên bộ tham số, quan hệ, gốc sổ đăng ký
+và epoch, chính sách codec và hồ sơ vật mang. Bên kiểm chứng đọc $N_s$ từ
+envelope đã trích xuất chỉ để tra cứu; trong một giao dịch đơn nhất, nó kiểm tra
+rằng thách thức đã được phát hành, chưa hết hạn, chưa tiêu thụ và được ràng buộc
+đúng, kiểm chứng chứng minh dưới phát biểu mà nó đã dựng, và chỉ đánh dấu thách
+thức là đã tiêu thụ nếu việc kiểm chứng thành công.
 
-\subsection{Linkage and disclosure}
+\subsection{Liên kết và tiết lộ}
 \label{sec:linkage}
-A holder of two openings can prove that two commitments hide the same
-payload with the equality proof (16\,160 bytes), bound to the two
-commitments and to a context such as the two statement identifiers. This
-links two in-band videos to one payload, or links an in-band video to a
-registered credential after the fact, without revealing the payload. A
-holder can also disclose the payload to a chosen party without revealing
-the randomness: the disclosure is the payload with an equality proof between
-the extracted commitment and the deterministic commitment to the payload
-under zero randomness, bound to the recipient's statement identifier and
-nonce (16\,160 bytes of proof). The recipient learns the payload but cannot
-reuse the commitment in new proofs.
+Một bên nắm giữ hai phần mở có thể chứng minh rằng hai cam kết giấu cùng một
+tải trọng bằng chứng minh đẳng thức (16\,160 byte), được ràng buộc vào hai cam
+kết và vào một ngữ cảnh chẳng hạn hai định danh phát biểu. Điều này liên kết hai
+video in-band tới một tải trọng, hoặc liên kết một video in-band tới một chứng
+chỉ đã đăng ký sau đó, mà không tiết lộ tải trọng. Một bên nắm giữ cũng có thể
+tiết lộ tải trọng cho một bên được chọn mà không tiết lộ tính ngẫu nhiên: việc
+tiết lộ là tải trọng kèm một chứng minh đẳng thức giữa cam kết đã trích xuất và
+cam kết tất định với tải trọng dưới tính ngẫu nhiên bằng không, được ràng buộc
+vào định danh phát biểu và nonce của bên nhận (16\,160 byte chứng minh). Bên
+nhận biết được tải trọng nhưng không thể tái dùng cam kết trong các chứng minh
+mới.
 
-\subsection{Carrier ordering key}
+\subsection{Khóa sắp thứ tự vật mang}
 \label{sec:orderkey}
-With a secret stego key shared by holder and verifier, the carrier layout is
-unknown to third parties, which is what steganographic undetectability
-requires: without a secret, anyone who knows the scheme can locate the
-carriers and test for an envelope~\cite{ref:simmons}. Where undetectability
-is not required, the ordering key can be derived from public registered
-configuration, $\mathrm{SHA\mbox{-}256}(\mathit{domain}\,\|\,\pid\,\|\,\mathit{profile})$,
-so that anyone with the registry can verify. The key only determines where
-bits are found: soundness and zero knowledge of the proof do not depend on
-it, because the verifier recomputes $P$ and $V$ and both enter the statement.
+Với một khóa stego bí mật được bên nắm giữ và bên kiểm chứng chia sẻ, bố cục vật
+mang không được bên thứ ba biết, đó chính là điều mà tính không phát hiện được
+trong giấu tin đòi hỏi: nếu không có một bí mật, bất kỳ ai biết lược đồ đều có
+thể định vị các vật mang và thử tìm một envelope~\cite{ref:simmons}. Ở những nơi
+không cần tính không phát hiện được, khóa sắp thứ tự có thể được dẫn xuất từ cấu
+hình đã đăng ký công khai,
+$\mathrm{SHA\mbox{-}256}(\mathit{domain}\,\|\,\pid\,\|\,\mathit{profile})$, để
+bất kỳ ai có sổ đăng ký đều có thể kiểm chứng. Khóa chỉ xác định nơi tìm thấy
+các bit: tính đúng đắn và tính không tiết lộ tri thức của chứng minh không phụ
+thuộc vào nó, bởi vì bên kiểm chứng tính lại $P$ và $V$ và cả hai đều đi vào
+phát biểu.
 
 \begin{algorithm}[t]
-\caption{Video-level embedding and verification.}
+\caption{Nhúng và kiểm chứng ở mức video.}
 \label{alg:video}
 \small
 \begin{algorithmic}[1]
@@ -565,432 +588,439 @@ it, because the verifier recomputes $P$ and $V$ and both enter the statement.
 % the document compiles either way. main.tex does not \ref this section,
 % because its label differs between the two cases.
 \IfFileExists{sections/security.tex}{\input{sections/security}}{%
-\section{Security analysis}
+\section{Phân tích an toàn}
 \label{sec:security}
 
-We summarize the argument; full statements and proofs follow the published
-analyses of BDLOP~\cite{ref:bdlop} and ML-DSA~\cite{ref:dilithium,ref:fips204}
-with uniform masking.
+Chúng tôi tóm tắt lập luận; các phát biểu và chứng minh đầy đủ theo các phân
+tích đã công bố của BDLOP~\cite{ref:bdlop} và ML-DSA~\cite{ref:dilithium,ref:fips204}
+với việc che bằng phân phối đều.
 
-\begin{theorem}[informal]
-In the classical random-oracle model, the opening proof is complete with
-per-attempt acceptance $((2B+1)/2\gamma)^{kN}$; it is honest-verifier zero
-knowledge for accepted transcripts; and it is special sound, with extractor
-output a relaxed opening $(\bar r,f)$ satisfying $B_1\bar r=f\,t_1$,
-$\norm{\bar r}_\infty\le2B$ and $f$ a difference of two challenges, hence
-invertible. Two relaxed openings of one commitment to different messages
-yield a Module-SIS solution for $B_1$ of $\ell_\infty$ norm at most $8\kappa B$;
-hiding reduces to Module-LWE of rank $\lambda$ with $n+1$ samples and ternary
-secret and error.
+\begin{theorem}[không hình thức]
+Trong mô hình oracle ngẫu nhiên cổ điển, chứng minh mở là đầy đủ với xác suất
+chấp nhận mỗi lần thử $((2B+1)/2\gamma)^{kN}$; nó không tiết lộ tri thức với bên
+kiểm chứng trung thực đối với các bản ghi được chấp nhận; và nó đúng đắn đặc
+biệt (special sound), với đầu ra của bộ trích xuất là một phần mở nới lỏng
+$(\bar r,f)$ thỏa mãn $B_1\bar r=f\,t_1$, $\norm{\bar r}_\infty\le2B$ và $f$ là
+một hiệu của hai thách thức, do đó khả nghịch. Hai phần mở nới lỏng của một cam
+kết tới các thông điệp khác nhau cho ra một nghiệm Module-SIS cho $B_1$ có chuẩn
+$\ell_\infty$ tối đa $8\kappa B$; tính che giấu quy về Module-LWE hạng $\lambda$
+với $n+1$ mẫu và bí mật cùng sai số bậc ba.
 \end{theorem}
 
-Knowledge soundness of the non-interactive proof follows from special
-soundness by the forking lemma~\cite{ref:ps00,ref:bn06}, with a non-tight
-reduction; the rejection-sampling bias in the random-oracle reprogramming is
-handled as in~\cite{ref:barbosa,ref:devevey}. The parameter
-identifier, the 274-byte statement and the full commitment are hashed before
-the challenge is derived, so a proof verifies only for the statement it was
-made for; since the verifier recomputes every statement field, the proof is
-bound to the carrier-normalized video, the carrier layout, the registry entry
-and the session (G1, and G3 for the envelope bytes), and the atomic consumption of $N_s$ gives G4. The
-equality proof yields relaxed openings with a common $f$, from which the two
-extracted messages are equal (G5). We call the scheme \emph{plausibly
-post-quantum}: the underlying problems have no known efficient quantum
-algorithm, but we do not claim a proof in the quantum random-oracle model.
+Tính đúng đắn tri thức của chứng minh không tương tác suy ra từ tính đúng đắn
+đặc biệt bằng bổ đề rẽ nhánh (forking lemma)~\cite{ref:ps00,ref:bn06}, với một
+rút gọn không chặt; độ lệch do lấy mẫu loại bỏ trong việc tái lập trình oracle
+ngẫu nhiên được xử lý như trong~\cite{ref:barbosa,ref:devevey}. Định danh tham
+số, phát biểu 274 byte và cam kết đầy đủ được băm trước khi thách thức được dẫn
+xuất, nên một chứng minh chỉ kiểm chứng được cho phát biểu mà nó được tạo ra; vì
+bên kiểm chứng tính lại mọi trường của phát biểu, chứng minh được ràng buộc vào
+video đã chuẩn hóa theo vật mang, bố cục vật mang, mục trong sổ đăng ký và phiên
+(G1, và G3 cho các byte envelope), và việc tiêu thụ nguyên tử (atomic) $N_s$ đem
+lại G4. Chứng minh đẳng thức cho ra các phần mở nới lỏng với một $f$ chung, từ
+đó hai thông điệp trích xuất được là bằng nhau (G5). Chúng tôi gọi lược đồ này
+là \emph{hậu lượng tử một cách hợp lý} (plausibly post-quantum): các bài toán
+nền tảng không có thuật toán lượng tử hiệu quả đã biết, nhưng chúng tôi không
+khẳng định một chứng minh trong mô hình oracle ngẫu nhiên lượng tử.
 }
 
 % =====================================================================
-\section{Implementation}
+\section{Hiện thực}
 \label{sec:implementation}
 
-The backend is a self-contained, pure-Python implementation (Python 3.12,
-NumPy) of about 1\,700 lines for the ring, sampling, commitment, opening and
-equality proofs, payload codec, statement, envelope, linkage and a command-line
-interface that separates the issuer, holder and verifier roles. Polynomial
-multiplication uses exact big-integer Kronecker substitution; there is no
-NTT because $q\equiv5\pmod8$ does not split $X^N+1$ fully. The H.264 side reuses a
-Python CAVLC parser and bitstream patcher with a blind carrier
-synchronizer, a carrier canonicalizer, the chunk framing, an ML-DSA-65-signed
-relation registry (via the \texttt{pqcrypto} bindings) and the SQLite
-session store. The test suite covers the ring and samplers, commitment and
-proof correctness, the accepted-response uniformity and the acceptance edge,
-extraction of relaxed openings from two transcripts, statement substitution,
-envelope tampering, registry pinning and rollback, session replay, linkage,
-the CLI, and byte-exact known-answer vectors for the parameter set.
+Backend là một hiện thực thuần Python, khép kín (Python 3.12, NumPy) khoảng
+1\,700 dòng cho vành (ring), lấy mẫu, cam kết, các chứng minh mở và đẳng thức,
+bộ mã tải trọng (payload codec), phát biểu, envelope, liên kết và một giao diện
+dòng lệnh tách bạch các vai trò bên phát hành, bên nắm giữ và bên kiểm chứng.
+Phép nhân đa thức dùng phép thế Kronecker số nguyên lớn chính xác; không có NTT
+bởi vì $q\equiv5\pmod8$ không tách $X^N+1$ một cách hoàn toàn. Phía H.264 tái
+dùng một bộ phân tích cú pháp CAVLC và bộ vá luồng bit bằng Python kèm một bộ
+đồng bộ vật mang mù, một bộ chuẩn tắc hóa vật mang, phần đóng khung chunk, một
+sổ đăng ký quan hệ được ký bằng ML-DSA-65 (qua các binding \texttt{pqcrypto})
+và kho phiên SQLite. Bộ kiểm thử bao phủ vành và các bộ lấy mẫu, tính đúng đắn
+của cam kết và chứng minh, tính đều của đáp ứng được chấp nhận và biên chấp
+nhận, việc trích xuất các phần mở nới lỏng từ hai bản ghi, việc thay thế phát
+biểu, việc giả mạo envelope, việc ghim và quay lui sổ đăng ký, việc phát lại
+phiên, việc liên kết, CLI, và các vector câu-trả-lời-đã-biết chính xác từng
+byte cho bộ tham số.
 
-\paragraph{Sizes} Commitment 6\,720~B, opening proof 8\,096~B (a 32-byte
-challenge seed and $kN$ responses of 18 bits), equality proof 16\,160~B,
-envelope header 69~B; hence 8\,165~B (registered) and 14\,885~B (in-band) in
-the video, plus 23~B of framing per chunk.
+\paragraph{Kích thước} Cam kết 6\,720~B, chứng minh mở 8\,096~B (một hạt giống
+thách thức 32 byte và $kN$ đáp ứng mỗi cái 18 bit), chứng minh đẳng thức
+16\,160~B, header envelope 69~B; do đó 8\,165~B (đã đăng ký) và 14\,885~B
+(in-band) trong video, cộng thêm 23~B đóng khung mỗi chunk.
 
-\paragraph{Timing} On the evaluation host (single thread, idle), the median
-times over 50 runs are 21\,ms to commit, 120\,ms to prove (95th percentile
-302\,ms) and 22\,ms to verify an opening, and 0.97\,s and 46\,ms for the
-equality proof (measured with \texttt{bdlop-open-128-v1})\todo{v2 measurement}. Cryptography is therefore negligible end to end: embedding
-and verification of a clip take minutes and are dominated by the Python
-CAVLC analysis and patching (Table~\ref{tab:e2e}). A faster verification
-path is in progress; \todo{update verification times after the verification
+\paragraph{Thời gian} Trên máy đánh giá (một luồng, rảnh rỗi), các thời gian
+trung vị qua 50 lần chạy là 21\,ms để cam kết, 120\,ms để chứng minh (phân vị
+thứ 95 là 302\,ms) và 22\,ms để kiểm chứng một phần mở, và 0.97\,s cùng 46\,ms
+cho chứng minh đẳng thức (đo với \texttt{bdlop-open-128-v1})\todo{v2 measurement}. Do đó mật mã là
+không đáng kể xét trên toàn trình đầu-cuối: việc nhúng và kiểm chứng một clip
+mất vài phút và bị chi phối bởi việc phân tích và vá CAVLC bằng Python
+(Bảng~\ref{tab:e2e}). Một đường kiểm chứng nhanh hơn đang được phát triển;
+\todo{update verification times after the verification
 speed-up (roadmap A2)}.
 
-\paragraph{Why not a native encoder path} Embedding inside an encoder would
-change the reconstructed reference pixels, and with them all subsequent
-intra-predicted values, as a function of the proof bits, so a statement could
-not bind the video without a codec-level relation. Post-encoding patching
-with a carrier-normalized digest keeps the statement independent of the
-proof.
+\paragraph{Vì sao không dùng đường mã hóa gốc (native)} Việc nhúng bên trong một
+bộ mã hóa sẽ làm thay đổi các điểm ảnh tham chiếu được tái dựng, và cùng với
+chúng là mọi giá trị dự đoán nội khung về sau, như một hàm của các bit chứng
+minh, nên một phát biểu không thể ràng buộc video nếu thiếu một quan hệ ở mức
+codec. Việc vá sau khi mã hóa với một digest đã chuẩn hóa theo vật mang giữ cho
+phát biểu độc lập với chứng minh.
 
 % =====================================================================
-\section{Evaluation}
+\section{Đánh giá}
 \label{sec:evaluation}
 
-\subsection{Setup}
-All measurements were taken on one Windows~11 host with an Intel Core
-i7-12700H (14 cores) and 24\,GB of RAM. Sources are standard Xiph test
-sequences: CIF ($352\times288$; 300 frames, except Deadline with 1\,374 and
-Football with 260) and 4CIF ($704\times576$; 600 frames). They were encoded
-with FFmpeg/libx264 in the Baseline profile (CAVLC), all-intra
-($\mathit{GOP}=1$, no B-frames) at a fixed QP of 18, 22 or 28. Two longer
-inputs were used for the earliest runs: the first 1\,000 frames of Deadline,
-and Coastguard looped ten times to 3\,000 frames (marked $\ast$). Quality is
-the FFmpeg luma PSNR of the decoded stego against the decoded cover; the PSNR
-of modified frames is computed from their mean MSE, and SSIM is over the
-whole video. Unless stated otherwise the registered mode and the magnitude
-carrier are used, with 100-frame segments and a chunk size chosen from the
-measured capacity of each clip. Experiments ran sequentially, except where
-noted in the tables.
+\subsection{Thiết lập thí nghiệm}
+Mọi phép đo được thực hiện trên một máy Windows~11 với CPU Intel Core i7-12700H
+(14 nhân) và 24\,GB RAM. Các nguồn là các chuỗi kiểm thử Xiph chuẩn: CIF
+($352\times288$; 300 khung, trừ Deadline có 1\,374 và Football có 260) và 4CIF
+($704\times576$; 600 khung). Chúng được mã hóa bằng FFmpeg/libx264 ở profile
+Baseline (CAVLC), toàn-khung-nội ($\mathit{GOP}=1$, không có khung B) tại một QP
+cố định 18, 22 hoặc 28. Hai đầu vào dài hơn được dùng cho các lần chạy sớm
+nhất: 1\,000 khung đầu của Deadline, và Coastguard được lặp mười lần thành
+3\,000 khung (đánh dấu $\ast$). Chất lượng là PSNR luma do FFmpeg tính của video
+stego đã giải mã so với bản gốc đã giải mã; PSNR của các khung bị sửa đổi được
+tính từ MSE trung bình của chúng, và SSIM tính trên toàn video. Trừ khi nói khác
+đi, chế độ đã đăng ký và vật mang độ lớn (magnitude) được dùng, với các đoạn 100
+khung và một kích thước chunk được chọn từ dung lượng đo được của mỗi clip. Các
+thí nghiệm chạy tuần tự, trừ những chỗ được ghi chú trong các bảng.
 
-\subsection{Capacity}
-Table~\ref{tab:capacity} lists stable, patchability-checked carriers. At
-QP\,22 CIF clips offer 10.5--49.8\,kbit per 100 frames. Textured content
-(Container, Deadline, Coastguard) carries the registered envelope
-(about 65.3\,kbit) in 200 frames, and Container and Deadline carry the in-band
-envelope (about 119.1\,kbit) in 300; flat or
-smooth content (Akiyo, Foreman) cannot carry the registered envelope in its
-300 frames.\todo{v2 measurement} Capacity falls steeply with QP (Container: 88.3, 49.8 and
-10.0\,kbit at QP 18, 22 and 28), because coarser quantization leaves fewer
-coefficients with $|\mathit{level}|\ge4$, and grows with resolution where the
-content is textured (City: 23.8\,kbit at CIF, 82.3\,kbit at 4CIF). Capacity
-also varies strongly within a clip: one Soccer segment offers only
-3.5\,kbit, and Crew offers 11--17\,kbit per segment, so the sweep skipped
-both 4CIF clips as not fitting. The capacity scan exposed a defect in the
-carrier analysis at non-CIF resolutions, which mapped macroblocks to frames
-with the CIF macroblock count and so discarded most of each 4CIF frame; it
-failed closed (no wrong data, only lost capacity) and was fixed before the
-4CIF runs.
+\subsection{Dung lượng}
+Bảng~\ref{tab:capacity} liệt kê các vật mang ổn định, đã kiểm tra tính vá được.
+Ở QP\,22, các clip CIF cung cấp 10.5--49.8\,kbit mỗi 100 khung. Nội dung nhiều
+kết cấu (Container, Deadline, Coastguard) mang được envelope đã đăng ký (khoảng
+65.3\,kbit) trong 200 khung, và Container cùng Deadline mang được envelope
+in-band (khoảng 119.1\,kbit) trong 300 khung; nội dung phẳng hoặc mượt (Akiyo,
+Foreman) không mang được envelope đã đăng ký trong 300 khung của nó.\todo{v2 measurement}
+Dung lượng giảm mạnh theo QP (Container: 88.3, 49.8 và 10.0\,kbit ở QP 18, 22
+và 28), bởi vì lượng tử hóa thô hơn để lại ít hệ số có $|\mathit{level}|\ge4$
+hơn, và tăng theo độ phân giải ở những nơi nội dung nhiều kết cấu (City:
+23.8\,kbit ở CIF, 82.3\,kbit ở 4CIF). Dung lượng cũng biến thiên mạnh trong một
+clip: một đoạn Soccer chỉ cung cấp 3.5\,kbit, còn Crew cung cấp 11--17\,kbit mỗi
+đoạn, nên lượt quét đã bỏ qua cả hai clip 4CIF vì không vừa. Lượt quét dung
+lượng đã phơi bày một khiếm khuyết trong phân tích vật mang ở các độ phân giải
+không phải CIF, vốn ánh xạ các macroblock sang các khung với số macroblock của
+CIF và do đó bỏ đi phần lớn mỗi khung 4CIF; nó thất bại theo hướng đóng (không
+có dữ liệu sai, chỉ mất dung lượng) và đã được sửa trước các lần chạy 4CIF.
 
 \input{tables/paper_capacity}
 
-\subsection{End-to-end embedding and video-only verification}
-Table~\ref{tab:e2e} reports the end-to-end runs. Every completed run verified
-from the stego video alone, and in the runs that exercised them a replay of
-the consumed session and a copy with one flipped bit were both rejected; the
-payload or credential never appears in the output file. The in-band runs
-additionally verified a linkage proof between the commitment extracted from
-the video and a separately committed credential, rejected the linkage to a
-different credential, and verified a later disclosure of the payload. On
-modified frames the luma PSNR is 40.0--45.4\,dB, the worst frame is
-32.1--39.3\,dB, and whole-video SSIM is at least 0.9991\todo{v2 measurement}. The worst frames are
-those in which many carriers fall in smooth regions, where intra prediction
-spreads a $\pm1$ change to neighbouring blocks. Embedding takes 6--63 minutes
-(90 minutes for the concurrently run 3\,000-frame in-band case) and
-verification 2--33 minutes per clip in pure Python; the proof itself
-takes about 0.1\,s\todo{v2 measurement}. QP governs capacity strongly: City 4CIF carries
-301\,kbit in its first 100 frames at QP~18, so the registered envelope fits
-one segment (47.7\,dB on modified frames, worst 42.8\,dB), but only 16\,kbit
-in 600 frames at QP~28, where neither envelope fits. Crew 4CIF has enough
-carriers in total at QP~22 but too unevenly spread over segments for
-uniform chunks; at QP~18 it verifies over four segments (48.8\,dB, worst
+\subsection{Nhúng đầu-cuối và kiểm chứng chỉ-từ-video}
+Bảng~\ref{tab:e2e} báo cáo các lần chạy đầu-cuối. Mọi lần chạy hoàn tất đều kiểm
+chứng được chỉ từ video stego, và trong các lần chạy có thử nghiệm chúng, một
+lần phát lại của phiên đã tiêu thụ và một bản sao bị lật một bit đều bị từ chối;
+tải trọng hoặc chứng chỉ không bao giờ xuất hiện trong tệp đầu ra. Các lần chạy
+in-band còn kiểm chứng thêm một chứng minh liên kết giữa cam kết trích xuất từ
+video và một chứng chỉ được cam kết riêng, từ chối việc liên kết tới một chứng
+chỉ khác, và kiểm chứng một lần tiết lộ tải trọng về sau. Trên các khung bị sửa
+đổi, PSNR luma là 40.0--45.4\,dB, khung tệ nhất là 32.1--39.3\,dB, và SSIM toàn
+video ít nhất là 0.9991\todo{v2 measurement}. Các khung tệ nhất là những khung mà nhiều vật mang
+rơi vào các vùng mượt, nơi dự đoán nội khung lan truyền một thay đổi $\pm1$ sang
+các khối lân cận. Việc nhúng mất 6--63 phút (90 phút cho trường hợp in-band
+3\,000 khung chạy đồng thời) và việc kiểm chứng 2--33 phút mỗi clip trong Python
+thuần; bản thân chứng minh mất khoảng 0.1\,s\todo{v2 measurement}. QP chi phối dung lượng mạnh:
+City 4CIF mang 301\,kbit trong 100 khung đầu ở QP~18, nên envelope đã đăng ký
+vừa một đoạn (47.7\,dB trên các khung bị sửa đổi, tệ nhất 42.8\,dB), nhưng chỉ
+16\,kbit trong 600 khung ở QP~28, nơi không envelope nào vừa. Crew 4CIF có đủ
+vật mang xét tổng thể ở QP~22 nhưng trải quá không đều trên các đoạn để dùng
+chunk đồng nhất; ở QP~18 nó kiểm chứng được qua bốn đoạn (48.8\,dB, tệ nhất
 36.6\,dB).\todo{v2 measurement}
 
 \input{tables/paper_e2e}
 
-\subsection{Steganalysis}
-\paragraph{Classical} Targeted tests against the exact cover, on the first
-100 frames of each stego video, do not separate cover and stego
-(Table~\ref{tab:steg-classical}): the Westfeld--Pfitzmann pairs-of-values
-attack on carrier magnitudes~\cite{ref:westfeld} returns an embedding
-probability of zero for both cover and stego, the two-sample magnitude
-histogram and sign tests give $p\ge0.998$, and SPA on decoded
-luma~\cite{ref:spa} changes in the fourth decimal. RS analysis returned no
-difference for cover or stego on this content and is not used as evidence.
+\subsection{Phân tích giấu tin}
+\paragraph{Cổ điển} Các phép kiểm thử có chủ đích đối chiếu với đúng bản gốc,
+trên 100 khung đầu của mỗi video stego, không phân tách được gốc và stego
+(Bảng~\ref{tab:steg-classical}): tấn công cặp-giá-trị Westfeld--Pfitzmann trên
+các độ lớn vật mang~\cite{ref:westfeld} trả về xác suất nhúng bằng không cho cả
+gốc lẫn stego, các phép kiểm hai mẫu trên histogram độ lớn và trên dấu cho
+$p\ge0.998$, và SPA trên luma đã giải mã~\cite{ref:spa} chỉ thay đổi ở chữ số
+thập phân thứ tư. Phân tích RS không trả về khác biệt nào cho gốc hay stego
+trên nội dung này và không được dùng làm bằng chứng.
 
 \input{tables/paper_steg_classical}
 
-\paragraph{Learned} A learned detector is more effective. We extract, per
-frame, 340 coefficient-domain features (per-position magnitude histograms,
-odd-magnitude rates for $|\mathit{level}|\ge4$, adjacent-position magnitude
-co-occurrences and per-position sign shares) and 500 pixel-domain features
-from a reduced spatial rich model~\cite{ref:srm} (quantized first- and
-second-order residual co-occurrences), and train logistic regression and an
-ensemble of shrinkage Fisher linear discriminants on random 30\,\% feature
-subspaces (51 members), in the spirit of~\cite{ref:ensemble}. The attacker is
-strong: it trains on exact cover/stego pairs from the same encoder settings
-and knows which frames carry bits; only modified frames are used. We report
-the minimum average error $P_E=\min(P_{\mathrm{FA}}+P_{\mathrm{MD}})/2$. With
-leave-one-clip-out evaluation over five CIF clips (1\,300 frame pairs), the
-best detector reaches $P_E=0.40$ with coefficient features and $0.45$ with
-pixel features; with clips seen in training (a random split of pairs), the
-combined features reach $0.36$ (Table~\ref{tab:steg-ml}). The embedding is
-thus detectable per frame at a moderate level in its own domain and barely
-in the pixel domain. These are per-frame figures; a detector that pools the
-evidence of all modified frames of a video~\cite{ref:ker06} would do better
-(Section~\ref{sec:discussion}). A GPU-trained CNN with a fixed SRM
-front end (163k parameters, in the style of Yedrouj-Net~\cite{ref:yedroudj18}, 256$\times$256
-paired crops, curriculum from an amplified change) does no better: frame
-$P_E=0.466$ leave-one-clip-out on 1\,700 frame pairs and $0.46$--$0.47$ on a
-random paired split (two seeds), and $0.41$ when its scores are pooled over
-each 100-frame segment (Table~\ref{tab:steg-cnn}). The margin is small:
-trained and tested on twice the real change, the same network reaches
-$P_E=0.18$. Adding the Harbour and Soccer 4CIF runs (seven clips, 1\,700
-frame pairs) leaves the picture unchanged: leave-one-clip-out $P_E=0.39$ with
-coefficient features and $0.46$ with pixel features, and $0.38$ with combined
-features on the paired split
+\paragraph{Học máy} Một bộ phát hiện học máy thì hiệu quả hơn. Với mỗi khung,
+chúng tôi trích xuất 340 đặc trưng miền hệ số (histogram độ lớn theo từng vị
+trí, tỉ lệ độ-lớn-lẻ cho $|\mathit{level}|\ge4$, đồng xuất hiện độ lớn giữa các
+vị trí lân cận và tỉ lệ dấu theo từng vị trí) và 500 đặc trưng miền điểm ảnh từ
+một mô hình giàu không gian rút gọn~\cite{ref:srm} (đồng xuất hiện phần dư bậc
+nhất và bậc hai đã lượng tử hóa), và huấn luyện hồi quy logistic cùng một tổ hợp
+(ensemble) các bộ phân biệt tuyến tính Fisher co ngót (shrinkage) trên các
+không gian con đặc trưng 30\,\% ngẫu nhiên (51 thành viên), theo tinh thần
+của~\cite{ref:ensemble}. Kẻ tấn công rất mạnh: nó huấn luyện trên các cặp
+gốc/stego chính xác với cùng thiết lập bộ mã hóa và biết khung nào mang bit; chỉ
+các khung bị sửa đổi được dùng. Chúng tôi báo cáo sai số trung bình tối thiểu
+$P_E=\min(P_{\mathrm{FA}}+P_{\mathrm{MD}})/2$. Với đánh giá bỏ-một-clip-ra-ngoài
+(leave-one-clip-out) trên năm clip CIF (1\,300 cặp khung), bộ phát hiện tốt nhất
+đạt $P_E=0.40$ với đặc trưng hệ số và $0.45$ với đặc trưng điểm ảnh; với các clip
+đã thấy khi huấn luyện (một phân chia ngẫu nhiên các cặp), các đặc trưng kết hợp
+đạt $0.36$ (Bảng~\ref{tab:steg-ml}). Do đó việc nhúng có thể phát hiện được theo
+từng khung ở mức vừa phải trong chính miền của nó và hầu như không trong miền
+điểm ảnh. Đây là các con số theo từng khung; một bộ phát hiện gộp bằng chứng của
+tất cả các khung bị sửa đổi của một video~\cite{ref:ker06} sẽ làm tốt hơn
+(Mục~\ref{sec:discussion}). Một CNN huấn luyện trên GPU với một tiền tầng SRM cố
+định (163k tham số, theo kiểu Yedrouj-Net~\cite{ref:yedroudj18}, các mảnh cắt
+ghép cặp 256$\times$256, học theo chương trình từ một thay đổi được khuếch đại)
+cũng không tốt hơn: $P_E=0.466$ theo khung khi bỏ-một-clip-ra-ngoài trên 1\,700
+cặp khung và $0.46$--$0.47$ trên một phân chia cặp ngẫu nhiên (hai hạt giống),
+và $0.41$ khi các điểm số của nó được gộp trên mỗi đoạn 100 khung
+(Bảng~\ref{tab:steg-cnn}). Khoảng cách là nhỏ: khi huấn luyện và kiểm thử trên
+gấp đôi thay đổi thực, cùng mạng đó đạt $P_E=0.18$. Việc thêm các lần chạy
+Harbour và Soccer 4CIF (bảy clip, 1\,700 cặp khung) không làm thay đổi bức
+tranh: bỏ-một-clip-ra-ngoài $P_E=0.39$ với đặc trưng hệ số và $0.46$ với đặc
+trưng điểm ảnh, và $0.38$ với đặc trưng kết hợp trên phân chia cặp
 (\texttt{benchmark/results/q2/ml\_eval\_cif\_4cif.json}).\todo{v2 measurement}
 
 \input{tables/paper_steg_ml}
 \input{tables/steg_cnn}
 
-\subsection{Carrier choice}
+\subsection{Lựa chọn vật mang}
 \label{sec:carrier}
-We compared the magnitude carrier with the trailing-one sign carrier used by
-earlier CAVLC schemes~\cite{ref:liao12}, through the same pipeline, on four
-CIF clips, both at the same number of modified frames as the magnitude
-carrier and packed into 100 frames (Table~\ref{tab:carrier}). All twelve runs
-verify. Sign carriers are an order of magnitude more plentiful
-(468--550\,kbit per 100 frames). At equal frame count they give higher PSNR
-on modified frames (43.3--48.8 vs.\ 40.0--45.4\,dB; worst frame 38.5--44.6
-vs.\ 32.7--38.8\,dB) but slightly lower whole-video SSIM, and they are much
-harder to see in the coefficient domain (leave-one-clip-out $P_E=0.47$ vs.\
-$0.39$) yet easier in the pixel domain ($0.40$ vs.\ $0.46$); with combined
-features the two are close ($0.40$ vs.\ $0.42$). The CNN separates them
-clearly: on sign carriers at the same payload and frame count it reaches
-$P_E=0.27$--$0.28$ leave-one-clip-out and $0.14$--$0.17$ on the paired split,
-against $0.47$ for the magnitude carrier (Table~\ref{tab:steg-cnn}); sign
-carriers should therefore not be presented as secure against learned
-steganalysis. Packed into 100 frames,
-sign flips are clearly detectable ($P_E=0.31$ with pixel features, and a
-per-position sign test flags one clip at $p=0.001$).\todo{v2 measurement} Sign carriers were
-4--8 times slower to verify at equal frame count (2--3 times when packed into
-100 frames), because the reduced stable-carrier analysis does not apply to
-them; \todo{timing of the optimized sign-carrier analysis
-(t1-sign-video-only-v2) once measured on an idle host}. We keep the magnitude carrier as the
-default for verification speed and resistance to learned detectors, and
-expose the sign carrier as an option when visual quality matters more.
+Chúng tôi so sánh vật mang độ lớn với vật mang dấu trailing-one được các lược
+đồ CAVLC trước đây dùng~\cite{ref:liao12}, qua cùng một pipeline, trên bốn clip
+CIF, cả ở cùng số khung bị sửa đổi như vật mang độ lớn lẫn khi gói gọn vào 100
+khung (Bảng~\ref{tab:carrier}). Cả mười hai lần chạy đều kiểm chứng được. Các
+vật mang dấu dồi dào hơn một bậc độ lớn (468--550\,kbit mỗi 100 khung). Ở cùng
+số khung, chúng cho PSNR cao hơn trên các khung bị sửa đổi (43.3--48.8 so với
+40.0--45.4\,dB; khung tệ nhất 38.5--44.6 so với 32.7--38.8\,dB) nhưng SSIM toàn
+video thấp hơn một chút, và chúng khó thấy hơn nhiều trong miền hệ số
+(bỏ-một-clip-ra-ngoài $P_E=0.47$ so với $0.39$) nhưng dễ hơn trong miền điểm ảnh
+($0.40$ so với $0.46$); với đặc trưng kết hợp, hai bên xấp xỉ nhau ($0.40$ so
+với $0.42$). CNN phân tách chúng rõ ràng: trên các vật mang dấu ở cùng tải trọng
+và số khung, nó đạt $P_E=0.27$--$0.28$ khi bỏ-một-clip-ra-ngoài và
+$0.14$--$0.17$ trên phân chia cặp, so với $0.47$ cho vật mang độ lớn
+(Bảng~\ref{tab:steg-cnn}); do đó không nên trình bày các vật mang dấu như là an
+toàn trước phân tích giấu tin học máy. Khi gói gọn vào 100 khung, các lần lật
+dấu rõ ràng có thể phát hiện được ($P_E=0.31$ với đặc trưng điểm ảnh, và một
+phép kiểm dấu theo từng vị trí gắn cờ một clip ở $p=0.001$).\todo{v2 measurement} Các vật mang dấu
+chậm hơn 4--8 lần khi kiểm chứng ở cùng số khung (2--3 lần khi gói gọn vào 100
+khung), bởi vì phân tích vật-mang-ổn-định rút gọn không áp dụng cho chúng;
+\todo{timing of the optimized sign-carrier analysis
+(t1-sign-video-only-v2) once measured on an idle host}. Chúng tôi giữ vật mang
+độ lớn làm mặc định vì tốc độ kiểm chứng và khả năng chống các bộ phát hiện học
+máy, và cung cấp vật mang dấu như một tùy chọn khi chất lượng hình ảnh quan
+trọng hơn.
 
 \input{tables/paper_carrier}
 
-\subsection{Embedding rule and density}
+\subsection{Quy tắc nhúng và mật độ}
 \label{sec:density}
-Table~\ref{tab:density} uses simulated embedding on the real carrier
-positions of the five CIF clips to compare rules and densities with the same
-detector. LSB matching ($\pm1$ chosen at random) is \emph{more} detectable
-than replacement ($P_E=0.27$ vs.\ $0.32$), so replacement is kept. Using 50,
-25 and 10\,\% of the carriers raises $P_E$ to 0.40, 0.44 and 0.47; the
-envelope can be spread by lowering the chunk size, at the cost of touching
-more frames. The simulation ignores the patchability filter and is therefore
-more detectable than the real runs; it supports relative comparisons only.
-Real registered runs on City and Harbour 4CIF confirm the trend (lower rows
-of Table~\ref{tab:density}): at 100, 50 and 25\,\% of the carriers, the
-leave-one-clip-out $P_E$ with coefficient features is 0.40, 0.44 and 0.46,
-the PSNR of modified frames 43.2, 45.7 and 50.0\,dB and the worst frame
-32.9, 35.0 and 38.2\,dB, while the number of modified frames grows from 150
-to 500 per clip. All six runs verify from the video alone.\todo{v2 measurement}
+Bảng~\ref{tab:density} dùng việc nhúng mô phỏng trên các vị trí vật mang thực
+của năm clip CIF để so sánh các quy tắc và mật độ với cùng một bộ phát hiện.
+LSB matching ($\pm1$ chọn ngẫu nhiên) \emph{dễ} phát hiện hơn so với
+replacement ($P_E=0.27$ so với $0.32$), nên replacement được giữ lại. Dùng 50,
+25 và 10\,\% số vật mang nâng $P_E$ lên 0.40, 0.44 và 0.47; envelope có thể được
+trải ra bằng cách giảm kích thước chunk, với cái giá là chạm tới nhiều khung
+hơn. Mô phỏng bỏ qua bộ lọc tính vá được và do đó dễ phát hiện hơn các lần chạy
+thực; nó chỉ hỗ trợ các so sánh tương đối. Các lần chạy đã đăng ký thực trên
+City và Harbour 4CIF xác nhận xu hướng này (các hàng dưới của
+Bảng~\ref{tab:density}): ở 100, 50 và 25\,\% số vật mang, $P_E$
+bỏ-một-clip-ra-ngoài với đặc trưng hệ số là 0.40, 0.44 và 0.46, PSNR của các
+khung bị sửa đổi là 43.2, 45.7 và 50.0\,dB và khung tệ nhất là 32.9, 35.0 và
+38.2\,dB, trong khi số khung bị sửa đổi tăng từ 150 lên 500 mỗi clip. Cả sáu
+lần chạy đều kiểm chứng được chỉ từ video.\todo{v2 measurement}
 
 \input{tables/paper_density}
 
-\subsection{Syndrome-trellis coded carriers}
+\subsection{Vật mang mã hóa syndrome-trellis}
 \label{sec:stc}
-Because the carrier positions and their number are fixed before the proof
-exists, the envelope of a segment can be written as the \emph{syndrome} of
-all stable carriers of that segment instead of into a prefix of them. The
-contract \texttt{adaptive-stc-magnitude-video-only-v1} codes each segment
-with a syndrome-trellis code~\cite{ref:stc} of constraint height 10; the
-embedder's Viterbi search chooses the cheapest set of LSB changes, and the
-blind extractor reads every carrier and recomputes the syndrome, needing only
-the carrier count (unchanged by embedding) and the message length from a
-14-byte header coded on the first 112 carriers. The carrier set, its keyed
-order and the statement are unchanged apart from the contract identifier,
-which the profile identifier binds. Content-based costs computed from
-carrier-invariant data added 5--35\,\% more changes than plain change
-minimization in simulation, so the default cost is uniform.
+Bởi vì các vị trí vật mang và số lượng của chúng được cố định trước khi chứng
+minh tồn tại, envelope của một đoạn có thể được viết dưới dạng \emph{hội chứng}
+(syndrome) của tất cả các vật mang ổn định của đoạn đó thay vì vào một tiền tố
+của chúng. Hợp đồng \texttt{adaptive-stc-magnitude-video-only-v1} mã hóa mỗi
+đoạn bằng một mã syndrome-trellis~\cite{ref:stc} có chiều cao ràng buộc 10;
+phép tìm kiếm Viterbi của bộ nhúng chọn tập thay đổi LSB rẻ nhất, và bộ trích
+xuất mù đọc mọi vật mang và tính lại hội chứng, chỉ cần số đếm vật mang (không
+đổi khi nhúng) và độ dài thông điệp từ một header 14 byte được mã hóa trên 112
+vật mang đầu tiên. Tập vật mang, thứ tự có khóa của nó và phát biểu đều không
+đổi ngoại trừ định danh hợp đồng, vốn được định danh hồ sơ ràng buộc. Các chi
+phí dựa trên nội dung được tính từ dữ liệu bất biến theo vật mang đã thêm
+5--35\,\% thay đổi nhiều hơn so với việc tối thiểu hóa thay đổi thuần túy trong
+mô phỏng, nên chi phí mặc định là đồng nhất.
 
-On 200-frame cuts of three CIF clips with the registered envelope
-(Table~\ref{tab:adaptive-e2e}), STC needs 26--47\,\% fewer changes
-(0.27--0.37 instead of 0.50 per envelope bit), gains 1.4--2.4\,dB luma PSNR on
-modified frames, and every run verifies from the video alone at the same
-cost. Learned detectors do worse against it in every fold and feature set
-(Table~\ref{tab:adaptive-steg}): the worst-case $P_E$ rises from 0.41 to 0.43
-leave-one-clip-out and from 0.32 to 0.39 on the paired split, while the CNN
-stays near chance for both (0.457 vs.\ 0.471).\todo{v2 measurement} With three clips and a fold
-standard error of about 0.03, the evidence is the consistency of the gain,
-not its size. The price is fragility: every carrier of a segment enters the
-code, so one corrupted carrier anywhere invalidates that segment, which the
-verifier already treats as rejection.
+Trên các đoạn cắt 200 khung của ba clip CIF với envelope đã đăng ký
+(Bảng~\ref{tab:adaptive-e2e}), STC cần ít hơn 26--47\,\% số thay đổi
+(0.27--0.37 thay vì 0.50 trên mỗi bit envelope), đạt thêm 1.4--2.4\,dB PSNR
+luma trên các khung bị sửa đổi, và mọi lần chạy đều kiểm chứng được chỉ từ
+video với cùng chi phí. Các bộ phát hiện học máy làm tệ hơn trước nó ở mọi fold
+và mọi tập đặc trưng (Bảng~\ref{tab:adaptive-steg}): $P_E$ trường hợp tệ nhất
+tăng từ 0.41 lên 0.43 khi bỏ-một-clip-ra-ngoài và từ 0.32 lên 0.39 trên phân
+chia cặp, trong khi CNN vẫn gần mức ngẫu nhiên cho cả hai (0.457 so với
+0.471).\todo{v2 measurement} Với ba clip và sai số chuẩn trên mỗi fold khoảng 0.03, bằng chứng nằm
+ở tính nhất quán của mức cải thiện, chứ không phải ở độ lớn của nó. Cái giá là
+sự mong manh: mọi vật mang của một đoạn đều đi vào mã, nên một vật mang bị hỏng
+bất kỳ đâu cũng làm vô hiệu đoạn đó, điều mà bên kiểm chứng vốn đã coi là từ
+chối.
 
 \input{tables/adaptive_e2e}
 \input{tables/adaptive_steg}
 
-\subsection{Streams with P slices}
+\subsection{Luồng có lát P}
 \label{sec:gop}
-For Baseline streams with a GOP longer than one, the policy
-\texttt{idr-carriers-inter-raw-v1} places carriers in IDR slices only and
-binds every P-slice NAL unit byte for byte: the canonical digest hashes their
-RBSP, and the policy check rejects B/SP/SI slices, data partitioning, slice
-groups, arbitrary slice order, redundant pictures, CABAC and non-canonical
-emulation prevention, so binding the RBSP equals binding the bytes. Segments
-must be whole GOPs, and the policy enters the carrier-profile identifier, so a
-GOP$>1$ statement never verifies under the all-intra profile.
-Table~\ref{tab:gop} reports CIF runs. An IDR carries what an all-intra frame
-carries, so capacity per frame falls by the GOP length: the 128-bit
-registered envelope needs about 1\,000 frames of Container at GOP~8 and 3\,000
-at GOP~25 (we use looped sources).\todo{v2 measurement} All runs verify from the video alone, all
-P slices are unchanged, and flipping one bit inside a P slice is rejected.
-Drift into P frames barely accumulates (Container loses 0.04--0.09\,dB over a
-GOP), but packing the envelope into fewer pictures lowers quality: modified
-frames average 39.3--40.8\,dB with a worst frame near 32\,dB, against
-42.1\,dB (worst 34.0\,dB) for all-intra Container at the same payload.\todo{v2 measurement} Only IDR slices are parsed, so
-verification is cheap per frame.
+Đối với các luồng Baseline có GOP dài hơn một, chính sách
+\texttt{idr-carriers-inter-raw-v1} đặt các vật mang chỉ trong các lát IDR và
+ràng buộc từng byte của mỗi đơn vị NAL lát P: digest chuẩn tắc băm RBSP của
+chúng, và phần kiểm tra chính sách từ chối các lát B/SP/SI, phân mảnh dữ liệu
+(data partitioning), nhóm lát (slice groups), thứ tự lát tùy ý, ảnh dư thừa,
+CABAC và việc chống giả lập (emulation prevention) không chuẩn tắc, nên ràng
+buộc RBSP tương đương với ràng buộc các byte. Các đoạn phải là các GOP trọn vẹn,
+và chính sách đi vào định danh hồ sơ vật mang, nên một phát biểu GOP$>1$ không
+bao giờ kiểm chứng được dưới hồ sơ toàn-khung-nội. Bảng~\ref{tab:gop} báo cáo
+các lần chạy CIF. Một IDR mang được những gì một khung toàn-khung-nội mang được,
+nên dung lượng mỗi khung giảm theo độ dài GOP: envelope đã đăng ký 128 bit cần
+khoảng 1\,000 khung của Container ở GOP~8 và 3\,000 ở GOP~25 (chúng tôi dùng các
+nguồn được lặp).\todo{v2 measurement} Mọi lần chạy đều kiểm chứng được chỉ từ video, mọi lát P đều
+không đổi, và việc lật một bit bên trong một lát P đều bị từ chối. Sự trôi vào
+các khung P hầu như không tích lũy (Container mất 0.04--0.09\,dB qua một GOP),
+nhưng việc gói envelope vào ít ảnh hơn làm giảm chất lượng: các khung bị sửa đổi
+trung bình 39.3--40.8\,dB với một khung tệ nhất gần 32\,dB, so với 42.1\,dB (tệ
+nhất 34.0\,dB) cho Container toàn-khung-nội ở cùng tải trọng.\todo{v2 measurement} Chỉ các lát IDR
+được phân tích, nên việc kiểm chứng rẻ trên mỗi khung.
 
 \input{tables/gop}
 
-\subsection{Comparison with alternative proof systems}
-Table~\ref{tab:baselines} compares schemes that could carry the claim.
-Groth16 is more than fifty times smaller but not post-quantum and needs a
-circuit-specific trusted setup. ML-DSA signatures are post-quantum and
-smaller, but a signature reveals the signed data or binds a public value; it
-proves nothing about a hidden payload and supports neither later linkage nor
-selective disclosure. ISW21 is a lattice zkSNARK with a designated verifier,
-statistical zero knowledge of only $2^{-40}$ in the configuration we ran, a
-2.4\,MB verifier key, and an analysis based on an assumption invalidated
-against quantum adversaries~\cite{ref:dfs24}; its envelope is also larger.
-The BDLOP opening proof is the smallest transparent, publicly verifiable,
-zero-knowledge option we found that fits the measured capacity.
+\subsection{So sánh với các hệ chứng minh thay thế}
+Bảng~\ref{tab:baselines} so sánh các lược đồ có thể mang khẳng định. Groth16
+nhỏ hơn hơn năm mươi lần nhưng không hậu lượng tử và cần một thiết lập tin cậy
+riêng cho từng mạch. Các chữ ký ML-DSA là hậu lượng tử và nhỏ hơn, nhưng một
+chữ ký tiết lộ dữ liệu đã ký hoặc ràng buộc một giá trị công khai; nó không
+chứng minh gì về một tải trọng ẩn và không hỗ trợ cả việc liên kết về sau lẫn
+tiết lộ chọn lọc. ISW21 là một zkSNARK trên lưới với bên kiểm chứng được chỉ
+định, tính không tiết lộ tri thức thống kê chỉ $2^{-40}$ trong cấu hình chúng
+tôi chạy, một khóa kiểm chứng 2.4\,MB, và một phân tích dựa trên một giả thiết
+bị vô hiệu trước các đối thủ lượng tử~\cite{ref:dfs24}; envelope của nó cũng lớn
+hơn. Chứng minh mở BDLOP là tùy chọn không tiết lộ tri thức, minh bạch, kiểm
+chứng công khai nhỏ nhất mà chúng tôi tìm thấy vừa với dung lượng đo được.
 
 \input{tables/paper_baselines}
 
 % =====================================================================
-\section{Discussion and limitations}
+\section{Thảo luận và các giới hạn}
 \label{sec:discussion}
 
-\paragraph{Relaxed soundness} The extractor yields a relaxed opening
-$(\bar r,f)$ rather than a ternary opening, so the payload is bound only
-through binding with respect to relaxed openings. This is standard for
-Fiat--Shamir-with-aborts proofs, but the statement ``the holder knows the
-payload'' must be read in this relaxed sense.
+\paragraph{Tính đúng đắn nới lỏng} Bộ trích xuất cho ra một phần mở nới lỏng
+$(\bar r,f)$ thay vì một phần mở bậc ba, nên tải trọng chỉ được ràng buộc thông
+qua tính ràng buộc đối với các phần mở nới lỏng. Điều này là chuẩn mực cho các
+chứng minh Fiat--Shamir-with-aborts, nhưng phát biểu ``bên nắm giữ biết tải
+trọng'' phải được hiểu theo nghĩa nới lỏng này.
 
-\paragraph{Random-oracle model} The argument is in the classical
-random-oracle model with a non-tight forking reduction. We do not claim
-security in the quantum random-oracle model; generic results for
-Fiat--Shamir~\cite{ref:dfms19,ref:lz19} make a post-quantum interpretation
-plausible but do not give concrete bounds for our parameters.
+\paragraph{Mô hình oracle ngẫu nhiên} Lập luận nằm trong mô hình oracle ngẫu
+nhiên cổ điển với một rút gọn rẽ nhánh không chặt. Chúng tôi không khẳng định
+tính an toàn trong mô hình oracle ngẫu nhiên lượng tử; các kết quả tổng quát cho
+Fiat--Shamir~\cite{ref:dfms19,ref:lz19} khiến một diễn giải hậu lượng tử là hợp
+lý nhưng không đưa ra các cận cụ thể cho các tham số của chúng tôi.
 
-\paragraph{Implementation} The code is a research prototype implemented by
-us from the published protocol. It has not been audited and is not constant
-time (Python big-integer arithmetic and data-dependent rejection loops);
-timing side channels are out of scope.
+\paragraph{Hiện thực} Mã nguồn là một bản mẫu nghiên cứu do chúng tôi hiện thực
+từ giao thức đã công bố. Nó chưa được kiểm toán và không chạy trong thời gian
+hằng (số học số nguyên lớn của Python và các vòng lặp loại bỏ phụ thuộc dữ
+liệu); các kênh phụ theo thời gian nằm ngoài phạm vi.
 
-\paragraph{Framing malleability} The envelope bytes are integrity-protected:
-changing any of them makes the proof or the statement fail. The chunk
-framing around them is bound as well: the verifier re-chunks the extracted
-envelope under the pinned chunk size and rejects unless the extracted chunks
-are exactly that encoding. Without this check, an envelope that fits in a
-single chunk left the 16-bit chunk-size field free, so carrier bits could be
-changed while the same envelope verified.
+\paragraph{Tính dễ uốn nắn của phần đóng khung} Các byte của envelope được bảo
+vệ toàn vẹn: thay đổi bất kỳ byte nào trong chúng đều làm chứng minh hoặc phát
+biểu thất bại. Phần đóng khung chunk quanh chúng cũng được ràng buộc: bên kiểm
+chứng chia lại chunk của envelope đã trích xuất theo kích thước chunk đã ghim và
+từ chối trừ khi các chunk trích xuất được đúng là mã hóa đó. Nếu không có phép
+kiểm này, một envelope vừa trong một chunk đơn lẻ sẽ để trống trường
+kích-thước-chunk 16 bit, nên các bit vật mang có thể bị thay đổi trong khi cùng
+envelope đó vẫn kiểm chứng được.
 
-\paragraph{Stego key versus public order} Undetectability requires a
-symmetric key shared with the verifier, which makes verification
-designated in practice. The public-order mode makes verification public and
-gives up undetectability. The keyed permutation that orders carriers is
-derived from an HMAC-SHA-256 seed but uses a chaotic-map shuffle, which is
-not a cryptographic pseudorandom permutation; replacing it with a standard
-keyed permutation is straightforward and does not affect the proof.
+\paragraph{Khóa stego so với thứ tự công khai} Tính không phát hiện được đòi hỏi
+một khóa đối xứng được chia sẻ với bên kiểm chứng, điều này trên thực tế khiến
+việc kiểm chứng trở thành được chỉ định. Chế độ thứ tự công khai khiến việc kiểm
+chứng trở nên công khai và từ bỏ tính không phát hiện được. Hoán vị có khóa dùng
+để sắp thứ tự các vật mang được dẫn xuất từ một hạt giống HMAC-SHA-256 nhưng
+dùng một phép xáo trộn theo ánh xạ hỗn loạn (chaotic-map), vốn không phải là một
+hoán vị giả ngẫu nhiên mật mã; việc thay nó bằng một hoán vị có khóa chuẩn là
+đơn giản và không ảnh hưởng tới chứng minh.
 
-\paragraph{Per-frame versus per-video detection} The learned detector's
-per-frame error of 0.40\todo{v2 measurement} means that each modified frame leaks a little; a
-video carries 100--1\,200 modified frames, and pooling their scores would
-likely detect the embedding with high confidence. We have not quantified a
-pooled detector. Spreading the envelope over more frames lowers per-frame
-density but increases the number of frames that leak; reducing the number
-of changes, as the syndrome-trellis coding of Section~\ref{sec:stc} does,
-lowers the leakage of every frame and is the more promising direction.
+\paragraph{Phát hiện theo từng khung so với theo từng video} Sai số theo từng
+khung 0.40\todo{v2 measurement} của bộ phát hiện học máy nghĩa là mỗi khung bị sửa đổi rò rỉ một
+chút; một video mang 100--1\,200 khung bị sửa đổi, và việc gộp các điểm số của
+chúng nhiều khả năng sẽ phát hiện được việc nhúng với độ tin cậy cao. Chúng tôi
+chưa định lượng một bộ phát hiện gộp. Việc trải envelope trên nhiều khung hơn
+làm giảm mật độ theo từng khung nhưng làm tăng số khung bị rò rỉ; việc giảm số
+thay đổi, như mã hóa syndrome-trellis của Mục~\ref{sec:stc} làm, hạ thấp mức rò
+rỉ của mọi khung và là hướng hứa hẹn hơn.
 
-\paragraph{Capacity and codec scope} Only Baseline (CAVLC) streams are
-supported; streams with P slices carry the proof in IDR slices only
-(Section~\ref{sec:gop}), which divides capacity by the GOP length. A registered envelope
-needs 65.3\,kbit, which smooth content and high QP do not provide within a few
-hundred frames. Appendix~\ref{sec:binary-proof} gives a proof that a commitment
-under the same parameter set hides a binary string (43\,022 bytes; 2.2\,s to
-prove and 72\,ms to verify, measured with \texttt{bdlop-binary-128-v1}\todo{v2 measurement}), built from lifted constant-coefficient relations
-and an ALS20-style product step~\cite{ref:als20,ref:lnp22} that works on our
-two-slot ring. It is not yet tied to the 24-bit payload encoding, which would
-need a bit-decomposition proof, and its multi-round Fiat--Shamir-with-aborts
-composition is argued but not written out; range proofs on the payload remain
-open.
+\paragraph{Dung lượng và phạm vi codec} Chỉ các luồng Baseline (CAVLC) được hỗ
+trợ; các luồng có lát P mang chứng minh chỉ trong các lát IDR
+(Mục~\ref{sec:gop}), điều này chia dung lượng cho độ dài GOP. Một envelope đã
+đăng ký cần 65.3\,kbit, mà nội dung mượt và QP cao không cung cấp được trong vài
+trăm khung. Phụ lục~\ref{sec:binary-proof} đưa ra một chứng minh rằng một cam
+kết dưới cùng bộ tham số giấu một chuỗi nhị phân (43\,022 byte; 2.2\,s để chứng
+minh và 72\,ms để kiểm chứng, đo với \texttt{bdlop-binary-128-v1}\todo{v2 measurement}), được
+xây dựng từ các quan hệ hệ-số-hằng được nâng (lifted) và một bước tích kiểu
+ALS20~\cite{ref:als20,ref:lnp22} hoạt động trên vành hai-slot của chúng tôi. Nó
+chưa được gắn với mã hóa tải trọng 24 bit, vốn sẽ cần một chứng minh phân rã
+bit, và phép hợp thành Fiat--Shamir-with-aborts nhiều vòng của nó được lập luận
+nhưng chưa được viết ra đầy đủ; các chứng minh khoảng (range proof) trên tải
+trọng vẫn còn bỏ ngỏ.
 
-\paragraph{What is claimed} An accepted video shows that its producer knew a
-(relaxed) opening of the bound commitment for this exact carrier-normalized
-video, carrier layout, registry entry and session; in registered mode, that
-the producer holds the registered credential. It does not show that the
-payload is true, that a camera recorded the video, or, in in-band mode, who
-produced it. The session challenge is not secret, so it should be delivered
-over an authenticated channel if the holder's identity matters.
+\paragraph{Những gì được khẳng định} Một video được chấp nhận cho thấy người tạo
+ra nó đã biết một phần mở (nới lỏng) của cam kết được ràng buộc cho đúng video
+đã chuẩn hóa theo vật mang này, bố cục vật mang, mục trong sổ đăng ký và phiên
+này; trong chế độ đã đăng ký, rằng người tạo nắm giữ chứng chỉ đã đăng ký. Nó
+không cho thấy tải trọng là đúng sự thật, rằng một máy quay đã ghi video, hay,
+trong chế độ in-band, ai đã tạo ra nó. Thách thức phiên không bí mật, nên nó nên
+được chuyển giao qua một kênh đã xác thực nếu danh tính của bên nắm giữ là quan
+trọng.
 
 % =====================================================================
-\section{Threats to validity}
+\section{Các mối đe dọa đối với tính hợp lệ}
 \label{sec:threats}
 
-\paragraph{Internal validity} The protocol, parser and patcher were
-implemented by the authors; correctness is supported by unit and negative
-tests, known-answer vectors and the end-to-end verification itself, but not
-by an independent implementation. Quality is measured against the decoded
-cover, not the raw source, which isolates the embedding from the encoder.
-Timings come from a single host; two long runs were executed concurrently
-and are marked. The density and rule comparisons are simulations that omit
-the patchability filter.
+\paragraph{Tính hợp lệ nội tại} Giao thức, bộ phân tích cú pháp và bộ vá được
+các tác giả hiện thực; tính đúng đắn được hỗ trợ bởi các kiểm thử đơn vị và kiểm
+thử phủ định, các vector câu-trả-lời-đã-biết và chính việc kiểm chứng đầu-cuối,
+nhưng không bởi một hiện thực độc lập. Chất lượng được đo đối chiếu với bản gốc
+đã giải mã, chứ không phải nguồn thô, điều này cô lập việc nhúng khỏi bộ mã hóa.
+Các thời gian đến từ một máy duy nhất; hai lần chạy dài được thực hiện đồng thời
+và được đánh dấu. Các so sánh về mật độ và quy tắc là các mô phỏng bỏ qua bộ lọc
+tính vá được.
 
-\paragraph{Construct validity} $P_E$ is a per-frame measure on modified
-frames only, which favours the attacker within a frame but ignores pooling
-across frames. PSNR on modified frames depends on how many frames an
-envelope touches, which in turn depends on the chosen chunk size. Capacity
-for partly scanned clips is extrapolated from the scanned segments.
+\paragraph{Tính hợp lệ của cấu trúc đo lường} $P_E$ là một thước đo theo từng
+khung chỉ trên các khung bị sửa đổi, điều này thiên vị kẻ tấn công trong phạm vi
+một khung nhưng bỏ qua việc gộp xuyên các khung. PSNR trên các khung bị sửa đổi
+phụ thuộc vào số khung mà một envelope chạm tới, điều này lại phụ thuộc vào kích
+thước chunk được chọn. Dung lượng cho các clip quét một phần được ngoại suy từ
+các đoạn đã quét.
 
-\paragraph{External validity} The evaluation uses a small set of standard
-CIF and 4CIF sequences, one encoder (x264), the Baseline profile, all-intra
-coding (plus short-GOP runs on looped CIF sources) and fixed QP. Results may
-differ for camera footage, other encoders, rate control, long GOPs or higher
-resolutions. The detectors are
-feature-based; a stronger learned detector may lower $P_E$.
+\paragraph{Tính hợp lệ ngoại tại} Việc đánh giá dùng một tập nhỏ các chuỗi CIF
+và 4CIF chuẩn, một bộ mã hóa (x264), profile Baseline, mã hóa toàn-khung-nội
+(cộng thêm các lần chạy GOP ngắn trên các nguồn CIF được lặp) và QP cố định. Kết
+quả có thể khác đối với cảnh quay từ máy ảnh, các bộ mã hóa khác, điều khiển tốc
+độ bit (rate control), GOP dài hoặc độ phân giải cao hơn. Các bộ phát hiện dựa
+trên đặc trưng; một bộ phát hiện học máy mạnh hơn có thể hạ thấp $P_E$.
 
-\paragraph{Conclusion validity} Learned results are averaged over five
-held-out clips with no confidence intervals; we report the range over folds
-instead. With few clips, differences of a few hundredths in $P_E$ between
-configurations should not be over-interpreted.
+\paragraph{Tính hợp lệ của kết luận} Các kết quả học máy được lấy trung bình
+trên năm clip giữ-ra-ngoài mà không có khoảng tin cậy; thay vào đó chúng tôi báo
+cáo khoảng giá trị trên các fold. Với ít clip, các khác biệt cỡ vài phần trăm
+trong $P_E$ giữa các cấu hình không nên bị diễn giải quá mức.
 
 % =====================================================================
-\section{Conclusion}
+\section{Kết luận}
 \label{sec:conclusion}
 
-A post-quantum zero-knowledge proof can travel inside an H.264 CAVLC
-bitstream, bound to that bitstream through a carrier-normalized commitment
-and to a verifier session, and be verified from the video alone. With a
-7.6\,kB registered envelope and a 14.3\,kB in-band envelope, textured CIF
-and 4CIF content carries the proof in one to three hundred frames at
-40--45\,dB on modified frames, and classical targeted steganalysis does not
-detect it. A learned per-frame detector does better than chance, and the
-security argument rests on relaxed soundness in the classical random-oracle
-model. The next steps are cost-aware carrier selection against learned and
-pooled detectors, tying the binary proof to the payload encoding, carriers
-inside P slices and an evaluation at HD resolutions, and an independent review of the
-cryptographic argument.
+Một chứng minh không tiết lộ tri thức hậu lượng tử có thể di chuyển bên trong
+một luồng bit H.264 CAVLC, được ràng buộc vào luồng bit đó thông qua một cam kết
+đã chuẩn hóa theo vật mang và vào một phiên của bên kiểm chứng, và được kiểm
+chứng chỉ từ video. Với một envelope đã đăng ký 7.6\,kB và một envelope in-band
+14.3\,kB, nội dung CIF và 4CIF nhiều kết cấu mang chứng minh trong một tới ba
+trăm khung ở 40--45\,dB trên các khung bị sửa đổi, và phân tích giấu tin cổ điển
+có chủ đích không phát hiện được nó. Một bộ phát hiện học máy theo từng khung
+làm tốt hơn ngẫu nhiên, và lập luận an toàn dựa trên tính đúng đắn nới lỏng
+trong mô hình oracle ngẫu nhiên cổ điển. Các bước tiếp theo là lựa chọn vật mang
+có cân nhắc chi phí để chống các bộ phát hiện học máy và gộp, gắn chứng minh
+nhị phân với mã hóa tải trọng, đặt vật mang bên trong các lát P và một đánh giá
+ở độ phân giải HD, cùng một rà soát độc lập đối với lập luận mật mã.
 
 % =====================================================================
-\section*{Artifact availability}
-The implementation, the specification with known-answer vectors, the
-parameter-estimation scripts, all result files used in this paper and the
-script that regenerates its tables are available in an anonymized
-repository: \todo{anonymized repository URL}. Test videos are derived from
-the public Xiph sequences with the provided encoding commands; the large
-intermediate files are not redistributed.
+\section*{Tính sẵn có của hiện vật}
+Phần hiện thực, bản đặc tả kèm các vector câu-trả-lời-đã-biết, các script ước
+lượng tham số, tất cả các tệp kết quả được dùng trong bài báo này và script tái
+tạo các bảng của nó có sẵn trong một kho ẩn danh: \todo{anonymized repository URL}.
+Các video kiểm thử được dẫn xuất từ các chuỗi Xiph công khai với các lệnh mã hóa
+được cung cấp; các tệp trung gian lớn không được phân phối lại.
 
 % Proofs of the security section (workstream A5), when present.
 \IfFileExists{sections/security_appendix.tex}{%

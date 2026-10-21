@@ -130,11 +130,11 @@ def capacity_table(results: Path) -> str:
         header=("Clip & Res. & QP & Frames & Seg. & \\multicolumn{2}{c}{kbit/100 fr.} & "
                 "\\multicolumn{2}{c}{Frames needed} \\\\\n\\cmidrule(lr){6-7}\\cmidrule(lr){8-9}\n"
                 " & & & & scanned & min & mean & reg. & in-band"),
-        caption=("Stable, patchability-checked magnitude carriers (all-intra, x264 Baseline/CAVLC). "
-                 "Seg.\\ scanned: 100-frame segments measured out of the clip's total; unscanned segments "
-                 "are extrapolated from the scanned ones. Frames needed: segments required at the smallest "
-                 "feasible chunk size; "
-                 "$^{\\dagger}$\\,more than the clip has."),
+        caption=("Các vật mang độ lớn ổn định, đã kiểm tra tính vá được (toàn-khung-nội, x264 Baseline/CAVLC). "
+                 "Seg.\\ scanned: số đoạn 100 khung được đo trên tổng số của clip; các đoạn chưa quét được "
+                 "ngoại suy từ các đoạn đã quét. Frames needed: số đoạn cần ở kích thước chunk khả thi "
+                 "nhỏ nhất; "
+                 "$^{\\dagger}$\\,nhiều hơn những gì clip có."),
         label="tab:capacity",
     )
 
@@ -196,14 +196,14 @@ def e2e_table(results: Path) -> str:
         header=("Clip & Res. & QP & Mode & Frames & Seg. & Carriers & Mod. fr. & "
                 "PSNR$_{\\mathrm{mod}}$ & PSNR$_{\\min}$ & PSNR$_{\\mathrm{all}}$ & SSIM & "
                 "Embed (s) & Verify (s) & Verified & Checks"),
-        caption=("End-to-end runs with the magnitude carrier. Every completed run was verified from the "
-                 "stego video alone. PSNR is luma PSNR (dB) against the decoded cover, computed from the "
-                 "mean MSE over modified frames (mod), the worst frame (min) and all frames (all); SSIM is "
-                 "over the whole video. Checks: R = replay of the consumed session rejected, T = a one-bit "
-                 "change of the stego file rejected, L = linkage proof to a credential verified and a "
-                 "different credential rejected, D = later disclosure of the payload verified; -- = not "
-                 "exercised in that run. $^{\\ast}$\\,300-frame source looped to 3\\,000 frames; these two "
-                 "runs were executed concurrently, so their times are inflated."),
+        caption=("Các lần chạy đầu-cuối với vật mang độ lớn. Mọi lần chạy hoàn tất đều được kiểm chứng chỉ "
+                 "từ video stego. PSNR là PSNR luma (dB) so với bản gốc đã giải mã, tính từ MSE trung bình "
+                 "trên các khung bị sửa đổi (mod), khung tệ nhất (min) và tất cả các khung (all); SSIM tính "
+                 "trên toàn video. Checks: R = phát lại phiên đã tiêu thụ bị từ chối, T = thay đổi một bit "
+                 "của tệp stego bị từ chối, L = chứng minh liên kết tới một chứng chỉ được kiểm chứng và một "
+                 "chứng chỉ khác bị từ chối, D = tiết lộ tải trọng về sau được kiểm chứng; -- = không được "
+                 "thử nghiệm trong lần chạy đó. $^{\\ast}$\\,nguồn 300 khung được lặp thành 3\\,000 khung; hai "
+                 "lần chạy này được thực hiện đồng thời, nên thời gian của chúng bị thổi phồng."),
         label="tab:e2e",
     )
 
@@ -234,11 +234,11 @@ def steg_classical_table(results: Path) -> str:
         body, columns="llrlrrrrrr",
         header=("Clip & Res. & QP & Mode & Frames & PoV $P$ (c/s) & Mag.\\ $p$ & T1 $p$ & Pos.\\ $p$ & "
                 "SPA (c/s)"),
-        caption=("Targeted classical steganalysis against the exact cover (magnitude carrier). PoV: "
-                 "Westfeld--Pfitzmann embedding probability on carrier magnitudes for cover/stego; "
-                 "Mag., T1, Pos.: $p$-values of two-sample tests on the magnitude histogram, trailing-one "
-                 "signs and per-scan-position signs ($p<0.05$ would indicate detection); SPA: sample-pair "
-                 "estimate on decoded luma for cover/stego."),
+        caption=("Phân tích giấu tin cổ điển có chủ đích đối chiếu với đúng bản gốc (vật mang độ lớn). PoV: "
+                 "xác suất nhúng Westfeld--Pfitzmann trên các độ lớn vật mang cho gốc/stego; "
+                 "Mag., T1, Pos.: các giá trị $p$ của các phép kiểm hai mẫu trên histogram độ lớn, dấu "
+                 "trailing-one và dấu theo từng vị trí quét ($p<0.05$ sẽ cho thấy có phát hiện); SPA: ước "
+                 "lượng cặp-mẫu trên luma đã giải mã cho gốc/stego."),
         label="tab:steg-classical", wide=True,
     )
 
@@ -262,9 +262,9 @@ def steg_ml_table(results: Path) -> str:
         header=("Features & Detector & \\multicolumn{3}{c}{Leave-one-clip-out} & "
                 "\\multicolumn{2}{c}{Paired split} \\\\\n\\cmidrule(lr){3-5}\\cmidrule(lr){6-7}\n"
                 " & & $P_E$ & range & AUC & $P_E$ & AUC"),
-        caption=(f"Learned per-frame steganalysis of the magnitude carrier on {ml['frame_pairs']:,} modified "
-                 f"cover/stego frame pairs from {len(ml['clips'])} CIF clips ($P_E=0.5$ is chance). Range: "
-                 "minimum and maximum $P_E$ over the held-out clips.").replace(",", "\\,", 1),
+        caption=(f"Phân tích giấu tin học máy theo từng khung của vật mang độ lớn trên {ml['frame_pairs']:,} "
+                 f"cặp khung gốc/stego bị sửa đổi từ {len(ml['clips'])} clip CIF ($P_E=0.5$ là ngẫu nhiên). Range: "
+                 "giá trị $P_E$ nhỏ nhất và lớn nhất trên các clip giữ-ra-ngoài.").replace(",", "\\,", 1),
         label="tab:steg-ml",
     )
 
@@ -307,11 +307,11 @@ def carrier_table(results: Path) -> str:
                 "Embed (s) & Verify (s) & min Pos.\\ $p$ & \\multicolumn{4}{c}{Learned $P_E$} \\\\\n"
                 "\\cmidrule(lr){10-13}\n & & & & & & & & & Coef. & Pixel & Comb. & Comb. \\\\\n"
                 " & & & & & & & & & LOCO & LOCO & LOCO & paired"),
-        caption=("Carrier comparison through the same pipeline on four CIF clips (City, Coastguard, "
-                 "Container, Hall; QP\\,22, registered mode). Ranges are over the four clips. ``Same "
-                 "frames'' uses the chunk size of the magnitude run, so both carriers touch the same "
-                 "number of frames; ``100 frames'' packs the envelope into one segment. min Pos.\\ $p$: "
-                 "smallest per-position sign-test $p$-value over the clips."),
+        caption=("So sánh vật mang qua cùng một pipeline trên bốn clip CIF (City, Coastguard, "
+                 "Container, Hall; QP\\,22, chế độ đã đăng ký). Các khoảng giá trị là trên bốn clip. ``Same "
+                 "frames'' dùng kích thước chunk của lần chạy độ lớn, nên cả hai vật mang chạm tới cùng "
+                 "số khung; ``100 frames'' gói envelope vào một đoạn. min Pos.\\ $p$: "
+                 "giá trị $p$ của phép kiểm dấu theo từng vị trí nhỏ nhất trên các clip."),
         label="tab:carrier",
     )
 
@@ -346,11 +346,11 @@ def density_table(results: Path) -> str:
     return table(
         body, columns="lrr",
         header="Embedding (fraction of carriers used) & $P_E$ & AUC",
-        caption=("Detectability versus embedding rule and density: leave-one-clip-out, coefficient "
-                 "features, FLD ensemble, five CIF clips. The upper rows are simulated on the real carrier "
-                 "positions without the patchability filter (hence more detectable than the real runs, "
-                 "$P_E=0.40$); they are for relative comparison only. The lower rows are real registered "
-                 "E2E runs on City and Harbour 4CIF (leave-one-clip-out over these two clips)."),
+        caption=("Khả năng phát hiện theo quy tắc nhúng và mật độ: bỏ-một-clip-ra-ngoài, đặc trưng hệ số, "
+                 "tổ hợp FLD, năm clip CIF. Các hàng trên được mô phỏng trên các vị trí vật mang thực mà "
+                 "không có bộ lọc tính vá được (do đó dễ phát hiện hơn các lần chạy thực, "
+                 "$P_E=0.40$); chúng chỉ để so sánh tương đối. Các hàng dưới là các lần chạy E2E đã đăng ký "
+                 "thực trên City và Harbour 4CIF (bỏ-một-clip-ra-ngoài trên hai clip này)."),
         label="tab:density",
     )
 
@@ -382,14 +382,14 @@ def baselines_table(results: Path) -> str:
     return table(
         body, columns="lllllrrl", wide=True,
         header="Scheme & Assumption & ZK & Hides payload & Size (B) & Prove (ms) & Verify (ms) & Setup",
-        caption=("Proof and signature schemes that could carry the claim, on the same host (single thread). "
-                 "Size: bytes carried in the video (envelope or proof-bearing payload); the equality proof "
-                 "is exchanged out of band at linkage time. "
-                 "BDLOP timings are medians of 50 runs on an idle machine (pure Python); Groth16 is "
-                 "end-to-end wall time through a Python bridge (3 trials); ML-DSA via \\texttt{pqcrypto}. "
-                 "ISW21 numbers were recorded earlier in a Linux container on the same CPU (toy 32-byte "
-                 "relation) and not re-run. $^{\\ddagger}$\\,The oblivious-LWE-sampling assumption used in "
-                 "its analysis is invalidated against quantum adversaries~\\cite{ref:dfs24}."),
+        caption=("Các lược đồ chứng minh và chữ ký có thể mang khẳng định, trên cùng một máy (một luồng). "
+                 "Size: số byte được mang trong video (envelope hoặc tải trọng mang chứng minh); chứng minh "
+                 "đẳng thức được trao đổi ngoài băng tại thời điểm liên kết. "
+                 "Các thời gian BDLOP là trung vị của 50 lần chạy trên một máy rảnh rỗi (Python thuần); Groth16 là "
+                 "thời gian thực đầu-cuối qua một cầu nối Python (3 lần thử); ML-DSA qua \\texttt{pqcrypto}. "
+                 "Các con số ISW21 được ghi lại trước đó trong một container Linux trên cùng CPU (quan hệ đồ chơi "
+                 "32 byte) và không chạy lại. $^{\\ddagger}$\\,Giả thiết lấy mẫu LWE không hay biết dùng trong "
+                 "phân tích của nó bị vô hiệu trước các đối thủ lượng tử~\\cite{ref:dfs24}."),
         label="tab:baselines",
     )
 
