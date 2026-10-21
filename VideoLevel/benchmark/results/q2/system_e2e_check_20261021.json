@@ -1,0 +1,168 @@
+{
+  "description": "Functional end-to-end check of every system mode (bdlop-open-128-v2), 2026-10-21; each scenario embeds, verifies from the stego video alone, and rejects a replayed session and a one-bit tamper.",
+  "code_commit": "c027c87",
+  "unit_tests": "scripts/repro.py unit-tests: PASS",
+  "scenarios": [
+    {
+      "scenario": "inband_magnitude",
+      "parameter_set": "bdlop-open-128-v2",
+      "mode": "in-band-commitment",
+      "carrier_contract": "stable-carriers-video-only-v1",
+      "envelope_bytes": 14885,
+      "segments_used": 3,
+      "verified_from_video_alone": true,
+      "replay_rejected": true,
+      "tamper_rejected": true,
+      "payload_absent_from_output": true,
+      "p_slice_tamper_rejected": null,
+      "trailing_rbsp_zero_rejected": null,
+      "disclosure_verifies": true,
+      "linked_to_credential": true,
+      "other_credential_rejected": true,
+      "psnr_modified_db": 39.969,
+      "psnr_worst_db": 31.395,
+      "timings_s": {
+        "embed_s": 278.413,
+        "verify_s": 130.041
+      }
+    },
+    {
+      "scenario": "reg_adaptive_chunk",
+      "parameter_set": "bdlop-open-128-v2",
+      "mode": "registered-commitment",
+      "carrier_contract": "stable-carriers-video-only-v1",
+      "envelope_bytes": 8165,
+      "segments_used": 2,
+      "verified_from_video_alone": true,
+      "replay_rejected": true,
+      "tamper_rejected": true,
+      "payload_absent_from_output": true,
+      "p_slice_tamper_rejected": null,
+      "trailing_rbsp_zero_rejected": null,
+      "disclosure_verifies": null,
+      "linked_to_credential": null,
+      "other_credential_rejected": null,
+      "psnr_modified_db": 39.291,
+      "psnr_worst_db": 34.026,
+      "timings_s": {
+        "embed_s": 217.231,
+        "verify_s": 115.148
+      }
+    },
+    {
+      "scenario": "reg_codec_v2",
+      "parameter_set": "bdlop-open-128-v2",
+      "mode": "registered-commitment",
+      "carrier_contract": "stable-carriers-video-only-v1",
+      "envelope_bytes": 8165,
+      "segments_used": 2,
+      "verified_from_video_alone": true,
+      "replay_rejected": true,
+      "tamper_rejected": true,
+      "payload_absent_from_output": true,
+      "p_slice_tamper_rejected": null,
+      "trailing_rbsp_zero_rejected": true,
+      "disclosure_verifies": null,
+      "linked_to_credential": null,
+      "other_credential_rejected": null,
+      "psnr_modified_db": 41.231,
+      "psnr_worst_db": 32.753,
+      "timings_s": {
+        "embed_s": 113.943,
+        "verify_s": 46.291
+      }
+    },
+    {
+      "scenario": "reg_gop8",
+      "parameter_set": "bdlop-open-128-v2",
+      "mode": "registered-commitment",
+      "carrier_contract": "stable-carriers-video-only-v1",
+      "envelope_bytes": 8165,
+      "segments_used": 7,
+      "verified_from_video_alone": true,
+      "replay_rejected": true,
+      "tamper_rejected": true,
+      "payload_absent_from_output": true,
+      "p_slice_tamper_rejected": true,
+      "trailing_rbsp_zero_rejected": null,
+      "disclosure_verifies": null,
+      "linked_to_credential": null,
+      "other_credential_rejected": null,
+      "psnr_modified_db": 40.446,
+      "psnr_worst_db": 33.037,
+      "timings_s": {
+        "embed_s": 120.732,
+        "verify_s": 49.095
+      }
+    },
+    {
+      "scenario": "reg_magnitude",
+      "parameter_set": "bdlop-open-128-v2",
+      "mode": "registered-commitment",
+      "carrier_contract": "stable-carriers-video-only-v1",
+      "envelope_bytes": 8165,
+      "segments_used": 2,
+      "verified_from_video_alone": true,
+      "replay_rejected": true,
+      "tamper_rejected": true,
+      "payload_absent_from_output": true,
+      "p_slice_tamper_rejected": null,
+      "trailing_rbsp_zero_rejected": null,
+      "disclosure_verifies": null,
+      "linked_to_credential": null,
+      "other_credential_rejected": null,
+      "psnr_modified_db": 41.714,
+      "psnr_worst_db": 33.679,
+      "timings_s": {
+        "embed_s": 186.621,
+        "verify_s": 75.976
+      }
+    },
+    {
+      "scenario": "reg_stc",
+      "parameter_set": "bdlop-open-128-v2",
+      "mode": "registered-commitment",
+      "carrier_contract": "adaptive-stc-magnitude-video-only-v1",
+      "envelope_bytes": 8165,
+      "segments_used": 2,
+      "verified_from_video_alone": true,
+      "replay_rejected": true,
+      "tamper_rejected": true,
+      "payload_absent_from_output": true,
+      "p_slice_tamper_rejected": null,
+      "trailing_rbsp_zero_rejected": null,
+      "disclosure_verifies": null,
+      "linked_to_credential": null,
+      "other_credential_rejected": null,
+      "psnr_modified_db": 43.282,
+      "psnr_worst_db": 33.78,
+      "timings_s": {
+        "embed_s": 190.304,
+        "verify_s": 84.027
+      }
+    },
+    {
+      "scenario": "reg_t1",
+      "parameter_set": "bdlop-open-128-v2",
+      "mode": "registered-commitment",
+      "carrier_contract": "t1-sign-video-only-v2",
+      "envelope_bytes": 8165,
+      "segments_used": 1,
+      "verified_from_video_alone": true,
+      "replay_rejected": true,
+      "tamper_rejected": true,
+      "payload_absent_from_output": true,
+      "p_slice_tamper_rejected": null,
+      "trailing_rbsp_zero_rejected": null,
+      "disclosure_verifies": null,
+      "linked_to_credential": null,
+      "other_credential_rejected": null,
+      "psnr_modified_db": 42.092,
+      "psnr_worst_db": 38.756,
+      "timings_s": {
+        "embed_s": 195.314,
+        "verify_s": 128.975
+      }
+    }
+  ]
+}
