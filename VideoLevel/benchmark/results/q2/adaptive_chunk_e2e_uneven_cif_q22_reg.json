@@ -1,0 +1,100 @@
+{
+  "adaptive_chunking": {
+    "checks": {
+      "other_plan": {
+        "fill_permille": 1000,
+        "max_chunk_bytes": 65535,
+        "min_chunk_bytes": 1024,
+        "reserve_bits": 0,
+        "version": "zkbc-v2-greedy-fill-v1"
+      },
+      "other_plan_reason": "extraction or envelope rejected: ValueError: blind payload magic mismatch",
+      "other_plan_rejected": true,
+      "skipped_segment_tamper_reason": "extraction or envelope rejected: RuntimeError: Refusing to use untrusted CAVLC parse offsets for embedding. The local parser required heuristic recovery, so its macroblock-to-bit offsets are not authoritative; this does not imply that the input H.264 stream is invalid. NAL index 2; integrity issues: luma_residual_error:mb=206:block=14:Invalid total_zeros VLC for TC=1 at bit 54346: Invalid VLC code: 000000000 (no match in table); luma_residual_error:mb=206:block=15:Invalid coeff_token for nC=5 at bit 54346: Invalid VLC code: 0000000000010011 (no match in table); heuristic_resync:mb=207:reason=mb_type_desync: mb_type=2435 slice_type=2:bit=54447; luma_residual_error:mb=213:block=12:Invalid run_before VLC with zeros_left=8 at bit 55748: Invalid VLC code: 00000100000 (no match in table); heuristic_resync:mb=216:reason=cbp_desync: coded_block_pattern=187:bit=56134",
+      "skipped_segment_tamper_rejected": true,
+      "skipped_segments": [
+        1
+      ]
+    },
+    "chunk_layout": [
+      {
+        "bytes": 3890,
+        "segment": 0
+      },
+      {
+        "bytes": 4275,
+        "segment": 2
+      }
+    ],
+    "chunk_plan": {
+      "fill_permille": 1000,
+      "max_chunk_bytes": 65535,
+      "min_chunk_bytes": 2048,
+      "reserve_bits": 0,
+      "version": "zkbc-v2-greedy-fill-v1"
+    },
+    "plan_id": "386af8aea367fcfd7fca99a8a5f871dc86a2cfbdeb7c2a4fe37fd2bce07aee58",
+    "segment_capacity_bits": [
+      31404,
+      10501,
+      50757
+    ],
+    "transport": "zkbc-v2 capacity-adaptive (src/blind_sync_adaptive.py)"
+  },
+  "blind_video_only_verification": true,
+  "carrier": "magnitude",
+  "carrier_contract": "stable-carriers-video-only-v1",
+  "carrier_profile_id": "a3080670833d130b94a06960a20434115d21ee040b3b1fa8f04e0186eaa25e01",
+  "carriers_used": 65880,
+  "chunk_bytes": null,
+  "commitment_bytes_in_video": 0,
+  "credential_linkage": null,
+  "decoded_quality": {
+    "psnr_average_db": 44.080236,
+    "psnr_is_lossless": false,
+    "ssim_all": 0.999644
+  },
+  "envelope_bytes": 8165,
+  "expected_envelope_bytes": 8165,
+  "frame_quality": {
+    "frames": 300,
+    "frames_modified": 200,
+    "frames_modified_fraction": 0.6667,
+    "luma_psnr_all_frames_db": 42.319,
+    "luma_psnr_modified_frames_db": 40.558,
+    "luma_psnr_worst_frame_db": 33.581
+  },
+  "frames_per_segment": 100,
+  "gop_policy": "all-intra",
+  "input_video": "uneven_cif_q22_g1_300f.h264",
+  "input_video_sha256": "0849ae842d8b7a1aa68cc591462ed5125552efb454b8a1d6e22b8a3648c11daa",
+  "mode": "registered-commitment",
+  "output_video_sha256": "d86e1ef4f98d3aef7394aaf2927c6adfb15e8dba09832c80b323dcfe6faa8ebb",
+  "p_slice_tamper_reason": null,
+  "p_slice_tamper_rejected": null,
+  "parameter_id": "c10dafa50278f29eafdddcdbffcb2c377b6a0dccf800db59a393332ac1724e02",
+  "parameter_set": "bdlop-open-128-v2",
+  "payload_absent_from_output": true,
+  "proof_bytes": 8096,
+  "protocol": "bdlop-open-v1 in-band H.264 CAVLC",
+  "replay_rejected": true,
+  "security_status": "research prototype; self-implemented published protocol; unaudited",
+  "segments_used": 2,
+  "slice_nal_comparison": {
+    "idr_slices": 300,
+    "idr_slices_changed": 200,
+    "nal_count_matches": true,
+    "nal_units": 901,
+    "non_idr_slices": 0,
+    "non_idr_slices_identical": 0,
+    "other_nal_units_changed": 0
+  },
+  "statement_id": "ee532d362814bcaf595c99e3eaf2907fe31f58a285cbc210529c7d60180a8fb5",
+  "tamper_reason": "extraction or envelope rejected: RuntimeError: Refusing to use untrusted CAVLC parse offsets for embedding. The local parser required heuristic recovery, so its macroblock-to-bit offsets are not authoritative; this does not imply that the input H.264 stream is invalid. NAL index 68; integrity issues: chroma_ac_error:mb=98:block=21:total_zeros=15 exceeds valid range [0,14] for TC=1 at bit 22235; chroma_ac_error:mb=98:block=22:total_zeros=15 exceeds valid range [0,14] for TC=1 at bit 22235; chroma_ac_error:mb=98:block=23:total_zeros=15 exceeds valid range [0,14] for TC=1 at bit 22235; heuristic_resync:mb=99:reason=chroma_pred_desync: intra_chroma_pred_mode=333:bit=22333; luma_residual_error:mb=100:block=6:Invalid coeff_token for nC=8 at bit 22605: Invalid VLC code: 0001111010101100 (no match in table)",
+  "tamper_rejected": true,
+  "timings_s": {
+    "embed_s": 499.55,
+    "verify_s": 217.13
+  },
+  "verify_reason": "ok"
+}

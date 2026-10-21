@@ -143,6 +143,13 @@ byte equality. A non-default policy is added to the carrier-profile
 description as `"gop_policy"`; all-intra profile identifiers are unchanged.
 See `docs/GOP_HD_SUPPORT.md`.
 
+An opt-in profile field `chunk_plan` replaces the fixed `chunk_bytes` with a
+capacity-adaptive plan (ZKBC v2): chunk sizes follow each segment's
+recomputable carrier capacity, low-capacity segments are skipped, the plan
+replaces `"chunk_bytes"` by `"chunk_plan"` in the profile description, and `D`
+uses the domain `zkstego/canonical-h264-segmented-adaptive/v1` with per-segment
+roles, capacities and chunk sizes. See `docs/ADAPTIVE_CHUNKING.md`.
+
 ### 3.7 Envelope
 
 ```text
