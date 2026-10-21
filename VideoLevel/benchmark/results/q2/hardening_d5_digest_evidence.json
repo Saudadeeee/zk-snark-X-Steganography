@@ -1,0 +1,54 @@
+{
+  "code": "src/video_canonicalization.py, src/blind_sync_streaming.py, src/lattice_zk/*",
+  "codec_policies": {
+    "v1": {
+      "id": "5a9b4d07e349774ef1fa999e8ac0c06e1c59141511bb96928430d4bf7dc5b65b",
+      "id_unchanged_from_10bce11": true,
+      "string": "h264-baseline-cavlc/canonical-h264-carrier-normalized-sha256-v1"
+    },
+    "v2": {
+      "id": "80b3ee07de79d617ddc9b6d59955063f324f42ee35bc6c1d0066590069067b43",
+      "string": "h264-baseline-cavlc/canonical-h264-carrier-normalized-sha256-v2/full-rbsp/tagged-raw-segments/segmentation=annexb-access-unit-exact-partition-v1"
+    }
+  },
+  "ffmpeg": "ffmpeg version 8.0.1-essentials_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers",
+  "fixture": "data/external/trust_corpus/mdn_friday_cif_q22_g1_30f.h264",
+  "fixture_sha256": "0d003128aef1beffcfcfd0e1d5a93c47a95355b8e4da2a3496e409672f6abf40",
+  "kat": {
+    "v1_vectors_reproduced": true,
+    "v2_regenerated_for_tagged_mask_key": true
+  },
+  "pinned_segmentation": {
+    "ffmpeg_output_is_exact_partition": true,
+    "rule": "annexb-access-unit-exact-partition-v1",
+    "segments": [
+      10,
+      10,
+      10
+    ]
+  },
+  "profile_ids_bdlop_open_128_v2_registered": {
+    "v1": "93f63501a96424681ccb85c0c5c4ce221e5297f9baee9e6e1ed677b8a567734c",
+    "v2": "65898c71f7df984e528e56151aa6b07a33441c5b0deb3f884aaa9486b6dfbabf"
+  },
+  "purpose": "security_appendix D5/D7/D8/Q12 hardening: digest-level evidence on the checked-in CIF fixture",
+  "q12_toy_challenge_space_bits": 53.6,
+  "seconds": 32.5,
+  "trailing_rbsp_zero_extension": {
+    "carrier_cut_frames": 10,
+    "carrier_positions": 256,
+    "digests": {
+      "carrier-normalized-full-rbsp-v2": {
+        "cover": "99afc5eab0a5fff0c9afafb8e0a97c50db43fbd1b534f6d1be5fd87f64ab4c9c",
+        "zero_extended": "875c57b56d094bc891feb348ef77badd946612b3c227913a34bf6969dbcb46c8"
+      },
+      "carrier-normalized-v1": {
+        "cover": "b07b1ae3c688dc0634164a868911cecfb61d7e9f0487ba83e5669b8d3c2be0ec",
+        "zero_extended": "b07b1ae3c688dc0634164a868911cecfb61d7e9f0487ba83e5669b8d3c2be0ec"
+      }
+    },
+    "v1_digest_unchanged": true,
+    "v2_digest_changed": true,
+    "zero_byte_inserted_after_carrier_idr_nal_at": 106348
+  }
+}
