@@ -1,31 +1,30 @@
-# BDLOP video proof: protocol specification and security argument
+# Chứng minh video BDLOP: đặc tả giao thức và lập luận bảo mật
 
-Version 1 (`bdlop-open-v1`), implemented in `src/lattice_zk/`. This document
-specifies the exact algorithms the code runs and argues each security property
-from published results. It is written so the protocol can be re-implemented
-and checked against the known-answer vectors in
-`research/bdlop_params/kat_v2.json` (production set `bdlop-open-128-v2`;
-`kat_v1.json` pins the earlier set `bdlop-open-128-v1`).
+Phiên bản 1 (`bdlop-open-v1`), cài đặt trong `src/lattice_zk/`. Tài liệu này
+đặc tả chính xác các thuật toán mà mã chạy và lập luận từng tính chất bảo mật
+dựa trên các kết quả đã công bố. Nó được viết để giao thức có thể được cài đặt
+lại và đối chiếu với các vector known-answer trong
+`research/bdlop_params/kat_v2.json` (bộ sản xuất `bdlop-open-128-v2`;
+`kat_v1.json` ghim bộ cũ hơn `bdlop-open-128-v1`).
 
-The construction is the commitment and opening proof of Baum, Damgård,
-Lyubashevsky, Oechsner and Peikert (SCN 2018, ePrint 2016/997), with three
-deliberate deviations listed in Section 6. The implementation has not been
-audited and is not constant time.
+Cấu trúc là cam kết và chứng minh opening của Baum, Damgård, Lyubashevsky,
+Oechsner và Peikert (SCN 2018, ePrint 2016/997), với ba khác biệt có chủ đích
+liệt kê ở Mục 6. Phần cài đặt chưa được audit và không phải constant time.
 
-## 1. Notation
+## 1. Ký hiệu
 
-- `R = Z[X]/(X^N + 1)`, `R_q = R / qR`, `N` a power of two.
-- `q` prime with `q ≡ 5 (mod 8)`. Then `X^N + 1` factors into exactly two
-  irreducible polynomials of degree `N/2` modulo `q`, and every nonzero
-  `y ∈ R_q` with `‖y‖∞ < q^{1/2}/√2` is invertible (Lyubashevsky–Seiler,
-  EUROCRYPT 2018, Corollary 1.2 with `k = 2`).
-- `n`: M-SIS rank, `λ`: M-LWE rank, one message polynomial, `k = n + λ + 1`.
-- `S_1`: polynomials with coefficients in `{-1, 0, 1}`.
-- `C = {c ∈ R : ‖c‖∞ = 1, ‖c‖₁ = κ}`, the challenge set, `|C| = binom(N, κ)·2^κ`.
-- `γ`: mask bound (a power of two); `B = γ − κ − 1`: response bound.
-- `H`: SHAKE-256 with the domain tags given below; all integers big-endian.
+- `R = Z[X]/(X^N + 1)`, `R_q = R / qR`, `N` là lũy thừa của hai.
+- `q` nguyên tố với `q ≡ 5 (mod 8)`. Khi đó `X^N + 1` tách thành đúng hai đa
+  thức bất khả quy bậc `N/2` modulo `q`, và mọi `y ∈ R_q` khác không với
+  `‖y‖∞ < q^{1/2}/√2` đều khả nghịch (Lyubashevsky–Seiler, EUROCRYPT 2018,
+  Hệ quả 1.2 với `k = 2`).
+- `n`: hạng M-SIS, `λ`: hạng M-LWE, một đa thức message, `k = n + λ + 1`.
+- `S_1`: các đa thức có hệ số trong `{-1, 0, 1}`.
+- `C = {c ∈ R : ‖c‖∞ = 1, ‖c‖₁ = κ}`, tập challenge, `|C| = binom(N, κ)·2^κ`.
+- `γ`: chặn mặt nạ (lũy thừa của hai); `B = γ − κ − 1`: chặn đáp ứng.
+- `H`: SHAKE-256 với các domain tag cho dưới đây; mọi số nguyên big-endian.
 
-## 2. Parameters
+## 2. Tham số
 
 | | `bdlop-open-128-v2` |
 |---|---|
@@ -33,105 +32,105 @@ audited and is not constant time.
 | `n`, `λ`, `k` | 6, 7, 14 |
 | `κ`, `γ`, `B` | 60, `2^17`, `2^17 − 61` |
 | `|C|` | `2^257` |
-| Commitment | `(n+1)·N·30` bits = 6 720 bytes |
-| Opening proof | `32 + k·N·18` bits = 8 096 bytes |
-| Equality proof | `32 + 2·k·N·18` bits = 16 160 bytes |
-| Per-attempt acceptance | `((2B+1)/(2γ))^{kN} ≈ 0.191` |
+| Cam kết | `(n+1)·N·30` bit = 6 720 byte |
+| Chứng minh opening | `32 + k·N·18` bit = 8 096 byte |
+| Equality proof | `32 + 2·k·N·18` bit = 16 160 byte |
+| Xác suất chấp nhận mỗi lần thử | `((2B+1)/(2γ))^{kN} ≈ 0.191` |
 
 `parameter_id = SHA3-256("zkstego/lattice-zk/bdlop-open/v1/parameters\0" ‖
-len(name) ‖ name ‖ N ‖ q ‖ n ‖ λ ‖ κ ‖ γ ‖ setup_seed)` pins every value.
+len(name) ‖ name ‖ N ‖ q ‖ n ‖ λ ‖ κ ‖ γ ‖ setup_seed)` ghim mọi giá trị.
 
-Concrete security, from `research/bdlop_params/estimate.py` with the
-CRYSTALS security-estimates model (commit `75c26949`), core-SVP cost:
+Bảo mật cụ thể, từ `research/bdlop_params/estimate.py` với mô hình
+security-estimates của CRYSTALS (commit `75c26949`), chi phí core-SVP:
 
-| Problem | Instance | Block size | Classical | Quantum |
+| Bài toán | Instance | Block size | Cổ điển | Lượng tử |
 |---|---|---|---|---|
-| M-SIS (binding) | `B1 ∈ R_q^{n×k}`, `ℓ∞` bound `8κB ≈ 2^25.9` | 480 | 140 | 127 |
-| M-LWE (hiding) | rank `λ`, `n+1` samples, ternary secret and error | 580 | 169 | 153 |
-| M-LWE, dual hybrid (lattice-estimator `e4333d9`) | same | 564 / 567 | **164** | **150** |
+| M-SIS (binding) | `B1 ∈ R_q^{n×k}`, chặn `ℓ∞` `8κB ≈ 2^25.9` | 480 | 140 | 127 |
+| M-LWE (hiding) | hạng `λ`, `n+1` mẫu, secret và error tam phân | 580 | 169 | 153 |
+| M-LWE, dual hybrid (lattice-estimator `e4333d9`) | như trên | 564 / 567 | **164** | **150** |
 
-Reduction losses are ignored, as for ML-DSA. The claimed hiding level is the
-lower dual-hybrid figure; the cross-check also reproduces the M-SIS and primal
-M-LWE rows (`research/bdlop_params/CROSSCHECK.md`). The quantum M-SIS figure,
-127 bits, is just below 128. The earlier set `bdlop-open-128-v1` (λ = 6,
-k = 13) has the same M-SIS estimate but only 135 / 123 bits for M-LWE (dual
-hybrid, β = 463); this is why the production set raises λ to 7.
+Các mất mát trong reduction bị bỏ qua, giống như với ML-DSA. Mức hiding được
+tuyên bố là con số dual-hybrid thấp hơn; phần đối chiếu cũng tái lập các dòng
+M-SIS và primal M-LWE (`research/bdlop_params/CROSSCHECK.md`). Con số M-SIS
+lượng tử, 127 bit, hơi dưới 128. Bộ cũ hơn `bdlop-open-128-v1` (λ = 6,
+k = 13) có cùng ước lượng M-SIS nhưng chỉ 135 / 123 bit cho M-LWE (dual
+hybrid, β = 463); đây là lý do bộ sản xuất nâng λ lên 7.
 
-## 3. Algorithms
+## 3. Thuật toán
 
-### 3.1 Public key
+### 3.1 Khóa công khai
 
-`B1 = [I_n | B1']` with `B1' ∈ R_q^{n×(λ+1)}`, `b2 = [0^n | 1 | b2']` with
-`b2' ∈ R_q^{1×λ}`. Both are expanded by rejection sampling from
-`H("zkstego/lattice-zk/bdlop-open/v1/key\0" ‖ parameter_id)`. There is no
-trapdoor and no trusted setup.
+`B1 = [I_n | B1']` với `B1' ∈ R_q^{n×(λ+1)}`, `b2 = [0^n | 1 | b2']` với
+`b2' ∈ R_q^{1×λ}`. Cả hai được trải bằng rejection sampling từ
+`H("zkstego/lattice-zk/bdlop-open/v1/key\0" ‖ parameter_id)`. Không có
+trapdoor và không có trusted setup.
 
 ### 3.2 Commit
 
-Input payload `p` with `|p| ≤ N·⌊(log₂q − 1)/8⌋ − 2` bytes. Encode
-`len(p) (2 bytes) ‖ p ‖ 0…` as `N` coefficients of three bytes each; this
-encoding is injective and its image is checked on decode. Sample `r ← S_1^k`
-and output `t1 = B1·r`, `t2 = ⟨b2, r⟩ + m`.
+Payload đầu vào `p` với `|p| ≤ N·⌊(log₂q − 1)/8⌋ − 2` byte. Mã hóa
+`len(p) (2 byte) ‖ p ‖ 0…` thành `N` hệ số, mỗi hệ số ba byte; cách mã hóa này
+đơn ánh và ảnh của nó được kiểm khi decode. Lấy mẫu `r ← S_1^k` và xuất
+`t1 = B1·r`, `t2 = ⟨b2, r⟩ + m`.
 
-A `Commitment` object is canonical by construction (D8): it carries its
-parameter set, and its constructor refuses anything but integer arrays of
-shapes `(n, N)` and `(N,)` with every coefficient in `[0, q)`; it stores
-read-only `int64` copies. `from_bytes`, `commit` and `dataclasses.replace`
-all go through that constructor. Verifiers still re-check every commitment
-they receive (`require_commitment`, `is_canonical`), so an object built
-around the constructor is refused as well.
+Một đối tượng `Commitment` là canonical theo cấu trúc (D8): nó mang theo bộ
+tham số của mình, và constructor của nó từ chối mọi thứ trừ mảng số nguyên có
+shape `(n, N)` và `(N,)` với mọi hệ số trong `[0, q)`; nó lưu các bản sao
+`int64` chỉ đọc. `from_bytes`, `commit` và `dataclasses.replace` đều đi qua
+constructor đó. Verifier vẫn kiểm lại mọi cam kết nhận được
+(`require_commitment`, `is_canonical`), nên một đối tượng dựng vòng qua
+constructor cũng bị từ chối.
 
 ### 3.3 Prove (opening)
 
-Input statement bytes `x`, commitment `t = (t1, t2)`, witness `r`.
+Đầu vào statement bytes `x`, cam kết `t = (t1, t2)`, witness `r`.
 
-1. Check `‖r‖∞ ≤ 1` and `B1·r = t1`; otherwise refuse.
+1. Kiểm `‖r‖∞ ≤ 1` và `B1·r = t1`; nếu không thì từ chối.
 2. `K = SHA3-256("zkstego/lattice-zk/hedged-mask-key/v2\0" ‖ len(P) ‖ P ‖
    len(pid) ‖ pid ‖ entropy ‖ len(x) ‖ x ‖ len(t) ‖ t ‖ len(r) ‖ r)` (hedged,
-   domain-separated; D7), with protocol label `P = "bdlop-open"`
-   (`"bdlop-equal"` for 3.5, `"bdlop-binary"` for the binary proof) and
-   `pid = parameter_id`. Only `bdlop-open-128-v1` keeps the earlier untagged
-   `K = SHA3-256(entropy ‖ len(x) ‖ x ‖ …)` for its opening and equality
-   proofs, so `kat_v1.json` is unchanged; `kat_v2.json` and the binary KAT
-   were regenerated for the tagged key. `K` only seeds the prover's masks: the
-   verifier never recomputes it, so proofs from either derivation verify.
-3. For attempt `i = 1, 2, …` (at most 512):
-   - `y ← [−γ+1, γ]^{kN}` from `H(mask-domain ‖ K ‖ i)`;
+   phân tách domain; D7), với nhãn giao thức `P = "bdlop-open"`
+   (`"bdlop-equal"` cho 3.5, `"bdlop-binary"` cho binary proof) và
+   `pid = parameter_id`. Chỉ `bdlop-open-128-v1` giữ `K` không gắn tag cũ
+   `K = SHA3-256(entropy ‖ len(x) ‖ x ‖ …)` cho opening và equality proof của
+   nó, nên `kat_v1.json` không đổi; `kat_v2.json` và KAT binary được sinh lại
+   cho khóa đã gắn tag. `K` chỉ seed cho mặt nạ của prover: verifier không bao
+   giờ tính lại nó, nên chứng minh từ cách dẫn xuất nào cũng verify được.
+3. Với lần thử `i = 1, 2, …` (tối đa 512):
+   - `y ← [−γ+1, γ]^{kN}` từ `H(mask-domain ‖ K ‖ i)`;
    - `w = B1·y`;
-   - `seed = H(fs-domain ‖ parameter_id ‖ len(x) ‖ x ‖ t ‖ w)`, 32 bytes;
-   - `c = SampleInBall(seed)` (ML-DSA-style Fisher–Yates over SHAKE output, weight `κ`);
-   - `z = y + c·r`; if `‖z‖∞ ≤ B` output `π = seed ‖ Pack(z + B)`.
+   - `seed = H(fs-domain ‖ parameter_id ‖ len(x) ‖ x ‖ t ‖ w)`, 32 byte;
+   - `c = SampleInBall(seed)` (Fisher–Yates kiểu ML-DSA trên đầu ra SHAKE, trọng số `κ`);
+   - `z = y + c·r`; nếu `‖z‖∞ ≤ B` thì xuất `π = seed ‖ Pack(z + B)`.
 
-Nothing from a rejected attempt leaves the prover.
+Không gì từ một lần thử bị loại rời khỏi prover.
 
 ### 3.4 Verify (opening)
 
-Reject unless `|π|` is exact, every packed value lies in `[0, 2B]` and the
-padding bits are zero. Recompute `c` from `seed`, `w' = B1·z − c·t1`, and
-accept iff `seed = H(fs-domain ‖ parameter_id ‖ len(x) ‖ x ‖ t ‖ w')`.
+Từ chối trừ khi `|π|` đúng chính xác, mọi giá trị đóng gói nằm trong `[0, 2B]`
+và các bit padding bằng không. Tính lại `c` từ `seed`, `w' = B1·z − c·t1`, và
+chấp nhận khi và chỉ khi `seed = H(fs-domain ‖ parameter_id ‖ len(x) ‖ x ‖ t ‖ w')`.
 
-Production strength (Q12): every application-level verifier
+Độ mạnh sản xuất (Q12): mọi verifier mức ứng dụng
 (`verify_video_proof`, `verify_envelope`, `verify_registered_envelope`,
 `verify_disclosure_proof`, `verify_commitment_disclosure`, `verify_linkage`,
-and `pins_from_registry`) raises `ValueError` for a parameter set whose
-challenge space is below `2^256` unless the caller passes
-`allow_toy_parameters=True`. The proof primitives of 3.4 and 3.5 stay
-parameter-agnostic building blocks.
+và `pins_from_registry`) ném `ValueError` cho một bộ tham số có không gian
+challenge dưới `2^256` trừ khi caller truyền
+`allow_toy_parameters=True`. Các nguyên thủy chứng minh của 3.4 và 3.5 vẫn là
+các khối xây dựng không phụ thuộc tham số.
 
 ### 3.5 Equality proof
 
-For `t_a = Com(m; r_a)` and `t_b = Com(m; r_b)` the prover samples `y_a, y_b`,
-sends `w_a = B1·y_a`, `w_b = B1·y_b`, `u = ⟨b2, y_a − y_b⟩` through the hash,
-and answers `z_a = y_a + c·r_a`, `z_b = y_b + c·r_b`, aborting unless both are
-in range. The verifier recomputes `w_a, w_b` as in 3.4 and
-`u' = ⟨b2, z_a − z_b⟩ − c·(t2_a − t2_b)`. The prover has its own cap of 4 096
-attempts (`equality_proof.MAX_ATTEMPTS`; see 4.1). Either witness may be the
-all-zero vector, which is ternary: `Com(m; 0) = (0, m)` is the public
-commitment used for disclosure (3.7).
+Với `t_a = Com(m; r_a)` và `t_b = Com(m; r_b)`, prover lấy mẫu `y_a, y_b`,
+gửi `w_a = B1·y_a`, `w_b = B1·y_b`, `u = ⟨b2, y_a − y_b⟩` qua hàm băm, và đáp
+`z_a = y_a + c·r_a`, `z_b = y_b + c·r_b`, hủy trừ khi cả hai trong biên.
+Verifier tính lại `w_a, w_b` như ở 3.4 và
+`u' = ⟨b2, z_a − z_b⟩ − c·(t2_a − t2_b)`. Prover có trần riêng 4 096
+lần thử (`equality_proof.MAX_ATTEMPTS`; xem 4.1). Một trong hai witness có thể
+là vector toàn không, vốn là tam phân: `Com(m; 0) = (0, m)` là cam kết công
+khai dùng cho disclosure (3.7).
 
-### 3.6 Video statement
+### 3.6 Statement video
 
-The Fiat–Shamir statement `x` is the fixed-width encoding
+Statement Fiat–Shamir `x` là mã hóa cố định độ rộng
 
 ```text
 u16 version ‖ relation_id ‖ parameter_id ‖ registry_root ‖ u64 registry_epoch ‖
@@ -139,69 +138,68 @@ session_challenge ‖ codec_policy_id ‖ carrier_profile_id ‖ u64 carrier_cou
 positions_hash ‖ video_commitment
 ```
 
-with every digest 32 bytes. The verifier builds it only from its pinned
-configuration (relation, registry root and epoch, codec policy, carrier
-profile) and from values it recomputes from the received H.264 stream:
-the carrier list (hence `carrier_count` and `positions_hash`) and
+với mọi digest 32 byte. Verifier dựng nó chỉ từ cấu hình đã ghim của mình
+(relation, registry root và epoch, codec policy, carrier profile) và từ các
+giá trị nó tính lại từ luồng H.264 nhận được: danh sách carrier (do đó
+`carrier_count` và `positions_hash`) và
 `video_commitment = SHA-256("zkstego/video-zk/video-commitment/v1\0" ‖ D)`.
-`D` is computed over the stream split by `ffmpeg -c:v copy -f segment` into
-segments of `frames_per_segment` frames:
+`D` được tính trên luồng đã tách bằng `ffmpeg -c:v copy -f segment` thành các
+segment gồm `frames_per_segment` khung:
 `D = SHA-256("zkstego/canonical-h264-segmented/v1\0" ‖ u32 F ‖ u32 L ‖
-(u32 i ‖ u32 frames_i ‖ d_i)_{i<L})`. For a segment that carries envelope
-chunks, `d_i` is the SHA-256 of a tagged, length-delimited serialization of its
-parsed NAL units (header fields, RBSP of NAL units without carriers, and for
-carrier-bearing IDR NAL units the RBSP bits between carrier blocks up to the
-stop bit, with each carrier block replaced by its coefficient vector in which
-every carrier is normalized); for the other segments `d_i` is the SHA-256 of
-the segment file. Because `D` normalizes exactly the positions that carry
-the envelope, the proof can bind the video without depending on its own bits.
-What `D` does not bind is listed in the paper's security section
-(`docs/paper/sections/security.tex`, integrity limits).
+(u32 i ‖ u32 frames_i ‖ d_i)_{i<L})`. Với một segment mang các chunk envelope,
+`d_i` là SHA-256 của một serialization có gắn tag, phân tách độ dài, của các
+NAL unit đã parse (các trường header, RBSP của những NAL unit không có carrier,
+và với các IDR NAL unit mang carrier là các bit RBSP giữa các block carrier cho
+đến stop bit, mỗi block carrier được thay bằng vector hệ số của nó trong đó mọi
+carrier được chuẩn hóa); với các segment khác `d_i` là SHA-256 của file
+segment. Vì `D` chuẩn hóa đúng các vị trí mang envelope, chứng minh có thể gắn
+video mà không phụ thuộc chính các bit của nó. Những gì `D` không gắn được liệt
+kê ở phần bảo mật của bài báo (`docs/paper/sections/security.tex`, integrity
+limits).
 
-**Codec policy v2 (D5).** The definition above is codec policy
-`h264-baseline-cavlc/canonical-h264-carrier-normalized-sha256-v1`; it is
-kept byte-identical (identifier, profile ids, `D`) for existing videos. A
-carrier profile can select
+**Codec policy v2 (D5).** Định nghĩa trên là codec policy
+`h264-baseline-cavlc/canonical-h264-carrier-normalized-sha256-v1`; nó được giữ
+nguyên từng byte (identifier, profile id, `D`) cho các video đã có. Một carrier
+profile có thể chọn
 `CODEC_POLICY_V2 = "…-sha256-v2/full-rbsp/tagged-raw-segments/segmentation=annexb-access-unit-exact-partition-v1"`;
-it is added to the profile description as `"codec_policy"`, so its profile
-id, policy hash, relation id and statement differ from v1. Under v2:
+nó được thêm vào mô tả profile dưới dạng `"codec_policy"`, nên profile id, policy
+hash, relation id và statement của nó khác với v1. Dưới v2:
 
-- (a) a segment without carriers has
+- (a) một segment không có carrier có
   `d_i = SHA-256("zkstego/canonical-h264-raw-segment/v2\0" ‖ u64 len ‖ bytes)`,
-  and `D = SHA-256("zkstego/canonical-h264-segmented/v2\0" ‖ u16 len ‖ rule ‖
+  và `D = SHA-256("zkstego/canonical-h264-segmented/v2\0" ‖ u16 len ‖ rule ‖
   u32 F ‖ u32 L ‖ u32 C ‖ (u32 i ‖ u32 frames_i ‖ u8 kind_i ‖ d_i)_{i<L})`,
-  where the first `C` segments carry chunks (`kind = 1`) and the rest are raw
+  trong đó `C` segment đầu mang chunk (`kind = 1`) và phần còn lại là raw
   (`kind = 0`);
-- (b) a carrier-bearing IDR NAL unit is hashed over its complete RBSP,
-  preceded by its byte length, so the zero bits after the stop bit (and any
-  appended zero bytes) are bound; v1 stopped at the stop bit;
-- (c) the segmentation is pinned: the segments must be exactly the
-  access-unit partition of the input (segment `k` starts at the first byte of
-  the start code that opens access unit `k·F`, H.264 7.4.1.2.3), checked byte
-  for byte after ffmpeg has split the stream. `D` is then a function of the
-  input bytes alone; an ffmpeg build that cuts elsewhere fails closed instead
-  of silently changing the hashed scope. The ffmpeg version itself is not
-  hashed: it would make verification depend on the verifier's installation
-  without binding anything the partition check does not already bind;
-- in addition, a carrier segment's leading zero bytes before its first start
-  code are counted, its NAL units must be canonically escaped, and NAL unit
-  types the parser does not model are refused.
+- (b) một IDR NAL unit mang carrier được băm trên toàn bộ RBSP của nó, trước đó
+  là độ dài byte của nó, nên các bit không sau stop bit (và mọi byte không được
+  thêm) đều bị gắn; v1 dừng ở stop bit;
+- (c) cách segment hóa được ghim: các segment phải đúng là phân hoạch
+  access-unit của đầu vào (segment `k` bắt đầu ở byte đầu tiên của start code mở
+  access unit `k·F`, H.264 7.4.1.2.3), kiểm từng byte sau khi ffmpeg đã tách
+  luồng. Khi đó `D` chỉ là hàm của các byte đầu vào; một bản ffmpeg cắt ở chỗ
+  khác sẽ fail closed thay vì âm thầm đổi phạm vi được băm. Bản thân phiên bản
+  ffmpeg không được băm: điều đó sẽ khiến verification phụ thuộc vào cài đặt của
+  verifier mà không gắn thêm gì mà kiểm tra phân hoạch chưa gắn;
+- ngoài ra, các byte không dẫn đầu của một segment carrier trước start code đầu
+  tiên được đếm, các NAL unit của nó phải escape canonical, và các loại NAL unit
+  mà parser không mô hình hóa bị từ chối.
 
-The carrier profile also fixes a GOP policy (`src/transport/gop_policy.py`), checked on
-every segment before analysis: `all-intra` (default; every coded slice is IDR)
-or `idr-carriers-inter-raw-v1` (GOP > 1: carriers only in IDR slices, P and
-non-IDR I slices hashed as raw RBSP in `d_i`, every segment starting with an
-IDR). Both require canonical emulation prevention, so RBSP equality is NAL
-byte equality. A non-default policy is added to the carrier-profile
-description as `"gop_policy"`; all-intra profile identifiers are unchanged.
-See `docs/GOP_HD_SUPPORT.md`.
+Carrier profile cũng cố định một GOP policy (`src/transport/gop_policy.py`),
+kiểm trên mọi segment trước khi phân tích: `all-intra` (mặc định; mọi slice đã
+mã hóa đều là IDR) hoặc `idr-carriers-inter-raw-v1` (GOP > 1: carrier chỉ trong
+slice IDR, các slice P và I không IDR được băm raw RBSP trong `d_i`, mỗi segment
+bắt đầu bằng IDR). Cả hai đều đòi emulation prevention canonical, nên RBSP bằng
+nhau là NAL byte bằng nhau. Một policy không mặc định được thêm vào mô tả
+carrier-profile dưới dạng `"gop_policy"`; các identifier profile all-intra không
+đổi. Xem `docs/GOP_HD_SUPPORT.md`.
 
-An opt-in profile field `chunk_plan` replaces the fixed `chunk_bytes` with a
-capacity-adaptive plan (ZKBC v2): chunk sizes follow each segment's
-recomputable carrier capacity, low-capacity segments are skipped, the plan
-replaces `"chunk_bytes"` by `"chunk_plan"` in the profile description, and `D`
-uses the domain `zkstego/canonical-h264-segmented-adaptive/v1` with per-segment
-roles, capacities and chunk sizes. See `docs/ADAPTIVE_CHUNKING.md`.
+Một trường profile opt-in `chunk_plan` thay thế `chunk_bytes` cố định bằng một
+kế hoạch thích ứng theo dung lượng (ZKBC v2): kích thước chunk theo dung lượng
+carrier tính-lại-được của mỗi segment, các segment dung lượng thấp bị bỏ qua,
+kế hoạch thay `"chunk_bytes"` bằng `"chunk_plan"` trong mô tả profile, và `D`
+dùng domain `zkstego/canonical-h264-segmented-adaptive/v1` với vai trò, dung
+lượng và kích thước chunk theo từng segment. Xem `docs/CARRIERS_VA_CHUNKING.md`.
 
 ### 3.7 Envelope
 
@@ -210,237 +208,228 @@ in-band     "ZKLB" ‖ 0x01 ‖ parameter_id ‖ session_challenge ‖ t ‖ π
 registered  "ZKLR" ‖ 0x01 ‖ parameter_id ‖ session_challenge ‖ π
 ```
 
-Carrier positions are ordered by a keyed shuffle. With a secret stego key
-shared with the verifier the channel stays undetectable to anyone without the
-key; with the key derived from public configuration
+Các vị trí carrier được sắp bằng một keyed shuffle. Với một khóa stego bí mật
+chia sẻ với verifier, kênh vẫn không phát hiện được với bất kỳ ai không có
+khóa; với khóa dẫn xuất từ cấu hình công khai
 (`public_sync_key = SHA-256(domain ‖ parameter_id ‖ carrier_profile_id)`,
-CLI `--public-carrier-order`) anyone holding the registry can verify, at the
-cost of undetectability. The proof's soundness and zero knowledge do not depend
-on this key.
+CLI `--public-carrier-order`) bất kỳ ai giữ registry đều verify được, đổi lại
+mất tính không phát hiện được. Soundness và zero knowledge của chứng minh không
+phụ thuộc khóa này.
 
-In registered mode `t` is a credential commitment whose bytes are hashed into
-the relation descriptor that the issuer signs (ML-DSA-65) into the registry.
-The session challenge is a 32-byte value issued by the verifier and consumed
-once, atomically, after a successful verification.
+Ở chế độ registered, `t` là một cam kết credential mà các byte của nó được băm
+vào relation descriptor do issuer ký (ML-DSA-65) vào registry. Session
+challenge là một giá trị 32 byte do verifier phát và tiêu thụ một lần, nguyên
+tử, sau khi verification thành công.
 
-**Holder identity.** The issuer may bind the credential to a holder identifier
-`h` (a non-empty NFC-normalized UTF-8 string of at most 256 bytes; CLI
-`--holder-id`). The registry field set is unchanged: the descriptor's
-`verifier_key_hash` becomes
+**Danh tính holder.** Issuer có thể gắn credential với một định danh holder
+`h` (một chuỗi UTF-8 chuẩn hóa NFC, không rỗng, tối đa 256 byte; CLI
+`--holder-id`). Tập trường registry không đổi: `verifier_key_hash` của
+descriptor trở thành
 
 ```text
 SHA-256(B1' ‖ b2' ‖ t ‖ SHA-256("zkstego/lattice-zk/video-pipeline/v1/holder-id\0" ‖ u16 |h| ‖ h))
 ```
 
-instead of `SHA-256(B1' ‖ b2' ‖ t)` (key blocks as big-endian 64-bit words,
-`t` packed as on the wire); every part has a length fixed by
-`parameter_id`, so the encoding is unambiguous, and without `h` the
-descriptor (and every existing registry) is unchanged. A holder id is refused
-for in-band profiles. Pins resolve only when the verifier supplies the same
-`h` (`pins_from_registry(..., holder_id=h)`), so the issuer's signature covers
-"commitment `t` belongs to holder `h`".
+thay vì `SHA-256(B1' ‖ b2' ‖ t)` (các block khóa dưới dạng từ 64-bit
+big-endian, `t` đóng gói như trên dây); mỗi phần có độ dài cố định bởi
+`parameter_id`, nên mã hóa là không nhập nhằng, và không có `h` thì descriptor
+(và mọi registry đã có) không đổi. Một holder id bị từ chối với các profile
+in-band. Pins chỉ resolve khi verifier cung cấp đúng `h`
+(`pins_from_registry(..., holder_id=h)`), nên chữ ký của issuer phủ "cam kết `t`
+thuộc về holder `h`".
 
-**Pins and credential.** `verify_video_proof` recomputes the relation id of
-`(parameter set, carrier profile, credential, holder id)` and raises
-`ValueError` unless it equals `pins.relation_id`. A mismatch (pins resolved
-for one credential used with another, in-band pins with a registered profile
-or the reverse, a wrong or missing holder id) is verifier misconfiguration,
-reported before the video is read; video content only ever yields
-`valid = False`.
+**Pins và credential.** `verify_video_proof` tính lại relation id của
+`(bộ tham số, carrier profile, credential, holder id)` và ném `ValueError` trừ
+khi nó bằng `pins.relation_id`. Một sai khớp (pins resolve cho credential này
+nhưng dùng với credential khác, pins in-band với profile registered hoặc ngược
+lại, một holder id sai hoặc thiếu) là lỗi cấu hình verifier, báo trước khi video
+được đọc; nội dung video chỉ bao giờ cho ra `valid = False`.
 
-**Disclosure.** The holder reveals the payload `p` of a commitment `t` to one
-recipient without handing over `r`:
+**Disclosure.** Holder tiết lộ payload `p` của một cam kết `t` cho một người
+nhận mà không trao `r`:
 
 ```text
 ctx         = "zkstego/lattice-zk/disclosure/v1\0" ‖ parameter_id ‖
               u64 32 ‖ statement_id ‖ u64 32 ‖ nonce
 t'          = Com(encode(p); 0) = (0, encode(p))
-π_eq        = equality proof (3.5) of (t, r) and (t', 0) for statement ctx
+π_eq        = equality proof (3.5) của (t, r) và (t', 0) cho statement ctx
 disclosure  = "ZKLD" ‖ 0x01 ‖ parameter_id ‖ u16 |p| ‖ p ‖ π_eq
 ```
 
-`statement_id` names what is disclosed (the verified video statement id for
-an in-band envelope; for a registered credential, any 32-byte id the
-recipient names, such as the relation id) and `nonce` is a 32-byte value the
-recipient chose, so a disclosure made for one recipient or one video does not
-verify for another. The recipient recomputes `t'` from `p` and verifies `π_eq`
-against the commitment it already holds (`verify_disclosure_proof` for an
-envelope, `verify_commitment_disclosure` for a credential; CLI `disclose` and
-`disclosure-verify`). Size: 39 bytes + `|p|` + 16 160 bytes for the
-production set. The proof is transferable: a third party who trusts that the
-nonce was fresh is convinced too. `self_check_opening` (formerly
-`verify_disclosure`) checks `(p, r)` directly and is a holder-side self-check
-only: anyone given `r` can prove knowledge of the opening for new statements.
+`statement_id` đặt tên cho những gì được tiết lộ (statement id video đã verify
+cho một envelope in-band; với credential registered, bất kỳ id 32 byte nào
+người nhận đặt tên, chẳng hạn relation id) và `nonce` là một giá trị 32 byte do
+người nhận chọn, nên một disclosure tạo cho người nhận này hoặc video này không
+verify cho người/video khác. Người nhận tính lại `t'` từ `p` và verify `π_eq`
+với cam kết đã có (`verify_disclosure_proof` cho một envelope,
+`verify_commitment_disclosure` cho một credential; CLI `disclose` và
+`disclosure-verify`). Kích thước: 39 byte + `|p|` + 16 160 byte cho bộ sản
+xuất. Chứng minh có thể chuyển nhượng: một bên thứ ba tin rằng nonce là mới
+cũng được thuyết phục. `self_check_opening` (trước là `verify_disclosure`) kiểm
+`(p, r)` trực tiếp và chỉ là self-check phía holder: ai được trao `r` đều chứng
+minh được tri thức về opening cho các statement mới.
 
-## 4. Security argument
+## 4. Lập luận bảo mật
 
-Throughout, `‖c·v‖∞ ≤ ‖c‖₁·‖v‖∞`.
+Xuyên suốt, `‖c·v‖∞ ≤ ‖c‖₁·‖v‖∞`.
 
 ### 4.1 Completeness
 
-`‖c·r‖∞ ≤ κ`, so an honest attempt is accepted with probability
-`((2B+1)/(2γ))^{kN}` (Section 2), the expected number of attempts is its
-inverse (5.23 for the production set; measured 4.68 over 50 runs with
-`bdlop-open-128-v1` (v2 measurement pending)), and an
-accepted `z` satisfies the verification equation because `t1 = B1·r`.
-The probability that 512 attempts all abort is `(1 − 0.191)^{512} < 2^{-156}`.
-The equality proof (3.5) accepts with probability `0.191^2 ≈ 0.037` per
-attempt (mean 27.4 attempts). It has its own cap of 4 096 attempts, so it
-fails with probability `(1 − 0.037)^{4096} ≈ 2^{-220}` (the shared cap of 512
-used before gave `2^{-35}` with `bdlop-open-128-v1`). The larger cap does not affect zero knowledge,
-because acceptance is independent of the witness, including the zero witness
-of a disclosure. `test_equality_prover_cap_gives_negligible_completeness_error`
-checks the bound `< 2^{-128}` from the parameters.
+`‖c·r‖∞ ≤ κ`, nên một lần thử trung thực được chấp nhận với xác suất
+`((2B+1)/(2γ))^{kN}` (Mục 2), số lần thử kỳ vọng là nghịch đảo của nó (5.23
+cho bộ sản xuất; đo được 4.68 qua 50 lượt với `bdlop-open-128-v1` (chưa đo
+lại dưới v2)), và một `z` được chấp nhận thỏa phương trình verification vì
+`t1 = B1·r`. Xác suất 512 lần thử đều hủy là `(1 − 0.191)^{512} < 2^{-156}`.
+Equality proof (3.5) chấp nhận với xác suất `0.191^2 ≈ 0.037` mỗi lần thử
+(trung bình 27.4 lần thử). Nó có trần riêng 4 096 lần thử, nên thất bại với
+xác suất `(1 − 0.037)^{4096} ≈ 2^{-220}` (trần chung 512 dùng trước đây cho
+`2^{-35}` với `bdlop-open-128-v1`). Trần lớn hơn không ảnh hưởng zero knowledge,
+vì chấp nhận độc lập với witness, kể cả witness không của một disclosure.
+`test_equality_prover_cap_gives_negligible_completeness_error`
+kiểm chặn `< 2^{-128}` từ các tham số.
 
-### 4.2 Honest-verifier zero knowledge of accepted transcripts
+### 4.2 Honest-verifier zero knowledge của các transcript được chấp nhận
 
-Fix `c` and `v = c·r` with `‖v‖∞ ≤ κ`. For any `z0` with `‖z0‖∞ ≤ B`, the mask
-`y = z0 − v` lies in `[−B−κ, B+κ] = [−γ+1, γ−1] ⊂ [−γ+1, γ]`. Hence every such
-`z0` has probability exactly `(2γ)^{−kN}`, and conditioned on acceptance `z`
-is uniform on `[−B, B]^{kN}` independently of `r`. A simulator samples `z`
-uniformly from that set and `c` uniformly from `C`, sets
-`w = B1·z − c·t1`, and programs the random oracle at
-`(parameter_id, x, t, w)`. This is the argument of the ML-DSA specification
-(Appendix B) applied to the BDLOP key; it requires `w` to have high
-min-entropy, which holds because `B1 = [I_n | B1']` and `y` is uniform over
-`2^{18·kN}` values. The bias that rejection sampling introduces in the random
-oracle, missed by earlier analyses, is treated by Barbosa et al. (2023) and
-Devevey et al. (2023); their fixed ROM proofs apply to this transform.
+Cố định `c` và `v = c·r` với `‖v‖∞ ≤ κ`. Với mọi `z0` thỏa `‖z0‖∞ ≤ B`, mặt
+nạ `y = z0 − v` nằm trong `[−B−κ, B+κ] = [−γ+1, γ−1] ⊂ [−γ+1, γ]`. Do đó mỗi
+`z0` như vậy có xác suất đúng bằng `(2γ)^{−kN}`, và với điều kiện chấp nhận thì
+`z` phân phối đều trên `[−B, B]^{kN}` độc lập với `r`. Một simulator lấy mẫu `z`
+đều từ tập đó và `c` đều từ `C`, đặt `w = B1·z − c·t1`, và lập trình random
+oracle tại `(parameter_id, x, t, w)`. Đây là lập luận của đặc tả ML-DSA
+(Phụ lục B) áp dụng cho khóa BDLOP; nó yêu cầu `w` có min-entropy cao, điều này
+đúng vì `B1 = [I_n | B1']` và `y` đều trên `2^{18·kN}` giá trị. Sai lệch mà
+rejection sampling đưa vào random oracle, bị các phân tích trước bỏ sót, được
+Barbosa và cộng sự (2023) và Devevey và cộng sự (2023) xử lý; các chứng minh
+ROM đã sửa của họ áp dụng cho biến đổi này.
 
-The test `test_accepted_response_coordinate_is_uniform_for_any_witness`
-checks the uniformity on a small parameter set, and
-`test_respond_accepts_exactly_the_response_range` checks the acceptance edge.
+Test `test_accepted_response_coordinate_is_uniform_for_any_witness`
+kiểm tính đều trên một bộ tham số nhỏ, và
+`test_respond_accepts_exactly_the_response_range` kiểm biên chấp nhận.
 
-### 4.3 Special soundness and knowledge soundness
+### 4.3 Special soundness và knowledge soundness
 
-Two accepting transcripts `(w, c, z)`, `(w, c', z')` with `c ≠ c'` give
-`B1·(z − z') = (c − c')·t1`. Put `f = c − c'` and `r̄ = z − z'`. Then
-`‖f‖∞ ≤ 2 < q^{1/2}/√2`, so `f` is invertible in `R_q`, and `‖r̄‖∞ ≤ 2B`.
-The pair `(r̄, f)` is a *relaxed opening*: it defines the message
-`m̄ = t2 − f^{−1}·⟨b2, r̄⟩`. The forking lemma turns this into knowledge
-soundness of the non-interactive proof in the random-oracle model, with a
-non-tight reduction. The test
-`test_two_transcripts_with_one_mask_yield_a_relaxed_opening` checks these
-equations on real transcripts.
+Hai transcript được chấp nhận `(w, c, z)`, `(w, c', z')` với `c ≠ c'` cho
+`B1·(z − z') = (c − c')·t1`. Đặt `f = c − c'` và `r̄ = z − z'`. Khi đó
+`‖f‖∞ ≤ 2 < q^{1/2}/√2`, nên `f` khả nghịch trong `R_q`, và `‖r̄‖∞ ≤ 2B`.
+Cặp `(r̄, f)` là một *relaxed opening*: nó định nghĩa message
+`m̄ = t2 − f^{−1}·⟨b2, r̄⟩`. Forking lemma biến điều này thành knowledge
+soundness của chứng minh không tương tác trong mô hình random oracle, với một
+reduction không chặt. Test
+`test_two_transcripts_with_one_mask_yield_a_relaxed_opening` kiểm các phương
+trình này trên transcript thật.
 
-### 4.4 Binding with respect to relaxed openings
+### 4.4 Binding theo relaxed opening
 
-Suppose `(r̄, f, m)` and `(r̄', f', m')` are relaxed openings of one commitment
-with `m ≠ m'`. From `f·t1 = B1·r̄` and `f'·t1 = B1·r̄'`,
-`B1·x = 0` for `x = f'·r̄ − f·r̄'`. If `x = 0` then `⟨b2, x⟩ = 0`, which with
-`f·t2 = ⟨b2, r̄⟩ + f·m` and `f'·t2 = ⟨b2, r̄'⟩ + f'·m'` gives
-`f·f'·(m − m') = 0`, contradicting invertibility of `f, f'`. So `x ≠ 0` is an
-M-SIS solution for `B1` with `‖x‖∞ ≤ 2·(2κ)·(2B) = 8κB`, the bound estimated in
-Section 2. The constructor of `BdlopParams` rejects any set in which
-`2·8κB ≥ q`, where the solution could wrap modulo `q`.
+Giả sử `(r̄, f, m)` và `(r̄', f', m')` là các relaxed opening của một cam kết
+với `m ≠ m'`. Từ `f·t1 = B1·r̄` và `f'·t1 = B1·r̄'`,
+`B1·x = 0` với `x = f'·r̄ − f·r̄'`. Nếu `x = 0` thì `⟨b2, x⟩ = 0`, điều này
+cùng `f·t2 = ⟨b2, r̄⟩ + f·m` và `f'·t2 = ⟨b2, r̄'⟩ + f'·m'` cho
+`f·f'·(m − m') = 0`, mâu thuẫn với tính khả nghịch của `f, f'`. Vậy `x ≠ 0` là
+một nghiệm M-SIS cho `B1` với `‖x‖∞ ≤ 2·(2κ)·(2B) = 8κB`, chặn được ước lượng ở
+Mục 2. Constructor của `BdlopParams` từ chối mọi bộ mà `2·8κB ≥ q`, nơi nghiệm
+có thể wrap modulo `q`.
 
 ### 4.5 Hiding
 
-Write `r = (r1, r2, r3) ∈ R^n × R × R^λ` and `B1' = [B1'_2 | B1'_3]`. Then
-`t2 − m = r2 + b2'·r3` and `t1 − B1'_2·(t2 − m) = r1 + (B1'_3 − B1'_2·b2')·r3`.
-For each fixed `m`, the map `(t1, t2) ↦ (t1 − B1'_2·(t2 − m), t2 − m)` is a
-public bijection, and its image is an M-LWE instance with secret `r3` of rank
-`λ`, `n + 1` ring samples, ternary error `(r1, r2)` and the uniform matrix
-`[B1'_3 − B1'_2·b2' ; b2']`. This is the instance estimated in Section 2.
+Viết `r = (r1, r2, r3) ∈ R^n × R × R^λ` và `B1' = [B1'_2 | B1'_3]`. Khi đó
+`t2 − m = r2 + b2'·r3` và `t1 − B1'_2·(t2 − m) = r1 + (B1'_3 − B1'_2·b2')·r3`.
+Với mỗi `m` cố định, ánh xạ `(t1, t2) ↦ (t1 − B1'_2·(t2 − m), t2 − m)` là một
+song ánh công khai, và ảnh của nó là một instance M-LWE với secret `r3` hạng
+`λ`, `n + 1` mẫu vành, error tam phân `(r1, r2)` và ma trận đều
+`[B1'_3 − B1'_2·b2' ; b2']`. Đây là instance được ước lượng ở Mục 2.
 
 ### 4.6 Equality proof
 
-Two accepting transcripts with one `(w_a, w_b, u)` give relaxed openings
-`(r̄_a, f)` and `(r̄_b, f)` with a *common* `f`, and from the third equation
-`f·(t2_a − t2_b) = ⟨b2, r̄_a − r̄_b⟩`. Substituting into the message
-definitions gives `m̄_a = m̄_b`. Zero knowledge follows as in 4.2, applied to
-both responses.
+Hai transcript được chấp nhận với một `(w_a, w_b, u)` cho các relaxed opening
+`(r̄_a, f)` và `(r̄_b, f)` với một `f` *chung*, và từ phương trình thứ ba
+`f·(t2_a − t2_b) = ⟨b2, r̄_a − r̄_b⟩`. Thay vào định nghĩa message cho
+`m̄_a = m̄_b`. Zero knowledge suy ra như ở 4.2, áp dụng cho cả hai đáp ứng.
 
-### 4.7 Binding to the video and the session
+### 4.7 Gắn vào video và phiên
 
-All of `parameter_id`, `x` and the full commitment enter the hash before `c`
-is derived. `x` is length-prefixed; `parameter_id`, the commitment and `w`
-have lengths fixed by `parameter_id`, so the hash input is uniquely decodable
-and a proof verifies only for the exact statement and commitment it was made
-for. The verifier never reads statement values from the video: it recomputes
-them and compares the session challenge with its own store. Changing any
-non-carrier syntax that `D` covers changes `D`; changing a carrier changes
-the envelope. Both are rejected
-(`test_envelope_is_rejected_under_any_other_statement`, the tamper checks in
-the E2E runs). The verifier also re-chunks the extracted envelope under the
-pinned `chunk_bytes` and rejects unless the extracted pieces equal that
-encoding byte for byte, so the carrier bits are the unique encoding of the
-envelope. Without this check a single-chunk envelope left the 16-bit
-`chunk_size` header field free (any value from the envelope length to
-65 535); `test_rewritten_single_chunk_header_is_rejected` covers it.
-Proofs and bounds: `docs/paper/sections/security.tex`.
+Cả `parameter_id`, `x` và toàn bộ cam kết đều vào hàm băm trước khi `c` được
+dẫn xuất. `x` được phân tách độ dài; `parameter_id`, cam kết và `w` có độ dài
+cố định bởi `parameter_id`, nên đầu vào băm giải mã được duy nhất và một chứng
+minh chỉ verify cho đúng statement và cam kết nó được tạo ra. Verifier không bao
+giờ đọc các giá trị statement từ video: nó tính lại chúng và so session
+challenge với kho của mình. Thay đổi bất kỳ cú pháp không-carrier nào mà `D`
+phủ sẽ đổi `D`; thay đổi một carrier sẽ đổi envelope. Cả hai đều bị từ chối
+(`test_envelope_is_rejected_under_any_other_statement`, các kiểm tra tamper
+trong các lượt chạy E2E). Verifier cũng re-chunk envelope đã trích dưới
+`chunk_bytes` đã ghim và từ chối trừ khi các mảnh trích ra bằng đúng mã hóa đó
+từng byte, nên các bit carrier là mã hóa duy nhất của envelope. Không có kiểm
+tra này, một envelope đơn chunk để trống trường header `chunk_size` 16-bit
+(bất kỳ giá trị nào từ độ dài envelope đến 65 535);
+`test_rewritten_single_chunk_header_is_rejected` phủ nó. Chứng minh và chặn:
+`docs/paper/sections/security.tex`.
 
-### 4.8 What the proof establishes
+### 4.8 Chứng minh thiết lập điều gì
 
-- **In-band mode**: the creator of this video, for this session, knows an
-  opening of the commitment it carries. The payload stays hidden and can be
-  disclosed later to a chosen party. This does not identify the creator.
-  Disclosure (3.7) is an equality proof against `(0, encode(payload))` with
-  zero randomness: extraction gives a relaxed opening `(r̄', f)` of
-  `(0, encode(p))` with `B1·r̄' = 0`, so `r̄' = 0` unless M-SIS is broken and
-  the carried commitment hides `p`. The randomness `r` is not revealed, so the
-  recipient cannot prove anything about the commitment afterwards.
-- **Registered mode**: the creator knows the opening of a credential
-  commitment that the issuer registered, so only the credential holder can
-  produce the proof. The argument needs, besides binding, that a relaxed
-  opening of an honestly generated commitment is hard to find (M-SIS, or
-  M-LWE when the opening found is the holder's own `r`). With a holder id
-  (3.7) the issuer's signature also covers "this commitment belongs to holder
-  `h`", and the proof then authenticates `h`. Without one, the registered
-  descriptor binds the commitment only and the link from a commitment to a
-  person comes from outside the signed registry. Either way the issuer is
-  trusted to have checked who `h` is.
-- **Linkage**: two carried commitments, or a carried commitment and a
-  credential, hide the same payload.
+- **Chế độ in-band**: người tạo video này, cho phiên này, biết một opening của
+  cam kết nó mang. Payload vẫn ẩn và có thể được tiết lộ sau cho một bên được
+  chọn. Điều này không định danh người tạo. Disclosure (3.7) là một equality
+  proof đối với `(0, encode(payload))` với randomness không: extraction cho một
+  relaxed opening `(r̄', f)` của `(0, encode(p))` với `B1·r̄' = 0`, nên `r̄' = 0`
+  trừ khi M-SIS bị phá và cam kết được mang giấu `p`. Randomness `r` không được
+  tiết lộ, nên người nhận không chứng minh được gì về cam kết về sau.
+- **Chế độ registered**: người tạo biết opening của một cam kết credential mà
+  issuer đã đăng ký, nên chỉ người giữ credential mới tạo được chứng minh. Lập
+  luận cần, ngoài binding, rằng một relaxed opening của một cam kết sinh trung
+  thực là khó tìm (M-SIS, hoặc M-LWE khi opening tìm được là chính `r` của
+  holder). Với một holder id (3.7) chữ ký của issuer cũng phủ "cam kết này thuộc
+  về holder `h`", và khi đó chứng minh xác thực `h`. Không có nó, descriptor
+  registered chỉ gắn cam kết và liên kết từ một cam kết tới một người đến từ
+  ngoài registry đã ký. Dù cách nào, issuer được tin là đã kiểm `h` là ai.
+- **Linkage**: hai cam kết được mang, hoặc một cam kết được mang và một
+  credential, giấu cùng một payload.
 
-It does not establish that the payload is true, that a camera recorded the
-video, or that an H.264 encoder ran correctly.
+Nó không thiết lập rằng payload là đúng sự thật, rằng một camera đã ghi video,
+hay rằng một bộ mã hóa H.264 đã chạy đúng.
 
-## 5. Post-quantum wording
+## 5. Cách diễn đạt hậu lượng tử
 
-The proofs above are in the classical random-oracle model under M-SIS and
-M-LWE. No tight quantum-random-oracle proof is claimed. The appropriate
-wording is "plausibly post-quantum": the underlying problems have no known
-efficient quantum algorithm, and generic results (Don, Fehr, Majenz,
-Schaffner, CRYPTO 2019; Liu–Zhandry, CRYPTO 2019) indicate the Fiat–Shamir
-transform preserves soundness of such protocols against quantum adversaries
-with polynomial loss.
+Các chứng minh trên ở trong mô hình random oracle cổ điển dưới M-SIS và M-LWE.
+Không tuyên bố chứng minh quantum-random-oracle chặt. Cách diễn đạt phù hợp là
+"plausibly post-quantum": các bài toán nền không có thuật toán lượng tử hiệu
+quả nào đã biết, và các kết quả tổng quát (Don, Fehr, Majenz, Schaffner,
+CRYPTO 2019; Liu–Zhandry, CRYPTO 2019) cho thấy biến đổi Fiat–Shamir bảo toàn
+soundness của các giao thức như vậy trước đối thủ lượng tử với mất mát đa thức.
 
-## 6. Deviations from BDLOP and why
+## 6. Khác biệt so với BDLOP và vì sao
 
-1. **Uniform masking instead of Gaussian.** Exact integer arithmetic and an
-   exactly uniform accepted response (4.2), at the cost of a larger extracted
-   norm. Binding is therefore estimated in `ℓ∞` with bound `8κB` rather than
-   reused from the paper's table.
-2. **Fiat–Shamir with an explicit statement.** The original is an interactive
-   protocol; here the challenge is derived from the full statement and
-   commitment, with hedged mask derivation.
-3. **Different parameters.** Smaller ring degree with larger module rank,
-   chosen by the estimator for size at the 128-bit level. The paper's own
-   parameter table is not used.
+1. **Masking đều thay vì Gauss.** Số học nguyên chính xác và một đáp ứng được
+   chấp nhận đều một cách chính xác (4.2), đổi lại norm trích ra lớn hơn. Do đó
+   binding được ước lượng theo `ℓ∞` với chặn `8κB` thay vì tái dùng từ bảng của
+   bài báo.
+2. **Fiat–Shamir với statement tường minh.** Bản gốc là một giao thức tương
+   tác; ở đây challenge được dẫn xuất từ toàn bộ statement và cam kết, với dẫn
+   xuất mặt nạ hedged.
+3. **Tham số khác.** Bậc vành nhỏ hơn với hạng module lớn hơn, chọn bởi
+   estimator để tối ưu kích thước ở mức 128 bit. Bảng tham số của chính bài báo
+   không được dùng.
 
-## 7. Known limitations
+## 7. Giới hạn đã biết
 
-- Soundness is relaxed (Section 4.3); the payload is bound only through
-  binding with respect to relaxed openings.
-- Not constant time: Python big-integer arithmetic and data-dependent
-  rejection loops.
-- In-band mode does not authenticate the creator; the session challenge is
-  not secret, so issue it over an authenticated channel if that matters.
-- The opening proof of this version says nothing about the message. Two
-  optional, separate proofs over this same ring change nothing specified
-  here: a proof that a base commitment hides a 256-bit binary string
-  (`docs/BINARY_PROOF_DESIGN.md`, `src/lattice_zk/binary_proof.py`), and a
-  payload range proof that a payload commitment of 3.2 hides
-  `encode(p)` for some `p` of a public length `L ≤ 128` bytes, i.e. every
-  coefficient is a 24-bit packing of payload bytes with the length field and
-  zero padding of 3.2 (`docs/PAYLOAD_RANGE_PROOF.md`,
-  `src/lattice_zk/payload_range_proof.py`, 44 558 bytes for `L ≤ 32`). The
-  latter applies to the commitment of an existing in-band envelope or
-  credential and can be sent out of band; it reveals `L`. A hidden-length or
-  full 24-bit (all 256 coefficients) range proof is not provided.
+- Soundness là relaxed (Mục 4.3); payload chỉ được gắn qua binding theo relaxed
+  opening.
+- Không constant time: số học số nguyên lớn của Python và các vòng rejection
+  phụ thuộc dữ liệu.
+- Chế độ in-band không xác thực người tạo; session challenge không bí mật, nên
+  hãy phát nó qua một kênh đã xác thực nếu điều đó quan trọng.
+- Chứng minh opening của phiên bản này không nói gì về message. Hai chứng minh
+  tùy chọn, riêng biệt trên cùng vành này không đổi gì được đặc tả ở đây: một
+  chứng minh rằng một cam kết nền giấu một chuỗi nhị phân 256-bit
+  (`docs/PROOF_NHI_PHAN_VA_KHOANG.md`, `src/lattice_zk/binary_proof.py`), và
+  một payload range proof rằng một cam kết payload của 3.2 giấu
+  `encode(p)` cho một `p` nào đó có độ dài công khai `L ≤ 128` byte, tức mỗi hệ
+  số là một đóng gói 24-bit của các byte payload với trường độ dài và zero
+  padding của 3.2 (`docs/PROOF_NHI_PHAN_VA_KHOANG.md`,
+  `src/lattice_zk/payload_range_proof.py`, 44 558 byte cho `L ≤ 32`). Cái sau áp
+  dụng cho cam kết của một envelope in-band hoặc credential đã có và có thể gửi
+  ngoài băng; nó lộ `L`. Không cung cấp một range proof độ-dài-ẩn hay 24-bit đầy
+  đủ (toàn bộ 256 hệ số).
 
-## 8. References
+## 8. Tài liệu tham khảo
 
 - C. Baum, I. Damgård, V. Lyubashevsky, S. Oechsner, C. Peikert. More
   efficient commitments from structured lattice assumptions. SCN 2018.
