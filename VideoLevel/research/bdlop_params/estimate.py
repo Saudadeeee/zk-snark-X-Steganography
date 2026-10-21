@@ -15,6 +15,9 @@ M-LWE with a ternary secret of rank lam and n + 1 ring samples.
 binary proof (``src/lattice_zk/binary_proof.py``): the same bound, the wider
 key B1' in R_q^(n x aux_width) and n + aux_slots M-LWE samples.  The base
 commitment of that proof is the unchanged BDLOP_OPEN_128 instance.
+``--parameter-set PAYLOAD_RANGE_128 --binary-polys L`` does the same for the
+auxiliary commitment of the payload range proof
+(``src/lattice_zk/payload_range_proof.py``) with ``L`` bit polynomials.
 """
 
 from __future__ import annotations
@@ -30,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.lattice_zk import binary_proof  # noqa: E402
+from src.lattice_zk import binary_proof, payload_range_proof  # noqa: E402
 from src.lattice_zk import params as parameter_sets  # noqa: E402
 from src.lattice_zk.params import BdlopParams  # noqa: E402
 
@@ -89,9 +92,34 @@ class AuxInstance:
         self.acceptance_probability = params.acceptance_probability
 
 
-def _parameter_set(name: str):
+class PayloadAuxInstance(AuxInstance):
+    """The auxiliary commitment of a payload-range set with ``polys`` bit polynomials."""
+
+    def __init__(self, params: payload_range_proof.PayloadRangeParams, polys: int) -> None:
+        base = params.base
+        length = min(params.max_payload_bytes, polys * params.degree // 8)
+        layout = params.layout(length)
+        if layout.binary_polys != polys:
+            raise ValueError("unsupported number of bit polynomials")
+        self.name = f"{params.name}/aux/l={polys}"
+        self.parameter_id = params.parameter_id
+        self.modulus, self.degree = base.modulus, base.degree
+        self.msis_rank, self.mlwe_rank = base.msis_rank, base.mlwe_rank
+        self.width = layout.aux_width
+        self.mlwe_samples = params.mlwe_samples(length)
+        self.binding_norm_bound = base.binding_norm_bound
+        parts = params.proof_parts(length)
+        self.commitment_bytes = parts["aux_commitment_d0"] + parts["aux_commitment_d1"]
+        self.proof_bytes = params.proof_bytes(length)
+        self.challenge_space_bits = base.challenge_space_bits
+        self.acceptance_probability = params.acceptance_probability(length)
+
+
+def _parameter_set(name: str, polys: int = 1):
     if hasattr(parameter_sets, name):
         return getattr(parameter_sets, name)
+    if hasattr(payload_range_proof, name):
+        return PayloadAuxInstance(getattr(payload_range_proof, name), polys)
     return AuxInstance(getattr(binary_proof, name))
 
 
@@ -158,9 +186,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--estimator", type=Path, required=True)
     parser.add_argument("--parameter-set", default="BDLOP_OPEN_128")
+    parser.add_argument("--binary-polys", type=int, default=1, help="payload range sets only")
     parser.add_argument("--output", type=Path)
     arguments = parser.parse_args()
-    params = _parameter_set(arguments.parameter_set)
+    params = _parameter_set(arguments.parameter_set, arguments.binary_polys)
     report = json.dumps(estimate(params, _load_model(arguments.estimator)), indent=2) + "\n"
     if arguments.output is not None:
         arguments.output.write_text(report, encoding="utf-8")
