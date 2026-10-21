@@ -809,7 +809,7 @@ def derive_blind_positions_operating_contract(
         and not stable_profile
         and not contract.signbit_only
     ):
-        from .embedder import _prune_patchable_positions
+        from .core.carrier_gate import prune_patchable_positions as _prune_patchable_positions
 
         patchable_target = max(
             required_bits + contract.patchability_headroom,
@@ -869,7 +869,7 @@ def embed_blind_video_payload(
 
     from .bitstream.bitstream_ops import BitstreamReconstructor
     from .core.stego import PayloadEmbedder
-    from .embedder import _strict_validate_h264_decode
+    from .core.carrier_gate import strict_validate_h264_decode as _strict_validate_h264_decode
 
     envelope = pack_blind_payload(payload)
     required_bits = len(envelope) * 8

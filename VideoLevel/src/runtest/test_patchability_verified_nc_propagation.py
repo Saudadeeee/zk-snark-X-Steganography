@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import bisect
 
-from src import embedder as embedder_module
+from src.core import carrier_gate as gate_module
 from src.bitstream.bitstream_ops import BitstreamPatcher
-from src.embedder import _prune_patchable_positions
+from src.core.carrier_gate import prune_patchable_positions as _prune_patchable_positions
 
 
 def test_patchability_pruning_propagates_verified_nc_to_reconstruction(monkeypatch):
@@ -66,7 +66,7 @@ def test_patchability_pruning_selects_nearest_preceding_idr_in_input_order(monke
         return 0, [0, 1] + [0] * 14, None
 
     monkeypatch.setattr(BitstreamPatcher, "validate_block_patchability", validated_match)
-    monkeypatch.setattr(embedder_module, "bisect_right", bisect_spy, raising=False)
+    monkeypatch.setattr(gate_module, "bisect_right", bisect_spy, raising=False)
 
     positions = [(210, 0, 1), (10, 0, 1), (150, 0, 1), (90, 0, 1)]
     retained = _prune_patchable_positions(
@@ -104,7 +104,7 @@ def test_single_carrier_pruning_does_not_materialize_position_buckets(monkeypatc
         raise AssertionError("single-carrier path should stream candidates by block")
 
     monkeypatch.setattr(BitstreamPatcher, "validate_block_patchability", validate)
-    monkeypatch.setattr(embedder_module, "defaultdict", reject_position_buckets)
+    monkeypatch.setattr(gate_module, "defaultdict", reject_position_buckets, raising=False)
 
     candidates = [(0, 0, 1), (0, 0, 2), (1, 0, 3), (2, 0, 4)]
     retained = _prune_patchable_positions(

@@ -11,6 +11,7 @@ from typing import Any, Optional, Sequence
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from .core.carrier_gate import canonical_json_bytes, hash_positions  # noqa: F401  (re-exported)
 from .lattice_pq import LATTICE_SIGNATURE_ALGORITHM, LatticeSigner
 
 
@@ -64,22 +65,6 @@ class ProofMetadata:
     prove_time_ms: Optional[float] = None
     verify_time_ms: Optional[float] = None
     statement_id: Optional[str] = None
-
-
-def canonical_json_bytes(data: dict[str, Any]) -> bytes:
-    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-
-
-def hash_positions(positions: Sequence[Sequence[int]]) -> str:
-    """Hash normalized embedding positions so their sidecar is authenticated."""
-    normalized: list[list[int]] = []
-    for position in positions:
-        if len(position) != 3:
-            raise ValueError("each embedding position must contain exactly three integers")
-        if any(not isinstance(value, int) or isinstance(value, bool) for value in position):
-            raise ValueError("each embedding position must contain exactly three integers")
-        normalized.append(list(position))
-    return hashlib.sha256(canonical_json_bytes({"positions": normalized})).hexdigest()
 
 
 def _private_key(key: bytes | Ed25519PrivateKey) -> Ed25519PrivateKey:

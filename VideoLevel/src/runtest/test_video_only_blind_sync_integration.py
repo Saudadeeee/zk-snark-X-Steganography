@@ -174,7 +174,7 @@ def test_stego_video_alone_rederives_carriers_and_extracts_payload():
         # prover-supplied position list. This validates context binding only;
         # no ZK proof backend is invoked here.
         from src.lattice_pq import LatticeSigner
-        from src.manifest import hash_positions
+        from src.core.carrier_gate import hash_positions
         from src.video_zkp_contract import (
             build_video_zkp_statement,
             carrier_policy_hash,

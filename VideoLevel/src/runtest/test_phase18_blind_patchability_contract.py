@@ -30,7 +30,7 @@ def t_patchable_contract_uses_embedder_headroom_and_modification_limit() -> None
         return positions[:required_bits]
 
     with patch("src.blind_sync.load_or_build_video_analysis", return_value=analysis), patch(
-        "src.embedder._prune_patchable_positions", side_effect=retain_requested
+        "src.core.carrier_gate.prune_patchable_positions", side_effect=retain_requested
     ) as prune:
         positions, _metadata = derive_blind_positions_operating_contract(
             "unused.h264",

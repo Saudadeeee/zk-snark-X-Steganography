@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.bitstream.bitstream_ops import BitstreamReconstructor
 from src.core.pipeline import extract_all_idr_blocks
 from src.core.stego import PayloadEmbedder
-from src.embedder import _strict_validate_h264_decode
+from src.core.carrier_gate import strict_validate_h264_decode as _strict_validate_h264_decode
 from src.runtest._helpers import get_output, get_video, run_test, section, summarise
 
 # -- Fixtures ----------------------------------------------------------- #

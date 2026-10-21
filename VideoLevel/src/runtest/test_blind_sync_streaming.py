@@ -260,7 +260,7 @@ def test_chunked_embed_reports_segment_progress(monkeypatch, tmp_path):
         return SimpleNamespace(carriers_used=8)
 
     monkeypatch.setattr("src.blind_sync.embed_blind_video_payload", fake_embed)
-    monkeypatch.setattr("src.embedder._strict_validate_h264_decode", lambda *_args: None)
+    monkeypatch.setattr("src.core.carrier_gate.strict_validate_h264_decode", lambda *_args: None)
 
     result = embed_chunked_video_payload(
         source,

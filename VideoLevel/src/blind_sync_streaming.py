@@ -402,7 +402,7 @@ def derive_chunked_video_context(
         is_syndrome_coded,
         pack_blind_payload,
     )
-    from .manifest import hash_positions
+    from .core.carrier_gate import hash_positions
     from .video_canonicalization import canonical_video_sha256
 
     _positive_int("frames_per_segment", frames_per_segment)
@@ -583,7 +583,7 @@ def embed_chunked_video_payload(
             )
 
         from .blind_sync import embed_blind_video_payload
-        from .embedder import _strict_validate_h264_decode
+        from .core.carrier_gate import strict_validate_h264_decode as _strict_validate_h264_decode
 
         output_segments: list[Path] = []
         carriers_used = 0
@@ -772,7 +772,7 @@ def extract_chunked_video_payload(
 
     if expected_count is None or len(pieces) != expected_count:
         raise ValueError("video ended before all declared payload chunks were extracted")
-    from .manifest import hash_positions
+    from .core.carrier_gate import hash_positions
 
     return ChunkedVideoPayloadResult(
         payload=assemble_payload_chunks(pieces),

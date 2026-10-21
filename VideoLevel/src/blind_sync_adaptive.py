@@ -384,7 +384,7 @@ def derive_adaptive_video_context(
         is_syndrome_coded,
         pack_blind_payload,
     )
-    from .manifest import hash_positions
+    from .core.carrier_gate import hash_positions
 
     total_crc = payload_crc(payload)
 
@@ -467,7 +467,7 @@ def embed_adaptive_video_payload(
     _require_contract(contract, sync_key)
     _require_plan(plan)
     from .blind_sync import embed_blind_video_payload
-    from .embedder import _strict_validate_h264_decode
+    from .core.carrier_gate import strict_validate_h264_decode as _strict_validate_h264_decode
 
     total_crc = payload_crc(payload)
     with tempfile.TemporaryDirectory(prefix="zkstego-adaptive-", dir=output.parent) as temp_name:
@@ -532,7 +532,7 @@ def extract_adaptive_video_payload(
     if payload_bytes is not None:
         _positive_int("payload_bytes", payload_bytes)
     from .blind_sync import extract_blind_video_payload
-    from .manifest import hash_positions
+    from .core.carrier_gate import hash_positions
 
     def carry(_index: int, segment: Path, _slot: ChunkSlot) -> _Carried:
         result = extract_blind_video_payload(str(segment), sync_key, contract)

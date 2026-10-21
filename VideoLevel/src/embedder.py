@@ -45,6 +45,10 @@ from .lattice_pq           import LatticeReceipt, pack_lattice_reference
 from .video_zkp_contract   import build_video_zkp_statement, payload_commitment, policy_hash
 from .zkp_registry         import REGISTRY_ZKP_SUITE, SignedZkpRelationRegistry
 from .video_canonicalization import canonical_video_sha256
+from .core.carrier_gate import (
+    prune_patchable_positions as _prune_patchable_positions,
+    strict_validate_h264_decode as _strict_validate_h264_decode,
+)
 from .manifest             import (
     StegoManifest,
     PayloadMetadata,
@@ -54,35 +58,6 @@ from .manifest             import (
     compute_file_hash,
     hash_positions,
 )
-
-
-def _strict_validate_h264_decode(video_path: str) -> None:
-    """Fail unless FFmpeg decodes the complete video without H.264 errors."""
-    ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg is None:
-        raise RuntimeError("ffmpeg is required to validate reconstructed H.264 output")
-
-    result = subprocess.run(
-        [
-            ffmpeg,
-            "-hide_banner",
-            "-v", "error",
-            "-xerror",
-            "-err_detect", "explode",
-            "-i", video_path,
-            "-map", "0:v:0",
-            "-f", "null", "-",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0 or result.stderr.strip():
-        raise UnsupportedStreamError(
-            "Reconstructed stego video failed strict H.264 decode",
-            decode_exit_code=result.returncode,
-            decoder_diagnostics=result.stderr[-2000:],
-        )
 
 
 def _promote_strictly_decoded_candidate(candidate_path: str, output_path: str) -> None:
@@ -113,103 +88,6 @@ def _resolve_future_zkp_registration(
     if not registry.verify(issuer_public_key):
         raise ValueError("zkp relation registry signature did not verify against the issuer trust anchor")
     return registry.resolve(relation_id, REGISTRY_ZKP_SUITE, expected_policy_hash)
-
-
-def _prune_patchable_positions(
-    safe_positions: list[tuple[int, int, int]],
-    frame_verified_data: dict,
-    required_bits: int,
-    max_modifications_per_block: int = 1,
-) -> list[tuple[int, int, int]]:
-    """
-    Keep only positions whose blocks are bitstream-patchable.
-
-    This validates candidate blocks lazily and stops once enough positions
-    have been retained for the payload.
-    """
-    patcher = BitstreamPatcher()
-    idr_offsets = sorted(frame_verified_data)
-    retained: list[tuple[int, int, int]] = []
-    idr_context: dict[int, tuple[dict, dict, bytes]] = {}
-
-    for idr_off, (g_off, _g_blk, nal_rbsp) in frame_verified_data.items():
-        local_offsets = {
-            (gmb - idr_off, gblk): od
-            for (gmb, gblk), od in g_off.items()
-            if gblk < 16 and od.get("bit_length") not in (None, 0)
-        }
-        end_to_block = {
-            od["end_bit"]: ((gmb - idr_off, gblk), od)
-            for (gmb, gblk), od in g_off.items()
-            if gblk < 16 and "end_bit" in od
-        }
-        idr_context[idr_off] = (local_offsets, end_to_block, nal_rbsp)
-
-    def block_is_patchable(mb: int, blk: int) -> bool:
-        idr_index = bisect_right(idr_offsets, mb) - 1
-        if idr_index < 0:
-            return False
-        idr_off = idr_offsets[idr_index]
-        local_offsets, end_to_block, nal_rbsp = idr_context.get(idr_off, ({}, {}, b""))
-        local_key = (mb - idr_off, blk)
-        match = patcher.validate_block_patchability(
-            nal_rbsp,
-            local_key,
-            local_offsets.get(local_key, {}),
-            end_to_block,
-        )
-        if match is None:
-            return False
-        # Validation may recover the only nC that reproduces the source codeword
-        # even when the trace parser's provisional neighbor estimate is wrong.
-        # The reconstruction patcher intentionally trusts this stored nC and
-        # does not scan alternatives, so propagate the validated value into the
-        # shared frame offset record before the carrier is accepted.
-        validated_offset = local_offsets.get(local_key)
-        if validated_offset is not None:
-            validated_offset["nC"] = match[0]
-            validated_offset["validated_nC"] = match[0]
-        return True
-
-    if max_modifications_per_block == 1:
-        seen_blocks: set[tuple[int, int]] = set()
-        for pos in safe_positions:
-            normalized = (int(pos[0]), int(pos[1]), int(pos[2]))
-            key = normalized[:2]
-            if key in seen_blocks:
-                continue
-            seen_blocks.add(key)
-            if not block_is_patchable(*key):
-                continue
-            retained.append(normalized)
-            if len(retained) >= required_bits:
-                break
-        return retained
-
-    block_order: list[tuple[int, int]] = []
-    block_to_positions: dict[tuple[int, int], list[tuple[int, int, int]]] = {}
-    for pos in safe_positions:
-        normalized = (int(pos[0]), int(pos[1]), int(pos[2]))
-        key = normalized[:2]
-        positions = block_to_positions.get(key)
-        if positions is None:
-            positions = []
-            block_to_positions[key] = positions
-            block_order.append(key)
-        if len(positions) < max_modifications_per_block:
-            positions.append(normalized)
-
-    for mb, blk in block_order:
-        if not block_is_patchable(mb, blk):
-            continue
-        for pos in block_to_positions[(mb, blk)]:
-            retained.append(pos)
-            if len(retained) >= required_bits:
-                break
-        if len(retained) >= required_bits:
-            break
-
-    return retained
 
 
 def _limit_positions_per_block(

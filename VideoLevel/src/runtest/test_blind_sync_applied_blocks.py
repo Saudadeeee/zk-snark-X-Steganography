@@ -65,7 +65,7 @@ def test_blind_embed_fails_closed_when_reconstruction_skips_a_changed_block(
 
     monkeypatch.setattr(BitstreamReconstructor, "reconstruct_video", reconstruct_video)
     monkeypatch.setattr(
-        "src.embedder._strict_validate_h264_decode",
+        "src.core.carrier_gate.strict_validate_h264_decode",
         lambda _path: None,
     )
 
