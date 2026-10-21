@@ -141,6 +141,8 @@ def adaptive_rows() -> dict[str, Any] | None:
     runs.sort(key=lambda row: (row["clip"], row["order"]))
     protocols = {"leave_one_clip_out": "leave-one-clip-out", "paired_half_split": "paired split"}
     detection: dict[tuple[str, str], list[float]] = {}
+    if not report.get("detection"):  # learned steganalysis deferred for this run
+        return {"runs": runs, "modes": names, "detection": {}, "frame_pairs": 0}
     for key, label in protocols.items():
         for name in report["detection"][tags[0]]["protocols"][key]:
             detection[(label, name)] = [report["detection"][tag]["protocols"][key][name]["p_e_mean"]
@@ -246,6 +248,7 @@ def build() -> str:
         tables["adaptive_e2e"] = _latex(
             headers, rows, "Direct vs.\\ syndrome-trellis coded magnitude carriers (registered envelope, "
             "200-frame CIF QP\\,22 cuts); every run verifies from the video alone.", "tab:adaptive-e2e")
+    if adaptive and adaptive["detection"]:  # empty when learned steganalysis was deferred
         headers = ["Protocol", "Features / detector"] + adaptive["modes"]
         rows = [[protocol, name] + [_fmt(value, 3) for value in values]
                 for (protocol, name), values in adaptive["detection"].items()]
@@ -272,7 +275,7 @@ def build() -> str:
         tables["gop"] = _latex(
             headers, rows, "GOP $>1$ streams: carriers in IDR slices only, P slices bound byte for byte "
             "(CIF, QP\\,22, registered). The 413-byte rows use the toy parameter set to fit short clips; "
-            "the 7\\,589-byte rows use \\texttt{bdlop-open-128-v1} on looped sources.", "tab:gop")
+            "the larger rows use the production set on looped sources.", "tab:gop")
 
     baselines = sorted(RESULTS.glob("baselines*.json"))
     if baselines:

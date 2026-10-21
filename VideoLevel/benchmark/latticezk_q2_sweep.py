@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -106,6 +107,11 @@ def _auto_chunk(case: dict[str, Any], video: Path, results: Path, log: Path) -> 
     return chunk
 
 
+def learned_steganalysis_skipped() -> bool:
+    """``ZKSTEGO_SKIP_LEARNED=1`` skips learned-steganalysis feature extraction."""
+    return os.environ.get("ZKSTEGO_SKIP_LEARNED", "") == "1"
+
+
 def run_case(case: dict[str, Any], work: Path, results: Path) -> dict[str, Any]:
     name = case["name"]
     video = ROOT / case["video"]
@@ -153,7 +159,8 @@ def run_case(case: dict[str, Any], work: Path, results: Path) -> dict[str, Any]:
               "--output", str(steg)], log)
 
     features = work / f"mlfeat_{name}.npz"
-    if case.get("ml_features", True) and not features.exists() and stego.exists():
+    if (case.get("ml_features", True) and not learned_steganalysis_skipped()
+            and not features.exists() and stego.exists()):
         _log(f"{name}: ML features")
         _run([PYTHON, "-B", "-m", "benchmark.latticezk_ml_steganalysis", "features",
               "--cover", str(video), "--stego", str(stego), "--label", case.get("clip", name),

@@ -475,7 +475,18 @@ def _capacity_steps(python: str) -> list[Step]:
     return steps
 
 
+LEARNED_STEPS = ("learned steganalysis (LOCO, 5 CIF clips)",
+                 "embedding-rule simulation (replacement / matching / T1)", "density simulation")
+
+
 def _evaluation_steps(python: str, workers: int) -> list[Step]:
+    steps = _all_evaluation_steps(python, workers)
+    if os.environ.get("ZKSTEGO_SKIP_LEARNED", "") == "1":  # learned steganalysis deferred
+        steps = [step for step in steps if step.name not in LEARNED_STEPS]
+    return steps
+
+
+def _all_evaluation_steps(python: str, workers: int) -> list[Step]:
     ml_cases = ("city_cif_q22_reg", "coastguard_cif_q22_reg", "container_cif_q22_reg",
                 "deadline_cif_q22_reg", "hall_cif_q22_reg")
     inband = WORK / "coastguard3000f_q22_inband_link.h264"

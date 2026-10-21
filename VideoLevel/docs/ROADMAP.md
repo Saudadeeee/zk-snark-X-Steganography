@@ -40,6 +40,20 @@ gộp trên nhánh.
 | B3 | Đánh giá rộng: 720p/1080p, GOP > 1 (P-slice) | Dung lượng, chất lượng, steganalysis trên bộ dữ liệu mới |
 | B4 | Chuẩn bị review mật mã bên ngoài | Gói tài liệu cho người đọc lại: đặc tả, chứng minh, KAT, câu hỏi mở |
 
+## Việc hoãn lại (làm vào thời gian khác)
+
+- **Đo lại steganalysis học máy dưới v2.** Lượt chạy lại v2 (2026-10-21) bỏ
+  qua bằng `ZKSTEGO_SKIP_LEARNED=1`: trích đặc trưng ML trong sweep, đánh giá
+  FLD (`ml_eval*.json`), mô phỏng nhúng (`embedding_*_sim.json`,
+  `adaptive_sim.json`), CNN (`cnn_*.json`, `adaptive_cnn_*.json`) và phần
+  detection của `adaptive_e2e`. Các số học máy trong bài vẫn là của v1
+  (envelope 7 589 B, v2 lớn hơn ~8 %) và phải ghi rõ như vậy. Cách làm lại:
+  chạy sweep không có biến đó (chỉ bước ML chạy, E2E đã có sẽ bỏ qua), rồi
+  `ml_steganalysis evaluate`, `embedding_sim`, `adaptive_sim`, các lệnh CNN
+  trong `docs/CNN_STEGANALYSIS.md` và `docs/ADAPTIVE_CARRIERS.md`.
+- **Sweep HD** (`benchmark/latticezk_hd_cases.json`) sau khi sửa thứ tự nhúng
+  còn giả định độ rộng CIF.
+
 ## Trạng thái
 
 - 2026-10-21: commit `22d52c9` chứa toàn bộ hệ thống tới thời điểm này.

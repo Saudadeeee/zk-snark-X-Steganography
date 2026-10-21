@@ -169,7 +169,9 @@ def main() -> int:
                 "timings_s": report["timings_s"],
             }
             _log(f"{case}: verified={report['blind_video_only_verification']} changes={changes}")
-    detection = {mode: steg.evaluate(paths) for mode, paths in feature_paths.items()}
+    # ZKSTEGO_SKIP_LEARNED=1 defers the learned-steganalysis evaluation.
+    detection = ({} if os.environ.get("ZKSTEGO_SKIP_LEARNED", "") == "1"
+                 else {mode: steg.evaluate(paths) for mode, paths in feature_paths.items()})
     summary = {
         "protocol": ("registered BDLOP envelope, chunk-bytes %d, 100-frame segments; "
                      "FLD/logistic on per-frame coefficient (340) and SRM-lite (500) features; "
