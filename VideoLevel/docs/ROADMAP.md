@@ -53,3 +53,8 @@ gộp trên nhánh.
   giống hệt) đã merge. D1 sửa: verifier chia lại envelope theo `chunk_bytes`
   đã pin và đòi chunk trích ra trùng từng byte; có test âm. Bản thảo cập nhật
   cho disclosure mới và trạng thái D1–D6. Còn chạy: A6, A0.
+- 2026-10-21 (khuya): A6 merge (CNN: magnitude P_E 0,466 LOCO, T1 0,27). D1
+  commit `dcb9c67`, E2E thật (registered, replay + tamper) PASS. A0 còn chạy
+  (~8 h). Bắt đầu song song phần code của B1 (carrier thích nghi), B2 (proof
+  nhị phân), B4 (gói review + đối chiếu lattice-estimator); B3 chờ A0 xong vì
+  cần RAM cho E2E.

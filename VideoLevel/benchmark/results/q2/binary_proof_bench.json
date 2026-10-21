@@ -1,0 +1,66 @@
+{
+  "parameter_set": "bdlop-binary-128-v1",
+  "parameter_id": "54e33dc9731e5c5713eaf9101b925ecfd367091bd984079ace01d09fd5a79801",
+  "base_parameter_set": "bdlop-open-128-v1",
+  "runs": 20,
+  "host": {
+    "machine": "AMD64",
+    "processor": "Intel64 Family 6 Model 154 Stepping 3, GenuineIntel",
+    "python": "3.12.10",
+    "system": "Windows-11-10.0.26100-SP0"
+  },
+  "message_bits": 256,
+  "repetitions": {
+    "lift": 5,
+    "check": 5
+  },
+  "sizes_bytes": {
+    "commitment": 6720,
+    "binary_proof": 41870,
+    "binary_proof_parts": {
+      "aux_commitment": 15360,
+      "masks_h": 4782,
+      "garbage_t_G": 960,
+      "challenge_seed": 32,
+      "responses_z_z_aux": 20736
+    },
+    "opening_proof": 7520,
+    "equality_proof": 15008
+  },
+  "soundness": {
+    "round_errors_log2": {
+      "lift": -150.0,
+      "check": -150.0,
+      "combine": -3840.0,
+      "challenge": -256.01
+    },
+    "soundness_bits": 150.0
+  },
+  "timings_ms": {
+    "prove": {
+      "median": 2208.0,
+      "mean": 3010.66,
+      "min": 456.17,
+      "p90": 9490.43,
+      "max": 11342.16
+    },
+    "verify": {
+      "median": 71.69,
+      "mean": 73.26,
+      "min": 68.73,
+      "p90": 76.85,
+      "max": 96.46
+    }
+  },
+  "attempts": {
+    "mean": 84.45,
+    "median": 62.5,
+    "max": 322,
+    "expected": 70.45,
+    "acceptance_probability": 0.01419,
+    "abort_cap": 16384,
+    "abort_probability_log2": -337.9
+  },
+  "reference_opening_attempts_expected": 4.65,
+  "note": "single-threaded Python + numpy reference implementation (float64 BLAS for exact negacyclic products); not constant time; machine shared with other jobs"
+}

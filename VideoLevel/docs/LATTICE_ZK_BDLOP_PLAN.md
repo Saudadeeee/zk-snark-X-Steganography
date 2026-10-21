@@ -83,7 +83,7 @@ quan hệ tuyến tính của BDLOP, kích thước bằng hai opening proof.
 | Equality proof | 15 008 B |
 | Xác suất chấp nhận mỗi lần thử | 0.215 |
 | M-SIS binding (ℓ∞, biên 2^25.9) | 140 bit cổ điển / 127 bit lượng tử (core-SVP) |
-| M-LWE hiding | 138 / 125 bit |
+| M-LWE hiding | 135 / 123 bit (dual hybrid, lattice-estimator; primal 138 / 125) |
 | Payload tối đa | 766 byte |
 | Prove / verify (Python, i7-12700H) | ~0.11 s / ~0.02 s |
 

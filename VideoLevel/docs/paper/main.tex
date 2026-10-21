@@ -53,7 +53,7 @@ zero-knowledge proof directly in the CAVLC residuals of an H.264 Baseline
 bitstream and verifies it from the received video, without side files,
 metadata boxes or access to the cover. The proof is a Fiat--Shamir-with-aborts
 proof of knowledge of an opening of a BDLOP commitment, instantiated at an
-estimated 138--140-bit classical (125--127-bit quantum) core-SVP level. Its
+estimated 135-bit classical (123-bit quantum) core-SVP level. Its
 statement binds a carrier-normalized digest of the video, the
 verifier-recomputed carrier positions, a one-use verifier challenge and an
 issuer-signed relation registry; carrier normalization breaks the circularity
@@ -465,9 +465,16 @@ rather than reused from~\cite{ref:bdlop}. The per-attempt acceptance
 probability is $((2B+1)/2\gamma)^{kN}\approx0.215$ (4.65 expected attempts;
 4.68 measured over 50 runs). Core-SVP costs were computed with the CRYSTALS
 estimation scripts~\cite{ref:crystalsestimates}, ignoring reduction losses as
-for ML-DSA; an independent cross-check with the
-lattice-estimator~\cite{ref:aps15,ref:latticeestimator} is
-\todo{cross-check M-SIS/M-LWE estimates with lattice-estimator}.
+for ML-DSA. An independent cross-check with the
+lattice-estimator~\cite{ref:aps15,ref:latticeestimator} (commit
+\texttt{e4333d9}, same core-SVP model) reproduces the M-SIS estimate
+($\beta=480$, 140/127 bits) and the primal M-LWE estimate ($\beta=473$,
+138/125 bits). Its dual-hybrid attack on M-LWE is slightly cheaper
+($\beta=463$, $2^{135}$ classical; $2^{123}$ quantum), so we take 135/123 bits
+for hiding (Table~\ref{tab:params}). The $\ell_2$ relaxation of the binding
+bound exceeds $q$, so binding rests on the $\ell_\infty$ estimate. Under the
+estimator's default cost model, every attack on either instance costs at
+least $2^{161}$.
 
 \subsection{Envelopes, registry and sessions}
 The envelope is
@@ -837,9 +844,14 @@ selection is the more promising direction.
 \paragraph{Capacity and codec scope} Only all-intra Baseline streams are
 supported, which is a real deployment restriction. A registered envelope
 needs 61\,kbit, which smooth content and high QP do not provide within a few
-hundred frames. Proving that each payload bit is binary, or that the payload
-lies in a range, would need a fully splitting ring and the product proofs
-of~\cite{ref:als20,ref:ens20}, which this parameter set does not provide.
+hundred frames. Appendix~\ref{sec:binary-proof} gives a proof that a commitment
+under the same parameter set hides a binary string (41\,870 bytes, 2.2\,s to
+prove and 72\,ms to verify), built from lifted constant-coefficient relations
+and an ALS20-style product step~\cite{ref:als20,ref:lnp22} that works on our
+two-slot ring. It is not yet tied to the 24-bit payload encoding, which would
+need a bit-decomposition proof, and its multi-round Fiat--Shamir-with-aborts
+composition is argued but not written out; range proofs on the payload remain
+open.
 
 \paragraph{What is claimed} An accepted video shows that its producer knew a
 (relaxed) opening of the bound commitment for this exact carrier-normalized
@@ -892,7 +904,7 @@ and 4CIF content carries the proof in one to three hundred frames at
 detect it. A learned per-frame detector does better than chance, and the
 security argument rests on relaxed soundness in the classical random-oracle
 model. The next steps are cost-aware carrier selection against learned and
-pooled detectors, binary and range proofs on a fully splitting ring, support
+pooled detectors, tying the binary proof to the payload encoding, support
 for P-slices and higher resolutions, and an independent review of the
 cryptographic argument.
 
@@ -908,7 +920,8 @@ intermediate files are not redistributed.
 % Proofs of the security section (workstream A5), when present.
 \IfFileExists{sections/security_appendix.tex}{%
 \appendices
-\input{sections/security_appendix}}{}
+\input{sections/security_appendix}
+\IfFileExists{sections/binary_proof.tex}{\input{sections/binary_proof}}{}}{}
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}

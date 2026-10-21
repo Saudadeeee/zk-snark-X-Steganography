@@ -150,7 +150,9 @@ def _setup_seed(label: str) -> bytes:
 
 # Production set.  Core-SVP estimates from research/bdlop_params/estimate.py
 # (CRYSTALS security-estimates model): M-SIS binding 140 classical / 127
-# quantum bits in the infinity norm, M-LWE hiding 138 / 125 bits.
+# quantum bits in the infinity norm, M-LWE hiding 138 / 125 bits (primal).
+# The lattice-estimator's dual hybrid gives 135 / 123 bits for M-LWE
+# (research/bdlop_params/CROSSCHECK.md); that lower figure is the one claimed.
 BDLOP_OPEN_128 = BdlopParams(
     name="bdlop-open-128-v1",
     degree=256,

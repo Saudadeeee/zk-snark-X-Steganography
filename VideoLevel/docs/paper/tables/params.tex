@@ -1,7 +1,8 @@
 \begin{table}[t]
 \centering
 \caption{Parameter set \texttt{bdlop-open-128-v1} and core-SVP estimates
-(CRYSTALS security-estimates, commit \texttt{75c26949}).}
+(CRYSTALS security-estimates, commit \texttt{75c26949}; M-LWE dual hybrid
+from the lattice-estimator, commit \texttt{e4333d9}).}
 \label{tab:params}
 \small\setlength{\tabcolsep}{4pt}
 \begin{tabular}{ll}
@@ -15,7 +16,8 @@ Acceptance per attempt & 0.215 \\
 Equality (linkage) proof & 15\,008 B \\
 Max.\ in-band payload & 766 B \\
 M-SIS ($\ell_\infty\le8\kappa B\approx2^{25.9}$) & $\beta=480$: 140 / 127 bits \\
-M-LWE (rank $\lambda$, $n{+}1$ samples) & $\beta=474$: 138 / 125 bits \\
+M-LWE (rank $\lambda$, $n{+}1$ samples) & dual hybrid $\beta=463$: 135 / 123 bits \\
+\quad (primal uSVP) & $\beta=473$: 138 / 125 bits \\
 \multicolumn{2}{l}{\footnotesize $\beta$: BKZ block size; core-SVP, classical / quantum.} \\
 \bottomrule
 \end{tabular}

@@ -1,0 +1,266 @@
+% Binary-message proof for BDLOP commitments (roadmap B2). DRAFT.
+%
+% Not wired into main.tex; the integrator decides. Requires amsmath, amssymb,
+% amsthm and the theorem environments of main.tex, and the macros below (all
+% \providecommand, so they coexist with sections/security.tex).
+% Code: src/lattice_zk/binary_proof.py (parameter set bdlop-binary-128-v1),
+% design notes: docs/BINARY_PROOF_DESIGN.md.
+
+\providecommand{\Rq}{\mathcal{R}_q}
+\providecommand{\norm}[1]{\lVert #1 \rVert}
+\providecommand{\Adv}{\mathsf{Adv}}
+\providecommand{\pid}{\mathit{pid}}
+\providecommand{\Cset}{\mathcal{C}}
+\providecommand{\Com}{\mathsf{Com}}
+\providecommand{\MSIS}{\textsf{M-SIS}}
+\providecommand{\MLWE}{\textsf{M-LWE}}
+\providecommand{\ct}{\mathrm{ct}}
+\providecommand{\Pibin}{\Pi_{\mathsf{bin}}}
+\providecommand{\erbr}{\varepsilon_{\mathsf{rbr}}}
+\providecommand{\Cdiff}{\bar{\mathcal{C}}}
+\providecommand{\Amax}{A_{\max}}
+
+\section{Proving that a commitment hides a binary string}
+\label{sec:binary-proof}
+
+The opening proof shows knowledge of \emph{some} relaxed opening and says
+nothing about the message. This section adds a proof $\Pibin$ that a
+commitment $C=\Com(m;r)=(t_1,t_2)$ of the base scheme hides
+$m\in\{0,1\}^N$, i.e.\ a 256-bit string. $C$ is unchanged, so the
+opening, equality and disclosure proofs still apply to it.
+
+\subsection{Setting and linearization}
+
+Notation is that of Section~\ref{sec:sec-notation}. Write
+$\langle a,b\rangle=\sum_j a_jb_j$ for coefficient vectors, $\ct(a)=a_0$,
+$a\circ b$ for the coefficient-wise product, $J=\sum_{j<N}X^j$ and
+$\sigma\in\mathrm{Aut}(\Rq)$ for $X\mapsto X^{-1}$. Because $q\equiv5\pmod8$,
+$\Rq\cong\mathbb F_{q^{N/2}}\times\mathbb F_{q^{N/2}}$; there are only two
+CRT slots, so the ring-level relation $m(m-1)=0$ of
+ALS20~\cite{ref:als20} would constrain only two bits. Following the
+constant-coefficient technique of LNP22~\cite{ref:lnp22}, we instead linearize the
+coefficient-wise relation $m\circ(m-J)=0$.
+
+\begin{lemma}[Linearization]
+\label{lem:bin-lin}
+For all $a,b\in\Rq$: (i) $\ct(\sigma(a)b)=\langle a,b\rangle$; (ii) $\sigma$ is
+an involution and $\langle\sigma(a),b\rangle=\langle a,\sigma(b)\rangle$;
+(iii) for $\gamma,\rho\in\mathbb Z_q^N$, $u\in\Rq$ and
+$R=\sigma(\gamma\circ\sigma(\rho))$,
+\[
+\ct\bigl(\sigma(\rho)u-Rm\bigr)=\langle\rho,\,u-\sigma(\gamma\circ m)\rangle,
+\qquad
+\ct\bigl(\sigma(\gamma\circ m)(m-J)\bigr)=\langle\gamma,\,m\circ(m-J)\rangle .
+\]
+(iv) Any quadratic form $\mathbb Z_q^N\to\mathbb Z_q$ of the shape
+$m\mapsto\ct(\sum_\ell a_\ell\,\tau_\ell(m)\,b_\ell\,\tau'_\ell(m))$ with
+$a_\ell,b_\ell\in\Rq$ and $\tau_\ell,\tau'_\ell\in\{\mathrm{id},\sigma\}$ is
+$m^{\mathsf T}T_wm$ for a negacyclic Toeplitz $T_w$, whose diagonal is
+$w_0I$.
+\end{lemma}
+\begin{proof}
+(i) The constant coefficient of $\sigma(a)b$ collects $a_0b_0$ and, for
+$i\ge1$, $(-a_i)X^{N-i}\cdot b_iX^i=a_ib_i$. (ii) $\sigma$ acts on coefficient
+vectors as a symmetric signed permutation. (iii) follows from (i) and (ii).
+(iv) Multiplication by $a$ is $T_a$, $\sigma$ is the signed permutation $S$
+with $ST_aS=T_{\sigma(a)}$, and $T_a^{\mathsf T}=T_{\sigma(a)}$; products and sums
+of negacyclic Toeplitz matrices are negacyclic Toeplitz.
+\end{proof}
+
+Item (iv) is why the prover must commit to the \emph{lifts}
+$u_i=\sigma(\gamma_i\circ m)$ once $\gamma_i$ is known: a random diagonal form
+$\sum_j\gamma_jm_j^2$ is not reachable from $m$ alone.
+
+\subsection{The protocol}
+
+Let $k$ (lift repetitions) and $k'$ (check repetitions) be parameters
+($k=k'=5$). An auxiliary BDLOP key $\mathsf{ck}'=(B_1',(b'_j)_j)$ with
+$B_1'=[I_n\,|\,\cdot]\in\Rq^{n\times k_{\mathrm{aux}}}$,
+$b'_j=[0^n\,|\,e_j\,|\,\cdot]$, $k_{\mathrm{aux}}=n+(k+k'+1)+\lambda$, is
+expanded from the parameter identifier. In each proof the prover samples a
+\emph{fresh} $r'\in S_1^{k_{\mathrm{aux}}}$. The interactive protocol is:
+\begin{enumerate}
+\item $V$: $\gamma_1,\dots,\gamma_k\leftarrow\mathbb Z_q^N$.
+\item $P$: $u_i=\sigma(\gamma_i\circ m)$, $g_t\leftarrow\{g\in\Rq:\ct(g)=0\}$;
+  send $D=(B_1'r',\ \langle b'_{u_i},r'\rangle+u_i,\ \langle b'_{g_t},r'\rangle+g_t)$.
+\item $V$: $\rho_{t,i}\leftarrow\mathbb Z_q^N$, $\mu_{t,i}\leftarrow\mathbb Z_q$.
+\item $P$: send $h_t=g_t+E_t$ for
+  $E_t=\sum_i\sigma(\rho_{t,i})u_i-R_{t,i}m+\mu_{t,i}u_i(m-J)$,
+  $R_{t,i}=\sigma(\gamma_i\circ\sigma(\rho_{t,i}))$. $V$ requires $\ct(h_t)=0$.
+\item $V$: $\alpha_t\leftarrow\Rq$. Both sides form
+  $P(s)=\sum_t\alpha_t(g_t+E_t-h_t)=\psi m+L(s)-H$, with
+  $\psi=\sum_i\beta_iu_i$, $\beta_i=\sum_t\alpha_t\mu_{t,i}$, $L$ linear and
+  $H=\sum_t\alpha_th_t$.
+\item $P$: masks $y\leftarrow Y$, $y'\leftarrow Y'$; with $a_j$ the projections
+  $\langle b_j,y\rangle$ resp.\ $\langle b'_j,y'\rangle$ and
+  $\Gamma_1=-(\psi a_m+a_\psi m+L(a))$, commit $t_G=\langle b'_G,r'\rangle+\Gamma_1$
+  and announce $(t_G,w=B_1y,w'=B_1'y',v=a_\psi a_m+a_G)$.
+\item $V$: $c\leftarrow\Cset$.\quad
+  $P$: $z=y+cr$, $z'=y'+cr'$; abort unless both lie in $[-B,B]$.
+\item $V$ accepts iff $B_1z=w+ct_1$, $B_1'z'=w'+ct_1'$ and, with masked
+  openings $f_j=ct_j-\langle b_j,z\rangle$,
+  \[
+  v=f_\psi f_m+c\,\bigl(L(f)-cH\bigr)-f_G .
+  \]
+\end{enumerate}
+Honestly $f_j=cs_j-a_j$, so the right-hand side equals
+$c^2P(s)+c(\Gamma_1-\Gamma_1)+a_\psi a_m+a_G=v$. The non-interactive version
+derives the four challenges from chained, domain-separated SHAKE-256 seeds
+over $(\pid,x,C)$, $D$, $(h_t)_t$ and $(t_G,w,w',v)$ in this order; on an abort
+only steps 6--7 are repeated. The proof is
+$(D,(h_t)_t,t_G,\mathit{seed},z,z')$; for \texttt{bdlop-binary-128-v1} it is
+41\,870 bytes.
+
+\subsection{Security}
+
+\begin{theorem}[Completeness]
+\label{thm:bin-complete}
+If $C=\Com(m;r)$ with $m\in\{0,1\}^N$ and $r\in S_1^k$, an attempt is accepted
+with probability exactly
+$p_{\mathrm{acc}}=((2B+1)/2\gamma)^{(k+k_{\mathrm{aux}})N}$
+($0.0142$ for \texttt{bdlop-binary-128-v1}), every accepted transcript
+verifies, and the prover fails to output a proof within $\Amax=16\,384$
+attempts with probability $(1-p_{\mathrm{acc}})^{\Amax}<2^{-337}$.
+\end{theorem}
+\begin{proof}
+$\ct(E_t)=0$ by Lemma~\ref{lem:bin-lin}(iii) with $u_i=\sigma(\gamma_i\circ m)$
+and $m\circ(m-J)=0$, so $\ct(h_t)=0$. $P(s)=0$ by construction, and the
+verification identity is the computation above. Acceptance is the
+uniform-masking argument of Lemma~\ref{lem:hvzk} applied to the
+$(k+k_{\mathrm{aux}})N$ coefficients of $(z,z')$, using
+$\norm{cr}_\infty,\norm{cr'}_\infty\le\kappa$.
+\end{proof}
+
+\begin{lemma}[Consistent masked openings]
+\label{lem:bin-consistent}
+Let three accepting transcripts share the messages of steps 1--6 and have
+pairwise distinct challenges $c,c',c''$. Then either one obtains a nonzero
+$x$ with $B_1x=0$ or $B_1'x=0$ and $\norm{x}_\infty\le8\kappa B$, or there are
+$\bar f\in\Cdiff$, relaxed openings $(\bar r,\bar f)$ of $C$ and
+$(\bar r',\bar f)$ of $D$ with messages $\bar m,\bar s$, and vectors
+$y^\star,y'^\star$ such that $z=y^\star+c\bar f^{-1}\bar r$ (likewise for
+$z'$) for all three transcripts. Consequently
+$v=c^2P(\bar s)+cX+Y$ for fixed $X,Y\in\Rq$ and all three challenges, and
+$P(\bar s)=0$.
+\end{lemma}
+\begin{proof}[Proof sketch]
+The first two transcripts give relaxed openings with $\bar f=c-c'$ and
+$\bar r=z-z'$, $\bar r'=z'_{(1)}-z'_{(2)}$, as in Lemma~\ref{lem:fork} and the
+equality proof (Lemma~\ref{lem:eq-ss}). Put $y^\star_c=z_c-c\bar f^{-1}\bar r$;
+then $B_1y^\star_c=w$ for every accepting $c$, and
+$\bar f(y^\star_c-y^\star_{c''})=\bar f(z_c-z_{c''})-(c-c'')\bar r$ is a vector
+of norm at most $2\kappa\cdot2B+2\kappa\cdot2B=8\kappa B$ in the kernel of
+$B_1$; it is zero unless it is an \MSIS{} solution, and then $y^\star$ is
+independent of $c$ because $\bar f$ is invertible
+(Lemma~\ref{lem:invertible}). The same holds for $B_1'$. Substituting into
+$f_j$ gives $f_j=c\bar s_j-\bar a_j$ with $\bar a_j$ independent of $c$, so the
+verification equation is a polynomial identity of degree two in $c$ with
+leading coefficient $P(\bar s)$. Subtracting it at $c,c'$ and $c',c''$ and
+using the invertibility of $c-c'$, $c'-c''$ and $c-c''$ gives $P(\bar s)=0$.
+\end{proof}
+
+\begin{theorem}[Round-by-round soundness]
+\label{thm:bin-rbr}
+Let $C$ be a commitment whose relaxed-opening message $\bar m$ (unique by
+Theorem~\ref{thm:binding}) is not binary. For any prover of the interactive
+protocol, the probability that the verifier accepts and no \MSIS{} solution
+for $B_1$ or $B_1'$ of norm $\le8\kappa B$ is found is at most
+\[
+\erbr=q^{-k}+q^{-k'}+q^{-N/2}+2/|\Cset| ,
+\]
+and each of the four challenge rounds individually contributes at most the
+corresponding term. For \texttt{bdlop-binary-128-v1},
+$\erbr\le2^{-149.99}$.
+\end{theorem}
+\begin{proof}[Proof sketch]
+Fix the extracted messages; they are determined by $C$ and $D$ up to
+\MSIS{} (binding with respect to relaxed openings, for both keys).
+\emph{Lift round.} Let $\Delta_i=\bar u_i-\sigma(\gamma_i\circ\bar m)$,
+$Q_i=\ct(\bar u_i(\bar m-J))$ and $e=(\Delta_i,Q_i)_i$. If $e=0$ then
+$Q_i=\langle\gamma_i,\bar m\circ(\bar m-J)\rangle=0$ for all $i$ by
+Lemma~\ref{lem:bin-lin}(iii); since $\bar m$ is fixed before $\gamma$ and
+$\bar m\circ(\bar m-J)\neq0$, this has probability $q^{-k}$, whatever $D$ the
+prover sends afterwards. \emph{Check round.} By Lemma~\ref{lem:bin-lin},
+$\ct(\bar g_t+E_t(\bar s))=\delta_t+\varphi_t(e)$ with
+$\delta_t=\ct(\bar g_t)$ and
+$\varphi_t(e)=\sum_i\langle\rho_{t,i},\Delta_i\rangle+\mu_{t,i}Q_i$. Both $e\neq0$
+and $\delta_t$ are fixed by $D$ before $(\rho,\mu)$ is drawn, and
+$\varphi_t(e)$ is uniform on $\mathbb Z_q$ for each $t$, independently; hence
+$\delta_t+\varphi_t(e)=0$ for all $t$ with probability $q^{-k'}$. Otherwise some
+$t$ has $\ct(\bar g_t+E_t)\ne0=\ct(h_t)$, i.e.\ $\bar P_t=\bar g_t+E_t-h_t\neq0$.
+\emph{Combine round.} The $\bar P_t$ are fixed before $\alpha$. In a CRT slot
+$\mathbb F_{q^{N/2}}$ where some $\bar P_{t_0}\neq0$, $\sum_t\alpha_t\bar P_t$ is
+uniform, so it vanishes with probability $q^{-N/2}$. \emph{Challenge round.}
+If $P(\bar s)\ne0$, pick a slot $\phi$ where it is nonzero. The polynomial
+$c^2P(\bar s)+cX+Y-v$ is nonzero of degree two modulo $\phi$, so it has at
+most two roots in the field $\Rq/\phi$; as $c-c'$ is invertible for distinct
+challenges, $c\mapsto c\bmod\phi$ is injective on $\Cset$, and at most two
+challenges are roots. By Lemma~\ref{lem:bin-consistent} an accepting
+transcript needs a root.
+\end{proof}
+
+\begin{theorem}[Knowledge soundness of the non-interactive proof, informal]
+\label{thm:bin-ks}
+Let $\mathcal A$ make at most $Q_H$ random-oracle queries and output an
+accepting $(x,C,\pi)$ with probability $\varepsilon$. There is an extractor that
+rewinds $\mathcal A$ at the last oracle query (the general forking lemma, as in
+Lemma~\ref{lem:fork}, with three forks) and outputs a relaxed opening of $C$
+whose message is binary, or an \MSIS{} solution for $B_1$ or $B_1'$ with
+$\ell_\infty$ norm $\le8\kappa B$, with probability polynomially related to
+$\varepsilon-(Q_H+1)\erbr$.
+\end{theorem}
+\noindent\emph{Status.} The round-by-round bound of
+Theorem~\ref{thm:bin-rbr} transfers to Fiat--Shamir with a loss of
+$Q_H+1$~\cite{ref:ccHLRR19}; the extraction of a binary opening combines it
+with the forking argument for the last round, in the style of
+Attema, Fehr and Klo{\ss}~\cite{ref:afk22}. We have not written out this
+composition for Fiat--Shamir \emph{with aborts}, in which only the last round
+is repeated after an abort; the treatment of aborts in
+\cite{ref:barbosa,ref:devevey} is expected to apply but this is a gap.
+
+\begin{theorem}[Honest-verifier zero knowledge]
+\label{thm:bin-zk}
+There is a simulator that, given $(x,C)$ only and programming the random
+oracle at four points, outputs proofs whose distribution differs from honest
+proofs by at most $\Adv^{\MLWE}_{\mathsf{aux}}$ (hiding of the auxiliary
+instance: secret rank $\lambda$, $n+k+k'+1$ ring samples, ternary secret and
+error) plus the programming-collision terms of Lemma~\ref{lem:sim}, for any
+number of proofs on the same $C$.
+\end{theorem}
+\begin{proof}[Proof sketch]
+(1) Accepted $(z,z')$ are uniform on $[-B,B]^{(k+k_{\mathrm{aux}})N}$ and
+independent of $(r,r')$ (Lemma~\ref{lem:hvzk}); sample them directly and
+program the oracles, the announcement having min-entropy through $w$ and $w'$.
+(2) $t_G$'s message $\Gamma_1$ is a function of $z'$, $c$, the public rows of
+$D$ and the witness (since $a_j=\langle b'_j,z'\rangle-c(t'_j-s_j)$), so a
+reduction that knows $m$ but not $r'$ can produce $D$ and $t_G$ from an
+\MLWE{} challenge for $\mathsf{ck}'$; replace them by uniform values.
+(3) Then $g_t$ occurs only in $h_t$, which is uniform on $\{\ct=0\}$; the
+simulator samples $h_t$ there. The verification equations determine
+$w,w',v$. The base randomness $r$ is used across proofs only through
+rejection-sampled responses, and $r'$ is fresh in each proof, so the
+hybrids compose over many proofs.
+\end{proof}
+
+\begin{remark}[Limits]
+The theorems are classical-ROM statements; no QROM claim is made. The
+auxiliary key's \MSIS{} ($n\times23$ instead of $n\times13$) and \MLWE{}
+($17$ instead of $7$ samples) instances give the same levels as the base set
+under the pinned estimator (\MSIS{} $\beta=480$, 140/127 bits; primal \MLWE{}
+$\beta=474$, 138/125 bits; dual $\beta=472$), since the optimal \MSIS{}
+sub-dimension ($\approx3\,022$) is below both widths
+(\texttt{research/bdlop\_params/bdlop\_binary\_128.estimate.json}); the
+dual-hybrid caveat of Section~\ref{sec:proof} applies equally. The
+soundness error $2^{-150}$ per round is below the $2^{-256}$ of the opening
+proof; $k=k'=9$ would match it at about 12\,KB more. The proof does not
+relate a binary commitment to the payload commitments of
+Section~\ref{sec:sec-notation}, which use a 24-bit-per-coefficient encoding.
+\end{remark}
+
+% Bibliography: ref:als20, ref:lnp22, ref:barbosa, ref:devevey, ref:bn06 exist
+% in references.bib. Two entries must be added:
+%  ref:ccHLRR19 R. Canetti, Y. Chen, J. Holmgren, A. Lombardi, G. N. Rothblum,
+%              R. D. Rothblum, D. Wichs. Fiat-Shamir: from practice to theory.
+%              STOC 2019 (round-by-round soundness).
+%  ref:afk22   T. Attema, S. Fehr, M. Kloss. Fiat-Shamir transformation of
+%              multi-round interactive proofs. TCC 2022.
