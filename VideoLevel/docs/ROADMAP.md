@@ -64,3 +64,6 @@ gộp trên nhánh.
   payload 24 bit; phụ lục bài). B1 merge (STC trên carrier magnitude: ít hơn
   26–47 % thay đổi, +1,4–2,4 dB, P_E LOCO tệ nhất 0,41 → 0,43; mục mới trong
   bài). Còn: A0 (sweep 4CIF), B3.
+- 2026-10-21 (trưa): chuyển sang `bdlop-open-128-v2` (λ = 7; hiding 164/150,
+  binding 140/127); KAT v2; bắt đầu chạy lại toàn bộ đánh giá lúc 12:24,
+  khởi động lại 12:51.

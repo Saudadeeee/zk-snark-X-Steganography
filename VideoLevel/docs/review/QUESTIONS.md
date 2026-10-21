@@ -92,17 +92,19 @@ The bound has the usual square-root loss of the general forking lemma: for
 
 ### Q5. M-LWE hiding instance and leakage through proofs (Theorem `thm:hiding`, Lemma `lem:mlwe-instance`)
 
-Hiding maps `Com(m; r)` to an M-LWE sample of rank λ = 6 with n+1 = 7 ring
-samples: `A ∈ R_q^{7×6}`, uniform ternary secret and error. Flattened, this
-is LWE with n = 1536, m = 1792, q = 2^30−35 and σ = √(2/3).
+Hiding maps `Com(m; r)` to an M-LWE sample of rank λ = 7 with n+1 = 7 ring
+samples: `A ∈ R_q^{7×7}`, uniform ternary secret and error. Flattened, this
+is LWE with n = 1792, m = 1792, q = 2^30−35 and σ = √(2/3).
 
 - Is the map `(t1 − B'_{1,2}(t2 − m), t2 − m) = A·r3 + (r1, r2)` a bijection
   for fixed m, and is `A` uniform? Ours: yes. D11 corrected a typo in the
   specification.
-- Estimates (see CROSSCHECK.md). Primal uSVP: β = 473, 138 / 125 bits.
-  **Dual-hybrid in the lattice-estimator "rough" model: β = 463, 2^135.2
-  classical, and β = 465, 2^123.3 quantum.** This is below the 138 / 125
-  bits of the CRYSTALS primal/dual scripts. Is ~135 bits the correct headline? Should a hybrid attack on a
+- Estimates (see CROSSCHECK.md). Primal uSVP: β = 580, 169 / 153 bits.
+  **Dual-hybrid in the lattice-estimator "rough" model: β = 564, 2^164.9
+  classical, and β = 567, 2^150.3 quantum.** This is below the 169 / 153
+  bits of the CRYSTALS primal/dual scripts and is the claimed 164 / 150. (For
+  `bdlop-open-128-v1`, λ = 6, the same attack gave 2^135.2 / 2^123.3, which is
+  why λ was raised to 7.) Is ~164 bits the correct headline? Should a hybrid attack on a
   uniform ternary secret, with only 1792 samples, be considered beyond what
   the estimator covers?
 - Leakage. Registered credentials are proven many times with the same `r`.
@@ -118,7 +120,7 @@ accepted iff `‖z‖∞ ≤ B = γ − κ − 1`. Since `‖c·r‖∞ ≤ κ`,
 corresponds to one mask value in `[−γ+1, γ−1]`.
 
 - Please confirm that acceptance is exactly
-  `p_acc = ((2B+1)/2γ)^{kN} ≈ 0.2151` for every witness and challenge, and
+  `p_acc = ((2B+1)/2γ)^{kN} ≈ 0.1912` for every witness and challenge, and
   that accepted `z` is exactly uniform on `Z`. Also confirm that
   `B = γ − κ − 1` is the largest bound that preserves this.
 - The mask sampler draws 18-bit values below `2γ = 2^18`, so there is no
@@ -252,6 +254,6 @@ relaying. Is this the right split of claims? Is the
 ### Q15. Concrete-estimate methodology
 
 Core-SVP ignores reduction overheads, as for ML-DSA. The MATZOV cost model
-gives 164 / 161 (M-LWE primal/dual-hybrid) and 168 (M-SIS) bits. Is reporting
-core-SVP 140/127 (M-SIS) and 135/123 (M-LWE, the dual-hybrid minimum) the
-right convention for a 128-bit claim? The quantum M-LWE figure is below 128. See `research/bdlop_params/CROSSCHECK.md`.
+gives 194 / 190 (M-LWE primal/dual-hybrid) and 171 (M-SIS) bits. Is reporting
+core-SVP 140/127 (M-SIS) and 164/150 (M-LWE, the dual-hybrid minimum) the
+right convention for a 128-bit claim? The quantum M-SIS figure is just below 128. See `research/bdlop_params/CROSSCHECK.md`.

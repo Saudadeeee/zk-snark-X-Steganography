@@ -15,7 +15,7 @@ exists.
       `2·8κB < q` (binding norm does not wrap, `params.py:66–68`). Test:
       `test_latticezk_bdlop.py::test_parameters_reject_unsound_choices`.
 - [ ] `B = γ − κ − 1` (`params.py:80–83`), shift bound κ (`:75–78`).
-      `acceptance_probability = ((2B+1)/2γ)^{kN}` (`:118–122`) equals 0.2151.
+      `acceptance_probability = ((2B+1)/2γ)^{kN}` (`:118–122`) equals 0.1912.
       Test: `::test_response_bound_leaves_exactly_the_shift_margin`,
       `::test_abort_rate_matches_the_parameter_estimate`.
 - [ ] Challenge space `log2 C(256,60) + 60 = 257.01` bits (`:114–116`).
@@ -79,10 +79,10 @@ exists.
       `::test_accepted_responses_are_in_range_and_witness_independent`.
 - [ ] Equality prover: accept iff *both* responses are in range
       (`equality_proof.py:144`). Cap 4096 (`:50`); failure probability about
-      2^-279 (`:54–64`). Tests:
+      2^-220 (`:54–64`). Tests:
       `test_latticezk_equality.py::test_equality_prover_cap_gives_negligible_completeness_error`,
       `::test_shared_opening_cap_would_not_have_sufficed_for_production`.
-- [ ] Opening cap 512 (`opening_proof.py:33`); failure probability 2^-178.9.
+- [ ] Opening cap 512 (`opening_proof.py:33`); failure probability 2^-156.7.
       Exhausting the cap raises and never outputs a rejected transcript
       (`:136`). Test: `test_latticezk_bdlop.py::test_provers_fail_closed_when_every_attempt_aborts`.
 - [ ] Verifier range check: `unpack_uints(..., bound = 2B+1)` rejects any
@@ -101,7 +101,7 @@ exists.
 - [ ] `pack_uints` / `unpack_uints` (`codec.py:10–33`): fixed bit width, MSB
       first, exact length, zero padding, values below the bound. Proof
       packing has no padding bits at production parameters
-      (`3328 · 18 bits = 7488 bytes`). Tests:
+      (`3584 · 18 bits = 8064 bytes`). Tests:
       `test_latticezk_bdlop.py::test_pack_uints_round_trip_and_canonical_rejection`,
       `::test_random_packed_fields_round_trip_and_decode_canonically`.
 - [ ] Commitments are canonical: shape and every coefficient in [0, q) are
@@ -203,7 +203,8 @@ Known variable-time code that touches secrets:
       pins SHA-256 digests of the key, the commitments, the opening proofs
       and the equality proofs. It covers the empty, short and maximum (766
       byte) payloads. Regenerate and diff:
-      `python -B research/bdlop_params/kat.py | diff - research/bdlop_params/kat_v1.json`.
-      Test: `test_latticezk_kat.py` (3 tests).
+      `python -B research/bdlop_params/kat.py --parameter-set BDLOP_OPEN_128_V2 | diff - research/bdlop_params/kat_v2.json`
+      (and `BDLOP_OPEN_128_V1` against `kat_v1.json`).
+      Test: `test_latticezk_kat.py` (3 tests, run for both sets).
 - [ ] The KATs fix the exact XOF consumption (see §2). Any change to tags,
       to the hedging input (D7) or to the samplers changes them.

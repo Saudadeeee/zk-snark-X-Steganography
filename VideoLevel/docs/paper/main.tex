@@ -53,19 +53,20 @@ zero-knowledge proof directly in the CAVLC residuals of an H.264 Baseline
 bitstream and verifies it from the received video, without side files,
 metadata boxes or access to the cover. The proof is a Fiat--Shamir-with-aborts
 proof of knowledge of an opening of a BDLOP commitment, instantiated at an
-estimated 135-bit classical (123-bit quantum) core-SVP level. Its
+estimated core-SVP level of 140 bits classical and 127 bits quantum for
+binding (164/150 bits for hiding). Its
 statement binds a carrier-normalized digest of the video, the
 verifier-recomputed carrier positions, a one-use verifier challenge and an
 issuer-signed relation registry; carrier normalization breaks the circularity
 between a proof and the video that contains it. Two modes are supported: a
-7\,589-byte envelope proving possession of a registered credential, and a
-14\,309-byte envelope committing to a hidden payload that can later be
+8\,165-byte envelope proving possession of a registered credential, and a
+14\,885-byte envelope committing to a hidden payload that can later be
 disclosed or linked to another commitment. On standard CIF and 4CIF sequences
 every completed run verified from the stego video alone and, where tested,
 rejected replayed sessions and single-bit tampering; luma PSNR on modified
 frames is
-40.0--45.4\,dB. Targeted classical steganalysis does not separate cover and
-stego, whereas a learned per-frame detector reaches a detection error of 0.40
+40.0--45.4\,dB\todo{v2 measurement}. Targeted classical steganalysis does not separate cover and
+stego, whereas a learned per-frame detector reaches a detection error of 0.40\todo{v2 measurement}
 across clips, which we report as a limitation. We state precisely what the
 proof does and does not establish.
 \end{abstract}
@@ -124,8 +125,8 @@ contributions are:
   field from the video, which gives replay protection and anchors trust at
   the verifier.
 \item \textbf{Two proof modes and linkage.} A registered mode proves
-  possession of an issuer-registered credential (7\,589-byte envelope), and
-  an in-band mode commits to a hidden payload of up to 766 bytes (14\,309-byte
+  possession of an issuer-registered credential (8\,165-byte envelope), and
+  an in-band mode commits to a hidden payload of up to 766 bytes (14\,885-byte
   envelope) that can later be disclosed or linked, by an equality proof, to
   another video or to a credential without being revealed.
 \item \textbf{A concrete, reproducible instantiation and evaluation.} We give
@@ -445,7 +446,7 @@ verifier recomputes as $\langle b_2,z_a-z_b\rangle-c\,(t_{2,a}-t_{2,b})$.
   \State $c\gets\SIB(s)$;\quad $z\gets y+cr$
   \If{$\norm{z}_\infty\le B$} \Return $\pi=(s,\mathrm{Pack}(z+B))$ \EndIf
 \EndFor
-\State \Return $\bot$ \Comment{probability $<2^{-178}$}
+\State \Return $\bot$ \Comment{probability $<2^{-156}$}
 \Statex
 \Statex \textbf{Verify}$(\pid, x, t, \pi)$
 \State parse $\pi=(s,z)$; reject unless $|\pi|$ is exact, every packed value
@@ -462,19 +463,23 @@ masking the accepted response is exactly uniform on $[-B,B]^{kN}$, which
 gives zero knowledge without a Gaussian sampler; the price is a larger
 extracted norm, so binding is estimated for the $\ell_\infty$ bound $8\kappa B$
 rather than reused from~\cite{ref:bdlop}. The per-attempt acceptance
-probability is $((2B+1)/2\gamma)^{kN}\approx0.215$ (4.65 expected attempts;
-4.68 measured over 50 runs). Core-SVP costs were computed with the CRYSTALS
+probability is $((2B+1)/2\gamma)^{kN}\approx0.191$ (5.23 expected attempts;
+4.68 measured over 50 runs with \texttt{bdlop-open-128-v1}\todo{v2 measurement}). Core-SVP costs were computed with the CRYSTALS
 estimation scripts~\cite{ref:crystalsestimates}, ignoring reduction losses as
 for ML-DSA. An independent cross-check with the
 lattice-estimator~\cite{ref:aps15,ref:latticeestimator} (commit
 \texttt{e4333d9}, same core-SVP model) reproduces the M-SIS estimate
-($\beta=480$, 140/127 bits) and the primal M-LWE estimate ($\beta=473$,
-138/125 bits). Its dual-hybrid attack on M-LWE is slightly cheaper
-($\beta=463$, $2^{135}$ classical; $2^{123}$ quantum), so we take 135/123 bits
-for hiding (Table~\ref{tab:params}). The $\ell_2$ relaxation of the binding
-bound exceeds $q$, so binding rests on the $\ell_\infty$ estimate. Under the
-estimator's default cost model, every attack on either instance costs at
-least $2^{161}$.
+($\beta=480$, 140/127 bits) and the primal M-LWE estimate ($\beta=580$,
+169/154 bits; 169/153 with the CRYSTALS scripts). Its dual-hybrid attack on
+M-LWE is slightly cheaper ($\beta=564$, $2^{164.9}$ classical; $\beta=567$,
+$2^{150.3}$ quantum), so we take 164/150 bits for hiding
+(Table~\ref{tab:params}). The quantum binding estimate, 127 bits, is just
+below 128. The $\ell_2$ relaxation of the binding bound exceeds $q$, so
+binding rests on the $\ell_\infty$ estimate. Under the estimator's default
+cost model, every attack on either instance costs at least $2^{170}$. The
+earlier set \texttt{bdlop-open-128-v1} ($\lambda=6$, $k=13$) has the same
+binding estimate but only 135/123 bits for hiding (dual hybrid, $\beta=463$);
+this is why the production set raises the M-LWE rank to $\lambda=7$.
 
 \subsection{Envelopes, registry and sessions}
 The envelope is
@@ -506,7 +511,7 @@ succeeds.
 \subsection{Linkage and disclosure}
 \label{sec:linkage}
 A holder of two openings can prove that two commitments hide the same
-payload with the equality proof (15\,008 bytes), bound to the two
+payload with the equality proof (16\,160 bytes), bound to the two
 commitments and to a context such as the two statement identifiers. This
 links two in-band videos to one payload, or links an in-band video to a
 registered credential after the fact, without revealing the payload. A
@@ -514,7 +519,7 @@ holder can also disclose the payload to a chosen party without revealing
 the randomness: the disclosure is the payload with an equality proof between
 the extracted commitment and the deterministic commitment to the payload
 under zero randomness, bound to the recipient's statement identifier and
-nonce (15\,008 bytes of proof). The recipient learns the payload but cannot
+nonce (16\,160 bytes of proof). The recipient learns the payload but cannot
 reuse the commitment in new proofs.
 
 \subsection{Carrier ordering key}
@@ -613,15 +618,15 @@ extraction of relaxed openings from two transcripts, statement substitution,
 envelope tampering, registry pinning and rollback, session replay, linkage,
 the CLI, and byte-exact known-answer vectors for the parameter set.
 
-\paragraph{Sizes} Commitment 6\,720~B, opening proof 7\,520~B (a 32-byte
-challenge seed and $kN$ responses of 18 bits), equality proof 15\,008~B,
-envelope header 69~B; hence 7\,589~B (registered) and 14\,309~B (in-band) in
+\paragraph{Sizes} Commitment 6\,720~B, opening proof 8\,096~B (a 32-byte
+challenge seed and $kN$ responses of 18 bits), equality proof 16\,160~B,
+envelope header 69~B; hence 8\,165~B (registered) and 14\,885~B (in-band) in
 the video, plus 23~B of framing per chunk.
 
 \paragraph{Timing} On the evaluation host (single thread, idle), the median
 times over 50 runs are 21\,ms to commit, 120\,ms to prove (95th percentile
 302\,ms) and 22\,ms to verify an opening, and 0.97\,s and 46\,ms for the
-equality proof. Cryptography is therefore negligible end to end: embedding
+equality proof (measured with \texttt{bdlop-open-128-v1})\todo{v2 measurement}. Cryptography is therefore negligible end to end: embedding
 and verification of a clip take minutes and are dominated by the Python
 CAVLC analysis and patching (Table~\ref{tab:e2e}). A faster verification
 path is in progress; \todo{update verification times after the verification
@@ -658,10 +663,10 @@ noted in the tables.
 Table~\ref{tab:capacity} lists stable, patchability-checked carriers. At
 QP\,22 CIF clips offer 10.5--49.8\,kbit per 100 frames. Textured content
 (Container, Deadline, Coastguard) carries the registered envelope
-(about 61\,kbit) in 200 frames, and Container and Deadline carry the in-band
-envelope (about 115\,kbit) in 300; flat or
+(about 65.3\,kbit) in 200 frames, and Container and Deadline carry the in-band
+envelope (about 119.1\,kbit) in 300; flat or
 smooth content (Akiyo, Foreman) cannot carry the registered envelope in its
-300 frames. Capacity falls steeply with QP (Container: 88.3, 49.8 and
+300 frames.\todo{v2 measurement} Capacity falls steeply with QP (Container: 88.3, 49.8 and
 10.0\,kbit at QP 18, 22 and 28), because coarser quantization leaves fewer
 coefficients with $|\mathit{level}|\ge4$, and grows with resolution where the
 content is textured (City: 23.8\,kbit at CIF, 82.3\,kbit at 4CIF). Capacity
@@ -684,18 +689,18 @@ additionally verified a linkage proof between the commitment extracted from
 the video and a separately committed credential, rejected the linkage to a
 different credential, and verified a later disclosure of the payload. On
 modified frames the luma PSNR is 40.0--45.4\,dB, the worst frame is
-32.1--39.3\,dB, and whole-video SSIM is at least 0.9991. The worst frames are
+32.1--39.3\,dB, and whole-video SSIM is at least 0.9991\todo{v2 measurement}. The worst frames are
 those in which many carriers fall in smooth regions, where intra prediction
 spreads a $\pm1$ change to neighbouring blocks. Embedding takes 6--63 minutes
 (90 minutes for the concurrently run 3\,000-frame in-band case) and
 verification 2--33 minutes per clip in pure Python; the proof itself
-takes about 0.1\,s. QP governs capacity strongly: City 4CIF carries
+takes about 0.1\,s\todo{v2 measurement}. QP governs capacity strongly: City 4CIF carries
 301\,kbit in its first 100 frames at QP~18, so the registered envelope fits
 one segment (47.7\,dB on modified frames, worst 42.8\,dB), but only 16\,kbit
 in 600 frames at QP~28, where neither envelope fits. Crew 4CIF has enough
 carriers in total at QP~22 but too unevenly spread over segments for
 uniform chunks; at QP~18 it verifies over four segments (48.8\,dB, worst
-36.6\,dB).
+36.6\,dB).\todo{v2 measurement}
 
 \input{tables/paper_e2e}
 
@@ -740,7 +745,7 @@ $P_E=0.18$. Adding the Harbour and Soccer 4CIF runs (seven clips, 1\,700
 frame pairs) leaves the picture unchanged: leave-one-clip-out $P_E=0.39$ with
 coefficient features and $0.46$ with pixel features, and $0.38$ with combined
 features on the paired split
-(\texttt{benchmark/results/q2/ml\_eval\_cif\_4cif.json}).
+(\texttt{benchmark/results/q2/ml\_eval\_cif\_4cif.json}).\todo{v2 measurement}
 
 \input{tables/paper_steg_ml}
 \input{tables/steg_cnn}
@@ -764,7 +769,7 @@ against $0.47$ for the magnitude carrier (Table~\ref{tab:steg-cnn}); sign
 carriers should therefore not be presented as secure against learned
 steganalysis. Packed into 100 frames,
 sign flips are clearly detectable ($P_E=0.31$ with pixel features, and a
-per-position sign test flags one clip at $p=0.001$). Sign carriers were
+per-position sign test flags one clip at $p=0.001$).\todo{v2 measurement} Sign carriers were
 4--8 times slower to verify at equal frame count (2--3 times when packed into
 100 frames), because the reduced stable-carrier analysis does not apply to
 them; \todo{timing of the optimized sign-carrier analysis
@@ -789,7 +794,7 @@ of Table~\ref{tab:density}): at 100, 50 and 25\,\% of the carriers, the
 leave-one-clip-out $P_E$ with coefficient features is 0.40, 0.44 and 0.46,
 the PSNR of modified frames 43.2, 45.7 and 50.0\,dB and the worst frame
 32.9, 35.0 and 38.2\,dB, while the number of modified frames grows from 150
-to 500 per clip. All six runs verify from the video alone.
+to 500 per clip. All six runs verify from the video alone.\todo{v2 measurement}
 
 \input{tables/paper_density}
 
@@ -816,7 +821,7 @@ modified frames, and every run verifies from the video alone at the same
 cost. Learned detectors do worse against it in every fold and feature set
 (Table~\ref{tab:adaptive-steg}): the worst-case $P_E$ rises from 0.41 to 0.43
 leave-one-clip-out and from 0.32 to 0.39 on the paired split, while the CNN
-stays near chance for both (0.457 vs.\ 0.471). With three clips and a fold
+stays near chance for both (0.457 vs.\ 0.471).\todo{v2 measurement} With three clips and a fold
 standard error of about 0.03, the evidence is the consistency of the gain,
 not its size. The price is fragility: every carrier of a segment enters the
 code, so one corrupted carrier anywhere invalidates that segment, which the
@@ -838,19 +843,19 @@ GOP$>1$ statement never verifies under the all-intra profile.
 Table~\ref{tab:gop} reports CIF runs. An IDR carries what an all-intra frame
 carries, so capacity per frame falls by the GOP length: the 128-bit
 registered envelope needs about 1\,000 frames of Container at GOP~8 and 3\,000
-at GOP~25 (we use looped sources). All runs verify from the video alone, all
+at GOP~25 (we use looped sources).\todo{v2 measurement} All runs verify from the video alone, all
 P slices are unchanged, and flipping one bit inside a P slice is rejected.
 Drift into P frames barely accumulates (Container loses 0.04--0.09\,dB over a
 GOP), but packing the envelope into fewer pictures lowers quality: modified
 frames average 39.3--40.8\,dB with a worst frame near 32\,dB, against
-42.1\,dB (worst 34.0\,dB) for all-intra Container at the same payload. Only IDR slices are parsed, so
+42.1\,dB (worst 34.0\,dB) for all-intra Container at the same payload.\todo{v2 measurement} Only IDR slices are parsed, so
 verification is cheap per frame.
 
 \input{tables/gop}
 
 \subsection{Comparison with alternative proof systems}
 Table~\ref{tab:baselines} compares schemes that could carry the claim.
-Groth16 is about fifty times smaller but not post-quantum and needs a
+Groth16 is more than fifty times smaller but not post-quantum and needs a
 circuit-specific trusted setup. ML-DSA signatures are post-quantum and
 smaller, but a signature reveals the signed data or binds a public value; it
 proves nothing about a hidden payload and supports neither later linkage nor
@@ -901,7 +906,7 @@ not a cryptographic pseudorandom permutation; replacing it with a standard
 keyed permutation is straightforward and does not affect the proof.
 
 \paragraph{Per-frame versus per-video detection} The learned detector's
-per-frame error of 0.40 means that each modified frame leaks a little; a
+per-frame error of 0.40\todo{v2 measurement} means that each modified frame leaks a little; a
 video carries 100--1\,200 modified frames, and pooling their scores would
 likely detect the embedding with high confidence. We have not quantified a
 pooled detector. Spreading the envelope over more frames lowers per-frame
@@ -912,10 +917,10 @@ lowers the leakage of every frame and is the more promising direction.
 \paragraph{Capacity and codec scope} Only Baseline (CAVLC) streams are
 supported; streams with P slices carry the proof in IDR slices only
 (Section~\ref{sec:gop}), which divides capacity by the GOP length. A registered envelope
-needs 61\,kbit, which smooth content and high QP do not provide within a few
+needs 65.3\,kbit, which smooth content and high QP do not provide within a few
 hundred frames. Appendix~\ref{sec:binary-proof} gives a proof that a commitment
-under the same parameter set hides a binary string (41\,870 bytes, 2.2\,s to
-prove and 72\,ms to verify), built from lifted constant-coefficient relations
+under the same parameter set hides a binary string (43\,022 bytes; 2.2\,s to
+prove and 72\,ms to verify, measured with \texttt{bdlop-binary-128-v1}\todo{v2 measurement}), built from lifted constant-coefficient relations
 and an ALS20-style product step~\cite{ref:als20,ref:lnp22} that works on our
 two-slot ring. It is not yet tied to the 24-bit payload encoding, which would
 need a bit-decomposition proof, and its multi-round Fiat--Shamir-with-aborts

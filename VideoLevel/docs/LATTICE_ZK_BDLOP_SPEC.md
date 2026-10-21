@@ -4,7 +4,8 @@ Version 1 (`bdlop-open-v1`), implemented in `src/lattice_zk/`. This document
 specifies the exact algorithms the code runs and argues each security property
 from published results. It is written so the protocol can be re-implemented
 and checked against the known-answer vectors in
-`research/bdlop_params/kat_v1.json`.
+`research/bdlop_params/kat_v2.json` (production set `bdlop-open-128-v2`;
+`kat_v1.json` pins the earlier set `bdlop-open-128-v1`).
 
 The construction is the commitment and opening proof of Baum, Damgård,
 Lyubashevsky, Oechsner and Peikert (SCN 2018, ePrint 2016/997), with three
@@ -26,16 +27,16 @@ audited and is not constant time.
 
 ## 2. Parameters
 
-| | `bdlop-open-128-v1` |
+| | `bdlop-open-128-v2` |
 |---|---|
 | `N`, `q` | 256, `2^30 − 35` |
-| `n`, `λ`, `k` | 6, 6, 13 |
+| `n`, `λ`, `k` | 6, 7, 14 |
 | `κ`, `γ`, `B` | 60, `2^17`, `2^17 − 61` |
 | `|C|` | `2^257` |
 | Commitment | `(n+1)·N·30` bits = 6 720 bytes |
-| Opening proof | `32 + k·N·18` bits = 7 520 bytes |
-| Equality proof | `32 + 2·k·N·18` bits = 15 008 bytes |
-| Per-attempt acceptance | `((2B+1)/(2γ))^{kN} ≈ 0.215` |
+| Opening proof | `32 + k·N·18` bits = 8 096 bytes |
+| Equality proof | `32 + 2·k·N·18` bits = 16 160 bytes |
+| Per-attempt acceptance | `((2B+1)/(2γ))^{kN} ≈ 0.191` |
 
 `parameter_id = SHA3-256("zkstego/lattice-zk/bdlop-open/v1/parameters\0" ‖
 len(name) ‖ name ‖ N ‖ q ‖ n ‖ λ ‖ κ ‖ γ ‖ setup_seed)` pins every value.
@@ -46,12 +47,15 @@ CRYSTALS security-estimates model (commit `75c26949`), core-SVP cost:
 | Problem | Instance | Block size | Classical | Quantum |
 |---|---|---|---|---|
 | M-SIS (binding) | `B1 ∈ R_q^{n×k}`, `ℓ∞` bound `8κB ≈ 2^25.9` | 480 | 140 | 127 |
-| M-LWE (hiding) | rank `λ`, `n+1` samples, ternary secret and error | 474 | 138 | 125 |
-| M-LWE, dual hybrid (lattice-estimator `e4333d9`) | same | 463 | **135** | **123** |
+| M-LWE (hiding) | rank `λ`, `n+1` samples, ternary secret and error | 580 | 169 | 153 |
+| M-LWE, dual hybrid (lattice-estimator `e4333d9`) | same | 564 / 567 | **164** | **150** |
 
 Reduction losses are ignored, as for ML-DSA. The claimed hiding level is the
 lower dual-hybrid figure; the cross-check also reproduces the M-SIS and primal
-M-LWE rows (`research/bdlop_params/CROSSCHECK.md`).
+M-LWE rows (`research/bdlop_params/CROSSCHECK.md`). The quantum M-SIS figure,
+127 bits, is just below 128. The earlier set `bdlop-open-128-v1` (λ = 6,
+k = 13) has the same M-SIS estimate but only 135 / 123 bits for M-LWE (dual
+hybrid, β = 463); this is why the production set raises λ to 7.
 
 ## 3. Algorithms
 
@@ -202,7 +206,7 @@ recipient chose, so a disclosure made for one recipient or one video does not
 verify for another. The recipient recomputes `t'` from `p` and verifies `π_eq`
 against the commitment it already holds (`verify_disclosure_proof` for an
 envelope, `verify_commitment_disclosure` for a credential; CLI `disclose` and
-`disclosure-verify`). Size: 39 bytes + `|p|` + 15 008 bytes for the
+`disclosure-verify`). Size: 39 bytes + `|p|` + 16 160 bytes for the
 production set. The proof is transferable: a third party who trusts that the
 nonce was fresh is convinced too. `self_check_opening` (formerly
 `verify_disclosure`) checks `(p, r)` directly and is a holder-side self-check
@@ -216,13 +220,14 @@ Throughout, `‖c·v‖∞ ≤ ‖c‖₁·‖v‖∞`.
 
 `‖c·r‖∞ ≤ κ`, so an honest attempt is accepted with probability
 `((2B+1)/(2γ))^{kN}` (Section 2), the expected number of attempts is its
-inverse (4.65 for the production set; measured 4.68 over 50 runs), and an
+inverse (5.23 for the production set; measured 4.68 over 50 runs with
+`bdlop-open-128-v1` (v2 measurement pending)), and an
 accepted `z` satisfies the verification equation because `t1 = B1·r`.
-The probability that 512 attempts all abort is `(1 − 0.215)^{512} < 2^{-178}`.
-The equality proof (3.5) accepts with probability `0.215^2 ≈ 0.046` per
-attempt (mean 21.6 attempts). It has its own cap of 4 096 attempts, so it
-fails with probability `(1 − 0.046)^{4096} ≈ 2^{-280}` (the shared cap of 512
-used before gave `2^{-35}`). The larger cap does not affect zero knowledge,
+The probability that 512 attempts all abort is `(1 − 0.191)^{512} < 2^{-156}`.
+The equality proof (3.5) accepts with probability `0.191^2 ≈ 0.037` per
+attempt (mean 27.4 attempts). It has its own cap of 4 096 attempts, so it
+fails with probability `(1 − 0.037)^{4096} ≈ 2^{-220}` (the shared cap of 512
+used before gave `2^{-35}` with `bdlop-open-128-v1`). The larger cap does not affect zero knowledge,
 because acceptance is independent of the witness, including the zero witness
 of a disclosure. `test_equality_prover_cap_gives_negligible_completeness_error`
 checks the bound `< 2^{-128}` from the parameters.

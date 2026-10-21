@@ -589,7 +589,7 @@ def _parser() -> argparse.ArgumentParser:
     short.add_argument("--video", default=DEFAULT_SMALL_VIDEO)
     short.add_argument("--frames", type=int, default=100)
     short.add_argument("--carrier", choices=sorted(SMALL_CHUNK_BYTES), default="t1")
-    short.add_argument("--chunk-bytes", type=int, help="default: 8000 for t1, 3800 for magnitude")
+    short.add_argument("--chunk-bytes", type=int, help="default: 8200 for t1, 4200 for magnitude")
     short.add_argument("--work", default="tmp/repro_small")
     short.add_argument("--security-checks", action="store_true",
                        help="also replay the session and verify a tampered copy (two more verifications)")

@@ -23,10 +23,14 @@ is a credential pinned by an ML-DSA-65-signed registry, and the video carries
 only the proof. An equality proof between two commitments is used for linkage
 and for disclosure.
 
-Parameter set `bdlop-open-128-v1`: N = 256, q = 2^30 − 35 (q ≡ 5 mod 8),
-n = λ = 6, k = 13, κ = 60, γ = 2^17, B = γ − κ − 1. Masks are uniform on
+Parameter set `bdlop-open-128-v2`: N = 256, q = 2^30 − 35 (q ≡ 5 mod 8),
+n = 6, λ = 7, k = 14, κ = 60, γ = 2^17, B = γ − κ − 1. Masks are uniform on
 [−γ+1, γ]. This is ML-DSA-style uniform masking, not the Gaussian masking of
-BDLOP.
+BDLOP. At commit `18c5123` the production set was `bdlop-open-128-v1`
+(λ = 6, k = 13); it was replaced because the lattice-estimator's dual-hybrid
+attack puts its M-LWE hiding at only 135 / 123 bits (v2: 164 / 150). Both
+sets are still defined in `params.py`, with KATs `kat_v1.json` and
+`kat_v2.json`.
 
 ## Scope: what to review
 
@@ -87,11 +91,11 @@ ffmpeg is needed: the pipeline tests use an in-memory fake transport.
 |---|---|---|
 | All lattice-ZK tests | `python -B -m pytest -p no:cacheprovider -q src/runtest/test_latticezk_*.py` | `209 passed, 1 skipped` in about 50 s. The skip is a POSIX file-mode test on Windows. |
 | Cryptographic core only | `python -B -m pytest -p no:cacheprovider -q src/runtest/test_latticezk_ring.py src/runtest/test_latticezk_bdlop.py src/runtest/test_latticezk_equality.py src/runtest/test_latticezk_kat.py src/runtest/test_latticezk_linkage.py src/runtest/test_latticezk_video_proof.py` | all pass |
-| KAT regeneration and comparison | `python -B research/bdlop_params/kat.py > /tmp/kat.json && diff /tmp/kat.json research/bdlop_params/kat_v1.json` | no diff (`kat.py` has no `--check` flag; `test_latticezk_kat.py` performs the same comparison) |
+| KAT regeneration and comparison | `python -B research/bdlop_params/kat.py --parameter-set BDLOP_OPEN_128_V2 > /tmp/kat.json && diff /tmp/kat.json research/bdlop_params/kat_v2.json` (and `BDLOP_OPEN_128_V1` against `kat_v1.json`) | no diff (`kat.py` has no `--check` flag; `test_latticezk_kat.py` performs the same comparison) |
 | Session store and chunk framing | `python -B -m pytest -p no:cacheprovider -q src/runtest/test_zkp_sessions.py src/runtest/test_blind_payload_chunks.py` | `22 passed` |
 | Registry (script-style test) | `python -B src/runtest/test_zkp_registry.py` | `7/7 passed` |
-| Core-SVP estimate (CRYSTALS scripts) | `git clone https://github.com/pq-crystals/security-estimates && git -C security-estimates checkout 75c26949 && python research/bdlop_params/estimate.py --estimator security-estimates` | reproduces `research/bdlop_params/bdlop_open_128.estimate.json` |
-| lattice-estimator cross-check (Sage) | see `research/bdlop_params/CROSSCHECK.md` | `research/bdlop_params/lattice_estimator_crosscheck.json` |
+| Core-SVP estimate (CRYSTALS scripts) | `git clone https://github.com/pq-crystals/security-estimates && git -C security-estimates checkout 75c26949 && python research/bdlop_params/estimate.py --estimator security-estimates` | reproduces `research/bdlop_params/bdlop_open_128_v2.estimate.json` (with `--parameter-set BDLOP_OPEN_128_V1`: `bdlop_open_128.estimate.json`) |
+| lattice-estimator cross-check (Sage) | see `research/bdlop_params/CROSSCHECK.md` | `research/bdlop_params/lattice_estimator_crosscheck_v2.json` (v1: `lattice_estimator_crosscheck.json`) |
 
 ## File map (security-critical code)
 
@@ -147,9 +151,9 @@ Supporting documents:
 | `docs/paper/sections/security.tex` | Model, games, theorem statements |
 | `docs/paper/sections/security_appendix.tex` | Full proofs; specification/code cross-check; discrepancies D1–D11 |
 | `docs/paper/tables/params.tex` | Parameter table |
-| `research/bdlop_params/estimate.py`, `bdlop_open_128.estimate.json` | Core-SVP estimate (CRYSTALS security-estimates model) |
+| `research/bdlop_params/estimate.py`, `bdlop_open_128_v2.estimate.json` (v1: `bdlop_open_128.estimate.json`) | Core-SVP estimate (CRYSTALS security-estimates model) |
 | `research/bdlop_params/lattice_estimator_crosscheck.py`, `.json`, `CROSSCHECK.md` | Independent cross-check with the lattice-estimator |
-| `research/bdlop_params/kat.py`, `kat_v1.json` | KAT generator and pinned digests (commitments, opening proofs, equality proofs, key) |
+| `research/bdlop_params/kat.py`, `kat_v2.json` (v1: `kat_v1.json`) | KAT generator and pinned digests (commitments, opening proofs, equality proofs, key) |
 
 ## Status of the self-review findings
 

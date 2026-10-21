@@ -392,10 +392,14 @@ An accepted attempt satisfies $B_1z-ct_1=B_1y+cB_1r-cB_1r=w$, and for the
 equality proof $\langle b_2,z_a-z_b\rangle-c(t_{2,a}-t_{2,b})=\langle b_2,y_a-y_b\rangle$
 because $t_{2,a}-t_{2,b}=\langle b_2,r_a-r_b\rangle$ for equal messages. By
 Lemma~\ref{lem:hvzk} the number of attempts is geometric with parameter
-$p_{\mathrm{acc}}$ (mean $4.65$) for the opening proof and $p_{\mathrm{acc}}^2$
-(mean $21.6$) for the equality proof. With the shared cap $\Amax=512$
-(\texttt{opening\_proof.py:33}) the prover fails with probability $2^{-178.9}$
-and $2^{-35.0}$ respectively; the second is item~D4.
+$p_{\mathrm{acc}}$ (mean $5.23$) for the opening proof and $p_{\mathrm{acc}}^2$
+(mean $27.4$) for the equality proof. With the caps $\Amax=512$
+(\texttt{opening\_proof.py:33}) and $\Amax=4\,096$
+(\texttt{equality\_proof.py:50}) the prover fails with probability
+$2^{-156.7}$ and $2^{-220.0}$ respectively. Under the shared cap of 512 that
+the reviewed code used, the equality proof failed with probability
+$2^{-35.0}$ for \texttt{bdlop-open-128-v1} (means $4.65$ and $21.6$); this is
+item~D4.
 
 \section{Specification and implementation cross-check}
 \label{app:code-check}
@@ -497,8 +501,9 @@ and \texttt{cli.py} are in \texttt{lattice\_zk/}.
   (proof above).
 \item[D4 (low): equality-proof completeness $2^{-35}$.]
   \texttt{equality\_proof.py:29,83} reuses $\Amax=512$ with acceptance
-  $p_{\mathrm{acc}}^2$. Fix: a separate cap, e.g.\ 4\,096 attempts
-  ($\approx2^{-280}$); a larger cap does not affect zero knowledge because
+  $p_{\mathrm{acc}}^2$ (figures for \texttt{bdlop-open-128-v1}, the set
+  reviewed; $2^{-27.5}$ for \texttt{bdlop-open-128-v2}). Fix: a separate cap,
+  e.g.\ 4\,096 attempts ($\approx2^{-280}$ for v1, $2^{-220}$ for v2); a larger cap does not affect zero knowledge because
   acceptance is witness-independent.
 \item[D5 (low): scope of the canonical digest.] The digest is over
   ffmpeg-segmented files (\texttt{blind\_sync\_streaming.py:117--215}); segments

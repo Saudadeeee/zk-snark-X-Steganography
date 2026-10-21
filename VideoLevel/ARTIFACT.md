@@ -2,7 +2,7 @@
 
 This file tells a reviewer how to rerun the evaluation of the lattice
 zero-knowledge video system (`src/lattice_zk/`, parameter set
-`bdlop-open-128-v1`): from the unit tests (about a minute) through one short
+`bdlop-open-128-v2`): from the unit tests (about a minute) through one short
 end-to-end run (10-15 minutes) to the full multi-clip sweep (tens of hours).
 Every command is run from `VideoLevel/`. Each step has a PowerShell (`.ps1`)
 and a POSIX (`.sh`) wrapper in `scripts/`. Both call `scripts/repro.py`, which
@@ -18,7 +18,7 @@ published papers and has not been audited (see `docs/LATTICE_ZK_BDLOP_SPEC.md`).
 | `src/lattice_zk/` | BDLOP commitment, opening / equality / linkage proofs, video statement and envelope, embed/verify pipeline, role-separated CLI |
 | `src/blind_sync*.py`, `src/blind_payload_chunks.py`, `src/core/analysis_cache.py`, `src/bitstream/` | Carrier analysis, chunk framing and CAVLC patching, used by the pipeline |
 | `src/zkp_registry.py`, `src/zkp_sessions.py`, `src/lattice_pq.py` | ML-DSA-signed relation registry, one-use verifier sessions, ML-DSA/ML-KEM wrappers |
-| `research/bdlop_params/` | Core-SVP parameter estimation (`estimate.py`, output `bdlop_open_128.estimate.json`) and known-answer vectors (`kat.py`, `kat_v1.json`) |
+| `research/bdlop_params/` | Core-SVP parameter estimation (`estimate.py`, output `bdlop_open_128_v2.estimate.json`; v1: `bdlop_open_128.estimate.json`) and known-answer vectors (`kat.py`, `kat_v2.json`; v1: `kat_v1.json`) |
 | `benchmark/latticezk_*.py`, `benchmark/latticezk_q2_cases.json` | Evaluation drivers: capacity scan, E2E, sweep, steganalysis, simulations, baselines, reports |
 | `benchmark/results/q2/` | Results behind the paper (JSON, `SUMMARY.md`, `carrier_compare.md`) |
 | `benchmark/results/latticezk_*_2026101*.json` | Earlier E2E, steganalysis and crypto-benchmark runs (2026-10-12/19) |
@@ -172,21 +172,23 @@ gitignored cover and is skipped with a reason when the file is absent
 (`conftest.py`, marker `needs_data`). CI runs the same script
 (`.github/workflows/videolevel-latticezk.yml`).
 
-Expected output on a clean checkout: `174 passed, 1 skipped` for pytest, all
+Expected output on a clean checkout: `174 passed, 1 skipped` for pytest (v2 measurement pending), all
 script suites `OK`, `RESULT: PASS`.
 
 ### 4.2 Known-answer vectors (about 10 s)
 
 `src/runtest/test_latticezk_kat.py` (part of 4.1) regenerates the vectors and
-compares them with `research/bdlop_params/kat_v1.json`. To do it by hand:
+compares them with `research/bdlop_params/kat_v1.json` and `kat_v2.json`. To
+do it by hand for the production set:
 
 ```bash
 mkdir -p tmp
-python research/bdlop_params/kat.py --output tmp/kat_check.json
-cmp tmp/kat_check.json research/bdlop_params/kat_v1.json      # Windows: fc /b; no output = identical
+python research/bdlop_params/kat.py --parameter-set BDLOP_OPEN_128_V2 --output tmp/kat_check.json
+cmp tmp/kat_check.json research/bdlop_params/kat_v2.json      # Windows: fc /b; no output = identical
 ```
 
-Checked for this artifact: the regenerated file is byte-identical (8 s).
+Checked for this artifact: the regenerated `kat_v1.json` is byte-identical
+(8 s) (v2 measurement pending).
 
 ### 4.3 Parameter estimation (Table `tab:params`)
 
@@ -196,11 +198,13 @@ Checked for this artifact: the regenerated file is byte-identical (8 s).
 git clone https://github.com/pq-crystals/security-estimates
 git -C security-estimates checkout 75c26949a902ca297b181375bfb7cfaf22cce784
 python research/bdlop_params/estimate.py --estimator security-estimates \
-       --output tmp/bdlop_open_128.estimate.json
+       --parameter-set BDLOP_OPEN_128_V2 --output tmp/bdlop_open_128_v2.estimate.json
 ```
 
-Compare the result with `research/bdlop_params/bdlop_open_128.estimate.json`
-(M-SIS binding 140/127 bits classical/quantum, M-LWE hiding 138/125 bits).
+Compare the result with `research/bdlop_params/bdlop_open_128_v2.estimate.json`
+(M-SIS binding 140/127 bits classical/quantum, M-LWE primal 169/153 bits). The
+claimed hiding level, 164/150 bits, is the lattice-estimator's dual hybrid
+(`research/bdlop_params/CROSSCHECK.md`).
 `docs/paper/tables/params.tex` was transcribed by hand from that file. This
 step was not rerun for the artifact because the build machine had no network
 access.
@@ -217,16 +221,16 @@ boundaries; this is a byte prefix of the cover, so no re-encoding is
 involved. It then runs `benchmark.latticezk_video_e2e` with the production
 parameter set (`BDLOP_OPEN_128`) in registered mode. That run creates an
 issuer key, a signed registry, a credential and a one-use session, embeds the
-7 589-byte envelope, and verifies from the stego video alone. Finally the
+8 165-byte envelope, and verifies from the stego video alone. Finally the
 script checks the report: production parameters, registered mode, expected
 envelope size, verification succeeded, payload absent from the output. The
 report, log and cut are written to `tmp/repro_small/run-<timestamp>/`.
 
-Carrier choice: the registered envelope needs about 61 kbit. A 100-frame CIF
+Carrier choice: the registered envelope needs about 65.3 kbit. A 100-frame CIF
 cut at QP 22 has 10-51 kbit of magnitude-LSB carriers but 470-550 kbit of
 trailing-one sign carriers, so the short run uses `--carrier t1` with an
-8 000-byte chunk (one segment). To exercise the default magnitude carrier,
-use 200 frames: `--carrier magnitude --frames 200` (chunk 3 800 B; about
+8 200-byte chunk (one segment). To exercise the default magnitude carrier,
+use 200 frames: `--carrier magnitude --frames 200` (chunk 4 200 B; about
 15 min). `--security-checks` also replays the consumed session and verifies a
 copy with one flipped bit. Both must be rejected, and each check costs one
 more full verification.
@@ -281,8 +285,8 @@ fresh sync key.
 | Section "Density" (Sec. `sec:density`), simulated | `latticezk_embedding_sim` | `benchmark/results/q2/embedding_density_sim.json`, `embedding_t1_vs_magnitude_sim.json` (`embedding_rule_sim.json` is the earlier two-arm run) |
 | Section "Density", measured on 4CIF ("reported in the artifact") | `_d50` / `_d25` sweep cases, `latticezk_density_report` | `benchmark/results/q2/density_report.json`, `docs/paper/figures/density.pdf` (generated once the 4CIF density cases have run) |
 | Table `tab:baselines` | `latticezk_baselines`, then `latticezk_q2_report` | `benchmark/results/q2/baselines_20261019.json` -> `tables/baselines.tex` |
-| Prove/verify times in the text (0.12 s / 0.02 s) | `latticezk_crypto_bench` | `benchmark/results/latticezk_crypto_bench_20261012.json` |
-| KAT (reproducibility of commitments and proofs) | `research/bdlop_params/kat.py` | `research/bdlop_params/kat_v1.json` |
+| Prove/verify times in the text (0.12 s / 0.02 s, v1; v2 measurement pending) | `latticezk_crypto_bench` | `benchmark/results/latticezk_crypto_bench_20261012.json` |
+| KAT (reproducibility of commitments and proofs) | `research/bdlop_params/kat.py` | `research/bdlop_params/kat_v2.json` (v1: `kat_v1.json`) |
 
 `benchmark/results/q2/SUMMARY.md` collects the generated tables in Markdown.
 
@@ -299,6 +303,7 @@ artifact.
 
 ## 7. Reference run of `reproduce_small`
 
+Measured with the earlier set `bdlop-open-128-v1` (v2 measurement pending).
 Run on 2026-10-21 on the evaluation machine (other experiments were running at
 the same time), with the defaults: the first 100 frames of
 `container_cif_q22_g1.h264`, T1 carrier, chunk 8 000 B, and no security

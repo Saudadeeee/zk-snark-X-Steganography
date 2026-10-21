@@ -50,8 +50,8 @@ The pinned Linux-only LaZer research adapter is in [`lazer/`](lazer/README.md); 
 itself: a BDLOP commitment with a Fiat-Shamir-with-aborts proof of knowledge
 of its opening, bound to the carrier-normalized H.264 stream, a one-use
 verifier session challenge and an ML-DSA-signed relation registry, and
-verified from the stego video alone. The envelope is 7 589 bytes (registered
-credential) or 14 309 bytes (in-band commitment). It is self-implemented from
+verified from the stego video alone. The envelope is 8 165 bytes (registered
+credential) or 14 885 bytes (in-band commitment). It is self-implemented from
 the published protocol and unaudited.
 
 - [`docs/LATTICE_ZK_BDLOP_PLAN.md`](docs/LATTICE_ZK_BDLOP_PLAN.md) - plan, status, measurements, CLI usage (Vietnamese)

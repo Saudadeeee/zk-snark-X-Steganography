@@ -44,7 +44,7 @@ proof covers it directly. Implementing it from the paper gave:
 - zero knowledge and knowledge soundness arguable from published theorems
   (`docs/LATTICE_ZK_BDLOP_SPEC.md`, Section 4);
 - portable pure-Python code that runs on the target host;
-- a 7 520-byte proof that has been carried through H.264 and verified from the
+- a 7 520-byte proof (`bdlop-open-128-v1`; 8 096 bytes with v2) that has been carried through H.264 and verified from the
   video alone (`docs/LATTICE_ZK_BDLOP_PLAN.md`, Section 7).
 
 The cost is that the code is self-implemented and unaudited, and soundness is

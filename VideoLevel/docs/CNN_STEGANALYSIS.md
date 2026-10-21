@@ -40,7 +40,7 @@ P_E = min over thresholds of (P_FA + P_MD) / 2; 0.5 is chance.
 | magnitude | container/coastguard/city/hall `_cif_q22_reg`, `deadline_cif_q22_reg` | `*_cif_q22_g1.h264`, `deadline_cif_q22_g1_1000f.h264` | 200 + 200 + 300 + 300 + 700 = 1700 |
 | t1_spread | container/coastguard/city/hall `_cif_q22_reg_t1_spread` | same covers | 200 + 200 + 300 + 300 = 1000 |
 
-* Each case carries the same 7589-byte envelope in the same segments (2 or 3
+* Each case carries the same 7589-byte envelope (`bdlop-open-128-v1`) in the same segments (2 or 3
   segments of 100 frames). The magnitude and T1-spread sets therefore have equal
   payload and equal density, and differ only in the carrier. All streams are
   CIF 352x288, all-intra (GOP 1), QP 22.

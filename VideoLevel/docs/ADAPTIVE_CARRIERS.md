@@ -108,7 +108,7 @@ model, height outside 1..12) are refused.
 
 ## Results
 
-Setup: registered BDLOP envelope (7 589 B), `--chunk-bytes 3800`, two
+Setup: registered BDLOP envelope (7 589 B, `bdlop-open-128-v1`; v2 measurement pending), `--chunk-bytes 3800`, two
 100-frame segments per clip, all-intra CIF QP 22 cuts of the first 200 frames of
 container, coastguard and deadline (city and hall do not fit the envelope in 200
 frames with either contract).  Detectors and features are those of

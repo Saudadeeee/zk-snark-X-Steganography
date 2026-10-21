@@ -3,7 +3,7 @@
 % Not wired into main.tex; the integrator decides. Requires amsmath, amssymb,
 % amsthm and the theorem environments of main.tex, and the macros below (all
 % \providecommand, so they coexist with sections/security.tex).
-% Code: src/lattice_zk/binary_proof.py (parameter set bdlop-binary-128-v1),
+% Code: src/lattice_zk/binary_proof.py (parameter set bdlop-binary-128-v2),
 % design notes: docs/BINARY_PROOF_DESIGN.md.
 
 \providecommand{\Rq}{\mathcal{R}_q}
@@ -108,8 +108,8 @@ $c^2P(s)+c(\Gamma_1-\Gamma_1)+a_\psi a_m+a_G=v$. The non-interactive version
 derives the four challenges from chained, domain-separated SHAKE-256 seeds
 over $(\pid,x,C)$, $D$, $(h_t)_t$ and $(t_G,w,w',v)$ in this order; on an abort
 only steps 6--7 are repeated. The proof is
-$(D,(h_t)_t,t_G,\mathit{seed},z,z')$; for \texttt{bdlop-binary-128-v1} it is
-41\,870 bytes.
+$(D,(h_t)_t,t_G,\mathit{seed},z,z')$; for \texttt{bdlop-binary-128-v2} it is
+43\,022 bytes.
 
 \subsection{Security}
 
@@ -118,9 +118,9 @@ $(D,(h_t)_t,t_G,\mathit{seed},z,z')$; for \texttt{bdlop-binary-128-v1} it is
 If $C=\Com(m;r)$ with $m\in\{0,1\}^N$ and $r\in S_1^k$, an attempt is accepted
 with probability exactly
 $p_{\mathrm{acc}}=((2B+1)/2\gamma)^{(k+k_{\mathrm{aux}})N}$
-($0.0142$ for \texttt{bdlop-binary-128-v1}), every accepted transcript
+($0.0112$ for \texttt{bdlop-binary-128-v2}), every accepted transcript
 verifies, and the prover fails to output a proof within $\Amax=16\,384$
-attempts with probability $(1-p_{\mathrm{acc}})^{\Amax}<2^{-337}$.
+attempts with probability $(1-p_{\mathrm{acc}})^{\Amax}<2^{-266}$.
 \end{theorem}
 \begin{proof}
 $\ct(E_t)=0$ by Lemma~\ref{lem:bin-lin}(iii) with $u_i=\sigma(\gamma_i\circ m)$
@@ -169,7 +169,7 @@ for $B_1$ or $B_1'$ of norm $\le8\kappa B$ is found is at most
 \erbr=q^{-k}+q^{-k'}+q^{-N/2}+2/|\Cset| ,
 \]
 and each of the four challenge rounds individually contributes at most the
-corresponding term. For \texttt{bdlop-binary-128-v1},
+corresponding term. For \texttt{bdlop-binary-128-v2},
 $\erbr\le2^{-149.99}$.
 \end{theorem}
 \begin{proof}[Proof sketch]
@@ -244,12 +244,12 @@ hybrids compose over many proofs.
 
 \begin{remark}[Limits]
 The theorems are classical-ROM statements; no QROM claim is made. The
-auxiliary key's \MSIS{} ($n\times23$ instead of $n\times13$) and \MLWE{}
+auxiliary key's \MSIS{} ($n\times24$ instead of $n\times14$) and \MLWE{}
 ($17$ instead of $7$ samples) instances give the same levels as the base set
 under the pinned estimator (\MSIS{} $\beta=480$, 140/127 bits; primal \MLWE{}
-$\beta=474$, 138/125 bits; dual $\beta=472$), since the optimal \MSIS{}
+$\beta=580$, 169/153 bits; dual $\beta=578$), since the optimal \MSIS{}
 sub-dimension ($\approx3\,022$) is below both widths
-(\texttt{research/bdlop\_params/bdlop\_binary\_128.estimate.json}); the
+(\texttt{research/bdlop\_params/bdlop\_binary\_128\_v2.estimate.json}); the
 dual-hybrid caveat of Section~\ref{sec:proof} applies equally. The
 soundness error $2^{-150}$ per round is below the $2^{-256}$ of the opening
 proof; $k=k'=9$ would match it at about 12\,KB more. The proof does not

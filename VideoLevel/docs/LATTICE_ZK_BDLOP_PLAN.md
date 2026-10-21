@@ -70,26 +70,30 @@ Ngoài ra có `equality_proof.py`: chứng minh hai cam kết (ví dụ cam kế
 video và credential trong registry) giấu cùng một message. Đây là chứng minh
 quan hệ tuyến tính của BDLOP, kích thước bằng hai opening proof.
 
-## 3. Tham số `bdlop-open-128-v1`
+## 3. Tham số `bdlop-open-128-v2`
 
 | | |
 |---|---|
 | N, q | 256, 2^30 − 35 |
-| n (M-SIS), λ (M-LWE), k | 6, 6, 13 |
+| n (M-SIS), λ (M-LWE), k | 6, 7, 14 |
 | κ, γ | 60, 2^17 |
 | Không gian challenge | 2^257 |
-| Cam kết / proof | 6720 B / 7520 B |
-| Envelope in-band / registered | 14 309 B / 7589 B |
-| Equality proof | 15 008 B |
-| Xác suất chấp nhận mỗi lần thử | 0.215 |
-| M-SIS binding (ℓ∞, biên 2^25.9) | 140 bit cổ điển / 127 bit lượng tử (core-SVP) |
-| M-LWE hiding | 135 / 123 bit (dual hybrid, lattice-estimator; primal 138 / 125) |
+| Cam kết / proof | 6720 B / 8096 B |
+| Envelope in-band / registered | 14 885 B / 8165 B |
+| Equality proof | 16 160 B |
+| Xác suất chấp nhận mỗi lần thử | 0.191 |
+| M-SIS binding (ℓ∞, biên 2^25.9) | 140 bit cổ điển / 127 bit lượng tử (core-SVP; lượng tử hơi dưới 128) |
+| M-LWE hiding | 164 / 150 bit (dual hybrid, lattice-estimator; primal 169 / 153) |
 | Payload tối đa | 766 byte |
-| Prove / verify (Python, i7-12700H) | ~0.11 s / ~0.02 s |
+| Prove / verify (Python, i7-12700H) | ~0.11 s / ~0.02 s (đo với v1; v2 measurement pending) |
 
 Ước lượng: `research/bdlop_params/estimate.py`, mô hình
 `pq-crystals/security-estimates@75c2694` (bộ script của Dilithium/Kyber).
-Kết quả lưu ở `research/bdlop_params/bdlop_open_128.estimate.json`.
+Kết quả lưu ở `research/bdlop_params/bdlop_open_128_v2.estimate.json`; đối
+chiếu với lattice-estimator ở `research/bdlop_params/CROSSCHECK.md`. Bộ trước,
+`bdlop-open-128-v1` (λ = 6, k = 13), chỉ đạt hiding 135 / 123 bit (dual hybrid),
+nên bộ production nâng λ lên 7 (`bdlop_open_128.estimate.json`, `kat_v1.json`
+giữ cho v1).
 
 ## 4. Điều được và không được tuyên bố
 
@@ -138,7 +142,7 @@ Mỗi bước chỉ sang bước sau khi cổng kiểm thử của nó qua.
 | 12 | Chất lượng theo frame (`benchmark/latticezk_quality.py`) | số đo ở mục 7 | Xong |
 | 13 | Benchmark nhiều clip/QP, steganalysis | bảng số tái lập được | Mới 2 clip; steganalysis chưa làm |
 | 14 | Product proof ALS20 (payload nhị phân / range) | test riêng | Chưa làm; xem ghi chú dưới |
-| 15 | Test vector KAT cố định byte | `test_latticezk_kat.py` (5), `research/bdlop_params/kat_v1.json` | Xong |
+| 15 | Test vector KAT cố định byte | `test_latticezk_kat.py` (5 mỗi bộ), `research/bdlop_params/kat_v1.json`, `kat_v2.json` | Xong |
 | 16 | Đặc tả giao thức + lập luận bảo mật (tiếng Anh, cho bài báo) | `docs/LATTICE_ZK_BDLOP_SPEC.md` | Xong |
 | 17 | Steganalysis nhắm đúng miền carrier (PoV trên LSB độ lớn) | `benchmark/latticezk_steganalysis.py` | Xong cho bộ dò cổ điển; chưa có bộ dò học máy |
 | 18 | Đưa test backend vào `run_all.py` | Phase 34–41 | Xong |
@@ -289,7 +293,7 @@ Giới hạn của kết quả này:
 - χ² PoV của stego giảm nhẹ so với cover (khoảng 1%), đúng hướng mà nhúng LSB
   gây ra; ở tỉ lệ nhúng cao hơn tín hiệu này có thể đủ để phát hiện.
 
-### Benchmark mật mã
+### Benchmark mật mã (`bdlop-open-128-v1`; v2 measurement pending)
 
 `benchmark/results/latticezk_crypto_bench_20261012.json`, 50 lượt, máy rảnh,
 i7-12700H, Python thuần một luồng:
@@ -380,7 +384,7 @@ Signal Processing: Image Communication).
 Phát hiện khi quét dung lượng: giới hạn trước đây không nằm ở clip mà ở chunk
 1 250 byte. Dung lượng thật của segment 100 frame đầu (CIF, QP 22) là 10.5 kbit
 (Akiyo) đến 50.8 kbit (Container), nên nhiều clip 300 frame chứa được envelope
-registered (61 kbit) nếu tăng chunk size.
+registered (61 kbit với v1; 65.3 kbit với v2) nếu tăng chunk size.
 
 Lưu ý: `coastguard_cif_q22_g1_3000f.h264` được tạo bằng cách lặp chuỗi gốc 300
 frame; phải ghi rõ trong bài nếu dùng số đo trên nó.
@@ -501,12 +505,12 @@ Theo mục D2, D3, D4, D6 trong phụ lục đối chiếu spec–code của bà
   proof giữa `C` và `Com(encode(p); 0)`, gắn với ngữ cảnh
   `statement_id ‖ nonce` (có domain tag, length-prefixed; nonce 32 byte do bên
   nhận chọn). Định dạng `"ZKLD" ‖ 0x01 ‖ parameter_id ‖ u16 |p| ‖ p ‖ π_eq`
-  (39 + |p| + 15 008 byte ở bộ production), không chứa `r`. Hàm cũ đổi tên
+  (39 + |p| + 16 160 byte ở bộ production `bdlop-open-128-v2`; 15 008 byte ở v1), không chứa `r`. Hàm cũ đổi tên
   thành `self_check_opening`, chỉ để holder tự kiểm. CLI thêm `disclose`,
   `disclosure-verify` và `verify --envelope-out`; E2E
   (`benchmark/latticezk_video_e2e.py`) dùng disclosure mới.
 - **D4, completeness của equality proof.** Cap riêng 4 096 lần thử
-  (`equality_proof.MAX_ATTEMPTS`), xác suất thất bại ≈ 2^-280 thay vì 2^-35;
+  (`equality_proof.MAX_ATTEMPTS`), xác suất thất bại ≈ 2^-280 thay vì 2^-35 (với v1; v2: ≈ 2^-220);
   test kiểm cận < 2^-128 từ tham số. KAT không đổi.
 - **D6, pins phải khớp credential.** `verify_video_proof` tính lại relation id
   của `(params, profile, credential, holder_id)` và ném `ValueError` nếu khác
@@ -518,3 +522,17 @@ Theo mục D2, D3, D4, D6 trong phụ lục đối chiếu spec–code của bà
   `None` giữ nguyên descriptor cũ. `pins_from_registry`, `verify_video_proof`
   và CLI (`--holder-id` ở `registry-sign`, `session-issue`, `embed`, `verify`)
   nhận cùng giá trị; sai hoặc thiếu holder id thì không resolve được pins.
+
+### Chuyển sang `bdlop-open-128-v2` (2026-10-21)
+
+- Lý do: lattice-estimator cho thấy tấn công dual hybrid trên M-LWE của v1 chỉ
+  tốn 135 / 123 bit. v2 nâng λ từ 6 lên 7 (k = 14), giữ nguyên N, q, n, κ, γ
+  (`research/bdlop_params/CROSSCHECK.md`).
+- Bảo mật (core-SVP, cổ điển / lượng tử): binding 140 / 127 bit (không đổi;
+  lượng tử hơi dưới 128), hiding 164 / 150 bit (dual hybrid; primal 169 / 153).
+  Với mô hình MATZOV mặc định của estimator, mọi tấn công tốn ít nhất 2^170.
+- Kích thước: opening proof 8 096 B, equality proof 16 160 B, envelope
+  registered / in-band 8 165 B / 14 885 B, binary proof 43 022 B
+  (`bdlop-binary-128-v2`). Xác suất chấp nhận 0.191 (trung bình 5.23 lần thử).
+- KAT: `kat_v2.json`; `kat_v1.json` giữ cho v1. Các số đo (thời gian, PSNR,
+  steganalysis, E2E) đang được chạy lại (v2 measurement pending).

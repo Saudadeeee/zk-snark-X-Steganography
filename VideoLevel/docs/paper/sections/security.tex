@@ -41,7 +41,7 @@ Appendix~\ref{app:code-check}.
 Let $\mathcal R=\mathbb Z[X]/(X^N+1)$ and $\Rq=\mathcal R/q\mathcal R$, with
 $N=256$ and the prime $q=2^{30}-35\equiv5\pmod 8$. The commitment key is
 $\mathsf{ck}=(B_1,b_2)$ with $B_1=[I_n\,|\,B_1']\in\Rq^{n\times k}$,
-$b_2=[0^n\,|\,1\,|\,b_2']\in\Rq^{1\times k}$, $k=n+\lambda+1$, $n=\lambda=6$.
+$b_2=[0^n\,|\,1\,|\,b_2']\in\Rq^{1\times k}$, $k=n+\lambda+1$, $n=6$, $\lambda=7$ (so $k=14$).
 $S_1$ is the set of polynomials with coefficients in $\{-1,0,1\}$. For a
 message $m\in\Rq$ and $r\in S_1^k$,
 $\Com(m;r)=(t_1,t_2)=(B_1r,\ \langle b_2,r\rangle+m)$. The challenge set is
@@ -55,7 +55,7 @@ quantities used in the bounds are collected in Table~\ref{tab:sec-numbers}.
 
 \begin{table}[t]
 \centering
-\caption{Concrete quantities for \texttt{bdlop-open-128-v1}}
+\caption{Concrete quantities for \texttt{bdlop-open-128-v2}}
 \label{tab:sec-numbers}
 \footnotesize
 \begin{tabular}{@{}lr@{}}
@@ -64,17 +64,17 @@ Quantity & Value \\
 \midrule
 $|\Cset|$ & $2^{257.01}$\\
 Fiat--Shamir seed length & 256 bits\\
-$p_{\mathrm{acc}}=((2B+1)/2\gamma)^{kN}$ (opening) & $0.2151$\\
-$p_{\mathrm{acc}}^2$ (equality proof) & $0.0463$\\
-Attempt cap $\Amax$ & $512$\\
-$(1-p_{\mathrm{acc}})^{\Amax}$; $(1-p_{\mathrm{acc}}^2)^{\Amax}$ & $2^{-178.9}$; $2^{-35.0}$\\
+$p_{\mathrm{acc}}=((2B+1)/2\gamma)^{kN}$ (opening) & $0.1912$\\
+$p_{\mathrm{acc}}^2$ (equality proof) & $0.0365$\\
+Attempt cap $\Amax$ (opening; equality) & $512$; $4\,096$\\
+$(1-p_{\mathrm{acc}})^{512}$; $(1-p_{\mathrm{acc}}^2)^{4096}$ & $2^{-156.7}$; $2^{-220.0}$\\
 $\eta=nN\log_2(2B+1)$ (min-entropy of $w$) & $27\,646.98$ bits\\
 $\beta=8\kappa B$ (M-SIS bound) & $62\,885\,280\approx2^{25.91}$\\
 $2\kappa+2B$ (one honest, one relaxed opening) & $262\,142\approx2^{18.0}$\\
 $\sqrt{q/2}$ (invertibility threshold) & $23\,170.5$\\
-$3^{kN}q^{-(n+1)N}$ & $\approx2^{-48\,485}$\\
+$3^{kN}q^{-(n+1)N}$ & $\approx2^{-48\,079}$\\
 Statement $x$ & 274 bytes\\
-Envelope, in-band / registered & 14\,309 / 7\,589 bytes\\
+Envelope, in-band / registered & 14\,885 / 8\,165 bytes\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -108,8 +108,9 @@ $\Adv^{\MSIS}$ is the advantage of finding $x\in\mathcal R^k$ with
 $B_1x\equiv0\pmod q$, $0<\norm{x}_\infty\le\beta=8\kappa B$, for uniform $B_1'$.
 $\Adv^{\MLWE}$ is the advantage of distinguishing $(A,As+e)$ from uniform for
 uniform $A\in\Rq^{(n+1)\times\lambda}$ and $s\in S_1^\lambda$, $e\in S_1^{n+1}$.
-These are the two instances estimated at 140/127 and 135/123 bits (classical/
-quantum core-SVP, Table~\ref{tab:params}). Every M-SIS solution in this
+These are the two instances estimated at 140/127 and 164/150 bits (classical/
+quantum core-SVP, Table~\ref{tab:params}); the quantum M-SIS estimate is just
+below 128 bits. Every M-SIS solution in this
 section has norm at most $\beta$, so no further lattice assumption is needed.
 $\Adv^{\mathsf{cr}}_{\mathsf{SHA2}}$ and $\Adv^{\mathsf{cr}}_{\mathsf{SHA3}}$ are
 collision-finding advantages against SHA-256 and SHA3-256, and

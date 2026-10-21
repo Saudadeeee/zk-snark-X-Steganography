@@ -1,7 +1,7 @@
 # Binary-message proof for BDLOP commitments (roadmap B2)
 
 Status: implemented as `src/lattice_zk/binary_proof.py` (parameter sets
-`bdlop-binary-128-v1` and `bdlop-binary-toy-v1`), tests in
+`bdlop-binary-128-v2` and `bdlop-binary-toy-v1`), tests in
 `src/runtest/test_latticezk_binary_proof.py`, theorem drafts in
 `docs/paper/sections/binary_proof.tex` (not wired into `main.tex`).
 Unaudited research code; not constant time.
@@ -9,7 +9,7 @@ Unaudited research code; not constant time.
 ## 1. What is proved
 
 Statement: bytes `x` and a commitment `C = (t1, t2) = Com(m; r)` made by
-`bdlop.commit` under the unchanged base set `bdlop-open-128-v1`.
+`bdlop.commit` under the unchanged base set `bdlop-open-128-v2`.
 The proof shows knowledge of a relaxed opening of `C` whose message `m̄` has
 every coefficient in `{0, 1}`, i.e. `C` hides a 256-bit string
 (`encode_bits` / `decode_bits`, 32 bytes, most significant bit first).
@@ -17,7 +17,7 @@ every coefficient in `{0, 1}`, i.e. `C` hides a 256-bit string
 `C` is an ordinary base commitment, so the opening, equality and disclosure
 proofs apply to it unchanged (test
 `test_binary_commitment_stays_compatible_with_the_base_proofs`). Nothing in
-`bdlop-open-128-v1`, its key, its proofs or the envelope formats changes.
+`bdlop-open-128-v2`, its key, its proofs or the envelope formats changes.
 
 ## 2. Design decision
 
@@ -35,7 +35,7 @@ ring has two slots: 2 bits per polynomial. Options considered:
   extraction of the spec (§4.3) breaks; the product proof has per-slot error
   ≈ `1/q` and needs ALS20's automorphism amplification; binding/hiding would
   need a new estimator run; the commitment would no longer be a
-  `bdlop-open-128-v1` commitment.
+  `bdlop-open-128-v2` commitment.
 - **(b) NTT-slot encoding over our ring.** Impossible: two slots.
 - **(c) Chosen.** Keep the ring and the base commitment; prove the
   coefficient-wise relation with the constant-coefficient / automorphism
@@ -148,7 +148,7 @@ determined by the verification equations. `C` is hidden as before (spec §4.5).
 `r` is reused across proofs only through rejection-sampled `z`, as for the
 opening proof; `r'` is fresh for each proof.
 
-## 6. Sizes and timings (production, `bdlop-binary-128-v1`)
+## 6. Sizes and timings (production, `bdlop-binary-128-v2`)
 
 | Part | Bytes |
 |---|---|
@@ -157,13 +157,13 @@ opening proof; `r'` is fresh for each proof.
 | Masks `h` (5 × 255 coefficients × 30 bits) | 4 782 |
 | Garbage `t_G` | 960 |
 | Challenge seed | 32 |
-| Responses `z, z'` (36 polys × 256 × 18 bits) | 20 736 |
-| **Proof total** | **41 870** |
+| Responses `z, z'` (38 polys × 256 × 18 bits) | 21 888 |
+| **Proof total** | **43 022** |
 
-Acceptance per attempt `((2B+1)/2γ)^{36·256} = 0.0142` (mean 70 attempts;
-cap 16 384, all-abort probability `2^-338`). Measured timings (median of 20
+Acceptance per attempt `((2B+1)/2γ)^{38·256} = 0.0112` (mean 89 attempts;
+cap 16 384, all-abort probability `2^-266`). Measured timings (median of 20
 runs, shared machine): see `benchmark/results/q2/binary_proof_bench.json`
-and Section 9.
+and Section 9 (measured with `bdlop-binary-128-v1`; v2 measurement pending).
 
 The arithmetic uses `fast_ring.py`: exact negacyclic products through
 float64 matrix products on 15-bit limbs (all partial sums are integers below
@@ -172,33 +172,34 @@ float64 matrix products on 15-bit limbs (all partial sums are integers below
 
 ## 7. Concrete security of the auxiliary key
 
-Same `q, N, n = λ = 6, κ, γ` and the same M-SIS bound `8κB ≈ 2^25.9` as the
-base; the auxiliary M-SIS matrix is `n × 23` (base: `n × 13`) and the
+Same `q, N, n = 6, λ = 7, κ, γ` and the same M-SIS bound `8κB ≈ 2^25.9` as
+the base; the auxiliary M-SIS matrix is `n × 24` (base: `n × 14`) and the
 auxiliary M-LWE instance has `n + 11 = 17` ring samples (base: 7).
-The pinned CRYSTALS estimator is not vendored and could not be fetched in
-this environment, so these numbers are a **heuristic, not a pinned estimate**:
+The pinned CRYSTALS estimate
+(`research/bdlop_params/bdlop_binary_128_v2.estimate.json`) gives the same
+levels as the base set: M-SIS β = 480 (140 / 127 bits), primal M-LWE β = 580
+(169 / 153 bits), dual β = 578. The reasons:
 
-- M-LWE primal (ADPS16 condition, own script): block size 473 with the
-  optimal 1 472 samples, the same for 7 and 17 available ring samples
-  (extra samples do not help beyond the optimum). The pinned base estimate
-  is 474.
+- M-LWE: extra samples do not help beyond the optimum, so 7 and 17 available
+  ring samples give the same block size. (For `bdlop-binary-128-v1` an own
+  ADPS16 script gave 473 against the pinned base estimate 474.)
 - M-SIS: the optimal attack dimension `sqrt(nN ln q / ln δ_480) ≈ 3 022`
-  is below both widths (3 328 and 5 888), so the extra columns are not
-  expected to lower the block size of 480 materially.
+  is below both widths (3 584 and 6 144), so the extra columns do not lower
+  the block size of 480.
 
 `python research/bdlop_params/estimate.py --estimator <security-estimates>
 --parameter-set BINARY_128` runs the pinned model on the auxiliary instance
-and must be run before any production claim.
+and produced that file.
 
 ## 8. Compatibility with the envelope
 
-- Compatible: the statement commitment is a `bdlop-open-128-v1` commitment;
+- Compatible: the statement commitment is a `bdlop-open-128-v2` commitment;
   existing proofs, disclosure and registry descriptors work on it unchanged.
 - Not automatic: today's payload commitments encode `len ‖ payload` with three
   bytes per coefficient (`codec.encode_payload`), which is *not* binary; the
   binary proof applies to commitments of `encode_bits(32-byte string)` (for
   example a digest or a 256-bit credential secret).
-- A 41.9 KB proof is about 2.9× the in-band envelope (14 309 bytes); carrying
+- A 43.0 KB proof is about 2.9× the in-band envelope (14 885 bytes); carrying
   it in-band needs a new envelope version and the carrier capacity measured
   by the Q2 sweep. Out-of-band (registered mode, or alongside a disclosure)
   needs no format change. The integrator decides.
@@ -210,6 +211,7 @@ and must be run before any production claim.
 
 ## 9. Measured results
 
+Measured with `bdlop-binary-128-v1` (v2 measurement pending).
 `benchmark/results/q2/binary_proof_bench.json`: 20 runs, fresh message,
 randomness and entropy per run, Intel Family 6 Model 154 laptop running
 another benchmark at the same time, Python 3.12, single thread.

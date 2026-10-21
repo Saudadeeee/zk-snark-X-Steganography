@@ -132,7 +132,7 @@ ffmpeg -i data/raw/<clip>.y4m -frames:v N -c:v libx264 -profile:v baseline -code
 ```
 
 The end-to-end run uses the **TOY** parameter set (registered, 413-byte
-envelope) because the 7 589-byte BDLOP_OPEN_128 envelope does not fit a
+envelope) because the 8 165-byte BDLOP_OPEN_128 envelope (7 589 B with v1) does not fit a
 200-300-frame GOP > 1 CIF clip (see "frames needed"); the transport, digest and
 statement code paths are the same. Quality is luma PSNR of the decoded stego
 against the decoded cover, all frames including P frames. Each row is one run
