@@ -25,37 +25,37 @@
 \providecommand{\epszk}{\varepsilon_{\mathsf{zk}}}
 \providecommand{\Amax}{A_{\max}}
 
-\section{Security model and analysis}
+\section{Mô hình và phân tích an toàn}
 \label{sec:security-model}
 
-This section states what the system proves and under which assumptions. All
-results are in the classical random-oracle model (ROM). No theorem in the
-quantum random-oracle model (QROM) is claimed (Section~\ref{sec:sec-qrom}).
-Full proofs are in Appendix~\ref{app:security-proofs}; the cross-check of
-every definition against the implementation is in
-Appendix~\ref{app:code-check}.
+Mục này phát biểu hệ thống chứng minh được điều gì và dưới những giả thiết nào.
+Mọi kết quả đều nằm trong mô hình oracle ngẫu nhiên cổ điển (ROM). Không có định
+lý nào trong mô hình oracle ngẫu nhiên lượng tử (QROM) được khẳng định
+(Mục~\ref{sec:sec-qrom}). Các chứng minh đầy đủ nằm trong
+Phụ lục~\ref{app:security-proofs}; việc kiểm tra chéo từng định nghĩa đối chiếu
+với phần hiện thực nằm trong Phụ lục~\ref{app:code-check}.
 
-\subsection{Notation, parameters and assumptions}
+\subsection{Ký hiệu, tham số và giả thiết}
 \label{sec:sec-notation}
 
-Let $\mathcal R=\mathbb Z[X]/(X^N+1)$ and $\Rq=\mathcal R/q\mathcal R$, with
-$N=256$ and the prime $q=2^{30}-35\equiv5\pmod 8$. The commitment key is
-$\mathsf{ck}=(B_1,b_2)$ with $B_1=[I_n\,|\,B_1']\in\Rq^{n\times k}$,
-$b_2=[0^n\,|\,1\,|\,b_2']\in\Rq^{1\times k}$, $k=n+\lambda+1$, $n=6$, $\lambda=7$ (so $k=14$).
-$S_1$ is the set of polynomials with coefficients in $\{-1,0,1\}$. For a
-message $m\in\Rq$ and $r\in S_1^k$,
-$\Com(m;r)=(t_1,t_2)=(B_1r,\ \langle b_2,r\rangle+m)$. The challenge set is
-$\Cset=\{c\in\mathcal R:\norm{c}_\infty=1,\ \norm{c}_1=\kappa\}$ with
-$\kappa=60$, so $|\Cset|=\binom{256}{60}2^{60}=2^{257.01}$; its difference set
-is $\Cdiff=\{c-c':c\neq c'\in\Cset\}$. Masks are uniform on
-$Y=[-\gamma+1,\gamma]^{kN}$ with $\gamma=2^{17}$; responses are accepted iff
-they lie in $Z=[-B,B]^{kN}$, $B=\gamma-\kappa-1$. We use
-$\norm{fv}_\infty\le\norm{f}_1\norm{v}_\infty$ throughout. The concrete
-quantities used in the bounds are collected in Table~\ref{tab:sec-numbers}.
+Đặt $\mathcal R=\mathbb Z[X]/(X^N+1)$ và $\Rq=\mathcal R/q\mathcal R$, với
+$N=256$ và số nguyên tố $q=2^{30}-35\equiv5\pmod 8$. Khóa cam kết là
+$\mathsf{ck}=(B_1,b_2)$ với $B_1=[I_n\,|\,B_1']\in\Rq^{n\times k}$,
+$b_2=[0^n\,|\,1\,|\,b_2']\in\Rq^{1\times k}$, $k=n+\lambda+1$, $n=6$, $\lambda=7$ (nên $k=14$).
+$S_1$ là tập các đa thức có hệ số trong $\{-1,0,1\}$. Với một thông điệp
+$m\in\Rq$ và $r\in S_1^k$,
+$\Com(m;r)=(t_1,t_2)=(B_1r,\ \langle b_2,r\rangle+m)$. Tập thách thức là
+$\Cset=\{c\in\mathcal R:\norm{c}_\infty=1,\ \norm{c}_1=\kappa\}$ với
+$\kappa=60$, nên $|\Cset|=\binom{256}{60}2^{60}=2^{257.01}$; tập hiệu của nó
+là $\Cdiff=\{c-c':c\neq c'\in\Cset\}$. Các mặt nạ đều (uniform) trên
+$Y=[-\gamma+1,\gamma]^{kN}$ với $\gamma=2^{17}$; các đáp ứng được chấp nhận khi
+và chỉ khi chúng nằm trong $Z=[-B,B]^{kN}$, $B=\gamma-\kappa-1$. Chúng tôi dùng
+$\norm{fv}_\infty\le\norm{f}_1\norm{v}_\infty$ xuyên suốt. Các đại lượng cụ thể
+dùng trong các cận được tập hợp trong Bảng~\ref{tab:sec-numbers}.
 
 \begin{table}[t]
 \centering
-\caption{Concrete quantities for \texttt{bdlop-open-128-v2}}
+\caption{Các đại lượng cụ thể cho \texttt{bdlop-open-128-v2}}
 \label{tab:sec-numbers}
 \footnotesize
 \begin{tabular}{@{}lr@{}}
@@ -79,121 +79,121 @@ Envelope, in-band / registered & 14\,885 / 8\,165 bytes\\
 \end{tabular}
 \end{table}
 
-\begin{lemma}[Invertible challenge differences]
+\begin{lemma}[Hiệu của các thách thức là khả nghịch]
 \label{lem:invertible}
-Every $f\in\Cdiff$ is invertible in $\Rq$.
+Mọi $f\in\Cdiff$ đều khả nghịch trong $\Rq$.
 \end{lemma}
 \begin{proof}
-Since $q\equiv5\pmod8$, $X^N+1$ splits modulo $q$ into exactly two
-irreducible factors, and every nonzero $y\in\Rq$ with
-$\norm{y}_\infty<q^{1/2}/\sqrt2$ is invertible
-(Lyubashevsky--Seiler~\cite{ref:ls18}, Corollary~1.2 with $k=2$). Any
-$f\in\Cdiff$ is nonzero with $\norm{f}_\infty\le2<23\,170$. The constructor of
-the parameter set enforces both conditions (\texttt{params.py:49--51},
+Vì $q\equiv5\pmod8$, $X^N+1$ tách theo modulo $q$ thành đúng hai nhân tử bất
+khả quy, và mọi $y\in\Rq$ khác không với $\norm{y}_\infty<q^{1/2}/\sqrt2$ đều
+khả nghịch (Lyubashevsky--Seiler~\cite{ref:ls18}, Hệ quả~1.2 với $k=2$). Mọi
+$f\in\Cdiff$ đều khác không với $\norm{f}_\infty\le2<23\,170$. Hàm khởi tạo của
+bộ tham số bắt buộc cả hai điều kiện (\texttt{params.py:49--51},
 \texttt{ring.py:52--58}).
 \end{proof}
 
-\begin{definition}[Openings]
+\begin{definition}[Các phần mở]
 \label{def:relaxed}
-A \emph{relaxed opening} of $t=(t_1,t_2)$ is a pair $(\bar r,f)$ with
-$f\in\Cdiff$, $\norm{\bar r}_\infty\le2B$ and $ft_1=B_1\bar r$. It defines the
-message $\bar m=t_2-f^{-1}\langle b_2,\bar r\rangle$, the unique $\bar m$ with
-$ft_2=\langle b_2,\bar r\rangle+f\bar m$ (Lemma~\ref{lem:invertible}). An
-\emph{honest opening} is $(r,1)$ with $r\in S_1^k$ and $t_1=B_1r$, with message
-$t_2-\langle b_2,r\rangle$; it is what a disclosure reveals.
+Một \emph{phần mở nới lỏng} của $t=(t_1,t_2)$ là một cặp $(\bar r,f)$ với
+$f\in\Cdiff$, $\norm{\bar r}_\infty\le2B$ và $ft_1=B_1\bar r$. Nó xác định thông
+điệp $\bar m=t_2-f^{-1}\langle b_2,\bar r\rangle$, là $\bar m$ duy nhất thỏa
+$ft_2=\langle b_2,\bar r\rangle+f\bar m$ (Bổ đề~\ref{lem:invertible}). Một
+\emph{phần mở trung thực} là $(r,1)$ với $r\in S_1^k$ và $t_1=B_1r$, có thông
+điệp $t_2-\langle b_2,r\rangle$; đó là thứ mà một lần tiết lộ bộc lộ ra.
 \end{definition}
 
-\paragraph{Assumptions}
-$\Adv^{\MSIS}$ is the advantage of finding $x\in\mathcal R^k$ with
-$B_1x\equiv0\pmod q$, $0<\norm{x}_\infty\le\beta=8\kappa B$, for uniform $B_1'$.
-$\Adv^{\MLWE}$ is the advantage of distinguishing $(A,As+e)$ from uniform for
-uniform $A\in\Rq^{(n+1)\times\lambda}$ and $s\in S_1^\lambda$, $e\in S_1^{n+1}$.
-These are the two instances estimated at 140/127 and 164/150 bits (classical/
-quantum core-SVP, Table~\ref{tab:params}); the quantum M-SIS estimate is just
-below 128 bits. Every M-SIS solution in this
-section has norm at most $\beta$, so no further lattice assumption is needed.
-$\Adv^{\mathsf{cr}}_{\mathsf{SHA2}}$ and $\Adv^{\mathsf{cr}}_{\mathsf{SHA3}}$ are
-collision-finding advantages against SHA-256 and SHA3-256, and
-$\Adv^{\mathsf{euf\text{-}cma}}_{\mathsf{ML\text{-}DSA}}$ is the EUF-CMA advantage
-against ML-DSA-65~\cite{ref:fips204}.
+\paragraph{Các giả thiết}
+$\Adv^{\MSIS}$ là lợi thế của việc tìm $x\in\mathcal R^k$ với
+$B_1x\equiv0\pmod q$, $0<\norm{x}_\infty\le\beta=8\kappa B$, cho $B_1'$ đều.
+$\Adv^{\MLWE}$ là lợi thế của việc phân biệt $(A,As+e)$ với đều, cho
+$A\in\Rq^{(n+1)\times\lambda}$ đều và $s\in S_1^\lambda$, $e\in S_1^{n+1}$.
+Đây là hai thể hiện được ước lượng ở 140/127 và 164/150 bit (core-SVP cổ
+điển/lượng tử, Bảng~\ref{tab:params}); ước lượng M-SIS lượng tử chỉ vừa dưới
+128 bit. Mọi nghiệm M-SIS trong mục này đều có chuẩn tối đa $\beta$, nên không
+cần thêm giả thiết lưới nào nữa.
+$\Adv^{\mathsf{cr}}_{\mathsf{SHA2}}$ và $\Adv^{\mathsf{cr}}_{\mathsf{SHA3}}$ là
+các lợi thế tìm va chạm đối với SHA-256 và SHA3-256, và
+$\Adv^{\mathsf{euf\text{-}cma}}_{\mathsf{ML\text{-}DSA}}$ là lợi thế EUF-CMA đối
+với ML-DSA-65~\cite{ref:fips204}.
 
-\paragraph{Random oracles}
-We model as independent random oracles the SHAKE-256 instances used for the
-Fiat--Shamir challenge seed $\Hfs$ (and $H_{\mathsf{eq}}$ for the equality
-proof), the challenge expansion $G:\{0,1\}^{256}\to\Cset$
-(\textsf{SampleInBall}), the mask stream, the key expansion, and the SHA3-256
-hedging hash. Their domain tags are pairwise prefix-free
-(Appendix~\ref{app:code-check}), so one SHAKE-256 oracle splits into
-independent oracles. $G$ is exactly uniform on $\Cset$ on a fresh input: the
-signs and the Fisher--Yates indices are drawn by exact rejection sampling.
-The key expansion as a random oracle makes $\mathsf{ck}$ uniform; it is a
-single global key derived from a public seed (no per-user key). $Q_H$ denotes
-the total number of random-oracle queries of the adversary, including those
-made on its behalf by verification queries, plus one.
+\paragraph{Các oracle ngẫu nhiên}
+Chúng tôi mô hình hóa như các oracle ngẫu nhiên độc lập các thể hiện SHAKE-256
+được dùng cho hạt giống thách thức Fiat--Shamir $\Hfs$ (và $H_{\mathsf{eq}}$ cho
+chứng minh đẳng thức), phép mở rộng thách thức $G:\{0,1\}^{256}\to\Cset$
+(\textsf{SampleInBall}), luồng mặt nạ, phép mở rộng khóa, và hàm băm phòng hộ
+(hedging) SHA3-256. Các thẻ miền của chúng là không-tiền-tố đôi một
+(Phụ lục~\ref{app:code-check}), nên một oracle SHAKE-256 tách thành các oracle
+độc lập. $G$ đều chính xác trên $\Cset$ với một đầu vào mới: các dấu và các chỉ
+số Fisher--Yates được rút bằng lấy mẫu loại bỏ chính xác. Phép mở rộng khóa
+dưới dạng một oracle ngẫu nhiên làm cho $\mathsf{ck}$ đều; đó là một khóa toàn
+cục duy nhất được dẫn xuất từ một hạt giống công khai (không có khóa riêng cho
+từng người dùng). $Q_H$ ký hiệu tổng số truy vấn oracle ngẫu nhiên của đối thủ,
+bao gồm cả những truy vấn được thực hiện thay mặt nó bởi các truy vấn kiểm
+chứng, cộng thêm một.
 
-\subsection{Syntax of the composed scheme}
+\subsection{Cú pháp của lược đồ hợp thành}
 \label{sec:sec-syntax}
 
-The transport layer is a set of deterministic functions of a pinned carrier
-profile $\mathsf{prof}$ and a synchronization key $k_s$:
-$\mathsf{Place}(\vid,\ell)$ returns the ordered carrier positions $P$ for an
-$\ell$-byte envelope; $\Canon(\vid,P)$ returns the carrier-normalized digest
-$D$; $\mathsf{Write}(\vid,P,E)$ writes envelope $E$ into the carriers;
-$\mathsf{Read}(\vid)$ returns $(E,P,D)$ or $\bot$. \emph{Transport
-correctness} means $\mathsf{Read}(\mathsf{Write}(\vid,P,E))=(E,P,\Canon(\vid,P))$
-for $P=\mathsf{Place}(\vid,|E|)$; it is a functional property, and its failure
-only causes rejection.
+Tầng vận chuyển là một tập các hàm tất định của một hồ sơ vật mang đã ghim
+$\mathsf{prof}$ và một khóa đồng bộ $k_s$: $\mathsf{Place}(\vid,\ell)$ trả về
+các vị trí vật mang có thứ tự $P$ cho một envelope $\ell$ byte;
+$\Canon(\vid,P)$ trả về digest đã chuẩn hóa theo vật mang $D$;
+$\mathsf{Write}(\vid,P,E)$ ghi envelope $E$ vào các vật mang;
+$\mathsf{Read}(\vid)$ trả về $(E,P,D)$ hoặc $\bot$. \emph{Tính đúng đắn vận
+chuyển} nghĩa là $\mathsf{Read}(\mathsf{Write}(\vid,P,E))=(E,P,\Canon(\vid,P))$
+với $P=\mathsf{Place}(\vid,|E|)$; đó là một tính chất hàm, và việc nó thất bại
+chỉ gây ra từ chối.
 
 \begin{itemize}
-\item $\mathsf{Setup}$: fixes the parameter set, $\pid$ (a SHA3-256 digest of
-  all parameters and the setup seed) and $\mathsf{ck}$.
-\item $\mathsf{RegKeyGen}$, $\mathsf{RegSign}$: the issuer holds an ML-DSA-65
-  key pair $(\mathit{pk}_I,\mathit{sk}_I)$ and signs a registry
-  $\mathsf{Reg}=(e,\Delta)$: an epoch and a set of relation descriptors. A
-  descriptor hashes $\pid$, the key, the relation module and the policy
-  (codec policy and carrier profile); in registered mode it also hashes a
-  credential commitment $t_c$.
-\item $\mathsf{Pins}$: given $\mathsf{Reg}$, $\mathit{pk}_I$, $\mathsf{prof}$,
-  a rollback floor $e_{\min}$ and (registered mode) $t_c$, verifies the
-  signature, recomputes the expected descriptor, requires exactly one match,
-  and outputs $\mathsf{pins}=(\mathit{rid},\mathit{root},e,\mathit{cpid},
-  \mathit{prof\_id})$, or fails.
-\item $\mathsf{Issue}$: draws a uniform 32-byte challenge $N_s$ and stores it
-  with the binding $\mathsf{bind}(\mathsf{pins})$ and an expiry.
-\item $\mathsf{Embed}$: on cover $\vid$, payload $p$ (in-band) or credential
-  $(t_c,r_c)$ (registered), $\mathsf{pins}$ and $N_s$: compute
-  $P=\mathsf{Place}(\vid,\ell)$ from a zero placeholder of the final length
-  $\ell$, $D=\Canon(\vid,P)$ and $x=\Stmt(\mathsf{pins},N_s,P,D)$; in-band,
-  sample $r\leftarrow S_1^k$, set $t=\Com(\mathsf{enc}(p);r)$; prove
-  $\pi\leftarrow\mathsf{P}(x,t,r)$; form $E=\texttt{"ZKLB"}\|1\|\pid\|N_s\|t\|\pi$
-  (or $\texttt{"ZKLR"}\|1\|\pid\|N_s\|\pi$) and output
-  $\mathsf{Write}(\vid,P,E)$ and, in-band, the opening $(p,r)$.
-\item $\mathsf{Verify}$: on $\vid^*$: $(E^*,P^*,D^*)=\mathsf{Read}(\vid^*)$;
-  parse $E^*$ strictly; take $N_s^*$ from $E^*$ (store mode) or use a fixed
-  $N_s$ (stateless mode); $x^*=\Stmt(\mathsf{pins},N_s^*,P^*,D^*)$; accept iff
-  $\mathsf{V}(x^*,t^*,\pi^*)=1$ with $t^*$ from $E^*$ (in-band) or the pinned
-  $t_c$ (registered) and, in store mode, $N_s^*$ is live for
-  $\mathsf{bind}(\mathsf{pins})$ and is atomically consumed.
-\item $\mathsf{VerDisc}$: accepts $(E,p,r)$ iff $(r,1)$ is an honest opening
-  of the commitment in $E$ to $\mathsf{enc}(p)$.
-\item $\mathsf{Link}$, $\mathsf{VerLink}$: the equality proof
-  $\Pi_{\mathsf{eq}}$ on two commitments, bound to a context digest
-  $\mathit{lx}=\mathrm{SHA3}(\text{tag}\|\pid\|\text{length-prefixed context})$.
+\item $\mathsf{Setup}$: cố định bộ tham số, $\pid$ (một digest SHA3-256 của tất
+  cả các tham số và hạt giống thiết lập) và $\mathsf{ck}$.
+\item $\mathsf{RegKeyGen}$, $\mathsf{RegSign}$: bên phát hành nắm một cặp khóa
+  ML-DSA-65 $(\mathit{pk}_I,\mathit{sk}_I)$ và ký một sổ đăng ký
+  $\mathsf{Reg}=(e,\Delta)$: một epoch và một tập các mô tả quan hệ. Một mô tả
+  băm $\pid$, khóa, module quan hệ và chính sách (chính sách codec và hồ sơ vật
+  mang); trong chế độ đã đăng ký nó còn băm một cam kết chứng chỉ $t_c$.
+\item $\mathsf{Pins}$: cho $\mathsf{Reg}$, $\mathit{pk}_I$, $\mathsf{prof}$,
+  một ngưỡng chống quay lui $e_{\min}$ và (chế độ đã đăng ký) $t_c$, kiểm tra
+  chữ ký, tính lại mô tả kỳ vọng, đòi hỏi đúng một kết quả khớp, và xuất ra
+  $\mathsf{pins}=(\mathit{rid},\mathit{root},e,\mathit{cpid},
+  \mathit{prof\_id})$, hoặc thất bại.
+\item $\mathsf{Issue}$: rút một thách thức đều 32 byte $N_s$ và lưu nó cùng ràng
+  buộc $\mathsf{bind}(\mathsf{pins})$ và một thời điểm hết hạn.
+\item $\mathsf{Embed}$: trên vật phủ $\vid$, tải trọng $p$ (in-band) hoặc chứng
+  chỉ $(t_c,r_c)$ (đã đăng ký), $\mathsf{pins}$ và $N_s$: tính
+  $P=\mathsf{Place}(\vid,\ell)$ từ một placeholder bằng không có độ dài cuối
+  cùng $\ell$, $D=\Canon(\vid,P)$ và $x=\Stmt(\mathsf{pins},N_s,P,D)$; với
+  in-band, lấy mẫu $r\leftarrow S_1^k$, đặt $t=\Com(\mathsf{enc}(p);r)$; chứng
+  minh $\pi\leftarrow\mathsf{P}(x,t,r)$; lập $E=\texttt{"ZKLB"}\|1\|\pid\|N_s\|t\|\pi$
+  (hoặc $\texttt{"ZKLR"}\|1\|\pid\|N_s\|\pi$) và xuất ra
+  $\mathsf{Write}(\vid,P,E)$ và, với in-band, phần mở $(p,r)$.
+\item $\mathsf{Verify}$: trên $\vid^*$: $(E^*,P^*,D^*)=\mathsf{Read}(\vid^*)$;
+  phân tích $E^*$ một cách nghiêm ngặt; lấy $N_s^*$ từ $E^*$ (chế độ có lưu
+  trữ) hoặc dùng một $N_s$ cố định (chế độ không trạng thái);
+  $x^*=\Stmt(\mathsf{pins},N_s^*,P^*,D^*)$; chấp nhận khi và chỉ khi
+  $\mathsf{V}(x^*,t^*,\pi^*)=1$ với $t^*$ từ $E^*$ (in-band) hoặc $t_c$ đã ghim
+  (đã đăng ký) và, trong chế độ có lưu trữ, $N_s^*$ còn sống đối với
+  $\mathsf{bind}(\mathsf{pins})$ và được tiêu thụ một cách nguyên tử.
+\item $\mathsf{VerDisc}$: chấp nhận $(E,p,r)$ khi và chỉ khi $(r,1)$ là một phần
+  mở trung thực của cam kết trong $E$ tới $\mathsf{enc}(p)$.
+\item $\mathsf{Link}$, $\mathsf{VerLink}$: chứng minh đẳng thức
+  $\Pi_{\mathsf{eq}}$ trên hai cam kết, được ràng buộc vào một digest ngữ cảnh
+  $\mathit{lx}=\mathrm{SHA3}(\text{tag}\|\pid\|\text{ngữ cảnh có tiền tố độ dài})$.
 \end{itemize}
 
-The statement is the 274-byte string
+Phát biểu là chuỗi 274 byte
 \begin{multline*}
 \Stmt=\mathtt{u16}(1)\|\mathit{rid}\|\pid\|\mathit{root}\|\mathtt{u64}(e)\|N_s\|
 \mathit{cpid}\|\mathit{prof\_id}\\
 \|\mathtt{u64}(|P|)\|\mathrm{SHA256}(P)\|V,\quad
 V=\mathrm{SHA256}(\text{tag}\|D),
 \end{multline*}
-with $\mathrm{SHA256}(P)$ taken over a canonical JSON encoding of the ordered
-positions. The opening proof $\Pi_{\mathsf{open}}$ outputs $\pi=(h,z)$ with
+với $\mathrm{SHA256}(P)$ được lấy trên một mã hóa JSON chuẩn tắc của các vị trí
+có thứ tự. Chứng minh mở $\Pi_{\mathsf{open}}$ xuất ra $\pi=(h,z)$ với
 $h=\Hfs(\text{tag}\|\pid\|\mathtt{u64}(|x|)\|x\|\mathsf{enc}(t)\|\mathsf{enc}(w))$,
-$w=B_1y$, $c=G(h)$, $z=y+cr\in Z$; the verifier recomputes $w'=B_1z-ct_1$ and
-checks $h$. Every field after $x$ has a length fixed by $\pid$, so the hash
-input is uniquely decodable.
+$w=B_1y$, $c=G(h)$, $z=y+cr\in Z$; bên kiểm chứng tính lại $w'=B_1z-ct_1$ và
+kiểm tra $h$. Mọi trường sau $x$ đều có độ dài được cố định bởi $\pid$, nên đầu
+vào của hàm băm giải mã được một cách duy nhất.
 
 \subsection{Adversary model}
 \label{sec:sec-adversary}
