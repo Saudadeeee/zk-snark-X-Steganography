@@ -1,0 +1,344 @@
+{
+  "parameter_set": "bdlop-open-128-v2",
+  "estimator": "malb/lattice-estimator",
+  "estimator_commit": "e4333d9bf9ef42fd8a29651b0c559fba7ce0d834",
+  "sage_version": "10.8.13",
+  "instances": {
+    "mlwe": {
+      "n": 1792,
+      "m": 1792,
+      "q": 1073741789,
+      "Xs": "uniform{-1,0,1}",
+      "Xe": "uniform{-1,0,1}"
+    },
+    "msis_linf": {
+      "n": 1536,
+      "m": 3584,
+      "q": 1073741789,
+      "norm": "inf",
+      "length_bound": 62885280,
+      "length_bound_log2": 25.91
+    },
+    "msis_l2_from_linf": {
+      "length_bound": 3764722758,
+      "length_bound_log2": 31.81,
+      "q_log2": 30.0
+    }
+  },
+  "results": {
+    "mlwe.rough": {
+      "result": {
+        "usvp": {
+          "rop_log2": 169.36,
+          "red_log2": 169.36,
+          "delta": 1.003060022466871,
+          "beta": 580,
+          "d": 3387,
+          "tag": "usvp",
+          "problem": "LWEParameters(n=1792, q=1073741789, Xs=D(\u03c3=0.82), Xe=D(\u03c3=0.82), m=1792, tag='bdlop-open-128-v2 M-LWE hiding')"
+        },
+        "dual_hybrid": {
+          "rop_log2": 164.85,
+          "problem": "LWEParameters(n=1792, q=1073741789, Xs=D(\u03c3=0.82), Xe=D(\u03c3=0.82), m=1792, tag='bdlop-open-128-v2 M-LWE hiding')",
+          "red_log2": 164.69,
+          "guess_log2": 161.65,
+          "beta": 564,
+          "p": 3,
+          "zeta": 0,
+          "t": 90,
+          "beta_": 564,
+          "N_log2": 116.6,
+          "m": 1792
+        }
+      },
+      "seconds": 12.9
+    },
+    "mlwe.primal_usvp.core_svp_classical": {
+      "result": {
+        "rop_log2": 169.36,
+        "red_log2": 169.36,
+        "delta": 1.003060022466871,
+        "beta": 580,
+        "d": 3387,
+        "tag": "usvp",
+        "problem": "LWEParameters(n=1792, q=1073741789, Xs=D(\u03c3=0.82), Xe=D(\u03c3=0.82), m=1792, tag='bdlop-open-128-v2 M-LWE hiding')"
+      },
+      "seconds": 0.0
+    },
+    "mlwe.primal_usvp.core_svp_quantum": {
+      "result": {
+        "rop_log2": 153.7,
+        "red_log2": 153.7,
+        "delta": 1.003060022466871,
+        "beta": 580,
+        "d": 3387,
+        "tag": "usvp",
+        "problem": "LWEParameters(n=1792, q=1073741789, Xs=D(\u03c3=0.82), Xe=D(\u03c3=0.82), m=1792, tag='bdlop-open-128-v2 M-LWE hiding')"
+      },
+      "seconds": 0.1
+    },
+    "mlwe.primal_usvp.matzov": {
+      "result": {
+        "rop_log2": 194.44,
+        "red_log2": 194.44,
+        "delta": 1.003060022466871,
+        "beta": 580,
+        "d": 3387,
+        "tag": "usvp",
+        "problem": "LWEParameters(n=1792, q=1073741789, Xs=D(\u03c3=0.82), Xe=D(\u03c3=0.82), m=1792, tag='bdlop-open-128-v2 M-LWE hiding')"
+      },
+      "seconds": 0.1
+    },
+    "mlwe.primal_bdd.matzov": {
+      "result": {
+        "rop_log2": 192.56,
+        "red_log2": 192.24,
+        "svp_log2": 190.24,
+        "beta": 572,
+        "eta": 605,
+        "d": 3434,
+        "tag": "bdd",
+        "problem": "LWEParameters(n=1792, q=1073741789, Xs=D(\u03c3=0.82), Xe=D(\u03c3=0.82), m=1792, tag='bdlop-open-128-v2 M-LWE hiding')"
+      },
+      "seconds": 2.0
+    },
+    "mlwe.dual_hybrid.core_svp_classical": {
+      "result": {
+        "rop_log2": 164.85,
+        "problem": "LWEParameters(n=1792, q=1073741789, Xs=D(\u03c3=0.82), Xe=D(\u03c3=0.82), m=1792, tag='bdlop-open-128-v2 M-LWE hiding')",
+        "red_log2": 164.69,
+        "guess_log2": 161.65,
+        "beta": 564,
+        "p": 3,
+        "zeta": 0,
+        "t": 90,
+        "beta_": 564,
+        "N_log2": 116.6,
+        "m": 1792
+      },
+      "seconds": 12.8
+    },
+    "mlwe.dual_hybrid.core_svp_quantum": {
+      "result": {
+        "rop_log2": 150.31,
+        "problem": "LWEParameters(n=1792, q=1073741789, Xs=D(\u03c3=0.82), Xe=D(\u03c3=0.82), m=1792, tag='bdlop-open-128-v2 M-LWE hiding')",
+        "red_log2": 150.25,
+        "guess_log2": 145.63,
+        "beta": 567,
+        "p": 3,
+        "zeta": 0,
+        "t": 80,
+        "beta_": 567,
+        "N_log2": 116.11,
+        "m": 1792
+      },
+      "seconds": 9.8
+    },
+    "mlwe.dual_hybrid.matzov": {
+      "result": {
+        "rop_log2": 189.79,
+        "problem": "LWEParameters(n=1792, q=1073741789, Xs=D(\u03c3=0.82), Xe=D(\u03c3=0.82), m=1792, tag='bdlop-open-128-v2 M-LWE hiding')",
+        "red_log2": 189.65,
+        "guess_log2": 186.29,
+        "beta": 559,
+        "p": 3,
+        "zeta": 20,
+        "t": 80,
+        "beta_": 560,
+        "N_log2": 114.66,
+        "m": 1792
+      },
+      "seconds": 22.7
+    },
+    "msis_linf.rough": {
+      "result": {
+        "lattice": {
+          "rop_log2": 140.16,
+          "red_log2": 140.16,
+          "sieve_log2": -332.19,
+          "beta": 480,
+          "eta": 480,
+          "zeta": 0,
+          "d": 3584,
+          "prob_log2": 0.0,
+          "repetitions_log2": 0.0,
+          "tag": "infinity",
+          "problem": "SISParameters(n=1536, q=1073741789, length_bound=62885280, m=3584, norm=+Infinity, tag='bdlop-open-128-v2 M-SIS binding')"
+        }
+      },
+      "seconds": 9.8
+    },
+    "msis_linf.lattice.core_svp_classical": {
+      "result": {
+        "rop_log2": 140.16,
+        "red_log2": 140.16,
+        "sieve_log2": -332.19,
+        "beta": 480,
+        "eta": 480,
+        "zeta": 0,
+        "d": 3584,
+        "prob_log2": 0.0,
+        "repetitions_log2": 0.0,
+        "tag": "infinity",
+        "problem": "SISParameters(n=1536, q=1073741789, length_bound=62885280, m=3584, norm=+Infinity, tag='bdlop-open-128-v2 M-SIS binding')"
+      },
+      "seconds": 0.1
+    },
+    "msis_linf.lattice.core_svp_quantum": {
+      "result": {
+        "rop_log2": 127.2,
+        "red_log2": 127.2,
+        "sieve_log2": -332.19,
+        "beta": 480,
+        "eta": 480,
+        "zeta": 0,
+        "d": 3584,
+        "prob_log2": 0.0,
+        "repetitions_log2": 0.0,
+        "tag": "infinity",
+        "problem": "SISParameters(n=1536, q=1073741789, length_bound=62885280, m=3584, norm=+Infinity, tag='bdlop-open-128-v2 M-SIS binding')"
+      },
+      "seconds": 9.5
+    },
+    "msis_linf.lattice.matzov": {
+      "result": {
+        "rop_log2": 170.78,
+        "red_log2": 169.85,
+        "sieve_log2": 169.7,
+        "beta": 493,
+        "eta": 496,
+        "zeta": 896,
+        "d": 2688,
+        "prob_log2": 0.0,
+        "repetitions_log2": 0.0,
+        "tag": "infinity",
+        "problem": "SISParameters(n=1536, q=1073741789, length_bound=62885280, m=3584, norm=+Infinity, tag='bdlop-open-128-v2 M-SIS binding')"
+      },
+      "seconds": 2.2
+    },
+    "msis_l2_from_linf.rough": {
+      "result": {
+        "large_norm": {
+          "rop_log2": 11.68,
+          "red_log2": 11.68,
+          "sieve_log2": -332.19,
+          "beta": 40,
+          "eta": 40,
+          "ell": 1148,
+          "d": 3584,
+          "prob_log2": 0.0,
+          "repetitions_log2": 0.0,
+          "tag": "large_norm",
+          "problem": "SISParameters(n=1536, q=1073741789, length_bound=3764722758, m=3584, norm=2, tag='bdlop-open-128-v2 M-SIS binding')"
+        }
+      },
+      "seconds": 1.7
+    },
+    "mlwe.estimate_full": {
+      "result": {
+        "bkw": {
+          "rop_log2": 360.21,
+          "m": 3.5106787579139355e+103,
+          "mem_log2": 335.75,
+          "b": 11,
+          "t1": 4,
+          "t2": 50,
+          "ell": 10,
+          "#cod": 1603,
+          "#top": 0,
+          "#test": 145,
+          "tag": "coded-bkw",
+          "problem": "LWEParameters(n=1792, q=1073741789, Xs=D(\u03c3=0.82), Xe=D(\u03c3=5.48), m=35106787579139354516505906369703563951120034713581941657026976842867524930478536986092729352712957722624, tag='bdlop-open-128-v2 M-LWE hiding')"
+        },
+        "usvp": {
+          "rop_log2": 194.44,
+          "red_log2": 194.44,
+          "delta": 1.003060022466871,
+          "beta": 580,
+          "d": 3387,
+          "tag": "usvp",
+          "problem": "LWEParameters(n=1792, q=1073741789, Xs=D(\u03c3=0.82), Xe=D(\u03c3=0.82), m=1792, tag='bdlop-open-128-v2 M-LWE hiding')"
+        },
+        "bdd": {
+          "rop_log2": 192.56,
+          "red_log2": 192.24,
+          "svp_log2": 190.24,
+          "beta": 572,
+          "eta": 605,
+          "d": 3434,
+          "tag": "bdd",
+          "problem": "LWEParameters(n=1792, q=1073741789, Xs=D(\u03c3=0.82), Xe=D(\u03c3=0.82), m=1792, tag='bdlop-open-128-v2 M-LWE hiding')"
+        },
+        "bdd_hybrid": {
+          "rop_log2": 192.58,
+          "red_log2": 192.26,
+          "svp_log2": 190.24,
+          "beta": 572,
+          "eta": 605,
+          "zeta": 0,
+          "|S|": 1,
+          "d": 3475,
+          "prob_log2": 0.0,
+          "repetitions_log2": 0.0,
+          "tag": "hybrid",
+          "problem": "LWEParameters(n=1792, q=1073741789, Xs=D(\u03c3=0.82), Xe=D(\u03c3=0.82), m=1792, tag='bdlop-open-128-v2 M-LWE hiding')"
+        },
+        "bdd_mitm_hybrid": {
+          "rop_log2": 284.26,
+          "red_log2": 279.58,
+          "svp_log2": 284.2,
+          "beta": 581,
+          "eta": 2,
+          "zeta": 222,
+          "|S|": 8.332897518990638e+105,
+          "d": 3271,
+          "prob_log2": -82.72,
+          "repetitions_log2": 84.92,
+          "tag": "hybrid",
+          "problem": "LWEParameters(n=1792, q=1073741789, Xs=D(\u03c3=0.82), Xe=D(\u03c3=0.82), m=1792, tag='bdlop-open-128-v2 M-LWE hiding')"
+        },
+        "dual": {
+          "rop_log2": 198.71,
+          "mem_log2": 131.84,
+          "m": 1725,
+          "beta": 591,
+          "d": 3517,
+          "repetitions_log2": 0.0,
+          "tag": "dual"
+        },
+        "dual_hybrid": {
+          "rop_log2": 189.79,
+          "problem": "LWEParameters(n=1792, q=1073741789, Xs=D(\u03c3=0.82), Xe=D(\u03c3=0.82), m=1792, tag='bdlop-open-128-v2 M-LWE hiding')",
+          "red_log2": 189.65,
+          "guess_log2": 186.29,
+          "beta": 559,
+          "p": 3,
+          "zeta": 20,
+          "t": 80,
+          "beta_": 560,
+          "N_log2": 114.66,
+          "m": 1792
+        }
+      },
+      "seconds": 326.9
+    },
+    "msis_linf.estimate_full": {
+      "result": {
+        "lattice": {
+          "rop_log2": 170.78,
+          "red_log2": 169.85,
+          "sieve_log2": 169.7,
+          "beta": 493,
+          "eta": 496,
+          "zeta": 896,
+          "d": 2688,
+          "prob_log2": 0.0,
+          "repetitions_log2": 0.0,
+          "tag": "infinity",
+          "problem": "SISParameters(n=1536, q=1073741789, length_bound=62885280, m=3584, norm=+Infinity, tag='bdlop-open-128-v2 M-SIS binding')"
+        }
+      },
+      "seconds": 0.0
+    }
+  }
+}

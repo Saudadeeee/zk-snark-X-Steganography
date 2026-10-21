@@ -1,4 +1,4 @@
-# Cross-check of `bdlop-open-128-v1` with the lattice-estimator
+# Cross-check of `bdlop-open-128-v1` and `-v2` with the lattice-estimator
 
 `estimate.py` computes core-SVP costs with the CRYSTALS security-estimates
 scripts (commit `75c26949`). This note repeats the estimate with the
@@ -6,7 +6,8 @@ scripts (commit `75c26949`). This note repeats the estimate with the
 `e4333d9bf9ef42fd8a29651b0c559fba7ce0d834`, 2026-10-17) running under Sage.
 This is an independent code base with its own attack models. Raw results are
 in `lattice_estimator_crosscheck.json`, and the script that produced them is
-`lattice_estimator_crosscheck.py`.
+`lattice_estimator_crosscheck.py`. The sections below cover v1; the current
+production set v2 is in [the v2 section](#bdlop-open-128-v2-m-lwe-rank-7).
 
 ## Instances
 
@@ -20,13 +21,23 @@ exactly as in `estimate.py` and in the reductions of
 | M-SIS binding (`B1 ∈ R_q^{6×13}`, ℓ∞ ≤ 8κB) | SIS n = 1536 rows, m = 3328 columns, q = 2^30 − 35, ℓ∞ bound 62 885 280 ≈ 2^25.91 |
 | ℓ2 relaxation of the same bound | ℓ2 bound √3328 · 8κB = 3 627 777 624 ≈ 2^31.76 > q |
 
-The script pins the parameters literally. To confirm they equal the code's
-parameter set, run from `VideoLevel/`:
+The script derives these sizes from a parameter set in
+`src/lattice_zk/params.py` (`--parameter-set`, default `BDLOP_OPEN_128_V1`).
+The container that runs the estimator cannot import the project, so the
+flattened instance is written on the host first and passed in as JSON. The
+v1 file is `lattice_estimator_crosscheck_instance_v1.json`; from `VideoLevel/`:
 
 ```
-python -c "from src.lattice_zk.params import BDLOP_OPEN_128 as p; print(p.mlwe_rank*p.degree, (p.msis_rank+1)*p.degree, p.width*p.degree, p.modulus, p.binding_norm_bound)"
-# 1536 1792 3328 1073741789 62885280
+python research/bdlop_params/lattice_estimator_crosscheck.py \
+  --write-instance research/bdlop_params/lattice_estimator_crosscheck_instance_v1.json
+# {"parameter_set": "bdlop-open-128-v1", ..., "binding_bound": 62885280,
+#  "mlwe": {"n": 1536, "m": 1792}, "msis": {"n": 1536, "m": 3328}}
 ```
+
+The script checks that its flattening agrees with `BdlopParams.width` and
+`binding_norm_bound`. A v1 rerun from this instance file, made with the
+refactored script on 2026-10-21 (`--skip-full`), reproduced every v1 result
+in `lattice_estimator_crosscheck.json`.
 
 ## Results
 
@@ -105,9 +116,15 @@ docker exec -e PYTHONPATH=$E -w $E le-sage python -c \
   "from estimator import *; print(LWE.primal_usvp(schemes.Kyber512)); SIS.estimate.rough(schemes.Dilithium2_MSIS_WkUnf)"
 # -> usvp rop 2^143.8, beta 406 ; lattice rop 2^123.5, beta 423   (identical to the README)
 
+cp research/bdlop_params/lattice_estimator_crosscheck_instance_v1.json "$W/"
 docker exec -e PYTHONPATH=$E -w $E le-sage \
-  python /work/lattice_estimator_crosscheck.py --output /work/lattice_estimator_crosscheck.json
+  python /work/lattice_estimator_crosscheck.py \
+    --instance-json /work/lattice_estimator_crosscheck_instance_v1.json \
+    --output /work/lattice_estimator_crosscheck.json
 ```
+
+(The original v1 run used an earlier version of the script that hard-coded
+these sizes. The instance file gives the same sizes and the same results.)
 
 (Under Git Bash, prefix the `docker run`/`docker exec` lines with
 `MSYS_NO_PATHCONV=1`.) The full run takes about 5 minutes. `LWE.estimate`
@@ -125,7 +142,7 @@ Estimator calls (see the script for details):
 - `SIS.lattice(sis, red_cost_model=RC.MATZOV)` and `SIS.estimate(sis)`.
 - `SIS.estimate.rough` on the ℓ2 relaxation.
 
-## Suggested text for the paper
+## Suggested text for the paper (v1)
 
 This replaces `\todo{cross-check M-SIS/M-LWE estimates with lattice-estimator}`
 in `docs/paper/main.tex`. It is not applied here.
@@ -145,3 +162,73 @@ If this text is adopted, the M-LWE row of `docs/paper/tables/params.tex`
 (and the comment above `BDLOP_OPEN_128` in `src/lattice_zk/params.py`) should
 read `135 / 123 bits` (dual-hybrid, β = 463). The alternative is to keep
 138/125 and state explicitly that it is the primal estimate.
+
+## `bdlop-open-128-v2` (M-LWE rank 7)
+
+`bdlop-open-128-v2` is the current production set (`BDLOP_OPEN_128`). It
+raises the M-LWE rank from λ = 6 to λ = 7, which makes the width
+k = n + λ + 1 = 14. All other parameters are those of v1. It was run on
+2026-10-21 with the same estimator commit, the same container (pulled by the
+digest above) and the same passagemath-standard 10.8.13, numpy 2.5.4,
+scipy 1.18.1 and mpmath 1.3.0. Raw results are in
+`lattice_estimator_crosscheck_v2.json`.
+
+| Problem | Flattened instance (`lattice_estimator_crosscheck_instance_v2.json`) |
+|---|---|
+| M-LWE hiding (rank λ = 7, n+1 = 7 ring samples) | LWE n = 1792, m = 1792, q = 2^30 − 35, ternary secret and error |
+| M-SIS binding (`B1 ∈ R_q^{6×14}`, ℓ∞ ≤ 8κB) | SIS n = 1536 rows, m = 3584 columns, q = 2^30 − 35, ℓ∞ bound 62 885 280 ≈ 2^25.91 |
+| ℓ2 relaxation | ℓ2 bound √3584 · 8κB = 3 764 722 758 ≈ 2^31.81 > q |
+
+Commands. These are the v1 steps, with the v2 instance:
+
+```
+# host, from VideoLevel/
+python research/bdlop_params/lattice_estimator_crosscheck.py --parameter-set BDLOP_OPEN_128_V2 \
+  --write-instance research/bdlop_params/lattice_estimator_crosscheck_instance_v2.json
+# {"parameter_set": "bdlop-open-128-v2", ..., "binding_bound": 62885280,
+#  "mlwe": {"n": 1792, "m": 1792}, "msis": {"n": 1536, "m": 3584}}
+
+docker desktop start
+docker pull python@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+docker run -d --name le-sage --memory=2g --memory-swap=2g -v "$W:/work" python@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 sleep infinity
+docker exec le-sage pip install --no-cache-dir --only-binary=:all: passagemath-standard==10.8.13
+# estimator tarball and smoke test as above (README numbers reproduced)
+cp research/bdlop_params/lattice_estimator_crosscheck.py research/bdlop_params/lattice_estimator_crosscheck_instance_v2.json "$W/"
+docker exec -e PYTHONPATH=$E -w $E le-sage \
+  python /work/lattice_estimator_crosscheck.py \
+    --instance-json /work/lattice_estimator_crosscheck_instance_v2.json \
+    --output /work/lattice_estimator_crosscheck_v2.json
+docker rm -f le-sage; docker rmi python@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1; docker desktop stop
+```
+
+The full run took 6 min 55 s, of which `LWE.estimate` took 327 s (with
+`arora-gb` denied, as for v1). Peak container memory was about 0.7 GB, and
+the container was not OOM-killed.
+
+| Problem / attack | `estimate.py` (CRYSTALS) | lattice-estimator, core-SVP | lattice-estimator, MATZOV |
+|---|---|---|---|
+| M-SIS ℓ∞, lattice reduction | β = 480: **140 / 127** | β = 480: **140.2 / 127.2** | β = 493: 170.8 (ζ = 896) |
+| M-LWE, primal uSVP | β = 580: **169 / 153** | β = 580: **169.4 / 153.7** | β = 580: 194.4 |
+| M-LWE, primal BDD | — | — | β = 572: 192.6 |
+| M-LWE, dual (no hybrid) | β = 578: 169 (classical) | — | β = 591: 198.7 |
+| M-LWE, dual-hybrid | — | β = 564: **164.9** classical; β = 567: **150.3** quantum | β = 559: 189.8 |
+| M-LWE, coded BKW / BDD-hybrid / BDD-MITM-hybrid | — | — | 360.2 / 192.6 / 284.3 |
+| ℓ2 relaxation of the M-SIS bound | — | trivially easy (bound > q; `large_norm` ≈ 2^11.7) | — |
+
+Findings:
+
+1. **M-SIS is unchanged from v1.** Both tools give β = 480 and 140 / 127
+   bits (ζ = 0). Under core-SVP, the extra 256 columns do not lower β.
+2. **M-LWE primal agrees exactly.** Both tools give β = 580 and 169 / 153
+   bits, which is 31 / 28 bits above v1.
+3. **Dual-hybrid is again the cheapest attack on M-LWE.** It costs 2^164.9
+   classical (β = 564, t = 90 guessed coordinates, guess 2^161.7) and 2^150.3
+   quantum (β = 567, t = 80). That is 4.5 / 3.4 bits below primal and still
+   more than 20 bits above 128 in both columns.
+4. Under the default MATZOV model, the cheapest attack on either v2 instance
+   is the M-SIS lattice attack at 2^170.8. The cheapest attack on M-LWE costs
+   2^189.8 (dual-hybrid).
+
+**Conclusion (v2):** using the minimum over all attacks in core-SVP, v2 claims
+**M-LWE hiding 164 / 150 bits** (classical / quantum; dual-hybrid, β = 564 / 567)
+and **M-SIS binding 140 / 127 bits** (β = 480, ℓ∞).

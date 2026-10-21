@@ -1,0 +1,19 @@
+{
+  "parameter_set": "bdlop-open-128-v2",
+  "degree": 256,
+  "modulus": 1073741789,
+  "msis_rank": 6,
+  "mlwe_rank": 7,
+  "width": 14,
+  "challenge_weight": 60,
+  "mask_bound": 131072,
+  "binding_bound": 62885280,
+  "mlwe": {
+    "n": 1792,
+    "m": 1792
+  },
+  "msis": {
+    "n": 1536,
+    "m": 3584
+  }
+}

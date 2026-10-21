@@ -165,8 +165,10 @@ BDLOP_OPEN_128_V1 = BdlopParams(
 )
 
 # Current production set: M-LWE rank 7 restores a quantum margin for hiding;
-# M-SIS rank, modulus, challenges and masks are those of v1.  Estimates are in
-# research/bdlop_params/bdlop_open_128_v2.estimate.json and CROSSCHECK.md.
+# M-SIS rank, modulus, challenges and masks are those of v1.  Claimed core-SVP
+# levels (minimum over attacks, lattice-estimator e4333d9 and the pinned
+# CRYSTALS scripts): M-SIS binding 140 / 127 bits, M-LWE hiding 164 / 150 bits
+# (dual hybrid; primal 169 / 153).  research/bdlop_params/CROSSCHECK.md.
 BDLOP_OPEN_128_V2 = BdlopParams(
     name="bdlop-open-128-v2",
     degree=256,
