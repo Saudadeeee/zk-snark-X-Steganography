@@ -1,51 +1,50 @@
-# Lattice ZK backend survey (2026-09-27 to 2026-10-12)
+# Khảo sát backend lattice ZK (2026-09-27 đến 2026-10-12)
 
-Why the system implements BDLOP itself instead of adopting an existing
-lattice proof system. Each candidate was checked against four gates:
+Vì sao hệ thống tự cài đặt BDLOP thay vì dùng một hệ chứng minh lattice đã có.
+Mỗi ứng viên được kiểm theo bốn cổng:
 
-1. **Zero knowledge** in the construction and code actually used.
-2. **Application relation**: the verifier-pinned video/session/payload
-   statement can be expressed and bound into the transcript.
-3. **Runnable here**: complete prove/verify on Windows x86-64 without AVX-512
-   (Intel i7-12700H), or in a Linux container on it.
-4. **Fits the carrier**: proof plus framing fits measured, quality-validated
-   CAVLC capacity (tens of KB on 1 000–3 000-frame CIF clips).
+1. **Zero knowledge** trong cấu trúc và mã thực sự được dùng.
+2. **Quan hệ ứng dụng**: statement video/phiên/payload do verifier ghim có thể
+   biểu diễn và gắn vào transcript.
+3. **Chạy được ở đây**: prove/verify hoàn chỉnh trên Windows x86-64 không có
+   AVX-512 (Intel i7-12700H), hoặc trong một container Linux trên đó.
+4. **Vừa carrier**: proof cộng framing vừa dung lượng CAVLC đã đo, đã được xác
+   minh chất lượng (hàng chục KB trên các clip CIF 1 000–3 000 khung).
 
-The detailed per-candidate notes (source pins, commands, logs) were consolidated
-into this file on 2026-10-19; the originals remain in git history up to commit
-`07c02d9`.
+Các ghi chú chi tiết theo từng ứng viên (source pin, lệnh, log) được gộp vào
+file này ngày 2026-10-19; bản gốc còn trong git history đến commit `07c02d9`.
 
-| Candidate | Source | Decisive finding | Gate failed |
+| Ứng viên | Nguồn | Phát hiện quyết định | Cổng thất bại |
 |---|---|---|---|
-| LaZer | lazer-crypto/lazer, pinned `10eafec` | Requires Linux x86-64 with AVX-512 and AES; the host CPU has AVX2 only; preflight (`src/legacy/lazer_backend.py`) fails closed | 3 |
-| LaZer Toolkit (ZK LaBRADOR) | ePrint 2026/1289 | Has a ZK variant, but the only ZK statement in source is a Merkle-membership example; not built here; same AVX-512 requirement | 2, 3 |
-| LNP22 (Go, KarpelesLab/lnp22 v0.1.1) | KarpelesLab/lnp22 v0.1.1 (local context-binding probe removed in the Oct 2026 cleanup; in git history) | Verifier accepts a proof for `s[0]=2` with `Beta=1` and a non-bit payload-opening witness (the probe's dependency-assessment test); exact bounds are not enforced | 1/soundness |
-| ISW21 lattice-zksnark | `48cb4cd` (local R1CS opening smoke test removed in the Oct 2026 cleanup; in git history) | Built and ran (toy 32-byte relation, 23 907-byte envelope carried through H.264). Designated verifier; its knowledge-based linear-only LWE assumption is broken by quantum oblivious sampling (LUNA; ePrint 2024/030); statistical ZK only 2^-40; upstream needed two local bug fixes | 1 (assumption), 4 at 300 frames |
-| ePrint 2025/2099 (DV zkSNARK from MSIS) | crypolover1998/LatticeBased-Dv-zkSNARK `9bc41a6` | Strongest theorem (adaptive knowledge soundness in ROM), but code predates the paper and simulates only `lambda=1` without accept/reject; 20.75 KB proof, 1.3 GB CRS | 3 |
-| LUNA | ePrint 2022/1690, yassimert/LUNA | Repository implements only the HGSW encryption component, not the prover/verifier; soundness non-adaptive | 3 |
-| LaBRADOR (C, Rust ports, Lazarus) | ePrint 2022/1341 | Paper disables ZK in its size results (masking shim left for later); C code needs AVX-512; Rust R1CS reductions incomplete | 1, 3 |
-| RoKoko | ePrint 2026/575 | Knowledge soundness only; final folded witness is verifier-readable; relies on vanishing-SIS; 112 KB proof | 1, 4 |
-| SALSAA | ePrint 2025/2124 | Paper proves correctness and knowledge soundness only; prover sends the final folded witness in the clear; 979 KB proof (73 KB folding only) | 1, 4 |
-| Symphony | ASIACRYPT 2026 | Framework only; concrete instantiation left to future work; SNARK definition has no ZK property | 1, 3 |
-| LatticeFold | ePrint 2024/257, NethermindEth/latticefold `15cc045` | Folding scheme, proof-of-concept code, not a standalone ZK prover/verifier | 1, 3 |
-| Jolt + Akita | a16z/jolt | Akita PCS backend is clear-only (no ZK); 65–80 KB reported | 1, 4 |
-| Ringo-SNARK / Buckler | sp301415/ringo-snark | Ran a payload-opening-shaped probe; binary proof about 1.65 MB | 4 |
-| latticezk (yarongvili1) | Baum et al. CRYPTO 2018 over `Z_(2^w)` | Experimental; interactive HVZK argument whose guarantees do not carry over directly to the FS variant used; default dimensions far exceed capacity | 2, 4 |
-| Practical sublinear R1CS (ePrint 2022/1048) | paper only | ZK with a Fiat–Shamir variant, but no implementation; 10.79 MB at 2^24 constraints | 3, 4 |
-| In-tree SIS prototype (`src/registry/lattice_pq.py`) | this repository | Statement chosen by the prover; 131 692-byte JSON proof; kept only as a fail-closed regression fixture | 2, 4 |
+| LaZer | lazer-crypto/lazer, pin `10eafec` | Cần Linux x86-64 với AVX-512 và AES; CPU host chỉ có AVX2; preflight (`src/legacy/lazer_backend.py`) fail closed | 3 |
+| LaZer Toolkit (ZK LaBRADOR) | ePrint 2026/1289 | Có biến thể ZK, nhưng statement ZK duy nhất trong source là ví dụ Merkle-membership; không build ở đây; cùng yêu cầu AVX-512 | 2, 3 |
+| LNP22 (Go, KarpelesLab/lnp22 v0.1.1) | KarpelesLab/lnp22 v0.1.1 (probe context-binding cục bộ gỡ trong đợt dọn dẹp 10/2026; trong git history) | Verifier chấp nhận một proof cho `s[0]=2` với `Beta=1` và một witness payload-opening không-bit (test đánh giá phụ thuộc của probe); các biên chính xác không được thực thi | 1/soundness |
+| ISW21 lattice-zksnark | `48cb4cd` (smoke test R1CS opening cục bộ gỡ trong đợt dọn dẹp 10/2026; trong git history) | Build và chạy được (quan hệ toy 32-byte, envelope 23 907 byte mang qua H.264). Designated verifier; giả thiết LWE knowledge-based linear-only bị phá bởi quantum oblivious sampling (LUNA; ePrint 2024/030); ZK thống kê chỉ 2^-40; upstream cần hai bản vá lỗi cục bộ | 1 (giả thiết), 4 ở 300 khung |
+| ePrint 2025/2099 (DV zkSNARK từ MSIS) | crypolover1998/LatticeBased-Dv-zkSNARK `9bc41a6` | Định lý mạnh nhất (adaptive knowledge soundness trong ROM), nhưng mã có trước bài báo và chỉ mô phỏng `lambda=1` không có accept/reject; proof 20.75 KB, CRS 1.3 GB | 3 |
+| LUNA | ePrint 2022/1690, yassimert/LUNA | Repo chỉ cài thành phần mã hóa HGSW, không phải prover/verifier; soundness non-adaptive | 3 |
+| LaBRADOR (C, các port Rust, Lazarus) | ePrint 2022/1341 | Bài báo tắt ZK trong kết quả kích thước (shim masking để sau); mã C cần AVX-512; các reduction R1CS Rust chưa hoàn chỉnh | 1, 3 |
+| RoKoko | ePrint 2026/575 | Chỉ knowledge soundness; witness gập cuối verifier đọc được; dựa vào vanishing-SIS; proof 112 KB | 1, 4 |
+| SALSAA | ePrint 2025/2124 | Bài báo chỉ chứng minh correctness và knowledge soundness; prover gửi witness gập cuối ở dạng rõ; proof 979 KB (73 KB chỉ riêng folding) | 1, 4 |
+| Symphony | ASIACRYPT 2026 | Chỉ framework; instantiation cụ thể để tương lai; định nghĩa SNARK không có tính chất ZK | 1, 3 |
+| LatticeFold | ePrint 2024/257, NethermindEth/latticefold `15cc045` | Lược đồ folding, mã proof-of-concept, không phải prover/verifier ZK độc lập | 1, 3 |
+| Jolt + Akita | a16z/jolt | Backend PCS Akita chỉ-rõ (không ZK); báo cáo 65–80 KB | 1, 4 |
+| Ringo-SNARK / Buckler | sp301415/ringo-snark | Chạy một probe hình-payload-opening; binary proof khoảng 1.65 MB | 4 |
+| latticezk (yarongvili1) | Baum et al. CRYPTO 2018 trên `Z_(2^w)` | Thực nghiệm; lập luận HVZK tương tác mà bảo đảm không chuyển trực tiếp sang biến thể FS được dùng; chiều mặc định vượt xa dung lượng | 2, 4 |
+| R1CS sublinear thực dụng (ePrint 2022/1048) | chỉ bài báo | ZK với một biến thể Fiat–Shamir, nhưng không có cài đặt; 10.79 MB ở 2^24 ràng buộc | 3, 4 |
+| Prototype SIS trong cây (`src/registry/lattice_pq.py`) | repo này | Statement do prover chọn; proof JSON 131 692 byte; chỉ giữ làm fixture regression fail-closed | 2, 4 |
 
-## Conclusion
+## Kết luận
 
-No available implementation passed all four gates. The relation the system
-needs (knowledge of an opening of one lattice commitment, bound to a
-verifier-built statement) is small enough that the published BDLOP opening
-proof covers it directly. Implementing it from the paper gave:
+Không có cài đặt sẵn nào vượt cả bốn cổng. Quan hệ mà hệ thống cần (tri thức về
+một opening của một cam kết lattice, gắn với một statement do verifier dựng) đủ
+nhỏ để chứng minh opening BDLOP đã công bố phủ nó trực tiếp. Cài đặt nó từ bài
+báo cho:
 
-- zero knowledge and knowledge soundness arguable from published theorems
-  (`docs/LATTICE_ZK_BDLOP_SPEC.md`, Section 4);
-- portable pure-Python code that runs on the target host;
-- a 7 520-byte proof (`bdlop-open-128-v1`; 8 096 bytes with v2) that has been carried through H.264 and verified from the
-  video alone (`docs/LATTICE_ZK_BDLOP_PLAN.md`, Section 7).
+- zero knowledge và knowledge soundness lập luận được từ các định lý đã công bố
+  (`docs/LATTICE_ZK_BDLOP_SPEC.md`, Mục 4);
+- mã Python thuần, di động, chạy trên host mục tiêu;
+- một proof 7 520 byte (`bdlop-open-128-v1`; 8 096 byte với v2) đã được mang qua
+  H.264 và verify chỉ từ video (`docs/LATTICE_ZK_BDLOP_PLAN.md`, Mục 7).
 
-The cost is that the code is self-implemented and unaudited, and soundness is
-relaxed rather than exact.
+Cái giá là mã tự cài đặt và chưa audit, và soundness là relaxed thay vì chính
+xác.

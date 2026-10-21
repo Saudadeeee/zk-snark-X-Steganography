@@ -1,380 +1,365 @@
-# GOP > 1 and HD streams (roadmap B3)
+# GOP > 1 và luồng HD (roadmap B3)
 
-Status: GOP > 1 Baseline streams (IDR + P slices) are supported behind a new
-GOP policy of the carrier profile; 720p/1080p all-intra streams, including
-several slices per picture, parse and recompute their carriers. All-intra
-behaviour is byte-identical to commit `dddb9d5` (carrier positions, video
-digest, stego bytes and all-intra carrier-profile ids, pinned by
+Trạng thái: các luồng Baseline GOP > 1 (slice IDR + P) được hỗ trợ sau một GOP
+policy mới của carrier profile; các luồng all-intra 720p/1080p, gồm cả nhiều
+slice mỗi ảnh, parse và tính lại carrier của chúng. Hành vi all-intra giống hệt
+từng byte với commit `dddb9d5` (vị trí carrier, video digest, byte stego và mọi
+id carrier-profile all-intra, ghim bởi
 `src/runtest/test_gop_and_hd_support.py`).
 
-## What happened before this change
+## Điều gì xảy ra trước thay đổi này
 
-Measured on the `dddb9d5` code with CIF clips encoded with `-g 8` and `-g 25`:
+Đo trên mã `dddb9d5` với các clip CIF mã hóa bằng `-g 8` và `-g 25`:
 
-* **Analysis** parsed only IDR NAL units. P slices were skipped but advanced
-  the picture counter, so carrier coordinates stayed `picture_index x MBs +
-  mb`; nothing was rejected or misparsed.
-* **Patching** rewrote only IDR slices; every other NAL unit was written back
-  from its RBSP. P slices came out byte-identical (175/175 on container g8).
-* **Canonical digest** hashed every non-IDR NAL unit's header fields and RBSP
-  raw, so P slices were already bound, except for one malleability: the parser
-  strips every `00 00 03`, so a superfluous emulation-prevention byte changed
-  the file but not the digest.
-* **Segmentation** (`ffmpeg -f segment -segment_frames 100,200,...`) cuts only
-  at key frames. With GOP 8 a cut at frame 100 moved to 104 and the frame-count
-  check failed closed ("choose boundaries aligned to IDR frames"); with GOP 25
-  or `frames_per_segment` a multiple of the GOP it worked.
-* **Statements** did not distinguish the stream structure: a GOP > 1 video
-  verified under the same carrier profile as an all-intra one.
-* **Several slices per picture** parsed (each slice NAL got its own
-  picture-sized coordinate slot), but the transport globalised positions with
-  `frame_offset x MBs`, so with `k` slices per picture the slots of segment
-  `i` overlapped those of segment `i+1`.
+* **Phân tích** chỉ parse các NAL unit IDR. Các slice P bị bỏ qua nhưng vẫn làm
+  tăng bộ đếm ảnh, nên tọa độ carrier giữ `picture_index x MBs + mb`; không gì
+  bị từ chối hay parse sai.
+* **Patching** chỉ ghi lại các slice IDR; mọi NAL unit khác được ghi lại từ RBSP
+  của nó. Các slice P ra giống hệt từng byte (175/175 trên container g8).
+* **Canonical digest** băm các trường header và RBSP raw của mọi NAL unit không
+  IDR, nên các slice P đã được gắn, trừ một malleability: parser lột mọi
+  `00 00 03`, nên một byte emulation-prevention thừa đổi file nhưng không đổi
+  digest.
+* **Segment hóa** (`ffmpeg -f segment -segment_frames 100,200,...`) chỉ cắt ở
+  các key frame. Với GOP 8 một cắt ở khung 100 dịch sang 104 và kiểm tra số khung
+  fail closed ("chọn biên căn theo khung IDR"); với GOP 25 hoặc `frames_per_segment`
+  là bội của GOP thì được.
+* **Statement** không phân biệt cấu trúc luồng: một video GOP > 1 verify dưới
+  cùng carrier profile với một video all-intra.
+* **Nhiều slice mỗi ảnh** parse được (mỗi slice NAL nhận slot tọa độ cỡ-ảnh
+  riêng), nhưng transport toàn cục hóa vị trí bằng `frame_offset x MBs`, nên với
+  `k` slice mỗi ảnh các slot của segment `i` chồng lên các slot của segment
+  `i+1`.
 
-## What is supported now
+## Điều gì được hỗ trợ bây giờ
 
 ### GOP policy (`src/transport/gop_policy.py`)
 
-`CarrierProfile(..., gop_policy=...)` in `src/lattice_zk/video_pipeline.py`:
+`CarrierProfile(..., gop_policy=...)` trong `src/lattice_zk/video_pipeline.py`:
 
-| policy | streams | carriers | other NAL units |
+| policy | luồng | carrier | NAL unit khác |
 |---|---|---|---|
-| `all-intra` (default) | every coded slice is IDR | IDR luma 4x4 blocks | raw RBSP in the digest |
-| `idr-carriers-inter-raw-v1` | Baseline GOP > 1: IDR, P and non-IDR I slices | IDR luma 4x4 blocks only | raw RBSP in the digest |
+| `all-intra` (mặc định) | mọi slice đã mã hóa là IDR | block luma 4x4 IDR | raw RBSP trong digest |
+| `idr-carriers-inter-raw-v1` | Baseline GOP > 1: slice IDR, P và I không IDR | chỉ block luma 4x4 IDR | raw RBSP trong digest |
 
-Every transport segment (cover at embedding, stego at extraction, carrier
-and raw-hashed segments alike) is checked from its Annex B bytes before any
-analysis; violations raise `ValueError`, which the verifier reports as
-`valid=False`:
+Mọi transport segment (cover khi nhúng, stego khi trích, cả segment carrier lẫn
+segment băm-raw) được kiểm từ byte Annex B của nó trước mọi phân tích; vi phạm
+ném `ValueError`, điều verifier báo là `valid=False`:
 
-* the first coded slice of each segment is an IDR slice (so every cut is an
-  IDR access unit and no segment references a picture of another), and the
-  number of pictures equals ffprobe's decoded frame count;
-* `all-intra`: no non-IDR slice at all (so a GOP > 1 stream is refused under an
-  all-intra profile, with a message naming the GOP policy);
-* only I and P slices (no B, SP, SI), no data partitioning, no arbitrary slice
-  order, no picture mixing IDR and non-IDR slices, `first_mb_in_slice` inside
-  the picture, no slice groups (FMO), no redundant pictures, no CABAC; a
-  progressive Baseline SPS (`profile_idc` 66, `frame_mbs_only_flag` 1); SPS/PPS
-  identical within a segment and present before the first slice;
-* no bytes outside NAL units (before the first start code, or a start code
-  without a NAL unit);
-* canonical emulation prevention in every NAL unit (escaping exactly the
-  minimal one of its RBSP), and `forbidden_zero_bit = 0`. With this, RBSP
-  equality is NAL byte equality, so the digest binds every P-slice byte.
+* slice đã mã hóa đầu tiên của mỗi segment là một slice IDR (nên mọi cắt là một
+  access unit IDR và không segment nào tham chiếu ảnh của segment khác), và số
+  ảnh bằng số khung đã giải mã của ffprobe;
+* `all-intra`: không có slice không IDR nào (nên một luồng GOP > 1 bị từ chối
+  dưới profile all-intra, với thông báo nêu tên GOP policy);
+* chỉ slice I và P (không B, SP, SI), không data partitioning, không arbitrary
+  slice order, không ảnh trộn slice IDR và không IDR, `first_mb_in_slice` trong
+  ảnh, không slice group (FMO), không ảnh dư, không CABAC; một SPS Baseline
+  progressive (`profile_idc` 66, `frame_mbs_only_flag` 1); SPS/PPS giống hệt
+  trong một segment và có mặt trước slice đầu tiên;
+* không có byte ngoài NAL unit (trước start code đầu tiên, hoặc một start code
+  không có NAL unit);
+* emulation prevention canonical trong mọi NAL unit (escape đúng cái tối thiểu
+  của RBSP của nó), và `forbidden_zero_bit = 0`. Với điều này, RBSP bằng nhau là
+  NAL byte bằng nhau, nên digest gắn mọi byte slice P.
 
-The policy is part of the carrier profile id only when it is not the default:
+Policy là một phần của carrier profile id chỉ khi nó không phải mặc định:
 
 ```text
 profile description += {"gop_policy": "idr-carriers-inter-raw-v1"}
 ```
 
-so a GOP > 1 statement has a different `carrier_profile_id`, policy hash,
-relation id and registry entry than an all-intra one, and all-intra ids are
-unchanged. `codec_policy_id` is unchanged. This is the only change in
-`src/lattice_zk/` (no cryptographic code is touched).
+nên một statement GOP > 1 có `carrier_profile_id`, policy hash, relation id và
+registry entry khác với một statement all-intra, và các id all-intra không đổi.
+`codec_policy_id` không đổi. Đây là thay đổi duy nhất trong `src/lattice_zk/`
+(không chạm mã mật mã nào).
 
-### Digest rules
+### Quy tắc digest
 
-Unchanged formula (`docs/LATTICE_ZK_BDLOP_SPEC.md` 3.6). Per carrier segment:
-IDR NAL units with carriers contribute their RBSP bits between carrier blocks
-plus the normalised carrier blocks; every other NAL unit, in particular each P
-slice, contributes its header fields and full RBSP. Segments without carriers
-are hashed as files. Changing one bit of any P slice changes `D` (tested at
-the digest level and end to end).
+Công thức không đổi (`docs/LATTICE_ZK_BDLOP_SPEC.md` 3.6). Mỗi carrier segment:
+các NAL unit IDR có carrier đóng góp các bit RBSP giữa các block carrier cộng
+các block carrier đã chuẩn hóa; mọi NAL unit khác, đặc biệt mỗi slice P, đóng
+góp các trường header và RBSP đầy đủ của nó. Các segment không có carrier được
+băm như file. Thay đổi một bit bất kỳ của bất kỳ slice P nào đều đổi `D` (đã
+test ở mức digest và end to end).
 
-### Segmentation
+### Segment hóa
 
-Segments stay fixed-length (`frames_per_segment`, bound in the profile). For
-GOP > 1 choose a multiple of the GOP length (e.g. 104 or 200 for GOP 8, 100
-for GOP 25); any other value fails closed. Segments are therefore whole GOPs.
-Because only IDR pictures carry, the capacity of a segment is
-`frames_per_segment / GOP` IDR pictures; longer segments do not cost memory
-(P slices are never parsed).
+Các segment giữ độ dài cố định (`frames_per_segment`, gắn trong profile). Với
+GOP > 1 hãy chọn một bội của độ dài GOP (ví dụ 104 hoặc 200 cho GOP 8, 100 cho
+GOP 25); giá trị khác fail closed. Do đó các segment là các GOP trọn vẹn. Vì chỉ
+ảnh IDR mang carrier, dung lượng của một segment là `frames_per_segment / GOP`
+ảnh IDR; các segment dài hơn không tốn bộ nhớ (slice P không bao giờ bị parse).
 
-### Several slices per picture
+### Nhiều slice mỗi ảnh
 
-Each coded slice keeps its own picture-sized coordinate slot (as the analysis
-already did), and the transport now offsets each segment by the number of
-coded slices before it instead of the number of frames. For one slice per
-picture the two are equal, which is why single-slice output is byte-identical.
-Multi-slice streams get different (now collision-free) global positions, hence
-a different `positions_hash`, than under `dddb9d5`; the stricter structure
-checks also refuse streams `dddb9d5` accepted (non-canonical escaping, bytes
-outside NAL units, changing parameter sets, non-Baseline SPS). x264 output
-passes all of them.
-Slices restart CAVLC neighbour contexts, which the parser already does per
-NAL unit. x264 emits one slice per picture unless `slices=N`,
-`slice-max-size` / `slice-max-mbs` or sliced threads (e.g. `-tune
-zerolatency`) are used.
+Mỗi slice đã mã hóa giữ slot tọa độ cỡ-ảnh riêng (như phân tích vốn đã làm), và
+transport nay offset mỗi segment theo số slice đã mã hóa trước nó thay vì số
+khung. Với một slice mỗi ảnh thì hai cái bằng nhau, đó là lý do đầu ra một-slice
+giống hệt từng byte. Các luồng nhiều slice nhận vị trí toàn cục khác (nay không
+va chạm), do đó một `positions_hash` khác, so với `dddb9d5`; các kiểm tra cấu
+trúc chặt hơn cũng từ chối các luồng mà `dddb9d5` chấp nhận (escape không
+canonical, byte ngoài NAL unit, bộ tham số thay đổi, SPS không Baseline). Đầu ra
+x264 vượt qua tất cả. Các slice khởi động lại ngữ cảnh neighbour CAVLC, điều
+parser vốn đã làm theo từng NAL unit. x264 phát một slice mỗi ảnh trừ khi dùng
+`slices=N`, `slice-max-size` / `slice-max-mbs` hoặc sliced threads (ví dụ
+`-tune zerolatency`).
 
 ### HD
 
-* MB count from the SPS (`80 x 45` at 720p, `120 x 68` at 1080p); cropping
-  (1088 -> 1080) only affects display and is left to the decoder.
-* Level limits: x264 picks Level 3.1 (720p) / 4.0 (1080p); nothing in the
-  parser depends on the level.
-* The stable-carrier analysis already used the SPS MB count (earlier fix,
-  `test_non_cif_carrier_capacity.py`). The embedding-order heuristics of the
-  original contracts (`sort_blocks_interleaved`, the chaos shuffle's
-  bottom-row preference) still assume a CIF grid of 22 x 18; at 4CIF/HD they
-  only change the deterministic order, identically at embedding and
-  extraction, not correctness. The `*-geo` contracts order the same carriers
-  on the SPS grid; see "Resolution-aware carrier order" below.
+* Số MB từ SPS (`80 x 45` ở 720p, `120 x 68` ở 1080p); cropping (1088 -> 1080)
+  chỉ ảnh hưởng hiển thị và để decoder lo.
+* Giới hạn Level: x264 chọn Level 3.1 (720p) / 4.0 (1080p); không gì trong
+  parser phụ thuộc level.
+* Phân tích stable-carrier đã dùng số MB từ SPS (fix trước,
+  `test_non_cif_carrier_capacity.py`). Các heuristic thứ tự nhúng của các hợp
+  đồng gốc (`sort_blocks_interleaved`, ưu tiên hàng dưới của chaos shuffle) vẫn
+  giả định lưới CIF 22 x 18; ở 4CIF/HD chúng chỉ đổi thứ tự xác định, giống hệt
+  khi nhúng và khi trích, không đổi tính đúng. Các hợp đồng `*-geo` sắp cùng các
+  carrier trên lưới SPS; xem "Thứ tự carrier theo độ phân giải" bên dưới.
 
-### Resolution-aware carrier order (stream C4)
+### Thứ tự carrier theo độ phân giải (stream C4)
 
-**Inventory** of CIF geometry hard-coded in the carrier path (`22`, `396`,
-`18`, `cif_mb_count`, `mb_width`, `macroblocks_per_frame`):
+**Kiểm kê** hình học CIF hard-code trong đường carrier (`22`, `396`, `18`,
+`cif_mb_count`, `mb_width`, `macroblocks_per_frame`):
 
-| place | constant | class | status |
+| nơi | hằng số | lớp | trạng thái |
 |---|---|---|---|
-| `core/analysis_cache._build_serial_analysis`, `core/parallel_analysis` jobs | `cif_mb_count` (IDR offset of a block) | correctness | SPS count (earlier fix); `396` only as a fallback when the context has none |
-| `core/stego.CAVLCSafetyFilter.get_safe_positions` | default `cif_mb_count=396` | correctness (fails closed) | every carrier-path caller passes the SPS count; a wrong value finds no IDR, so no carriers, never wrong ones |
-| `bitstream_ops.reconstruct_video`, `analysis_cache._build_reconstruction_context` | `mb_count_per_slice`, fallback `264` without an SPS | correctness | SPS count; the fallback is unreachable (the GOP policy requires an SPS before the first slice) |
-| `bitstream_ops._calculate_nC(pic_width_in_mbs=22)` | width | none | dead code (no callers); nC is computed within the macroblock |
-| `blind_sync_streaming`, `blind_sync_adaptive` globalisation; E2E RBSP tamper check | MBs per slot | correctness | SPS count, one slot per coded slice |
-| `core/chaos.ChaosTransformer.shuffle_positions` | `396`, `22`, bottom row `14` | ordering/quality | original contracts (pinned); groups 396-MB "frames" (quarter pictures at 4CIF, straddling pictures at HD) and prefers stripes of 88 MBs in mid-picture |
-| `core/stego.sort_blocks_interleaved` (`stego.py`, `parallel_analysis.py`) | `_CIF_MB_COUNT`, `_CIF_MB_WIDTH` | ordering/quality | pre-shuffle order of the sign-bit (`t1`) and full analyses; pinned for the original contracts, ignored by the `*-geo` contracts (canonical order first) |
-| `blind_sync._cap_per_idr`, `_filter_bottom_zone`, `derive_blind_positions_*` | `cif_mb_count=396`, `cif_mb_width=22` | ordering/quality | used only by contracts with `max_bits_per_idr` / `bottom_rows` > 0 (header/diagnostic contracts, none of the lattice ones); the `*-geo` contracts pass the SPS geometry |
-| `core/matrix_embedding.rank_positions_cost_guided`, `embedder.py` chaos shuffle, `core/pipeline*` | `396` | ordering/quality | legacy SEC1 CIF pipeline only, not on the lattice path |
-| `bitstream_ops.batch_psnr_validate` | "4 bottom rows" | quality | uses the SPS width already; row count tuned on CIF (legacy pipeline) |
-| `benchmark/_common.py`, `sec1_quality.py`, `sec2_capacity.py`, `sec3_methods.py`, `blind_sync_diagnostic.py`, `validated_pool_proxy_diagnostic.py`, `latticezk_adaptive_e2e.py`, `latticezk_adaptive_sim.py` | `396` / `22` | benchmark-only | CIF benchmarks (case names are CIF) |
-| `latticezk_ml_steganalysis.py`, `latticezk_embedding_sim.py` | `--macroblocks-per-frame` default `396` | benchmark-only | the Q2 sweep passes the case's `macroblocks_per_frame` (3 600 / 8 160 in the HD cases) |
+| `core/analysis_cache._build_serial_analysis`, các job `core/parallel_analysis` | `cif_mb_count` (IDR offset của một block) | tính đúng | số từ SPS (fix trước); `396` chỉ làm fallback khi context không có |
+| `core/stego.CAVLCSafetyFilter.get_safe_positions` | mặc định `cif_mb_count=396` | tính đúng (fail closed) | mọi caller đường carrier truyền số SPS; giá trị sai không tìm thấy IDR, nên không có carrier, không bao giờ sai |
+| `bitstream_ops.reconstruct_video`, `analysis_cache._build_reconstruction_context` | `mb_count_per_slice`, fallback `264` khi không có SPS | tính đúng | số SPS; fallback không tới được (GOP policy đòi một SPS trước slice đầu tiên) |
+| `bitstream_ops._calculate_nC(pic_width_in_mbs=22)` | width | không | mã chết (không caller); nC tính trong macroblock |
+| toàn cục hóa `blind_sync_streaming`, `blind_sync_adaptive`; kiểm tra tamper RBSP E2E | MB mỗi slot | tính đúng | số SPS, một slot mỗi slice đã mã hóa |
+| `core/chaos.ChaosTransformer.shuffle_positions` | `396`, `22`, hàng dưới `14` | thứ tự/chất lượng | các hợp đồng gốc (ghim); gom các "khung" 396-MB (một phần tư ảnh ở 4CIF, trải qua các ảnh ở HD) và ưu tiên các sọc 88 MB giữa ảnh |
+| `core/stego.sort_blocks_interleaved` (`stego.py`, `parallel_analysis.py`) | `_CIF_MB_COUNT`, `_CIF_MB_WIDTH` | thứ tự/chất lượng | thứ tự trước-shuffle của phân tích sign-bit (`t1`) và đầy đủ; ghim cho các hợp đồng gốc, bỏ qua bởi các hợp đồng `*-geo` (canonical order trước) |
+| `blind_sync._cap_per_idr`, `_filter_bottom_zone`, `derive_blind_positions_*` | `cif_mb_count=396`, `cif_mb_width=22` | thứ tự/chất lượng | chỉ dùng bởi các hợp đồng có `max_bits_per_idr` / `bottom_rows` > 0 (các hợp đồng header/diagnostic, không cái nào thuộc lattice); các hợp đồng `*-geo` truyền hình học SPS |
+| `core/matrix_embedding.rank_positions_cost_guided`, chaos shuffle `embedder.py`, `core/pipeline*` | `396` | thứ tự/chất lượng | chỉ pipeline SEC1 CIF legacy, không trên đường lattice |
+| `bitstream_ops.batch_psnr_validate` | "4 hàng dưới" | chất lượng | đã dùng width SPS; số hàng tinh chỉnh trên CIF (pipeline legacy) |
+| `benchmark/_common.py`, `sec1_quality.py`, `sec2_capacity.py`, `sec3_methods.py`, `blind_sync_diagnostic.py`, `validated_pool_proxy_diagnostic.py`, `latticezk_adaptive_e2e.py`, `latticezk_adaptive_sim.py` | `396` / `22` | chỉ benchmark | benchmark CIF (tên case là CIF) |
+| `latticezk_ml_steganalysis.py`, `latticezk_embedding_sim.py` | `--macroblocks-per-frame` mặc định `396` | chỉ benchmark | sweep Q2 truyền `macroblocks_per_frame` của case (3 600 / 8 160 trong các case HD) |
 
-**Fix.** The original contracts keep the CIF-grid order: their carrier
-profile ids, positions hashes, canonical digests and stego bytes are pinned
-(recorded with commit `c027c87` before the change) by
-`src/runtest/test_geometry_aware_ordering.py` on a CIF cut of a checked-in
-fixture and a synthetic 4CIF clip, and were also checked on a 10-frame
-foreman CIF cut and a 4-frame city 4CIF cut
-(`benchmark/results/q2/hd_order_compat.json`). Three new contracts select the
-SPS-geometry order through a `carrier_order` field (so `dataclasses.asdict`,
-the carrier profile id, policy hash, relation and public sync key all differ):
+**Fix.** Các hợp đồng gốc giữ thứ tự lưới-CIF: carrier profile id, positions
+hash, canonical digest và byte stego của chúng được ghim (ghi với commit
+`c027c87` trước thay đổi) bởi `src/runtest/test_geometry_aware_ordering.py` trên
+một cắt CIF của một fixture đã checked-in và một clip 4CIF tổng hợp, và cũng được
+kiểm trên một cắt foreman CIF 10 khung và một cắt city 4CIF 4 khung
+(`benchmark/results/q2/hd_order_compat.json`). Ba hợp đồng mới chọn thứ tự
+hình-học-SPS qua một trường `carrier_order` (nên `dataclasses.asdict`, carrier
+profile id, policy hash, relation và public sync key đều khác):
 
-| E2E `--carrier` | contract version | carriers as |
+| E2E `--carrier` | phiên bản hợp đồng | carrier dưới dạng |
 |---|---|---|
 | `magnitude-geo` | `stable-carriers-sps-geometry-v1` | `magnitude` |
 | `t1-geo` | `t1-sign-sps-geometry-v1` | `t1` |
 | `adaptive-geo` | `adaptive-stc-magnitude-sps-geometry-v1` | `adaptive` (STC coded) |
 
-`src/core/carrier_order.py` (`sps-geometry-low-drift-v1`): canonical
-`(mb, block, coefficient)` order; group by slot `mb // (W x H)` from the SPS
-(one slot per coded slice); within a slot the last `round(2/9 x rows)` rows of
-the slot's carrier extent first (4 of 18 at CIF, 8 at 4CIF, 10 at 720p, 15 at
-1080p; per slice for multi-slice pictures, since intra prediction does not
-cross slices), each group in SHA-256-keyed order; slots round-robin. The
-`max_bits_per_idr` / `bottom_rows` filters use the SPS grid too. The order
-depends only on the (embedding-invariant) carrier set, the SPS and the key, so
-the extractor recomputes it from the stego.
+`src/core/carrier_order.py` (`sps-geometry-low-drift-v1`): thứ tự canonical
+`(mb, block, coefficient)`; gom theo slot `mb // (W x H)` từ SPS (một slot mỗi
+slice đã mã hóa); trong một slot `round(2/9 x rows)` hàng cuối của phạm vi carrier
+của slot trước (4 trên 18 ở CIF, 8 ở 4CIF, 10 ở 720p, 15 ở 1080p; theo từng
+slice với ảnh nhiều slice, vì dự đoán intra không vượt qua slice), mỗi nhóm theo
+thứ tự keyed SHA-256; các slot round-robin. Các bộ lọc `max_bits_per_idr` /
+`bottom_rows` cũng dùng lưới SPS. Thứ tự chỉ phụ thuộc tập carrier (bất biến khi
+nhúng), SPS và khóa, nên extractor tính lại nó từ stego.
 
-## Measurements (CIF, QP 22, magnitude carriers)
+## Số đo (CIF, QP 22, carrier magnitude)
 
 `python -m benchmark.latticezk_gop_eval --cases benchmark/latticezk_gop_cases.json
---data-root <tree with data/raw>`; results in `benchmark/results/q2/gop_*.json`
-and `gop_summary.json`. Encoding (in `latticezk_gop_eval.encode_command`):
+--data-root <cây có data/raw>`; kết quả trong `benchmark/results/q2/gop_*.json`
+và `gop_summary.json`. Mã hóa (trong `latticezk_gop_eval.encode_command`):
 
 ```text
 ffmpeg -i data/raw/<clip>.y4m -frames:v N -c:v libx264 -profile:v baseline -coder 0 -bf 0 \
        -g G -keyint_min G -sc_threshold 0 -qp 22 -threads 4 -f h264 <clip>_gG.h264
 ```
 
-The end-to-end run uses the **TOY** parameter set (registered, 413-byte
-envelope) because the 8 165-byte BDLOP_OPEN_128 envelope (7 589 B with v1) does not fit a
-200-300-frame GOP > 1 CIF clip (see "frames needed"); the transport, digest and
-statement code paths are the same. Quality is luma PSNR of the decoded stego
-against the decoded cover, all frames including P frames. Each row is one run
-with a random sync key, so the carriers (and PSNR) differ between runs: an
-earlier container GOP 8 run gave 46.80 / 43.96 / 38.67 dB.
+Lượt chạy end-to-end dùng bộ tham số **TOY** (registered, envelope 413 byte) vì
+envelope BDLOP_OPEN_128 8 165 byte (7 589 B với v1) không vừa một clip CIF
+GOP > 1 200-300 khung (xem "số khung cần"); các đường mã transport, digest và
+statement là như nhau. Chất lượng là luma PSNR của stego đã giải mã so với cover
+đã giải mã, mọi khung kể cả khung P. Mỗi dòng là một lượt với một sync key ngẫu
+nhiên, nên các carrier (và PSNR) khác nhau giữa các lượt: một lượt container GOP
+8 trước đó cho 46.80 / 43.96 / 38.67 dB.
 
-| clip (frames) | GOP | seg. | carrier bits /100 fr | bits /IDR | 128-bit reg. needs (frames) | carriers used / IDRs touched | frames changed | PSNR all | PSNR changed | worst frame |
+| clip (khung) | GOP | seg. | bit carrier /100 kh | bit /IDR | reg. 128-bit cần (khung) | carrier dùng / IDR chạm | khung đổi | PSNR all | PSNR đổi | khung tệ nhất |
 |---|---|---|---|---|---|---|---|---|---|---|
 | container (200) | 1 | 100 | 50 757 | 508 | 120 | 3 600 / 100 | 100 | 63.71 | 60.70 | 55.58 |
 | container (200) | 8 | 104 | 6 376 | 510 | 953 | 3 600 / 13 | 104 | 47.02 | 44.18 | 40.91 |
 | container (200) | 25 | 100 | 2 030 | 507 | 2 992 | 3 896 / 8 | 200 | 39.25 | 39.25 | 32.02 |
 | foreman (300) | 1 | 100 | 14 178 | 142 | 429 | 3 600 / 100 | 100 | 58.87 | 54.09 | 42.39 |
 | foreman (300) | 8 | 152 | 1 793 | 142 | 3 387 | 3 896 / 38 | 300 | 53.21 | 53.21 | 44.57 |
-| foreman (300) | 25 | 100 | 522 | 131 | 11 631 | does not fit (TOY needs 16 segments of 27 B) | – | – | – | – |
+| foreman (300) | 25 | 100 | 522 | 131 | 11 631 | không vừa (TOY cần 16 segment 27 B) | – | – | – | – |
 
-All runs verified blind; replay, a random one-bit tamper and a one-bit flip
-inside a P slice of a carrier segment were rejected (reason: statement
-mismatch, i.e. the digest, not a parse failure); every P slice was
-byte-identical (175/175, 192/192, 262/262). Embedding / verification took
-8-14 s / 4.7-6.3 s for GOP > 1 against 16-46 s / 13-42 s all-intra (only IDR
-slices are parsed).
+Mọi lượt verify blind; replay, một tamper một-bit ngẫu nhiên và một lật một-bit
+trong một slice P của một carrier segment đều bị từ chối (lý do: sai khớp
+statement, tức digest, không phải lỗi parse); mọi slice P giống hệt từng byte
+(175/175, 192/192, 262/262). Nhúng / verification mất 8-14 s / 4.7-6.3 s cho
+GOP > 1 so với 16-46 s / 13-42 s all-intra (chỉ slice IDR được parse).
 
-**Capacity.** An IDR picture carries what an all-intra frame of the same
-content carries (508 vs 510 bits for container), and P slices carry nothing,
-so capacity per frame falls by the GOP length. The registered 128-bit
-envelope needs ~1 000 frames (40 s at 25 fps) for container at GOP 8, ~3 000
-(2 min) at GOP 25; low-texture foreman needs 3 400 and 11 600 frames.
+**Dung lượng.** Một ảnh IDR mang những gì một khung all-intra cùng nội dung
+mang (508 so với 510 bit cho container), và các slice P không mang gì, nên dung
+lượng mỗi khung giảm theo độ dài GOP. Envelope registered 128-bit cần ~1 000
+khung (40 s ở 25 fps) cho container ở GOP 8, ~3 000 (2 phút) ở GOP 25; foreman
+ít kết cấu cần 3 400 và 11 600 khung.
 
-**Drift.** P slices are untouched but predict from the modified IDR, so every
-frame of a GOP whose IDR changed differs from the cover (`frames changed` =
-GOP x IDRs touched). Within a GOP the error neither grows nor decays much:
-container loses 0.04 dB over 7 P frames at GOP 8 and 0.09 dB over 24 at GOP
-25 (`luma_psnr_by_gop_position_in_modified_gops_db`); foreman, with motion,
-recovers 0.6 dB by the end of the GOP. The worst frame is an IDR or a late P
-frame of a dense GOP.
+**Drift.** Các slice P không bị chạm nhưng dự đoán từ IDR đã sửa, nên mọi khung
+của một GOP mà IDR của nó thay đổi đều khác cover (`khung đổi` = GOP x IDR
+chạm). Trong một GOP lỗi không tăng cũng không giảm nhiều: container mất 0.04 dB
+qua 7 khung P ở GOP 8 và 0.09 dB qua 24 ở GOP 25
+(`luma_psnr_by_gop_position_in_modified_gops_db`); foreman, có chuyển động, hồi
+phục 0.6 dB vào cuối GOP. Khung tệ nhất là một IDR hoặc một khung P muộn của một
+GOP dày.
 
-**Quality cost vs all-intra.** It comes from density, not from drift
-accumulation: the same envelope is packed into GOP-times fewer pictures
-(container: 36 carriers per IDR at GOP 1, 277 at GOP 8, 487 at GOP 25), and
-each modified picture's distortion is then copied into GOP-1 P frames. For the
-same envelope, container's PSNR on changed frames drops from 60.7 dB to 44.2
-and 39.3 dB, the worst frame from 55.6 to 40.9 (38.7 in the other run) and
-32.0 dB. Foreman, whose
-IDRs are carrier-poor, stays at 53-54 dB because its per-IDR change count is
-small either way.
+**Chi phí chất lượng so với all-intra.** Nó đến từ mật độ, không từ tích lũy
+drift: cùng envelope được nhồi vào số ảnh ít hơn GOP lần (container: 36 carrier
+mỗi IDR ở GOP 1, 277 ở GOP 8, 487 ở GOP 25), và méo của mỗi ảnh bị sửa rồi được
+chép vào GOP-1 khung P. Với cùng envelope, PSNR trên khung đổi của container
+giảm từ 60.7 dB xuống 44.2 và 39.3 dB, khung tệ nhất từ 55.6 xuống 40.9 (38.7 ở
+lượt khác) và 32.0 dB. Foreman, có các IDR nghèo carrier, giữ ở 53-54 dB vì số
+thay đổi mỗi IDR nhỏ dù thế nào.
 
-## HD readiness
+## Mức sẵn sàng HD
 
-Tested here on synthetic encodes only (`test_gop_and_hd_support.py`): 1280x720
-with four slices per picture (parse, one slot per slice, carriers in every
-slice, two one-frame segments with disjoint global positions, extraction and
-carrier recomputation equal) and 1920x1080 (SPS 120 x 68, cropped decode
-1920x1080, embed/extract and recomputation equal).
+Test ở đây chỉ trên encode tổng hợp (`test_gop_and_hd_support.py`): 1280x720 với
+bốn slice mỗi ảnh (parse, một slot mỗi slice, carrier trong mọi slice, hai
+segment một-khung với vị trí toàn cục rời nhau, trích và tính lại carrier bằng
+nhau) và 1920x1080 (SPS 120 x 68, giải mã crop 1920x1080, embed/extract và tính
+lại bằng nhau).
 
-**Memory and time** (`benchmark/latticezk_hd_profile.py`, serial analysis,
-one segment = the cut; analysis + embedding + extraction; results in
+**Bộ nhớ và thời gian** (`benchmark/latticezk_hd_profile.py`, phân tích tuần
+tự, một segment = cắt; phân tích + nhúng + trích; kết quả trong
 `benchmark/results/q2/hd_profile_*.json`):
 
-| cut | MBs/picture | coded luma blocks/frame | peak MB/frame | s/frame (3 passes) |
+| cắt | MB/ảnh | block luma mã hóa/khung | đỉnh MB/khung | s/khung (3 pass) |
 |---|---|---|---|---|
-| city 4CIF (natural) | 1 584 | 24 200 | 35.5 | 10.2 |
-| container upscaled to 720p | 3 600 | 38 000 | 69.3 | 8.5 |
-| container upscaled to 1080p | 8 160 | 70 400 | 117 (analysis) | 24.1 |
-| testsrc2 + noise, 1080p (every block coded) | 8 160 | 130 000 | 199 | 41.3 |
+| city 4CIF (tự nhiên) | 1 584 | 24 200 | 35.5 | 10.2 |
+| container upscale lên 720p | 3 600 | 38 000 | 69.3 | 8.5 |
+| container upscale lên 1080p | 8 160 | 70 400 | 117 (phân tích) | 24.1 |
+| testsrc2 + noise, 1080p (mọi block mã hóa) | 8 160 | 130 000 | 199 | 41.3 |
 
-Memory is 1.2-1.6 KB per coded luma block (offsets, coefficients, nC, lengths
-kept per block) plus ~50 MB. Scaling natural 4CIF content per macroblock gives
-**~80 MB per 720p frame and ~180 MB per 1080p frame** (upper bound ~90 / ~200
-MB) of segment, and ~7.7 / ~17.6 s per frame per pass (serial). The peak
-depends on `frames_per_segment` only (one segment is analysed at a time), so
-the HD cases use 25-frame (720p) and 10-frame (1080p) segments: ~2.1 GB and
-~1.9 GB peak. With GOP > 1 only IDR pictures count (a 200-frame GOP 8 segment
-at 720p holds 25 IDRs, ~2.1 GB). Natural HD capacity is not measured; scaling
-4CIF city (~1 000 bits per frame at QP 22) suggests ~2 300 (720p) and ~5 200
-(1080p) bits per frame, so a registered 128-bit envelope needs 2-3 segments.
+Bộ nhớ là 1.2-1.6 KB mỗi block luma mã hóa (offset, hệ số, nC, độ dài giữ theo
+từng block) cộng ~50 MB. Scale nội dung 4CIF tự nhiên theo macroblock cho
+**~80 MB mỗi khung 720p và ~180 MB mỗi khung 1080p** (chặn trên ~90 / ~200 MB)
+của segment, và ~7.7 / ~17.6 s mỗi khung mỗi pass (tuần tự). Đỉnh phụ thuộc
+`frames_per_segment` thôi (mỗi lúc chỉ một segment được phân tích), nên các case
+HD dùng segment 25-khung (720p) và 10-khung (1080p): đỉnh ~2.1 GB và ~1.9 GB.
+Với GOP > 1 chỉ ảnh IDR tính (một segment GOP 8 200 khung ở 720p chứa 25 IDR,
+~2.1 GB). Dung lượng HD tự nhiên chưa đo; scale city 4CIF (~1 000 bit mỗi khung
+ở QP 22) gợi ý ~2 300 (720p) và ~5 200 (1080p) bit mỗi khung, nên một envelope
+registered 128-bit cần 2-3 segment.
 
-### Measured on natural HD cuts (stream C4, partial)
+### Đo trên các cắt HD tự nhiên (stream C4, một phần)
 
-10-frame cuts, libx264 Baseline all-intra QP 22 (`-g 1 -keyint_min 1
--sc_threshold 0 -coder 0 -bf 0`), `frames_per_segment` 5, magnitude carriers,
-`ZKSTEGO_ANALYSIS_WORKERS=2`, run next to another memory-heavy job. Results in
+Các cắt 10 khung, libx264 Baseline all-intra QP 22 (`-g 1 -keyint_min 1
+-sc_threshold 0 -coder 0 -bf 0`), `frames_per_segment` 5, carrier magnitude,
+`ZKSTEGO_ANALYSIS_WORKERS=2`, chạy cạnh một job nặng bộ nhớ khác. Kết quả trong
 `benchmark/results/q2/hd_order_*.json` (`benchmark/latticezk_hd_order.py`).
-The RAM watchdog (available < 1.2 GB, caused by the other job) interrupted
-three of the runs; their files say `"complete": false`, and the benchmarks were
-then deferred.
+Bộ canh RAM (available < 1.2 GB, do job kia gây ra) đã ngắt ba lượt chạy; file
+của chúng ghi `"complete": false`, và các benchmark này sau đó bị hoãn.
 
-| cut | carrier bits / picture | v2 registered envelope (8 165 B) needs |
+| cắt | bit carrier / ảnh | envelope registered v2 (8 165 B) cần |
 |---|---|---|
-| park_joy 720p | 4 668-6 157 (mean 5 455) | 13 pictures (fill 1.0), 14 (0.9), 25 (0.5) |
-| park_joy 720p, 4 slices | 4 666-6 178 (mean 5 474) | same |
-| riverbed 1080p | 147-205 (mean 171) | ~400 pictures; the whole 250-frame clip holds < 43 kbit, so it **does not fit** with magnitude carriers |
+| park_joy 720p | 4 668-6 157 (mean 5 455) | 13 ảnh (fill 1.0), 14 (0.9), 25 (0.5) |
+| park_joy 720p, 4 slice | 4 666-6 178 (mean 5 474) | như trên |
+| riverbed 1080p | 147-205 (mean 171) | ~400 ảnh; cả clip 250-khung chứa < 43 kbit, nên **không vừa** với carrier magnitude |
 
-So the v2 envelope does not fit any 10-frame HD cut; the end-to-end run used
-the registered **TOY** set (413 B): park_joy 720p, adaptive chunks, one
-segment carried 3 584 carriers; `magnitude-geo` verified blind, replay and a
-one-bit tamper were rejected (embed 61 s, verify 52 s, peak process-tree RSS
-477 MB); the original `magnitude` order on the same cut also verified (37 s /
-28 s, 448 MB; random sync keys differ between the two runs).
+Vậy envelope v2 không vừa bất kỳ cắt HD 10-khung nào; lượt chạy end-to-end dùng
+bộ **TOY** registered (413 B): park_joy 720p, adaptive chunk, một segment mang
+3 584 carrier; `magnitude-geo` verify blind, replay và một tamper một-bit bị từ
+chối (embed 61 s, verify 52 s, đỉnh RSS cây tiến trình 477 MB); thứ tự
+`magnitude` gốc trên cùng cắt cũng verify (37 s / 28 s, 448 MB; sync key ngẫu
+nhiên khác giữa hai lượt).
 
-PSNR of the changed frames / worst frame (dB), original CIF-grid order ->
-SPS-geometry order, same payload, key and chunk layout per pair:
+PSNR của các khung đổi / khung tệ nhất (dB), thứ tự lưới-CIF gốc -> thứ tự
+hình-học-SPS, cùng payload, khóa và chunk layout mỗi cặp:
 
-| cut, fill | original | geometry |
+| cắt, fill | gốc | hình học |
 |---|---|---|
 | park_joy 720p, 0.25 (key 0 / key 1) | 42.68 / 37.25, 44.09 / 39.67 | 41.69 / 37.42, 44.14 / 38.67 |
 | park_joy 720p, 0.5 | 37.98 / 33.37 | 40.67 / 34.93 |
 | park_joy 720p, 0.9 | 36.84 / 33.84 | 36.40 / 30.90 |
-| park_joy 720p 4 slices, 0.25 | 43.84 / 39.77 | 45.72 / 41.60 |
-| park_joy 720p 4 slices, 0.5 | 40.00 / 36.29 | 40.96 / 34.88 |
+| park_joy 720p 4 slice, 0.25 | 43.84 / 39.77 | 45.72 / 41.60 |
+| park_joy 720p 4 slice, 0.5 | 40.00 / 36.29 | 40.96 / 34.88 |
 | riverbed 1080p, 0.5 | 49.37 / 47.09 | 51.75 / 49.44 |
-| E2E TOY (12 % of segment 0, different keys) | 48.38 / 46.49 | 46.80 / 42.95 |
+| E2E TOY (12 % của segment 0, khóa khác) | 48.38 / 46.49 | 46.80 / 42.95 |
 
-Over the seven paired runs the geometry order gains +0.9 dB on the changed
-frames on average (range -1.0 to +2.7) and +0.1 dB on the worst frame (range
--2.9 to +2.4): no consistent quality gain at this sample size. Concentrating
-the first carriers in the bottom 22 % of each picture shortens the drift path
-but raises the local change density, and the two effects roughly cancel. The
-geometry contracts are therefore a correctness/consistency fix of the order
-(real pictures, real bottom rows, slice-relative zones), not a demonstrated
-quality improvement. Peak memory: ~690 MB for 5-frame 720p segments
-(analysis + embed + extraction), ~955 MB for 5-frame 1080p segments; ~10 s
-per 720p frame per embed (two analysis passes, reconstruction, decode check)
-under contention.
+Qua bảy lượt theo cặp, thứ tự hình học được +0.9 dB trên các khung đổi trung
+bình (khoảng -1.0 đến +2.7) và +0.1 dB trên khung tệ nhất (khoảng -2.9 đến
++2.4): không có cải thiện chất lượng nhất quán ở cỡ mẫu này. Dồn các carrier đầu
+vào 22 % dưới của mỗi ảnh rút ngắn đường drift nhưng nâng mật độ thay đổi cục
+bộ, và hai hiệu ứng gần như triệt tiêu. Do đó các hợp đồng hình học là một fix
+tính-đúng/nhất-quán của thứ tự (ảnh thật, hàng dưới thật, vùng theo slice),
+không phải một cải thiện chất lượng đã chứng minh. Bộ nhớ đỉnh: ~690 MB cho
+segment 720p 5-khung (phân tích + embed + trích), ~955 MB cho segment 1080p
+5-khung; ~10 s mỗi khung 720p mỗi embed (hai pass phân tích, tái dựng, kiểm tra
+giải mã) dưới tranh chấp.
 
-**Not measured** (deferred): the multi-key repetition (5 of 12 runs done),
-multi-slice and 1080p fill 0.9 with extraction, old_town_cross and pedestrian
-capacity, trailing-one (`t1-geo`) capacity at HD, any v2 (8 165 B) HD end-to-end
-run, and `latticezk_hd_profile` on the natural cuts.
+**Chưa đo** (hoãn): lặp đa khóa (5 trên 12 lượt xong), multi-slice và 1080p fill
+0.9 với trích, dung lượng old_town_cross và pedestrian, dung lượng trailing-one
+(`t1-geo`) ở HD, bất kỳ lượt end-to-end HD v2 (8 165 B) nào, và
+`latticezk_hd_profile` trên các cắt tự nhiên.
 
-## Limits
+## Giới hạn
 
-* Carriers come only from IDR slices; non-IDR I slices and P slices carry
-  nothing (P-slice residual carriers would need motion-compensated drift
-  control and inter CAVLC patching, not attempted).
-* GOP > 1 needs a fixed GOP whose length divides `frames_per_segment`
-  (encode with `-keyint_min G -sc_threshold 0`, closed GOPs, no B frames);
-  open-GOP recovery points, B slices, FMO/ASO and redundant pictures are
-  refused.
-* Drift reaches every frame of a touched GOP. The operating-envelope quality
-  guard (every modified frame >= 40 dB) holds for foreman at GOP 8 (worst
-  44.6 dB), is borderline for container at GOP 8 (40.9 / 38.7 dB in two runs)
-  and fails at GOP 25 (32.0 dB), even with the 413-byte envelope; spreading the envelope over more GOPs (smaller
-  chunks, longer clips) is the lever, as for all-intra.
-* HD memory grows with `frames_per_segment x MBs per picture` (the analysis
-  keeps every coded block's offsets); pick short segments at 1080p.
-* The original contracts' order heuristics assume a CIF grid (order only,
-  pinned); the `*-geo` contracts use the SPS grid, with no consistent PSNR gain
-  measured so far.
-* Magnitude carriers are thin on smooth 1080p content (riverbed: ~171 bits per
-  picture), too few for the 128-bit envelope in the whole clip; such clips need
-  the trailing-one carriers, whose HD capacity is not measured.
-* The 128-bit envelope was not run end to end on GOP > 1 or HD here (machine
-  constraints); the commands are below.
+* Carrier chỉ đến từ slice IDR; slice I không IDR và slice P không mang gì
+  (carrier residual slice P sẽ cần kiểm soát drift bù chuyển động và patching
+  CAVLC inter, chưa thử).
+* GOP > 1 cần một GOP cố định mà độ dài chia hết `frames_per_segment` (mã hóa
+  với `-keyint_min G -sc_threshold 0`, GOP đóng, không khung B); các recovery
+  point open-GOP, slice B, FMO/ASO và ảnh dư bị từ chối.
+* Drift tới mọi khung của một GOP bị chạm. Guard chất lượng operating-envelope
+  (mọi khung bị sửa >= 40 dB) đạt cho foreman ở GOP 8 (tệ nhất 44.6 dB), biên
+  giới cho container ở GOP 8 (40.9 / 38.7 dB trong hai lượt) và thất bại ở GOP 25
+  (32.0 dB), kể cả với envelope 413 byte; trải envelope qua nhiều GOP hơn (chunk
+  nhỏ hơn, clip dài hơn) là đòn bẩy, như với all-intra.
+* Bộ nhớ HD tăng theo `frames_per_segment x MB mỗi ảnh` (phân tích giữ offset
+  của mọi block mã hóa); chọn segment ngắn ở 1080p.
+* Các heuristic thứ tự của hợp đồng gốc giả định lưới CIF (chỉ thứ tự, ghim); các
+  hợp đồng `*-geo` dùng lưới SPS, không có lợi ích PSNR nhất quán nào đo được tới
+  nay.
+* Carrier magnitude mỏng trên nội dung 1080p mượt (riverbed: ~171 bit mỗi ảnh),
+  quá ít cho envelope 128-bit trong cả clip; các clip như vậy cần carrier
+  trailing-one, mà dung lượng HD của nó chưa đo.
+* Envelope 128-bit chưa được chạy end to end trên GOP > 1 hay HD ở đây (ràng
+  buộc máy); các lệnh ở dưới.
 
-## Integrator runs
+## Lệnh cho người tích hợp
 
-No 720p/1080p source is in `data/raw`, and none is in `scripts/data_manifest.json`.
-The Xiph derf sequences used (sizes checked with `curl -I`, 2026-10-21; add
-their SHA-256 to the manifest after download):
+Không có nguồn 720p/1080p trong `data/raw`, và không có trong
+`scripts/data_manifest.json`. Các chuỗi Xiph derf đã dùng (kích thước kiểm bằng
+`curl -I`, 2026-10-21; thêm SHA-256 của chúng vào manifest sau khi tải):
 
 ```sh
 cd VideoLevel
-curl -L -o data/raw/park_joy_420_720p50.y4m       https://media.xiph.org/video/derf/y4m/park_joy_420_720p50.y4m        # 691 MB, 500 frames
-curl -L -o data/raw/old_town_cross_420_720p50.y4m https://media.xiph.org/video/derf/y4m/old_town_cross_420_720p50.y4m  # 691 MB, 500 frames
-curl -L -o data/raw/pedestrian_area_1080p25.y4m   https://media.xiph.org/video/derf/y4m/pedestrian_area_1080p25.y4m    # 1.17 GB, 375 frames
-curl -L -o data/raw/riverbed_1080p25.y4m          https://media.xiph.org/video/derf/y4m/riverbed_1080p25.y4m           # 778 MB, 250 frames
+curl -L -o data/raw/park_joy_420_720p50.y4m       https://media.xiph.org/video/derf/y4m/park_joy_420_720p50.y4m        # 691 MB, 500 khung
+curl -L -o data/raw/old_town_cross_420_720p50.y4m https://media.xiph.org/video/derf/y4m/old_town_cross_420_720p50.y4m  # 691 MB, 500 khung
+curl -L -o data/raw/pedestrian_area_1080p25.y4m   https://media.xiph.org/video/derf/y4m/pedestrian_area_1080p25.y4m    # 1.17 GB, 375 khung
+curl -L -o data/raw/riverbed_1080p25.y4m          https://media.xiph.org/video/derf/y4m/riverbed_1080p25.y4m           # 778 MB, 250 khung
 sha256sum data/raw/*_720p50.y4m data/raw/*_1080p25.y4m
 ```
 
-1. HD sweep (encode, capacity scan, registered BDLOP_OPEN_128 E2E with
-   replay/tamper checks, classical steganalysis), one case at a time:
+1. Sweep HD (mã hóa, quét dung lượng, E2E BDLOP_OPEN_128 registered với kiểm
+   tra replay/tamper, steganalysis cổ điển), một case mỗi lần:
 
    ```sh
    ZKSTEGO_ANALYSIS_WORKERS=2 python -m benchmark.latticezk_q2_sweep \
        --cases benchmark/latticezk_hd_cases.json --workers 1 --work tmp/hd_sweep
    ```
 
-   The cases use `magnitude-geo` (720p) / `t1-geo` (1080p) with capacity-adaptive
-   chunks (no capacity scan; the greedy plan stops at the segment that
-   completes the envelope, so only those segments are analysed) and short
-   segments (10 frames at 720p, 5 at 1080p, 80 = 10 IDRs for the GOP 8 case).
-   Estimate from the measurements above: peak ~1.1 GB per process at 720p
-   (10-frame segments) and ~1 GB at 1080p (5-frame segments), plus ffmpeg.
-   park_joy 720p needs ~14 pictures (2 segments): ~10-15 min with the
-   security checks; old_town_cross 720p is unmeasured (budget 30-60 min);
-   the GOP 8 park_joy case ~2 segments of 10 IDRs, ~20-30 min. The 1080p
-   `t1-geo` cases are the uncertain part: sign-bit analysis cost ~17 s per
-   4CIF frame and pass, i.e. ~90 s per 1080p frame and pass, and their capacity
-   is unknown; measure it first and drop or resize those cases if it is low:
+   Các case dùng `magnitude-geo` (720p) / `t1-geo` (1080p) với chunk thích ứng
+   theo dung lượng (không quét dung lượng; kế hoạch greedy dừng ở segment hoàn
+   tất envelope, nên chỉ các segment đó được phân tích) và segment ngắn (10 khung
+   ở 720p, 5 ở 1080p, 80 = 10 IDR cho case GOP 8). Ước tính từ các số đo trên:
+   đỉnh ~1.1 GB mỗi tiến trình ở 720p (segment 10-khung) và ~1 GB ở 1080p
+   (segment 5-khung), cộng ffmpeg. park_joy 720p cần ~14 ảnh (2 segment): ~10-15
+   phút với các kiểm tra bảo mật; old_town_cross 720p chưa đo (ngân sách 30-60
+   phút); case GOP 8 park_joy ~2 segment 10 IDR, ~20-30 phút. Các case `t1-geo`
+   1080p là phần không chắc chắn: phân tích sign-bit tốn ~17 s mỗi khung 4CIF mỗi
+   pass, tức ~90 s mỗi khung 1080p mỗi pass, và dung lượng của chúng chưa biết;
+   đo nó trước và bỏ hoặc chỉnh cỡ các case đó nếu nó thấp:
    `ZKSTEGO_ANALYSIS_WORKERS=2 python -m benchmark.latticezk_capacity_scan data/encoded/riverbed_1080p_q22_g1_100f.h264 --carrier t1-geo --frames-per-segment 2 --segments 1`.
-   Ordering comparison on a cut:
-   `python -m benchmark.latticezk_hd_order --video <cut> --frames-per-segment 5 --fill 0.25 0.5 --keys 3 --output benchmark/results/q2/hd_order_<name>.json`.
-2. 128-bit envelope at GOP > 1 (CIF, looped sources; IDR-only analysis, peak
-   < 1 GB):
+   So sánh thứ tự trên một cắt:
+   `python -m benchmark.latticezk_hd_order --video <cắt> --frames-per-segment 5 --fill 0.25 0.5 --keys 3 --output benchmark/results/q2/hd_order_<name>.json`.
+2. Envelope 128-bit ở GOP > 1 (CIF, nguồn lặp; phân tích chỉ-IDR, đỉnh < 1 GB):
 
    ```sh
    ZKSTEGO_ANALYSIS_WORKERS=2 python -m benchmark.latticezk_gop_eval \
@@ -382,6 +367,6 @@ sha256sum data/raw/*_720p50.y4m data/raw/*_1080p25.y4m
        --only container_g8_3000f_reg128 coastguard_g8_3000f_reg128 container_g25_6000f_reg128
    ```
 
-   Expected: container GOP 8 needs ~7 segments of 200 frames (1 400 frames),
-   coastguard GOP 8 ~8 (1 600), container GOP 25 ~17 (3 400); 10-30 min each.
-3. The CIF short cases are reproduced by the same command without `--only`.
+   Kỳ vọng: container GOP 8 cần ~7 segment 200 khung (1 400 khung), coastguard
+   GOP 8 ~8 (1 600), container GOP 25 ~17 (3 400); 10-30 phút mỗi cái.
+3. Các case CIF ngắn được tái lập bằng cùng lệnh không có `--only`.
