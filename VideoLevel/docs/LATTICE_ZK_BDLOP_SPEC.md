@@ -367,11 +367,18 @@ with polynomial loss.
   rejection loops.
 - In-band mode does not authenticate the creator; the session challenge is
   not secret, so issue it over an authenticated channel if that matters.
-- Proving that each payload bit is 0 or 1 is not part of this version. An
-  optional, separate proof that a base commitment hides a 256-bit binary
-  string, over this same ring, is described in `docs/BINARY_PROOF_DESIGN.md`
-  (`src/lattice_zk/binary_proof.py`); it changes nothing specified here, and
-  the payload encoding of 3.2 is not binary.
+- The opening proof of this version says nothing about the message. Two
+  optional, separate proofs over this same ring change nothing specified
+  here: a proof that a base commitment hides a 256-bit binary string
+  (`docs/BINARY_PROOF_DESIGN.md`, `src/lattice_zk/binary_proof.py`), and a
+  payload range proof that a payload commitment of 3.2 hides
+  `encode(p)` for some `p` of a public length `L ≤ 128` bytes, i.e. every
+  coefficient is a 24-bit packing of payload bytes with the length field and
+  zero padding of 3.2 (`docs/PAYLOAD_RANGE_PROOF.md`,
+  `src/lattice_zk/payload_range_proof.py`, 44 558 bytes for `L ≤ 32`). The
+  latter applies to the commitment of an existing in-band envelope or
+  credential and can be sent out of band; it reveals `L`. A hidden-length or
+  full 24-bit (all 256 coefficients) range proof is not provided.
 
 ## 8. References
 

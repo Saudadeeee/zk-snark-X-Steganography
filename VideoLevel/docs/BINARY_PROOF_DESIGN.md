@@ -127,6 +127,18 @@ Knowledge of the relaxed opening is extracted by forking the last
 round exactly as in spec §4.3 (three accepting transcripts with pairwise
 invertible challenge differences pin `P̄ = 0`, as in the equality proof).
 
+The multi-round Fiat–Shamir-with-aborts composition is now written out
+(paper, Theorem `thm:bin-ks`): aborts repeat only the last round, so a
+rejected attempt is just a discarded `H_4` query; the extractor forks only
+`H_4` (the Σ-protocol case of AFK22, expected `3 + 2Q` runs, error
+`(Q + 1)·2/|C|`); and the three statistical rounds are bounded against the
+*computationally* bound messages by a plurality/forking argument, giving
+`(Q + 1)·ε_i + sqrt((Q + 1)·α_i)` per round with `α_i` the success
+probability of an explicit M-SIS finder. Total:
+`ε ≤ (Q + 1)·ε_rbr + Σ_i sqrt((Q + 1)·α_i) + β + Q²·2^-256`. Remaining gaps
+are listed after the theorem (non-tight M-SIS terms, adaptive prefix in
+AFK22, `SampleInBall` modelled as uniform, classical ROM only).
+
 Consistency of masked openings: from two transcripts `y* = z − c r̄/f̄` is the
 same for all accepting `c` unless `f̄(z − z'') − (c − c'')r̄` is a nonzero M-SIS
 solution of norm `≤ 8κB` (the bound of spec §4.4), for `B1` and for `B1'`.
@@ -203,11 +215,13 @@ and produced that file.
   it in-band needs a new envelope version and the carrier capacity measured
   by the Q2 sweep. Out-of-band (registered mode, or alongside a disclosure)
   needs no format change. The integrator decides.
-- Linking a binary commitment to an existing payload commitment needs a proof
-  of the Z_q-linear bit-packing relation between the two messages; the same
-  `ct`/`ρ` technique applies (one more functional), but it is not implemented.
-  A range proof for 24-bit coefficients by bit decomposition would cost
-  `24·(1 + k)` auxiliary polynomials and is not practical at this size.
+- Implemented since: `payload_range_proof.py` (`docs/PAYLOAD_RANGE_PROOF.md`)
+  proves that an existing payload commitment hides `encode_payload(p)` for a
+  public length `L ≤ 128`, by committing the payload bits in the auxiliary
+  commitment and adding the Z_q-linear link `m = e_L + A β` as one more term of
+  the check functionals (44 558 B for `L ≤ 32`). A range proof of all 256
+  coefficients by 24 bit-planes would cost `24·(1 + k)` auxiliary
+  polynomials (256 526 B, acceptance `8·10^-10`) and remains impractical.
 
 ## 9. Measured results
 
@@ -232,9 +246,10 @@ and of `fast_ring.py`.
 1. Check the round-by-round analysis (Section 4), in particular that the
    masks `g_t` committed after `γ` but before `ρ` cannot be exploited, and
    that `ct(h_t) = 0` via the encoding is equivalent to an explicit check.
-2. Check the multi-round Fiat–Shamir-with-aborts composition: aborts restart
-   only the last round with the earlier seeds fixed; extraction forks only the
-   last hash.
+2. Check the multi-round Fiat–Shamir-with-aborts composition, now written out
+   as Theorem `thm:bin-ks` (aborts restart only the last round with the
+   earlier seeds fixed; extraction forks only the last hash; statistical
+   rounds by a plurality argument with a square-root M-SIS term).
 3. Confirm the auxiliary M-SIS/M-LWE estimates with the pinned estimator.
 4. `k = k' = 5` gives `2^-150` per round. Matching the `2^-256` challenge
    space would need `k = k' = 9` (about +12 KB).
