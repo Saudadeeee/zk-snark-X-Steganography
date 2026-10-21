@@ -1,5 +1,19 @@
 \documentclass[journal]{IEEEtran}
-\usepackage[T1]{fontenc}
+% Vietnamese rendering: build with pdfLaTeX using the T5 (Vietnamese) font
+% encoding. vntex supplies T5-encoded Times/Helvetica/Courier -- the three
+% families IEEEtran uses (\rmdefault=ptm, \sfdefault=phv, tt=pcr) -- so the
+% diacritics render while the Times look and the \IEEEPARstart drop cap are
+% preserved and \documentclass is unchanged. Supported build command:
+%   latexmk -pdf main.tex        (pdf_mode=1 in .latexmkrc)
+% A Unicode-engine branch (LuaLaTeX/XeLaTeX + fontspec) is guarded so the
+% source still compiles there, but pdfLaTeX+T5 is the supported/tested build.
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[utf8]{inputenc}
+  \usepackage[T5]{fontenc}
+\else
+  \usepackage{fontspec}
+\fi
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{booktabs}
 \usepackage{graphicx}
