@@ -178,229 +178,230 @@ $2\beta<q$, \texttt{params.py:53--54}), nên $x$ là một vector ngắn khác k
 cả theo modulo $q$ lẫn trên $\mathbb Z$. Phép rút gọn cấy ma trận của nó làm
 $B_1'$, lấy mẫu $b_2'$ và xuất ra $x$. \qed
 
-\subsection{Proof of Lemma~\ref{lem:row}}
+\subsection{Chứng minh Bổ đề~\ref{lem:row}}
 
-\begin{lemma}[Hiding instance]
+\begin{lemma}[Thể hiện che giấu]
 \label{lem:mlwe-instance}
-There is an efficient map that, for any $m$ chosen after seeing
-$\mathsf{ck}$, sends an M-LWE instance $(A,u)$, $A\in\Rq^{(n+1)\times\lambda}$,
-to $(\mathsf{ck},t)$ with $\mathsf{ck}$ uniform, such that $t=\Com(m;r)$ with
-$r\leftarrow S_1^k$ if $u=As+e$, and $t$ is uniform if $u$ is uniform.
+Tồn tại một ánh xạ hiệu quả mà, với bất kỳ $m$ nào được chọn sau khi thấy
+$\mathsf{ck}$, gửi một thể hiện M-LWE $(A,u)$, $A\in\Rq^{(n+1)\times\lambda}$,
+tới $(\mathsf{ck},t)$ với $\mathsf{ck}$ đều, sao cho $t=\Com(m;r)$ với
+$r\leftarrow S_1^k$ nếu $u=As+e$, và $t$ đều nếu $u$ đều.
 \end{lemma}
 \begin{proof}
-Write $A=\bigl[\begin{smallmatrix}A_1\\a_2\end{smallmatrix}\bigr]$ and
-$u=(u_1,u_2)$. Draw $B_{1,2}'\leftarrow\Rq^{n\times1}$ and set $b_2'=a_2$,
-$B_{1,3}'=A_1+B_{1,2}'a_2$, which makes $\mathsf{ck}$ uniform. Given $m$, set
-$t_2=u_2+m$ and $t_1=u_1+B_{1,2}'u_2$. If $u=As+e$ with $e=(e_1,e_2)$ and
-$r=(e_1,e_2,s)$, then $\langle b_2,r\rangle=e_2+a_2s=u_2$ and
-$B_1r=e_1+B_{1,2}'e_2+(A_1+B_{1,2}'a_2)s=u_1+B_{1,2}'u_2$, so $t=\Com(m;r)$
-with $r$ uniform ternary. If $u$ is uniform, so is $t$, because
-$(u_1,u_2)\mapsto(u_1+B_{1,2}'u_2,u_2+m)$ is a bijection.
+Viết $A=\bigl[\begin{smallmatrix}A_1\\a_2\end{smallmatrix}\bigr]$ và
+$u=(u_1,u_2)$. Rút $B_{1,2}'\leftarrow\Rq^{n\times1}$ và đặt $b_2'=a_2$,
+$B_{1,3}'=A_1+B_{1,2}'a_2$, điều này làm $\mathsf{ck}$ đều. Cho $m$, đặt
+$t_2=u_2+m$ và $t_1=u_1+B_{1,2}'u_2$. Nếu $u=As+e$ với $e=(e_1,e_2)$ và
+$r=(e_1,e_2,s)$, thì $\langle b_2,r\rangle=e_2+a_2s=u_2$ và
+$B_1r=e_1+B_{1,2}'e_2+(A_1+B_{1,2}'a_2)s=u_1+B_{1,2}'u_2$, nên $t=\Com(m;r)$
+với $r$ đều bậc ba. Nếu $u$ đều thì $t$ cũng đều, bởi vì
+$(u_1,u_2)\mapsto(u_1+B_{1,2}'u_2,u_2+m)$ là một song ánh.
 \end{proof}
 
-Now let $\mathcal A$ output $(j,\bar r,f)$ with $f\in\Cdiff$,
-$\norm{\bar r}_\infty\le2B$ and $ft^{(j)}_1=B_1\bar r$, and put $x=fr_j-\bar r$.
-Then $B_1x=ft_1^{(j)}-ft_1^{(j)}=0$ and $\norm{x}_\infty\le2\kappa+2B<q/2$.
+Bây giờ cho $\mathcal A$ xuất ra $(j,\bar r,f)$ với $f\in\Cdiff$,
+$\norm{\bar r}_\infty\le2B$ và $ft^{(j)}_1=B_1\bar r$, và đặt $x=fr_j-\bar r$.
+Khi đó $B_1x=ft_1^{(j)}-ft_1^{(j)}=0$ và $\norm{x}_\infty\le2\kappa+2B<q/2$.
 
-\emph{Case $x\neq0$.} An M-SIS adversary plants its matrix as $B_1'$, samples
-$b_2'$, generates every $t^{(j)}$ itself (so it knows every $r_j$), and outputs
-$x$. Hence $\Pr[x\neq0]\le\Adv^{\MSIS}$.
+\emph{Trường hợp $x\neq0$.} Một đối thủ M-SIS cấy ma trận của nó làm $B_1'$,
+lấy mẫu $b_2'$, tự sinh mọi $t^{(j)}$ (nên nó biết mọi $r_j$), và xuất ra
+$x$. Do đó $\Pr[x\neq0]\le\Adv^{\MSIS}$.
 
-\emph{Case $x=0$.} Then $\bar r\equiv fr_j$, so $r_j$ is the centered
-representative of $f^{-1}\bar r\bmod q$. An M-LWE distinguisher guesses
-$j_0\leftarrow[Q]$, builds $\mathsf{ck}$ and $t^{(j_0)}$ from its instance by
-Lemma~\ref{lem:mlwe-instance} (with the message $m_{j_0}$ that $\mathcal A$
-chooses), generates the other commitments honestly, and outputs $1$ iff
-$\mathcal A$ returns $j=j_0$ and $r'=\mathrm{center}(f^{-1}\bar r)$ is ternary
-with $\Com(m_{j_0};r')=t^{(j_0)}$. On a real instance it outputs $1$ with
-probability at least $\Pr[x=0]/Q$. On a uniform instance $t^{(j_0)}$ is uniform
-and independent of $m_{j_0}$, so a ternary opening exists with probability at
-most $|S_1^k|/q^{(n+1)N}=3^{kN}q^{-(n+1)N}$. Hence
+\emph{Trường hợp $x=0$.} Khi đó $\bar r\equiv fr_j$, nên $r_j$ là đại diện tâm
+hóa của $f^{-1}\bar r\bmod q$. Một bộ phân biệt M-LWE đoán
+$j_0\leftarrow[Q]$, dựng $\mathsf{ck}$ và $t^{(j_0)}$ từ thể hiện của nó bằng
+Bổ đề~\ref{lem:mlwe-instance} (với thông điệp $m_{j_0}$ mà $\mathcal A$
+chọn), sinh các cam kết còn lại một cách trung thực, và xuất ra $1$ khi và chỉ
+khi $\mathcal A$ trả về $j=j_0$ và $r'=\mathrm{center}(f^{-1}\bar r)$ là bậc ba
+với $\Com(m_{j_0};r')=t^{(j_0)}$. Trên một thể hiện thực, nó xuất ra $1$ với
+xác suất ít nhất $\Pr[x=0]/Q$. Trên một thể hiện đều, $t^{(j_0)}$ đều và độc
+lập với $m_{j_0}$, nên một phần mở bậc ba tồn tại với xác suất tối đa
+$|S_1^k|/q^{(n+1)N}=3^{kN}q^{-(n+1)N}$. Do đó
 $\Pr[x=0]\le Q(\Adv^{\MLWE}+3^{kN}q^{-(n+1)N})$. \qed
 
-\subsection{Proof of Theorem~\ref{thm:hiding}}
+\subsection{Chứng minh Định lý~\ref{thm:hiding}}
 
-$H_0$ is $\mathsf{IND}^0$. In $H_1$ all honest proofs, including the challenge
-proof, are simulated: $|H_0-H_1|\le\epszk(Q_P+1,Q_H)$. In $H_2$ the challenge
-commitment is replaced by a uniform pair; a distinguisher between $H_1$ and
-$H_2$ is an M-LWE distinguisher by Lemma~\ref{lem:mlwe-instance} with
-$m=\mathsf{enc}(p_0)$: it builds $\mathsf{ck}$ from its instance, generates the
-other commitments honestly, answers $\mathcal O_{\mathsf{Disc}}$ and
-$\mathcal O_{\mathsf{Link}}$ for them, and the challenge randomness is never
-needed because the challenge proof is simulated and disclosure and linkage of
-the challenge are excluded. So $|H_1-H_2|\le\Adv^{\MLWE}$. The stego video in
-$H_2$ is $\mathsf{Write}(\vid,P,E)$ with $P$, $D$, $x$ independent of the
-payload (fixed from a placeholder of the final length,
-\texttt{video\_pipeline.py:216--227}), and $E$ contains only $\pid$, $N_s$, a
-uniform $t$ and a simulated proof; $H_2$ is therefore independent of $b$. The
-same three hybrids from $\mathsf{IND}^1$ end in the same $H_2$, which gives
-the bound. The payload length is hidden because $\mathsf{enc}$ maps every
-payload of at most 766 bytes to one polynomial and the envelope has a fixed
-size. \qed
+$H_0$ là $\mathsf{IND}^0$. Trong $H_1$, mọi chứng minh trung thực, bao gồm cả
+chứng minh thách thức, đều được mô phỏng: $|H_0-H_1|\le\epszk(Q_P+1,Q_H)$.
+Trong $H_2$, cam kết thách thức được thay bằng một cặp đều; một bộ phân biệt
+giữa $H_1$ và $H_2$ là một bộ phân biệt M-LWE theo Bổ đề~\ref{lem:mlwe-instance}
+với $m=\mathsf{enc}(p_0)$: nó dựng $\mathsf{ck}$ từ thể hiện của nó, sinh các
+cam kết còn lại một cách trung thực, trả lời $\mathcal O_{\mathsf{Disc}}$ và
+$\mathcal O_{\mathsf{Link}}$ cho chúng, và không bao giờ cần tính ngẫu nhiên của
+thách thức vì chứng minh thách thức được mô phỏng và việc tiết lộ cùng liên kết
+của thách thức bị loại trừ. Vậy $|H_1-H_2|\le\Adv^{\MLWE}$. Video stego trong
+$H_2$ là $\mathsf{Write}(\vid,P,E)$ với $P$, $D$, $x$ độc lập với tải trọng
+(được cố định từ một placeholder có độ dài cuối cùng,
+\texttt{video\_pipeline.py:216--227}), và $E$ chỉ chứa $\pid$, $N_s$, một
+$t$ đều và một chứng minh được mô phỏng; do đó $H_2$ độc lập với $b$. Cùng ba
+bước lai đó xuất phát từ $\mathsf{IND}^1$ kết thúc ở cùng $H_2$, điều này cho
+ta cận. Độ dài tải trọng được che giấu bởi vì $\mathsf{enc}$ ánh xạ mọi tải
+trọng dài tối đa 766 byte tới một đa thức và envelope có kích thước cố định. \qed
 
-\subsection{Proof of Theorem~\ref{thm:replay}}
+\subsection{Chứng minh Định lý~\ref{thm:replay}}
 
-We model the store as a linearizable table keyed by
+Chúng tôi mô hình hóa kho như một bảng tuyến tính hóa được, khóa theo
 $d(N)=\mathrm{SHA256}(\text{tag}\|N)$ (\texttt{zkp\_sessions.py:113--117}).
-Rows are inserted only by $\mathsf{Issue}$ with a fresh uniform $N$
-(\texttt{:132--151}) and deleted only once expired (\texttt{:140--143}).
-Acceptance requires the preflight \texttt{is\_active} and then
-\texttt{consume}, an \texttt{UPDATE} with the conditions
-\texttt{consumed\_at IS NULL}, matching binding and \texttt{expires\_at>now},
-committed inside \texttt{BEGIN IMMEDIATE}, returning success iff exactly one
-row changed (\texttt{:181--205}).
+Các hàng chỉ được chèn bởi $\mathsf{Issue}$ với một $N$ đều mới
+(\texttt{:132--151}) và chỉ bị xóa một khi đã hết hạn (\texttt{:140--143}).
+Sự chấp nhận đòi hỏi bước tiền kiểm \texttt{is\_active} rồi
+\texttt{consume}, một \texttt{UPDATE} với các điều kiện
+\texttt{consumed\_at IS NULL}, ràng buộc khớp và \texttt{expires\_at>now},
+được commit bên trong \texttt{BEGIN IMMEDIATE}, trả về thành công khi và chỉ
+khi đúng một hàng thay đổi (\texttt{:181--205}).
 
-(i) After the first successful \texttt{consume} of a row, the condition
-\texttt{consumed\_at IS NULL} fails for that row forever; a second success for
-the same $N_s$ needs another row with key $d(N_s)$, i.e.\ a later issuance of
-some $N'$ with $d(N')=d(N_s)$: either $N'=N_s$ (probability at most
-$Q_I^22^{-257}$ over all pairs of issuances) or a SHA-256 collision.
-(ii) Any row with key $d(N_s^*)$ comes from an issuance of some $N$ with
-$d(N)=d(N_s^*)$, so $N_s^*$ was issued unless SHA-256 collides; the binding
-and expiry are part of the \texttt{WHERE} clause, evaluated at consumption
-time. (iii) The session field occupies bytes $106$--$137$ (0-indexed) of every statement,
-and $x^*$ is a substring of the point $(\pid,x^*,t^*,w^*)$. A query made
-before the issuance of $N_s^*$ fixes this field before $N_s^*$ is drawn, so it
-matches with probability $2^{-256}$; a union bound over $Q_H$ queries and $Q_I$
-sessions gives $Q_HQ_I2^{-256}$. \qed
+(i) Sau lần \texttt{consume} thành công đầu tiên của một hàng, điều kiện
+\texttt{consumed\_at IS NULL} vĩnh viễn thất bại cho hàng đó; một lần thành
+công thứ hai cho cùng $N_s$ cần một hàng khác với khóa $d(N_s)$, tức một lần
+phát hành về sau của một $N'$ nào đó với $d(N')=d(N_s)$: hoặc $N'=N_s$ (xác
+suất tối đa $Q_I^22^{-257}$ trên mọi cặp lần phát hành) hoặc một va chạm
+SHA-256. (ii) Bất kỳ hàng nào với khóa $d(N_s^*)$ đều đến từ một lần phát hành
+của một $N$ nào đó với $d(N)=d(N_s^*)$, nên $N_s^*$ đã được phát hành trừ khi
+SHA-256 va chạm; ràng buộc và thời điểm hết hạn là một phần của mệnh đề
+\texttt{WHERE}, được đánh giá tại thời điểm tiêu thụ. (iii) Trường phiên chiếm
+các byte $106$--$137$ (đánh chỉ số từ 0) của mọi phát biểu, và $x^*$ là một
+chuỗi con của điểm $(\pid,x^*,t^*,w^*)$. Một truy vấn thực hiện trước lần phát
+hành $N_s^*$ cố định trường này trước khi $N_s^*$ được rút, nên nó khớp với xác
+suất $2^{-256}$; một cận hợp trên $Q_H$ truy vấn và $Q_I$ phiên cho
+$Q_HQ_I2^{-256}$. \qed
 
-\subsection{Proof of Theorem~\ref{thm:auth}}
+\subsection{Chứng minh Định lý~\ref{thm:auth}}
 
-Let $W_a$, $W_b$ be the two winning cases.
+Gọi $W_a$, $W_b$ là hai trường hợp thắng.
 
-$W_a$: $\mathsf{Pins}$ verifies $\mathsf{Reg}^*$ under $\mathit{pk}_I$
-(\texttt{video\_pipeline.py:146--147}). If its signing bytes were never signed
-through $\mathcal O_{\mathsf{Reg}}$, it is an EUF-CMA forgery; the reduction
-runs the whole experiment, using its signing oracle for
-$\mathcal O_{\mathsf{Reg}}$. Otherwise $\mathsf{Reg}^*$ is a signed registry
-and contains a descriptor equal to the registered descriptor of $t^*$
-(\texttt{:150--153}). That descriptor has the registered constraint-module
-hash, so it is not in any $\Delta$ (in-band descriptors have a different
-module hash, unless SHA-256 collides on the two fixed module strings), and it
-was computed from some $t'\in T_{\mathsf{reg}}$. Since $t^*\notin T_{\mathsf{reg}}$,
-$t'\neq t^*$ and the canonical encodings differ, so
+$W_a$: $\mathsf{Pins}$ kiểm chứng $\mathsf{Reg}^*$ dưới $\mathit{pk}_I$
+(\texttt{video\_pipeline.py:146--147}). Nếu các byte ký của nó chưa bao giờ
+được ký qua $\mathcal O_{\mathsf{Reg}}$, thì đó là một chữ ký giả mạo EUF-CMA;
+phép rút gọn chạy toàn bộ thí nghiệm, dùng oracle ký của nó cho
+$\mathcal O_{\mathsf{Reg}}$. Ngược lại $\mathsf{Reg}^*$ là một sổ đăng ký đã ký
+và chứa một mô tả bằng với mô tả đã đăng ký của $t^*$
+(\texttt{:150--153}). Mô tả đó có giá trị băm module-ràng-buộc đã đăng ký, nên
+nó không nằm trong bất kỳ $\Delta$ nào (các mô tả in-band có một giá trị băm
+module khác, trừ khi SHA-256 va chạm trên hai chuỗi module cố định), và nó
+được tính từ một $t'\in T_{\mathsf{reg}}$ nào đó. Vì $t^*\notin T_{\mathsf{reg}}$,
+$t'\neq t^*$ và các mã hóa chuẩn tắc khác nhau, nên
 $\mathrm{SHA256}(B_1'\|b_2'\|t^*)=\mathrm{SHA256}(B_1'\|b_2'\|t')$
-(\texttt{:119--128}) is a collision. Hence
+(\texttt{:119--128}) là một va chạm. Do đó
 $\Pr[W_a]\le\Adv^{\mathsf{euf\text{-}cma}}_{\mathsf{ML\text{-}DSA}}+\Adv^{\mathsf{cr}}_{\mathsf{SHA2}}$.
 
-$W_b$: simulate all honest proofs ($\epszk$) and handle the programmed-point
-case as in Theorem~\ref{thm:se} ($\Adv^{\MSIS}$). The remaining runner
-$\mathcal B$ receives the honest credentials as a $Q_C$-instance challenge of
-Lemma~\ref{lem:row}, never uses their randomness (all proofs are simulated,
-and a disclosure query for an instance aborts the run, which does not affect
-runs in which $\mathcal A$ wins with an undisclosed $j$), and outputs the
-index of the verifier's fresh query. Lemma~\ref{lem:fork} extracts a relaxed
-opening of $t^*=t_c^{(j)}$, which is a Lemma~\ref{lem:row} adversary, so
-$\varepsilon_{\mathsf{ext}}\le\Adv^{\mathsf{row}}_{Q_C}$. Adding the cases
-gives the theorem.
+$W_b$: mô phỏng mọi chứng minh trung thực ($\epszk$) và xử lý trường hợp
+điểm-đã-lập-trình như trong Định lý~\ref{thm:se} ($\Adv^{\MSIS}$). Bộ chạy còn
+lại $\mathcal B$ nhận các chứng chỉ trung thực như một thách thức $Q_C$-thể-hiện
+của Bổ đề~\ref{lem:row}, không bao giờ dùng tính ngẫu nhiên của chúng (mọi chứng
+minh đều được mô phỏng, và một truy vấn tiết lộ cho một thể hiện làm hủy lần
+chạy, điều này không ảnh hưởng tới các lần chạy mà $\mathcal A$ thắng với một
+$j$ chưa tiết lộ), và xuất ra chỉ số của truy vấn mới của bên kiểm chứng.
+Bổ đề~\ref{lem:fork} trích xuất một phần mở nới lỏng của $t^*=t_c^{(j)}$, vốn
+là một đối thủ của Bổ đề~\ref{lem:row}, nên
+$\varepsilon_{\mathsf{ext}}\le\Adv^{\mathsf{row}}_{Q_C}$. Cộng các trường hợp
+cho ta định lý.
 
-A tight alternative for $W_b$ follows the ML-DSA analysis: after replacing the
-credential by a uniform pair (M-LWE), an accepted proof is a solution of the
-SelfTargetMSIS problem for $[B_1\,|\,t_1]$ and $\Hfs$~\cite{ref:kls18}, without
-rewinding. We state the rewinding bound because it uses only the estimated
-M-SIS and M-LWE instances. \qed
+Một phương án chặt thay thế cho $W_b$ theo phân tích ML-DSA: sau khi thay chứng
+chỉ bằng một cặp đều (M-LWE), một chứng minh được chấp nhận là một nghiệm của
+bài toán SelfTargetMSIS cho $[B_1\,|\,t_1]$ và $\Hfs$~\cite{ref:kls18}, không
+cần tua lại. Chúng tôi phát biểu cận có tua lại vì nó chỉ dùng các thể hiện
+M-SIS và M-LWE đã ước lượng. \qed
 
-\subsection{Proofs for linkage (Theorem~\ref{thm:link})}
+\subsection{Các chứng minh cho liên kết (Định lý~\ref{thm:link})}
 
-\begin{lemma}[Special soundness of the equality proof]
+\begin{lemma}[Tính đúng đắn đặc biệt của chứng minh đẳng thức]
 \label{lem:eq-ss}
-Two accepting transcripts $((w_a,w_b,u),c,z_a,z_b)$ and
-$((w_a,w_b,u),c',z_a',z_b')$ with $c\neq c'$ yield relaxed openings
-$(\bar r_a,f)$ of $t_a$ and $(\bar r_b,f)$ of $t_b$, $f=c-c'$, with equal
-messages.
+Hai bản ghi được chấp nhận $((w_a,w_b,u),c,z_a,z_b)$ và
+$((w_a,w_b,u),c',z_a',z_b')$ với $c\neq c'$ cho ra các phần mở nới lỏng
+$(\bar r_a,f)$ của $t_a$ và $(\bar r_b,f)$ của $t_b$, $f=c-c'$, với các thông
+điệp bằng nhau.
 \end{lemma}
 \begin{proof}
-The verifier checks $B_1z_a=w_a+ct_{1,a}$, $B_1z_b=w_b+ct_{1,b}$ and
+Bên kiểm chứng kiểm tra $B_1z_a=w_a+ct_{1,a}$, $B_1z_b=w_b+ct_{1,b}$ và
 $\langle b_2,z_a-z_b\rangle=u+c(t_{2,a}-t_{2,b})$
-(\texttt{equality\_proof.py:135--145}). Subtracting the two transcripts gives
-$B_1\bar r_a=ft_{1,a}$, $B_1\bar r_b=ft_{1,b}$ and
-$\langle b_2,\bar r_a-\bar r_b\rangle=f(t_{2,a}-t_{2,b})$ with
-$\bar r_\ast=z_\ast-z_\ast'$, $\norm{\bar r_\ast}_\infty\le2B$. Then
+(\texttt{equality\_proof.py:135--145}). Trừ hai bản ghi cho ta
+$B_1\bar r_a=ft_{1,a}$, $B_1\bar r_b=ft_{1,b}$ và
+$\langle b_2,\bar r_a-\bar r_b\rangle=f(t_{2,a}-t_{2,b})$ với
+$\bar r_\ast=z_\ast-z_\ast'$, $\norm{\bar r_\ast}_\infty\le2B$. Khi đó
 $\bar m_a-\bar m_b=(t_{2,a}-t_{2,b})-f^{-1}\langle b_2,\bar r_a-\bar r_b\rangle=0$.
 \end{proof}
 
-\emph{Soundness.} Simulate $\mathcal O_{\mathsf{Link}}$ ($\epszk$). If the
-verifier's $H_{\mathsf{eq}}$ point was programmed for the same context and
-commitments, then $c$ is the programmed one and $(z_a,z_b)\neq(z_a^{(i)},z_b^{(i)})$
-with $B_1(z_a-z_a^{(i)})=B_1(z_b-z_b^{(i)})=0$, an M-SIS solution of norm $2B$.
-Otherwise Lemma~\ref{lem:fork}, with the forked oracle $H_{\mathsf{eq}}$ and
-Lemma~\ref{lem:eq-ss} in place of the opening relation, extracts openings with
-a common message $\bar m$. The adversary's first-run openings have messages
-$m_a\neq m_b$, so $m_a\neq\bar m$ or $m_b\neq\bar m$, and
-Theorem~\ref{thm:binding} applied to $t_a$ or $t_b$ gives an M-SIS solution.
-Hence $\varepsilon_{\mathsf{ext}}\le\Adv^{\MSIS}$ in the bound of
-Theorem~\ref{thm:se}.
+\emph{Tính đúng đắn.} Mô phỏng $\mathcal O_{\mathsf{Link}}$ ($\epszk$). Nếu
+điểm $H_{\mathsf{eq}}$ của bên kiểm chứng đã được lập trình cho cùng ngữ cảnh và
+cùng các cam kết, thì $c$ là cái đã lập trình và $(z_a,z_b)\neq(z_a^{(i)},z_b^{(i)})$
+với $B_1(z_a-z_a^{(i)})=B_1(z_b-z_b^{(i)})=0$, một nghiệm M-SIS có chuẩn $2B$.
+Ngược lại Bổ đề~\ref{lem:fork}, với oracle bị rẽ nhánh $H_{\mathsf{eq}}$ và
+Bổ đề~\ref{lem:eq-ss} thay cho quan hệ mở, trích xuất các phần mở với một thông
+điệp chung $\bar m$. Các phần mở lần-chạy-thứ-nhất của đối thủ có các thông điệp
+$m_a\neq m_b$, nên $m_a\neq\bar m$ hoặc $m_b\neq\bar m$, và
+Định lý~\ref{thm:binding} áp dụng cho $t_a$ hoặc $t_b$ cho một nghiệm M-SIS.
+Do đó $\varepsilon_{\mathsf{ext}}\le\Adv^{\MSIS}$ trong cận của
+Định lý~\ref{thm:se}.
 
-\emph{Hiding.} Simulate the proof ($\epszk(Q_P+1,Q_H)$), then replace $t_a$ and
-$t_b$ by uniform pairs, one M-LWE hybrid each (Lemma~\ref{lem:mlwe-instance};
-the randomness is independent). The final game is independent of $b$; doing
-the same from $b=1$ gives $2\epszk+4\Adv^{\MLWE}$.
+\emph{Che giấu.} Mô phỏng chứng minh ($\epszk(Q_P+1,Q_H)$), rồi thay $t_a$ và
+$t_b$ bằng các cặp đều, mỗi cái một bước lai M-LWE (Bổ đề~\ref{lem:mlwe-instance};
+tính ngẫu nhiên là độc lập). Trò chơi cuối cùng độc lập với $b$; làm điều tương
+tự xuất phát từ $b=1$ cho $2\epszk+4\Adv^{\MLWE}$.
 
-\emph{Disclosure by proof.} The equality proof with $t_b=(0,\mathsf{enc}(p))$
-and $r_b=0$ (a ternary opening of $t_b$) proves that $t_a$ hides $p$ without
-revealing $r_a$: extraction gives a relaxed opening $(\bar r_b,f)$ of $t_b$
-with $B_1\bar r_b=0$, so $\bar r_b=0$ unless M-SIS is broken, and then
-$\bar m_b=\mathsf{enc}(p)=\bar m_a$. This is the fix proposed for item~D3.
+\emph{Tiết lộ bằng chứng minh.} Chứng minh đẳng thức với $t_b=(0,\mathsf{enc}(p))$
+và $r_b=0$ (một phần mở bậc ba của $t_b$) chứng minh rằng $t_a$ giấu $p$ mà
+không tiết lộ $r_a$: việc trích xuất cho một phần mở nới lỏng $(\bar r_b,f)$ của
+$t_b$ với $B_1\bar r_b=0$, nên $\bar r_b=0$ trừ khi M-SIS bị phá, và khi đó
+$\bar m_b=\mathsf{enc}(p)=\bar m_a$. Đây là bản sửa được đề xuất cho mục~D3.
 \qed
 
-\subsection{Proof of Lemma~\ref{lem:canon} and Theorem~\ref{thm:integrity}}
+\subsection{Chứng minh Bổ đề~\ref{lem:canon} và Định lý~\ref{thm:integrity}}
 
-\emph{Unique decodability.} For a carrier segment the hashed string is the
-domain tag followed, for each NAL unit, by \texttt{"NAL\textbackslash0"} and a
-fixed 12-byte header, then either \texttt{"RAW\textbackslash0"}, a 64-bit
-length and the RBSP, or a sequence of \texttt{"BITS\textbackslash0"}, a 64-bit
-bit count and the packed bits, alternating with \texttt{"BLOCK\textbackslash0"},
-the 16-byte key and length, and the signed 64-bit levels
-(\texttt{video\_canonicalization.py:234--307}). The four tags differ in their
-first two bytes, every field is fixed-width or length-prefixed, and the
-padding of packed bits is determined by the bit count, so a left-to-right
-parser recovers the whole sequence. The segment combiner hashes a tag, the
-32-bit frames-per-segment and segment count, and fixed-width
-$(i,f_i,d_i)$ triples (\texttt{blind\_sync\_streaming.py:225--233}); $V$ hashes a
-tag and $D$. A difference in $\Canon$ is therefore a difference in the input
-of one of the three SHA-256 layers whose outputs are equal, which is a
-collision. Carrier segments are exactly those containing positions of $P$, so
-for equal $P$ both sides hash each segment in the same mode.
+\emph{Tính giải mã duy nhất.} Đối với một đoạn mang vật mang, chuỗi được băm là
+thẻ miền theo sau, với mỗi đơn vị NAL, bởi \texttt{"NAL\textbackslash0"} và một
+header 12 byte cố định, rồi hoặc \texttt{"RAW\textbackslash0"}, một độ dài 64
+bit và RBSP, hoặc một dãy \texttt{"BITS\textbackslash0"}, một số đếm bit 64 bit
+và các bit đã đóng gói, xen kẽ với \texttt{"BLOCK\textbackslash0"},
+khóa và độ dài 16 byte, và các mức 64 bit có dấu
+(\texttt{video\_canonicalization.py:234--307}). Bốn thẻ khác nhau ở hai byte
+đầu của chúng, mọi trường đều có độ rộng cố định hoặc có tiền tố độ dài, và phần
+đệm của các bit đã đóng gói được xác định bởi số đếm bit, nên một bộ phân tích
+từ trái sang phải khôi phục toàn bộ dãy. Bộ kết hợp đoạn băm một thẻ, số
+khung-mỗi-đoạn và số đếm đoạn 32 bit, và các bộ ba $(i,f_i,d_i)$ có độ rộng cố
+định (\texttt{blind\_sync\_streaming.py:225--233}); $V$ băm một thẻ và $D$. Do
+đó một khác biệt trong $\Canon$ là một khác biệt trong đầu vào của một trong ba
+tầng SHA-256 mà đầu ra của chúng bằng nhau, tức là một va chạm. Các đoạn mang
+vật mang đúng là các đoạn chứa các vị trí của $P$, nên với $P$ bằng nhau, cả hai
+bên băm mỗi đoạn theo cùng chế độ.
 
-\emph{What is determined.} Fix $\Canon$ and $P$. Segments without carriers
-are fixed byte for byte. In a carrier segment, every NAL header field in the
-serialization, every RBSP of a NAL unit without carriers, and every RBSP bit
-outside carrier blocks up to the stop bit are fixed. Each carrier block is
-fixed as a level vector except at carriers, where only the normalized value
-$\nu=\mathrm{sgn}(\ell)2\lfloor|\ell|/2\rfloor$ is fixed. The pipeline enforces
-the stable rule (\texttt{blind\_sync\_streaming.py:268--271}; carriers have
-$|\ell|\ge4$ and the embedder flips the magnitude parity), so
-$\ell=\nu+\mathrm{sgn}(\nu)b$ with $b$ the carrier bit; for the optional
-trailing-one sign carrier, $\ell=\pm1$ with the sign as the bit. The carrier
-bits are written in the order of $P$ as the chunk-framed encoding of $E$.
-If that encoding is unique, $E$ fixes the bits and hence every carrier level.
+\emph{Những gì được xác định.} Cố định $\Canon$ và $P$. Các đoạn không có vật
+mang được cố định từng byte. Trong một đoạn mang vật mang, mọi trường header NAL
+trong phép tuần tự hóa, mọi RBSP của một đơn vị NAL không có vật mang, và mọi
+bit RBSP bên ngoài các khối vật mang cho tới bit dừng đều được cố định. Mỗi khối
+vật mang được cố định dưới dạng một vector mức ngoại trừ tại các vật mang, nơi
+chỉ giá trị chuẩn hóa $\nu=\mathrm{sgn}(\ell)2\lfloor|\ell|/2\rfloor$ được cố
+định. Pipeline bắt buộc quy tắc ổn định (\texttt{blind\_sync\_streaming.py:268--271};
+các vật mang có $|\ell|\ge4$ và bộ nhúng lật chẵn-lẻ độ lớn), nên
+$\ell=\nu+\mathrm{sgn}(\nu)b$ với $b$ là bit vật mang; đối với vật mang dấu
+trailing-one tùy chọn, $\ell=\pm1$ với dấu làm bit. Các bit vật mang được ghi
+theo thứ tự của $P$ dưới dạng mã hóa đóng-khung-chunk của $E$. Nếu mã hóa đó là
+duy nhất, $E$ cố định các bit và do đó mọi mức vật mang.
 
-\emph{Theorem~\ref{thm:integrity}.} Let $(x_h,t,\pi_h)\in L$ be the honest
-triple. If $(x^*,t,\pi^*)\notin L$, the event is bounded as in
-Theorem~\ref{thm:auth}, case $W_b$, with the $Q_P$ honest commitments as the
-Lemma~\ref{lem:row} instances. Otherwise $x^*=x_h$ and $\pi^*=\pi_h$ (each
-honest in-band commitment occurs in one triple except with negligible
-probability; a credential occurs in several, all honest). Equal statements
-give equal $|P|$ and $\mathrm{SHA256}(P)$, hence $P^*=P_h$ unless SHA-256
-collides (the positions are hashed as canonical JSON of integer triples), and
-equal $V$, hence equal $\Canon$ by the first part. The envelope is
-$E^*=\texttt{magic}\|1\|\pid\|N_s\|t\|\pi^*$, and its parser accepts only this
-exact layout (\texttt{video\_proof.py:142--153, 218--228}), so $E^*=E_h$. \qed
+\emph{Định lý~\ref{thm:integrity}.} Gọi $(x_h,t,\pi_h)\in L$ là bộ ba trung
+thực. Nếu $(x^*,t,\pi^*)\notin L$, sự kiện được chặn như trong
+Định lý~\ref{thm:auth}, trường hợp $W_b$, với $Q_P$ cam kết trung thực làm các
+thể hiện của Bổ đề~\ref{lem:row}. Ngược lại $x^*=x_h$ và $\pi^*=\pi_h$ (mỗi cam
+kết in-band trung thực xuất hiện trong một bộ ba ngoại trừ với xác suất không
+đáng kể; một chứng chỉ xuất hiện trong nhiều bộ ba, tất cả đều trung thực). Các
+phát biểu bằng nhau cho $|P|$ và $\mathrm{SHA256}(P)$ bằng nhau, do đó
+$P^*=P_h$ trừ khi SHA-256 va chạm (các vị trí được băm dưới dạng JSON chuẩn tắc
+của các bộ ba số nguyên), và $V$ bằng nhau, do đó $\Canon$ bằng nhau theo phần
+đầu. Envelope là $E^*=\texttt{magic}\|1\|\pid\|N_s\|t\|\pi^*$, và bộ phân tích
+của nó chỉ chấp nhận đúng bố cục này (\texttt{video\_proof.py:142--153, 218--228}),
+nên $E^*=E_h$. \qed
 
-\subsection{Completeness}
+\subsection{Tính đầy đủ}
 
-An accepted attempt satisfies $B_1z-ct_1=B_1y+cB_1r-cB_1r=w$, and for the
-equality proof $\langle b_2,z_a-z_b\rangle-c(t_{2,a}-t_{2,b})=\langle b_2,y_a-y_b\rangle$
-because $t_{2,a}-t_{2,b}=\langle b_2,r_a-r_b\rangle$ for equal messages. By
-Lemma~\ref{lem:hvzk} the number of attempts is geometric with parameter
-$p_{\mathrm{acc}}$ (mean $5.23$) for the opening proof and $p_{\mathrm{acc}}^2$
-(mean $27.4$) for the equality proof. With the caps $\Amax=512$
-(\texttt{opening\_proof.py:33}) and $\Amax=4\,096$
-(\texttt{equality\_proof.py:50}) the prover fails with probability
-$2^{-156.7}$ and $2^{-220.0}$ respectively. Under the shared cap of 512 that
-the reviewed code used, the equality proof failed with probability
-$2^{-35.0}$ for \texttt{bdlop-open-128-v1} (means $4.65$ and $21.6$); this is
-item~D4.
+Một lần thử được chấp nhận thỏa $B_1z-ct_1=B_1y+cB_1r-cB_1r=w$, và đối với chứng
+minh đẳng thức $\langle b_2,z_a-z_b\rangle-c(t_{2,a}-t_{2,b})=\langle b_2,y_a-y_b\rangle$
+bởi vì $t_{2,a}-t_{2,b}=\langle b_2,r_a-r_b\rangle$ với các thông điệp bằng
+nhau. Theo Bổ đề~\ref{lem:hvzk}, số lần thử là hình học với tham số
+$p_{\mathrm{acc}}$ (trung bình $5.23$) cho chứng minh mở và $p_{\mathrm{acc}}^2$
+(trung bình $27.4$) cho chứng minh đẳng thức. Với các ngưỡng $\Amax=512$
+(\texttt{opening\_proof.py:33}) và $\Amax=4\,096$
+(\texttt{equality\_proof.py:50}), bên chứng minh thất bại với xác suất lần lượt
+là $2^{-156.7}$ và $2^{-220.0}$. Dưới ngưỡng chung 512 mà mã được rà soát đã
+dùng, chứng minh đẳng thức thất bại với xác suất $2^{-35.0}$ cho
+\texttt{bdlop-open-128-v1} (trung bình $4.65$ và $21.6$); đây là mục~D4.
 
 \section{Specification and implementation cross-check}
 \label{app:code-check}
