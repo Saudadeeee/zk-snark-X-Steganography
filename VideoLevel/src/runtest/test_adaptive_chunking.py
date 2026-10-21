@@ -230,7 +230,11 @@ def test_existing_profiles_and_v1_framing_are_byte_identical() -> None:
     from src.blind_sync_streaming import _combine_segment_digests
 
     table = {}
-    for name, contract in sorted(CARRIER_CONTRACTS.items()):
+    # The carriers that existed at 10bce11; later contracts (e.g. the *-geo
+    # orders) have their own identifiers and are pinned in their own tests.
+    existing = ("adaptive", "adaptive-texture", "magnitude", "t1")
+    for name in existing:
+        contract = CARRIER_CONTRACTS[name]
         for registered in (False, True):
             for chunk in (1250, 4200, 65535):
                 for policy in (gop_policy.ALL_INTRA, gop_policy.IDR_CARRIERS_INTER_RAW):

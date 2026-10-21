@@ -31,7 +31,13 @@ if str(ROOT) not in sys.path:
 
 from src import gop_policy as gop_policies  # noqa: E402
 from src.adaptive_chunks import AdaptiveChunkPlan  # noqa: E402
-from src.blind_sync import AdaptiveOperatingContract, BlindOperatingContract  # noqa: E402
+from src.blind_sync import (  # noqa: E402
+    T1_SPS_GEOMETRY_CONTRACT_VERSION,
+    AdaptiveOperatingContract,
+    BlindOperatingContract,
+    GeometryOrderedAdaptiveContract,
+    GeometryOrderedOperatingContract,
+)
 from src.lattice_pq import LatticeSigner  # noqa: E402
 from src.lattice_zk import params as parameter_sets  # noqa: E402
 from src.lattice_zk import video_pipeline as pipeline  # noqa: E402
@@ -65,9 +71,20 @@ T1_SIGN_CONTRACT = BlindOperatingContract(
 # (docs/ADAPTIVE_CARRIERS.md): fewer, cheaper changes for the same envelope.
 ADAPTIVE_CONTRACT = AdaptiveOperatingContract()
 ADAPTIVE_TEXTURE_CONTRACT = AdaptiveOperatingContract(cost_model="texture-magnitude-v1")
+# Resolution-aware variants (src/core/carrier_order.py): the same carriers in
+# an order computed on the SPS macroblock grid instead of a CIF 22 x 18 grid.
+# New contract versions, hence new carrier profile ids; the originals above
+# keep their ids, positions and stego bytes.
+GEOMETRY_CONTRACT = GeometryOrderedOperatingContract()
+T1_GEOMETRY_CONTRACT = GeometryOrderedOperatingContract(
+    version=T1_SPS_GEOMETRY_CONTRACT_VERSION, signbit_only=True,
+)
+ADAPTIVE_GEOMETRY_CONTRACT = GeometryOrderedAdaptiveContract()
 CARRIER_CONTRACTS = {
     "magnitude": CONTRACT, "t1": T1_SIGN_CONTRACT,
     "adaptive": ADAPTIVE_CONTRACT, "adaptive-texture": ADAPTIVE_TEXTURE_CONTRACT,
+    "magnitude-geo": GEOMETRY_CONTRACT, "t1-geo": T1_GEOMETRY_CONTRACT,
+    "adaptive-geo": ADAPTIVE_GEOMETRY_CONTRACT,
 }
 DEMO_PAYLOAD = b"zkstego lattice-ZK demo payload: hidden provenance record #0001"
 CODEC_POLICIES = {"v1": pipeline.CODEC_POLICY_V1, "v2": pipeline.CODEC_POLICY_V2}
@@ -453,7 +470,8 @@ def main() -> int:
         "--carrier", choices=sorted(CARRIER_CONTRACTS), default="magnitude",
         help="magnitude: LSB of the first |level|>=4 AC coefficient; t1: trailing-one sign flip; "
         "adaptive: the magnitude carriers, syndrome-trellis coded (fewest changes); "
-        "adaptive-texture: the same with texture/magnitude costs",
+        "adaptive-texture: the same with texture/magnitude costs; *-geo: the same carriers "
+        "ordered on the SPS macroblock grid (resolution-aware, new contract versions)",
     )
     parser.add_argument(
         "--skip-security-checks", action="store_true",

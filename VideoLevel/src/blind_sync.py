@@ -23,6 +23,14 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .core.analysis_cache import load_or_build_video_analysis
+from .core.carrier_order import (
+    CIF_GEOMETRY,
+    SPS_GEOMETRY_ORDER_V1,
+    PictureGeometry,
+    contract_carrier_order,
+    geometry_from_sps,
+    order_carriers,
+)
 from .core.chaos import ChaosTransformer
 from .core.stego import CAVLCSafetyFilter
 from .core.stego import stable_blind_candidate_index as _stable_candidate_index
@@ -159,6 +167,38 @@ class AdaptiveOperatingContract(BlindOperatingContract):
     # "uniform" minimises the number of changes, which measured best against the
     # learned detectors (docs/ADAPTIVE_CARRIERS.md); "texture-magnitude-v1" weights them.
     cost_model: str = "uniform"
+
+
+SPS_GEOMETRY_CONTRACT_VERSION = "stable-carriers-sps-geometry-v1"
+T1_SPS_GEOMETRY_CONTRACT_VERSION = "t1-sign-sps-geometry-v1"
+ADAPTIVE_SPS_GEOMETRY_CONTRACT_VERSION = "adaptive-stc-magnitude-sps-geometry-v1"
+
+
+@dataclass
+class GeometryOrderedOperatingContract(BlindOperatingContract):
+    """A direct contract whose carrier order uses the SPS picture geometry.
+
+    Same carriers as the matching original contract; only their order (and
+    the per-picture grouping of ``max_bits_per_idr`` / ``bottom_rows``)
+    follows ``carrier_order`` (``src.core.carrier_order``) instead of a CIF
+    grid.  The extra field makes ``dataclasses.asdict`` (hence the carrier
+    profile id) differ from every original contract, whose serialisation is
+    unchanged.
+    """
+
+    version: str = SPS_GEOMETRY_CONTRACT_VERSION
+    require_bitstream_patchable: bool = True
+    patchability_headroom: int = 64
+    stable_carriers_only: bool = True
+    carrier_order: str = SPS_GEOMETRY_ORDER_V1
+
+
+@dataclass
+class GeometryOrderedAdaptiveContract(AdaptiveOperatingContract):
+    """The syndrome-trellis coded magnitude contract with geometry-aware order."""
+
+    version: str = ADAPTIVE_SPS_GEOMETRY_CONTRACT_VERSION
+    carrier_order: str = SPS_GEOMETRY_ORDER_V1
 
 
 def is_syndrome_coded(contract: BlindOperatingContract) -> bool:
@@ -729,6 +769,14 @@ def derive_blind_positions_operating_contract(
     )
     seed_base = derive_seed_base(metadata)
     ordering_secret = derive_ordering_key(sync_key, seed_base) if contract.metadata_bound else bytes(sync_key)
+    carrier_order = contract_carrier_order(contract)
+    if carrier_order is None:
+        # Original contracts: CIF grid (396 x 22), pinned for compatibility.
+        geometry = None
+        mb_count, mb_width = cif_mb_count, CIF_GEOMETRY.width_mbs
+    else:
+        geometry = _video_geometry(video_path, use_analysis_cache)
+        mb_count, mb_width = geometry.mbs_per_picture, geometry.width_mbs
 
     if contract.stable_carriers_only:
         safe_set = set(safe_positions)
@@ -740,11 +788,15 @@ def derive_blind_positions_operating_contract(
     if contract.bottom_rows > 0:
         candidates = _filter_bottom_zone(
             candidates,
-            cif_mb_count=cif_mb_count,
+            cif_mb_count=mb_count,
+            cif_mb_width=mb_width,
             bottom_rows=contract.bottom_rows,
         )
 
-    ordered = ChaosTransformer(ordering_secret).shuffle_positions(candidates)
+    if geometry is None:
+        ordered = ChaosTransformer(ordering_secret).shuffle_positions(candidates)
+    else:
+        ordered = order_carriers(candidates, geometry, ordering_secret)
     if contract.dedup_per_block:
         ordered = _dedup_per_block(ordered)
     if contract.require_bitstream_patchable:
@@ -772,10 +824,18 @@ def derive_blind_positions_operating_contract(
     if contract.max_bits_per_idr > 0:
         ordered = _cap_per_idr(
             ordered,
-            cif_mb_count=cif_mb_count,
+            cif_mb_count=mb_count,
             max_bits_per_idr=contract.max_bits_per_idr,
         )
     return ordered[:required_bits], metadata
+
+
+def _video_geometry(video_path: str, use_analysis_cache: bool) -> PictureGeometry:
+    """SPS macroblock geometry of the analysed video (cached with its analysis)."""
+    from .core.analysis_cache import load_or_build_reconstruction_context
+
+    context = load_or_build_reconstruction_context(video_path, use_cache=use_analysis_cache)
+    return geometry_from_sps(context.get("sps"))
 
 
 def embed_blind_video_payload(

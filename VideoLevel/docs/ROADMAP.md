@@ -51,8 +51,10 @@ gộp trên nhánh.
   chạy sweep không có biến đó (chỉ bước ML chạy, E2E đã có sẽ bỏ qua), rồi
   `ml_steganalysis evaluate`, `embedding_sim`, `adaptive_sim`, các lệnh CNN
   trong `docs/CNN_STEGANALYSIS.md` và `docs/ADAPTIVE_CARRIERS.md`.
-- **Sweep HD** (`benchmark/latticezk_hd_cases.json`) sau khi sửa thứ tự nhúng
-  còn giả định độ rộng CIF.
+- **Sweep HD** (`benchmark/latticezk_hd_cases.json`). Thứ tự nhúng theo hình
+  học SPS đã có (C4: hợp đồng `magnitude-geo` / `t1-geo` / `adaptive-geo`, hợp
+  đồng cũ giữ nguyên từng byte); các case HD dùng `magnitude-geo` và chunk
+  thích ứng. Lệnh và ước tính RAM/thời gian: `docs/GOP_HD_SUPPORT.md`.
 
 ## Trạng thái
 

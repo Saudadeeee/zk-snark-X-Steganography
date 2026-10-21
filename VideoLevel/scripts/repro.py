@@ -75,6 +75,7 @@ TOUCHED_MODULE_PYTEST = (
     "test_blind_payload_envelope.py",
     "test_blind_sync_streaming.py",
     "test_gop_and_hd_support.py",
+    "test_geometry_aware_ordering.py",
     "test_blind_stable_analysis.py",
     "test_video_only_blind_sync_integration.py",
     "test_zkp_sessions.py",

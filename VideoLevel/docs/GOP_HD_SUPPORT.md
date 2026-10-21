@@ -115,10 +115,58 @@ zerolatency`) are used.
 * Level limits: x264 picks Level 3.1 (720p) / 4.0 (1080p); nothing in the
   parser depends on the level.
 * The stable-carrier analysis already used the SPS MB count (earlier fix,
-  `test_non_cif_carrier_capacity.py`). The embedding-order heuristics
-  (`sort_blocks_interleaved`, the chaos shuffle's bottom-row preference) still
-  assume a CIF MB width of 22; at HD they only change the deterministic order,
-  identically at embedding and extraction, not correctness.
+  `test_non_cif_carrier_capacity.py`). The embedding-order heuristics of the
+  original contracts (`sort_blocks_interleaved`, the chaos shuffle's
+  bottom-row preference) still assume a CIF grid of 22 x 18; at 4CIF/HD they
+  only change the deterministic order, identically at embedding and
+  extraction, not correctness. The `*-geo` contracts order the same carriers
+  on the SPS grid; see "Resolution-aware carrier order" below.
+
+### Resolution-aware carrier order (stream C4)
+
+**Inventory** of CIF geometry hard-coded in the carrier path (`22`, `396`,
+`18`, `cif_mb_count`, `mb_width`, `macroblocks_per_frame`):
+
+| place | constant | class | status |
+|---|---|---|---|
+| `core/analysis_cache._build_serial_analysis`, `core/parallel_analysis` jobs | `cif_mb_count` (IDR offset of a block) | correctness | SPS count (earlier fix); `396` only as a fallback when the context has none |
+| `core/stego.CAVLCSafetyFilter.get_safe_positions` | default `cif_mb_count=396` | correctness (fails closed) | every carrier-path caller passes the SPS count; a wrong value finds no IDR, so no carriers, never wrong ones |
+| `bitstream_ops.reconstruct_video`, `analysis_cache._build_reconstruction_context` | `mb_count_per_slice`, fallback `264` without an SPS | correctness | SPS count; the fallback is unreachable (the GOP policy requires an SPS before the first slice) |
+| `bitstream_ops._calculate_nC(pic_width_in_mbs=22)` | width | none | dead code (no callers); nC is computed within the macroblock |
+| `blind_sync_streaming`, `blind_sync_adaptive` globalisation; E2E RBSP tamper check | MBs per slot | correctness | SPS count, one slot per coded slice |
+| `core/chaos.ChaosTransformer.shuffle_positions` | `396`, `22`, bottom row `14` | ordering/quality | original contracts (pinned); groups 396-MB "frames" (quarter pictures at 4CIF, straddling pictures at HD) and prefers stripes of 88 MBs in mid-picture |
+| `core/stego.sort_blocks_interleaved` (`stego.py`, `parallel_analysis.py`) | `_CIF_MB_COUNT`, `_CIF_MB_WIDTH` | ordering/quality | pre-shuffle order of the sign-bit (`t1`) and full analyses; pinned for the original contracts, ignored by the `*-geo` contracts (canonical order first) |
+| `blind_sync._cap_per_idr`, `_filter_bottom_zone`, `derive_blind_positions_*` | `cif_mb_count=396`, `cif_mb_width=22` | ordering/quality | used only by contracts with `max_bits_per_idr` / `bottom_rows` > 0 (header/diagnostic contracts, none of the lattice ones); the `*-geo` contracts pass the SPS geometry |
+| `core/matrix_embedding.rank_positions_cost_guided`, `embedder.py` chaos shuffle, `core/pipeline*` | `396` | ordering/quality | legacy SEC1 CIF pipeline only, not on the lattice path |
+| `bitstream_ops.batch_psnr_validate` | "4 bottom rows" | quality | uses the SPS width already; row count tuned on CIF (legacy pipeline) |
+| `benchmark/_common.py`, `sec1_quality.py`, `sec2_capacity.py`, `sec3_methods.py`, `blind_sync_diagnostic.py`, `validated_pool_proxy_diagnostic.py`, `latticezk_adaptive_e2e.py`, `latticezk_adaptive_sim.py` | `396` / `22` | benchmark-only | CIF benchmarks (case names are CIF) |
+| `latticezk_ml_steganalysis.py`, `latticezk_embedding_sim.py` | `--macroblocks-per-frame` default `396` | benchmark-only | the Q2 sweep passes the case's `macroblocks_per_frame` (3 600 / 8 160 in the HD cases) |
+
+**Fix.** The original contracts keep the CIF-grid order: their carrier
+profile ids, positions hashes, canonical digests and stego bytes are pinned
+(recorded with commit `c027c87` before the change) by
+`src/runtest/test_geometry_aware_ordering.py` on a CIF cut of a checked-in
+fixture and a synthetic 4CIF clip, and were also checked on a 10-frame
+foreman CIF cut and a 4-frame city 4CIF cut
+(`benchmark/results/q2/hd_order_compat.json`). Three new contracts select the
+SPS-geometry order through a `carrier_order` field (so `dataclasses.asdict`,
+the carrier profile id, policy hash, relation and public sync key all differ):
+
+| E2E `--carrier` | contract version | carriers as |
+|---|---|---|
+| `magnitude-geo` | `stable-carriers-sps-geometry-v1` | `magnitude` |
+| `t1-geo` | `t1-sign-sps-geometry-v1` | `t1` |
+| `adaptive-geo` | `adaptive-stc-magnitude-sps-geometry-v1` | `adaptive` (STC coded) |
+
+`src/core/carrier_order.py` (`sps-geometry-low-drift-v1`): canonical
+`(mb, block, coefficient)` order; group by slot `mb // (W x H)` from the SPS
+(one slot per coded slice); within a slot the last `round(2/9 x rows)` rows of
+the slot's carrier extent first (4 of 18 at CIF, 8 at 4CIF, 10 at 720p, 15 at
+1080p; per slice for multi-slice pictures, since intra prediction does not
+cross slices), each group in SHA-256-keyed order; slots round-robin. The
+`max_bits_per_idr` / `bottom_rows` filters use the SPS grid too. The order
+depends only on the (embedding-invariant) carrier set, the SPS and the key, so
+the extractor recomputes it from the stego.
 
 ## Measurements (CIF, QP 22, magnitude carriers)
 
@@ -209,6 +257,59 @@ at 720p holds 25 IDRs, ~2.1 GB). Natural HD capacity is not measured; scaling
 4CIF city (~1 000 bits per frame at QP 22) suggests ~2 300 (720p) and ~5 200
 (1080p) bits per frame, so a registered 128-bit envelope needs 2-3 segments.
 
+### Measured on natural HD cuts (stream C4, partial)
+
+10-frame cuts, libx264 Baseline all-intra QP 22 (`-g 1 -keyint_min 1
+-sc_threshold 0 -coder 0 -bf 0`), `frames_per_segment` 5, magnitude carriers,
+`ZKSTEGO_ANALYSIS_WORKERS=2`, run next to another memory-heavy job. Results in
+`benchmark/results/q2/hd_order_*.json` (`benchmark/latticezk_hd_order.py`).
+The RAM watchdog (available < 1.2 GB, caused by the other job) interrupted
+three of the runs; their files say `"complete": false`, and the benchmarks were
+then deferred.
+
+| cut | carrier bits / picture | v2 registered envelope (8 165 B) needs |
+|---|---|---|
+| park_joy 720p | 4 668-6 157 (mean 5 455) | 13 pictures (fill 1.0), 14 (0.9), 25 (0.5) |
+| park_joy 720p, 4 slices | 4 666-6 178 (mean 5 474) | same |
+| riverbed 1080p | 147-205 (mean 171) | ~400 pictures; the whole 250-frame clip holds < 43 kbit, so it **does not fit** with magnitude carriers |
+
+So the v2 envelope does not fit any 10-frame HD cut; the end-to-end run used
+the registered **TOY** set (413 B): park_joy 720p, adaptive chunks, one
+segment carried 3 584 carriers; `magnitude-geo` verified blind, replay and a
+one-bit tamper were rejected (embed 61 s, verify 52 s, peak process-tree RSS
+477 MB); the original `magnitude` order on the same cut also verified (37 s /
+28 s, 448 MB; random sync keys differ between the two runs).
+
+PSNR of the changed frames / worst frame (dB), original CIF-grid order ->
+SPS-geometry order, same payload, key and chunk layout per pair:
+
+| cut, fill | original | geometry |
+|---|---|---|
+| park_joy 720p, 0.25 (key 0 / key 1) | 42.68 / 37.25, 44.09 / 39.67 | 41.69 / 37.42, 44.14 / 38.67 |
+| park_joy 720p, 0.5 | 37.98 / 33.37 | 40.67 / 34.93 |
+| park_joy 720p, 0.9 | 36.84 / 33.84 | 36.40 / 30.90 |
+| park_joy 720p 4 slices, 0.25 | 43.84 / 39.77 | 45.72 / 41.60 |
+| park_joy 720p 4 slices, 0.5 | 40.00 / 36.29 | 40.96 / 34.88 |
+| riverbed 1080p, 0.5 | 49.37 / 47.09 | 51.75 / 49.44 |
+| E2E TOY (12 % of segment 0, different keys) | 48.38 / 46.49 | 46.80 / 42.95 |
+
+Over the seven paired runs the geometry order gains +0.9 dB on the changed
+frames on average (range -1.0 to +2.7) and +0.1 dB on the worst frame (range
+-2.9 to +2.4): no consistent quality gain at this sample size. Concentrating
+the first carriers in the bottom 22 % of each picture shortens the drift path
+but raises the local change density, and the two effects roughly cancel. The
+geometry contracts are therefore a correctness/consistency fix of the order
+(real pictures, real bottom rows, slice-relative zones), not a demonstrated
+quality improvement. Peak memory: ~690 MB for 5-frame 720p segments
+(analysis + embed + extraction), ~955 MB for 5-frame 1080p segments; ~10 s
+per 720p frame per embed (two analysis passes, reconstruction, decode check)
+under contention.
+
+**Not measured** (deferred): the multi-key repetition (5 of 12 runs done),
+multi-slice and 1080p fill 0.9 with extraction, old_town_cross and pedestrian
+capacity, trailing-one (`t1-geo`) capacity at HD, any v2 (8 165 B) HD end-to-end
+run, and `latticezk_hd_profile` on the natural cuts.
+
 ## Limits
 
 * Carriers come only from IDR slices; non-IDR I slices and P slices carry
@@ -225,7 +326,12 @@ at 720p holds 25 IDRs, ~2.1 GB). Natural HD capacity is not measured; scaling
   chunks, longer clips) is the lever, as for all-intra.
 * HD memory grows with `frames_per_segment x MBs per picture` (the analysis
   keeps every coded block's offsets); pick short segments at 1080p.
-* The embedding-order heuristics assume a CIF macroblock width (order only).
+* The original contracts' order heuristics assume a CIF grid (order only,
+  pinned); the `*-geo` contracts use the SPS grid, with no consistent PSNR gain
+  measured so far.
+* Magnitude carriers are thin on smooth 1080p content (riverbed: ~171 bits per
+  picture), too few for the 128-bit envelope in the whole clip; such clips need
+  the trailing-one carriers, whose HD capacity is not measured.
 * The 128-bit envelope was not run end to end on GOP > 1 or HD here (machine
   constraints); the commands are below.
 
@@ -252,11 +358,21 @@ sha256sum data/raw/*_720p50.y4m data/raw/*_1080p25.y4m
        --cases benchmark/latticezk_hd_cases.json --workers 1 --work tmp/hd_sweep
    ```
 
-   Estimate (serial pass costs above; two workers speed up analysis only):
-   each 720p case ~45 min, each 1080p case ~40 min, the 720p GOP 8 case ~40
-   min; ~3.5 h in total; peak ~2.1 GB per process (plus ffmpeg). Optional
-   check of the estimate on a real cut first:
-   `python -m benchmark.latticezk_hd_profile --video data/encoded/park_joy_720p_q22_g1_200f.h264 --frames 3 6 --extrapolate 25 50`.
+   The cases use `magnitude-geo` (720p) / `t1-geo` (1080p) with capacity-adaptive
+   chunks (no capacity scan; the greedy plan stops at the segment that
+   completes the envelope, so only those segments are analysed) and short
+   segments (10 frames at 720p, 5 at 1080p, 80 = 10 IDRs for the GOP 8 case).
+   Estimate from the measurements above: peak ~1.1 GB per process at 720p
+   (10-frame segments) and ~1 GB at 1080p (5-frame segments), plus ffmpeg.
+   park_joy 720p needs ~14 pictures (2 segments): ~10-15 min with the
+   security checks; old_town_cross 720p is unmeasured (budget 30-60 min);
+   the GOP 8 park_joy case ~2 segments of 10 IDRs, ~20-30 min. The 1080p
+   `t1-geo` cases are the uncertain part: sign-bit analysis cost ~17 s per
+   4CIF frame and pass, i.e. ~90 s per 1080p frame and pass, and their capacity
+   is unknown; measure it first and drop or resize those cases if it is low:
+   `ZKSTEGO_ANALYSIS_WORKERS=2 python -m benchmark.latticezk_capacity_scan data/encoded/riverbed_1080p_q22_g1_100f.h264 --carrier t1-geo --frames-per-segment 2 --segments 1`.
+   Ordering comparison on a cut:
+   `python -m benchmark.latticezk_hd_order --video <cut> --frames-per-segment 5 --fill 0.25 0.5 --keys 3 --output benchmark/results/q2/hd_order_<name>.json`.
 2. 128-bit envelope at GOP > 1 (CIF, looped sources; IDR-only analysis, peak
    < 1 GB):
 

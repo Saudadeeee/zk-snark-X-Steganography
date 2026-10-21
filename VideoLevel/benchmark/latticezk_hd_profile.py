@@ -56,8 +56,9 @@ def _cut(video: Path, frames: int, target: Path) -> int:
     return cut_annexb(video, target, frames)
 
 
-def _child(video: Path, frames: int, phases: list[str]) -> dict[str, Any]:
-    from benchmark.latticezk_video_e2e import CONTRACT
+def _child(video: Path, frames: int, phases: list[str],
+           carrier: str = "magnitude") -> dict[str, Any]:
+    from benchmark.latticezk_video_e2e import CARRIER_CONTRACTS
     from src import blind_sync_streaming as transport
     from src.core.analysis_cache import (
         clear_video_analysis_cache,
@@ -67,7 +68,8 @@ def _child(video: Path, frames: int, phases: list[str]) -> dict[str, Any]:
     from src.gop_policy import ALL_INTRA, IDR_CARRIERS_INTER_RAW, inspect_segment
 
     key = bytes(range(32))
-    report: dict[str, Any] = {"frames": frames}
+    contract = CARRIER_CONTRACTS[carrier]
+    report: dict[str, Any] = {"frames": frames, "carrier": carrier}
     with tempfile.TemporaryDirectory(prefix="latticezk-hd-") as directory:
         cut = Path(directory) / "cut.h264"
         report["pictures"] = _cut(video, frames, cut)
@@ -95,14 +97,14 @@ def _child(video: Path, frames: int, phases: list[str]) -> dict[str, Any]:
             stego = Path(directory) / "stego.h264"
             started = time.perf_counter()
             transport.embed_chunked_video_payload(
-                cut, stego, payload, key, CONTRACT, frames_per_segment=frames,
+                cut, stego, payload, key, contract, frames_per_segment=frames,
                 chunk_size=len(payload), gop_policy=policy,
             )
             report["embed_s"] = round(time.perf_counter() - started, 1)
             report["peak_after_embed_mb"] = _peak_mb()
             started = time.perf_counter()
             extracted = transport.extract_chunked_video_payload(
-                stego, key, CONTRACT, frames_per_segment=frames, gop_policy=policy
+                stego, key, contract, frames_per_segment=frames, gop_policy=policy
             )
             report["extract_s"] = round(time.perf_counter() - started, 1)
             report["extracted_ok"] = extracted.payload == payload
@@ -142,12 +144,15 @@ def main() -> int:
     parser.add_argument("--frames", type=int, nargs="+", default=[3, 6])
     parser.add_argument("--extrapolate", type=int, nargs="*", default=[10, 25, 50, 100])
     parser.add_argument("--analysis-only", action="store_true", help="skip embed/extract")
+    parser.add_argument("--carrier", default="magnitude",
+                        help="carrier contract (benchmark.latticezk_video_e2e.CARRIER_CONTRACTS)")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
     arguments = parser.parse_args()
     phases = [] if arguments.analysis_only else ["embed"]
     if arguments.child:
-        sys.stdout.write(json.dumps(_child(arguments.video, arguments.frames[0], phases)) + "\n")
+        sys.stdout.write(json.dumps(
+            _child(arguments.video, arguments.frames[0], phases, arguments.carrier)) + "\n")
         return 0
 
     with tempfile.TemporaryDirectory(prefix="latticezk-hd-src-") as directory:
@@ -158,7 +163,8 @@ def main() -> int:
         runs = []
         for frames in arguments.frames:
             command = [sys.executable, "-B", "-m", "benchmark.latticezk_hd_profile", "--child",
-                       "--video", str(video.resolve()), "--frames", str(frames)]
+                       "--video", str(video.resolve()), "--frames", str(frames),
+                       "--carrier", arguments.carrier]
             if arguments.analysis_only:
                 command.append("--analysis-only")
             completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True,
