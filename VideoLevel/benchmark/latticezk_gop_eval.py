@@ -30,7 +30,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmark.latticezk_quality import _psnr, per_frame_luma_mse, summarize_luma_mse  # noqa: E402
-from src import gop_policy  # noqa: E402
+from src.transport import gop_policy  # noqa: E402
 
 PYTHON = sys.executable
 CHUNK_MARGIN = 0.97
@@ -59,7 +59,7 @@ def encode_command(case: dict[str, Any], source: Path | str, output: Path | str)
 
 
 def _structure(video: Path, frames_per_segment: int, policy: str) -> list[dict[str, int]]:
-    from src.blind_sync_streaming import _inspect_segments, _split_video_into_segments
+    from src.transport.blind_sync_streaming import _inspect_segments, _split_video_into_segments
 
     with tempfile.TemporaryDirectory(prefix="latticezk-gop-") as directory:
         segments, counts = _split_video_into_segments(video, directory, frames_per_segment)
@@ -96,8 +96,8 @@ def _drift_profile(luma_mse: list[float], gop: int) -> dict[str, Any]:
 
 
 def _envelope_fit(carrier_bits: list[int], frames: list[int]) -> dict[str, Any]:
-    from src.blind_payload_chunks import CHUNK_HEADER
-    from src.blind_sync import BLIND_ENVELOPE_HEADER_BYTES
+    from src.transport.blind_payload_chunks import CHUNK_HEADER
+    from src.transport.blind_sync import BLIND_ENVELOPE_HEADER_BYTES
     from src.lattice_zk import video_proof
     from src.lattice_zk.params import BDLOP_OPEN_128
 

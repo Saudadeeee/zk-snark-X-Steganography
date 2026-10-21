@@ -28,12 +28,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmark.latticezk_video_e2e import CARRIER_CONTRACTS, DEMO_PAYLOAD  # noqa: E402
-from src.lattice_pq import LatticeSigner  # noqa: E402
+from src.registry.lattice_pq import LatticeSigner  # noqa: E402
 from src.lattice_zk import bdlop, codec  # noqa: E402
 from src.lattice_zk import params as parameter_sets  # noqa: E402
 from src.lattice_zk import video_pipeline as pipeline  # noqa: E402
-from src.zkp_registry import SignedZkpRelationRegistry  # noqa: E402
-from src.zkp_sessions import SessionChallengeStore  # noqa: E402
+from src.registry.zkp_registry import SignedZkpRelationRegistry  # noqa: E402
+from src.registry.zkp_sessions import SessionChallengeStore  # noqa: E402
 
 
 def _top(profile: cProfile.Profile, limit: int) -> str:

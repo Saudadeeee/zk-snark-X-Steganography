@@ -33,14 +33,14 @@ if str(ROOT) not in sys.path:
 from benchmark.latticezk_capacity_scan import CHUNK_FRAMING_BYTES, UNBOUNDED_BITS  # noqa: E402
 from benchmark.latticezk_quality import per_frame_luma_mse, summarize_luma_mse  # noqa: E402
 from benchmark.latticezk_video_e2e import CARRIER_CONTRACTS  # noqa: E402
-from src import blind_sync_streaming as transport  # noqa: E402
-from src.blind_sync import derive_blind_positions_operating_contract  # noqa: E402
+from src.transport import blind_sync_streaming as transport  # noqa: E402
+from src.transport.blind_sync import derive_blind_positions_operating_contract  # noqa: E402
 from src.core.analysis_cache import (  # noqa: E402
     clear_video_analysis_cache,
     load_or_build_reconstruction_context,
 )
 from src.core.carrier_order import geometry_from_sps  # noqa: E402
-from src.gop_policy import ALL_INTRA, inspect_segment  # noqa: E402
+from src.transport.gop_policy import ALL_INTRA, inspect_segment  # noqa: E402
 from src.lattice_zk import video_proof  # noqa: E402
 from src.lattice_zk.params import BDLOP_OPEN_128, TOY  # noqa: E402
 

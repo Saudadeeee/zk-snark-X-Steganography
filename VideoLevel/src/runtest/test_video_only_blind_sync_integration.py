@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.blind_sync import (
+from src.transport.blind_sync import (
     BlindOperatingContract,
     _stable_candidate_index,
     derive_blind_positions_operating_contract,
@@ -27,7 +27,7 @@ from src.core.analysis_cache import (
 )
 from src.core.pipeline import _extract_bits_from_decoded_analysis, extract_bits_direct
 from src.runtest._helpers import get_video
-from src.video_canonicalization import canonical_video_sha256
+from src.transport.video_canonicalization import canonical_video_sha256
 
 
 def test_stable_carrier_choice_survives_lsb_toggle():
@@ -60,7 +60,7 @@ def test_sidecar_free_embed_refuses_to_overwrite_existing_output(tmp_path):
 
 
 def test_stable_signbit_profile_derives_one_trailing_sign_per_block(monkeypatch):
-    from src.blind_sync import derive_blind_positions_operating_contract
+    from src.transport.blind_sync import derive_blind_positions_operating_contract
 
     fake_analysis = (
         [(0, 0, [0] * 16), (1, 0, [0] * 16)],
@@ -71,7 +71,7 @@ def test_stable_signbit_profile_derives_one_trailing_sign_per_block(monkeypatch)
         [(0, 0, -15), (0, 0, -14), (1, 0, -15), (1, 0, 7)],
     )
     monkeypatch.setattr(
-        "src.blind_sync.load_or_build_video_analysis",
+        "src.transport.blind_sync.load_or_build_video_analysis",
         lambda *_args, **_kwargs: fake_analysis,
     )
     contract = BlindOperatingContract(
@@ -173,16 +173,16 @@ def test_stego_video_alone_rederives_carriers_and_extracts_payload():
         # itself from verifier-pinned session/configuration, not accept a
         # prover-supplied position list. This validates context binding only;
         # no ZK proof backend is invoked here.
-        from src.lattice_pq import LatticeSigner
+        from src.registry.lattice_pq import LatticeSigner
         from src.core.carrier_gate import hash_positions
-        from src.video_zkp_contract import (
+        from src.legacy.video_zkp_contract import (
             build_video_zkp_statement,
             carrier_policy_hash,
             payload_commitment,
             policy_hash,
             verify_video_zkp_context_binding_video_only,
         )
-        from src.zkp_registry import SignedZkpRelationRegistry
+        from src.registry.zkp_registry import SignedZkpRelationRegistry
 
         policy = {
             "codec": "h264-baseline-cavlc",

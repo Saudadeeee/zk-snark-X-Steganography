@@ -145,7 +145,7 @@ def decode_luma_native(video: Path, max_frames: int | None = None) -> np.ndarray
 
 
 def _segment_features(segment: Path, macroblocks_per_frame: int) -> tuple[np.ndarray, np.ndarray]:
-    from benchmark._common import load_or_extract_idr_blocks
+    from benchmark.legacy._common import load_or_extract_idr_blocks
     from src.bitstream.bitstream_ops import BitstreamReconstructor
 
     luma = decode_luma_native(segment)
@@ -159,7 +159,7 @@ def _sha256(path: Path) -> str:
 
 def extract(cover: Path, stego: Path, label: str, frames_per_segment: int,
             macroblocks_per_frame: int, max_segments: int | None) -> dict[str, np.ndarray]:
-    from src.blind_sync_streaming import _split_video_into_segments
+    from src.transport.blind_sync_streaming import _split_video_into_segments
 
     outputs: dict[str, list] = {name: [] for name in ("coeff", "pixel", "label", "pair", "modified")}
     with tempfile.TemporaryDirectory(prefix="latticezk-mlsteg-") as directory:

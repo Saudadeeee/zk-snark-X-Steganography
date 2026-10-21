@@ -18,11 +18,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from .. import gop_policy as gop_policies
-from .. import video_canonicalization as canonicalization
-from ..adaptive_chunks import AdaptiveChunkPlan
-from ..zkp_registry import BDLOP_OPEN_ZKP_SUITE, RelationRecord, SignedZkpRelationRegistry
-from ..zkp_sessions import SessionChallengeStore
+from ..transport import gop_policy as gop_policies
+from ..transport import video_canonicalization as canonicalization
+from ..transport.adaptive_chunks import AdaptiveChunkPlan
+from ..registry.zkp_registry import BDLOP_OPEN_ZKP_SUITE, RelationRecord, SignedZkpRelationRegistry
+from ..registry.zkp_sessions import SessionChallengeStore
 from . import bdlop, video_proof
 from .params import BdlopParams
 from .video_proof import PayloadOpening, VerifierPins
@@ -53,7 +53,7 @@ ProgressCallback = Callable[[dict[str, Any]], None]
 
 
 class Transport(Protocol):
-    """Blind carrier channel; ``src.blind_sync_streaming`` is the real one."""
+    """Blind carrier channel; ``src.transport.blind_sync_streaming`` is the real one."""
 
     def derive_chunked_video_context(self, video_path, chunks, sync_key, contract, **options): ...
 
@@ -63,7 +63,7 @@ class Transport(Protocol):
 
 
 class AdaptiveTransport(Protocol):
-    """Capacity-adaptive channel; ``src.blind_sync_adaptive`` is the real one."""
+    """Capacity-adaptive channel; ``src.transport.blind_sync_adaptive`` is the real one."""
 
     def derive_adaptive_video_context(self, video_path, payload, sync_key, contract, *, plan,
                                       **options): ...
@@ -84,7 +84,7 @@ class CarrierProfile:
     chunk_bytes: int = DEFAULT_CHUNK_BYTES
     # True: the commitment is pinned by the registry and the video carries only the proof.
     registered: bool = False
-    # Slice structure the transport accepts (``src.gop_policy``). GOP > 1
+    # Slice structure the transport accepts (``src.transport.gop_policy``). GOP > 1
     # streams need ``IDR_CARRIERS_INTER_RAW``; the default stays all-intra.
     gop_policy: str = gop_policies.ALL_INTRA
     # Canonical-digest scope (D5); ``CODEC_POLICY_V2`` binds the full RBSP of
@@ -313,13 +313,13 @@ def public_sync_key(params: BdlopParams, profile: CarrierProfile) -> bytes:
 
 
 def _default_transport() -> Transport:
-    from .. import blind_sync_streaming
+    from ..transport import blind_sync_streaming
 
     return blind_sync_streaming  # type: ignore[return-value]
 
 
 def _default_adaptive_transport() -> AdaptiveTransport:
-    from .. import blind_sync_adaptive
+    from ..transport import blind_sync_adaptive
 
     return blind_sync_adaptive  # type: ignore[return-value]
 
@@ -330,7 +330,7 @@ def _canonical_adaptive_chunks(extracted: Any, plan: AdaptiveChunkPlan) -> tuple
     The capacities must end at the segment that completes the payload, so the
     transport cannot report extra, unbound segments.
     """
-    from ..adaptive_chunks import canonical_adaptive_chunks
+    from ..transport.adaptive_chunks import canonical_adaptive_chunks
 
     capacities = getattr(extracted, "segment_capacity_bits", None)
     if not isinstance(capacities, (tuple, list)) or not all(
@@ -347,7 +347,7 @@ def _canonical_adaptive_chunks(extracted: Any, plan: AdaptiveChunkPlan) -> tuple
 
 
 def _chunks(payload: bytes, profile: CarrierProfile) -> list[bytes]:
-    from ..blind_payload_chunks import pack_payload_chunks
+    from ..transport.blind_payload_chunks import pack_payload_chunks
 
     return pack_payload_chunks(payload, chunk_size=profile.chunk_bytes)
 

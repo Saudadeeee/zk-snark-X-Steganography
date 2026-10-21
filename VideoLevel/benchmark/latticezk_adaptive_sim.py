@@ -43,8 +43,8 @@ REGISTERED_ENVELOPE_CHUNK = 4200  # two chunks of the 8 165-byte v2 envelope
 
 
 def _segment_bits(envelope_bytes: int, chunk_bytes: int) -> list[int]:
-    from src.blind_payload_chunks import pack_payload_chunks
-    from src.blind_sync import pack_blind_payload
+    from src.transport.blind_payload_chunks import pack_payload_chunks
+    from src.transport.blind_sync import pack_blind_payload
 
     chunks = pack_payload_chunks(bytes(envelope_bytes), chunk_size=chunk_bytes)
     return [len(pack_blind_payload(chunk)) * 8 for chunk in chunks]
@@ -85,7 +85,7 @@ def _apply(coefficients, positions, stego_bits) -> tuple[list, int]:
 
 def simulate_video(video: Path, envelope_bytes: int, chunk_bytes: int, height: int,
                    log: Callable[[str], None]) -> dict[str, Any]:
-    from src.blind_sync_streaming import _split_video_into_segments
+    from src.transport.blind_sync_streaming import _split_video_into_segments
     from src.core.analysis_cache import clear_video_analysis_cache, load_or_build_video_analysis
 
     rng = np.random.default_rng(SEED)

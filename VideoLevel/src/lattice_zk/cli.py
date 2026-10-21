@@ -31,10 +31,10 @@ from typing import Any
 
 import numpy as np
 
-from ..blind_sync import BlindOperatingContract
-from ..lattice_pq import LatticeSigner
-from ..zkp_registry import SignedZkpRelationRegistry
-from ..zkp_sessions import SessionChallengeStore
+from ..transport.blind_sync import BlindOperatingContract
+from ..registry.lattice_pq import LatticeSigner
+from ..registry.zkp_registry import SignedZkpRelationRegistry
+from ..registry.zkp_sessions import SessionChallengeStore
 from . import bdlop, codec, video_proof
 from . import video_pipeline as pipeline
 from .params import BDLOP_OPEN_128, BdlopParams

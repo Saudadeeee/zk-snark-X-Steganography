@@ -41,7 +41,7 @@ def get_output(name: str) -> str:
 
 
 def get_circuits_dir() -> str:
-    return os.path.join(get_project_root(), 'circuits')
+    return os.path.join(get_project_root(), 'legacy', 'circuits')
 
 
 def node_available() -> bool:

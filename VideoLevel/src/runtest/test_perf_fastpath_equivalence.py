@@ -17,7 +17,7 @@ import pytest
 from src.bitstream.bitstream_io import BitstreamReader, BitstreamWriter
 from src.bitstream.bitstream_ops import BitArray
 from src.bitstream.cavlc import CAVLCDecoder, CAVLCEncoder
-from src.video_canonicalization import (
+from src.transport.video_canonicalization import (
     _update_raw_bit_segment,
     canonical_h264_digest,
     canonicalize_carrier_coefficients,

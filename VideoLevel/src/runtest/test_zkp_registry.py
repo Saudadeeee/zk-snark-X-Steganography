@@ -13,7 +13,7 @@ from src.runtest._helpers import run_test, section, summarise
 
 
 def _relation_descriptor() -> dict[str, str]:
-    from src.video_zkp_contract import policy_hash
+    from src.legacy.video_zkp_contract import policy_hash
 
     return {
         "zkp_suite": "lazer-v1",
@@ -25,13 +25,13 @@ def _relation_descriptor() -> dict[str, str]:
 
 
 def _issuer_keys() -> tuple[bytes, bytes]:
-    from src.lattice_pq import LatticeSigner
+    from src.registry.lattice_pq import LatticeSigner
 
     return LatticeSigner.generate_keypair()
 
 
 def t_signed_registry_resolves_only_a_registered_lazer_relation() -> None:
-    from src.zkp_registry import SignedZkpRelationRegistry
+    from src.registry.zkp_registry import SignedZkpRelationRegistry
 
     public_key, private_key = _issuer_keys()
     registry = SignedZkpRelationRegistry.create(epoch=4, relations=[_relation_descriptor()]).sign(private_key, signer_id="issuer-v1")
@@ -48,7 +48,7 @@ def t_signed_registry_resolves_only_a_registered_lazer_relation() -> None:
 
 
 def t_registry_rejects_tampering_unknown_relation_or_wrong_issuer() -> None:
-    from src.zkp_registry import SignedZkpRelationRegistry
+    from src.registry.zkp_registry import SignedZkpRelationRegistry
 
     public_key, private_key = _issuer_keys()
     registry = SignedZkpRelationRegistry.create(epoch=4, relations=[_relation_descriptor()]).sign(private_key, signer_id="issuer-v1")
@@ -69,7 +69,7 @@ def t_registry_rejects_tampering_unknown_relation_or_wrong_issuer() -> None:
 
 
 def t_verifier_binding_requires_its_pinned_relation_and_signed_snapshot() -> None:
-    from src.zkp_registry import SignedZkpRelationRegistry
+    from src.registry.zkp_registry import SignedZkpRelationRegistry
 
     public_key, private_key = _issuer_keys()
     registry = SignedZkpRelationRegistry.create(
@@ -116,8 +116,8 @@ def t_verifier_binding_requires_its_pinned_relation_and_signed_snapshot() -> Non
 
 
 def t_embedder_gate_requires_an_issuer_verified_lazer_registry() -> None:
-    from src.embedder import _resolve_future_zkp_registration
-    from src.zkp_registry import SignedZkpRelationRegistry
+    from src.legacy.embedder import _resolve_future_zkp_registration
+    from src.registry.zkp_registry import SignedZkpRelationRegistry
 
     public_key, private_key = _issuer_keys()
     registry = SignedZkpRelationRegistry.create(epoch=9, relations=[_relation_descriptor()]).sign(private_key, signer_id="issuer-v1")
@@ -141,7 +141,7 @@ def _expect_value_error(build, label: str) -> None:
 
 
 def t_untrusted_registry_documents_fail_with_value_error_only() -> None:
-    from src.zkp_registry import SignedZkpRelationRegistry
+    from src.registry.zkp_registry import SignedZkpRelationRegistry
 
     _, private_key = _issuer_keys()
     encoded = SignedZkpRelationRegistry.create(epoch=4, relations=[_relation_descriptor()]).sign(
@@ -166,7 +166,7 @@ def t_untrusted_registry_documents_fail_with_value_error_only() -> None:
 
 
 def t_registry_epoch_fits_the_unsigned_64_bit_statement_field() -> None:
-    from src.zkp_registry import MAX_EPOCH, SignedZkpRelationRegistry
+    from src.registry.zkp_registry import MAX_EPOCH, SignedZkpRelationRegistry
 
     largest = SignedZkpRelationRegistry.create(epoch=MAX_EPOCH - 1, relations=[_relation_descriptor()])
     assert largest.epoch == MAX_EPOCH - 1
@@ -180,7 +180,7 @@ def t_registry_epoch_fits_the_unsigned_64_bit_statement_field() -> None:
 def t_random_registry_tampering_never_verifies() -> None:
     import random
 
-    from src.zkp_registry import SignedZkpRelationRegistry
+    from src.registry.zkp_registry import SignedZkpRelationRegistry
 
     public_key, private_key = _issuer_keys()
     encoded = SignedZkpRelationRegistry.create(epoch=4, relations=[_relation_descriptor()]).sign(

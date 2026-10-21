@@ -36,7 +36,7 @@ def test_envelope_that_does_not_fit_is_reported(tmp_path) -> None:
 
 
 def test_chunk_never_exceeds_the_chunk_format_limit(tmp_path) -> None:
-    from src.blind_payload_chunks import MAX_CHUNK_BYTES
+    from src.transport.blind_payload_chunks import MAX_CHUNK_BYTES
 
     _capacity(tmp_path, "huge", 68_680, 1)
     chunk = sweep._auto_chunk({"name": "huge", "registered": True}, tmp_path / "v.h264",

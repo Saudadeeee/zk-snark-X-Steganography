@@ -1,0 +1,206 @@
+"""
+test_phase5_extract_verify.py - Phase 5: Public API round-trip and receipt verification.
+
+Tests:
+  1. embed_api_sidecars_exist          - embed() produces a coherent stego artifact set
+  2. lattice_attestation_pipeline      - ML-DSA receipt path through embed()/verify()
+"""
+
+import os
+import sys
+import json
+from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+from src.runtest._helpers import (
+    section,
+    run_test,
+    summarise,
+    SKIP,
+    get_video,
+    get_output,
+    get_circuits_dir,
+)
+from src.legacy.embedder import embed
+from src.registry.lattice_pq import LatticeSigner
+from src.exceptions import InsufficientCapacityError
+from src.legacy.verifier import verify
+from benchmark.legacy._common import (
+    load_sec1_positions,
+    measure_patchable_usable_bits,
+)
+from benchmark.legacy.locked_operating_contract import (
+    LOCKED_MESSAGE,
+    LOCKED_SECRET_KEY,
+    load_best_locked_operating_contract,
+)
+
+
+SECRET_KEY = LOCKED_SECRET_KEY
+TEST_MSG = LOCKED_MESSAGE
+CIRCUITS_DIR = get_circuits_dir()
+LATTICE_PUBLIC_KEY, LATTICE_PRIVATE_KEY = LatticeSigner.generate_keypair()
+
+# Prefer larger all-intra assets first because patchable capacity is the real constraint.
+VIDEO_CANDIDATES = [
+    get_video("deadline_cif_q22_g1.h264"),
+    get_video("coastguard_cif_q22_g1_1000f.h264"),
+    get_video("coastguard_cif_q22_g1.h264"),
+    get_video("foreman_cif_q22_g1.h264"),
+]
+SCAN_JSON = Path(__file__).resolve().parents[3] / "benchmark" / "results" / "patchable_capacity_scan.json"
+
+
+def _first_embeddable_video(message: bytes) -> str | None:
+    required_bits = (3 + 4 + len(message) + 32) * 8
+    contract = load_best_locked_operating_contract(required_bits=required_bits)
+    if contract is not None:
+        return contract.video_path
+    if SCAN_JSON.exists():
+        try:
+            cached = json.loads(SCAN_JSON.read_text(encoding="utf-8"))
+            scan_data = cached.get("data", cached)
+            ranked = []
+            for seq_name, row in scan_data.items():
+                video_path = row.get("video_path")
+                usable = int(row.get("patchable_usable_bits") or 0)
+                if video_path and os.path.isfile(video_path):
+                    ranked.append((usable, str(video_path)))
+            ranked.sort(reverse=True)
+            for usable, video_path in ranked:
+                if usable >= required_bits:
+                    return video_path
+            if ranked:
+                return ranked[0][1]
+        except Exception:
+            pass
+
+    best_video = None
+    best_bits = -1
+    for video in VIDEO_CANDIDATES:
+        if os.path.isfile(video):
+            try:
+                stats = measure_patchable_usable_bits(video, max_positions=required_bits)
+            except Exception:
+                continue
+            usable = int(stats["patchable_usable_bits"])
+            if usable >= required_bits:
+                return video
+            if usable > best_bits:
+                best_bits = usable
+                best_video = video
+    return best_video
+
+
+def _validated_pool_for_video(video: str) -> list[tuple[int, int, int]]:
+    required_bits = (3 + 4 + len(TEST_MSG) + 32) * 8
+    contract = load_best_locked_operating_contract(required_bits=required_bits)
+    if contract is None:
+        return []
+    if os.path.abspath(contract.video_path) != os.path.abspath(video):
+        return []
+    return load_sec1_positions(contract.sequence_name, validated_pool=True)
+
+
+def _cleanup_output(base_path: str) -> None:
+    for path in (
+        base_path,
+        f"{base_path}.positions.json",
+        f"{base_path}.meta.json",
+        f"{base_path}.manifest.json",
+        f"{base_path}.lattice-zkp.json",
+        f"{base_path}.pq-statement.json",
+        ):
+        if os.path.exists(path):
+            os.remove(path)
+
+
+def t_embed_api_sidecars_exist():
+    video = _first_embeddable_video(TEST_MSG)
+    if video is None:
+        SKIP("embed_api_sidecars_exist", "no benchmark asset available")
+        return
+
+    out = get_output("test_p5_api_small.h264")
+    try:
+        candidate_pool = _validated_pool_for_video(video)
+        try:
+            result = embed(
+                video_path=video,
+                message=TEST_MSG,
+                output_path=out,
+                circuits_dir=CIRCUITS_DIR,
+                secret_key=SECRET_KEY,
+                lattice_private_key=LATTICE_PRIVATE_KEY,
+                precomputed_positions=candidate_pool or None,
+                trust_precomputed_positions=False,
+                use_analysis_cache=True,
+            )
+        except InsufficientCapacityError:
+            SKIP("embed_api_sidecars_exist", "selected assets lack enough patchable capacity")
+            return
+
+        assert os.path.exists(out), "stego output file should exist"
+        assert os.path.exists(f"{out}.positions.json"), "positions sidecar should exist"
+        assert os.path.exists(f"{out}.meta.json"), "meta sidecar should exist"
+        assert os.path.exists(f"{out}.manifest.json"), "manifest sidecar should exist"
+        assert result.bits_embedded > 0, "embed() should report non-zero embedded bits"
+        assert result.used_positions, "embed() should return used operating positions"
+    finally:
+        _cleanup_output(out)
+
+
+def t_lattice_attestation_pipeline():
+    video = _first_embeddable_video(TEST_MSG)
+    if video is None:
+        SKIP("lattice_attestation_pipeline", "no benchmark asset available")
+        return
+
+    out = get_output("test_p5_zk_api.h264")
+    try:
+        candidate_pool = _validated_pool_for_video(video)
+        try:
+            result = embed(
+                video_path=video,
+                message=TEST_MSG,
+                output_path=out,
+                circuits_dir=CIRCUITS_DIR,
+                secret_key=SECRET_KEY,
+                lattice_private_key=LATTICE_PRIVATE_KEY,
+                precomputed_positions=candidate_pool or None,
+                trust_precomputed_positions=False,
+                use_analysis_cache=True,
+            )
+        except InsufficientCapacityError:
+            SKIP("lattice_attestation_pipeline", "selected assets lack enough patchable capacity")
+            return
+
+        verify_result = verify(
+            stego_video_path=out,
+            original_video_path=video,
+            circuits_dir=CIRCUITS_DIR,
+            secret_key=SECRET_KEY,
+            lattice_public_key=LATTICE_PUBLIC_KEY,
+            message_length=len(TEST_MSG),
+            precomputed_positions=result.used_positions,
+            precomputed_payload_bits=result.bits_embedded,
+            use_analysis_cache=True,
+        )
+        assert verify_result.valid, "full public API lattice-attestation pipeline should verify"
+        assert verify_result.message == TEST_MSG, f"unexpected extracted message: {verify_result.message!r}"
+    finally:
+        _cleanup_output(out)
+
+
+def main():
+    section("Phase 5 - Public API Round-trip & Lattice Attestation Verification")
+    results = [
+        run_test("embed_api_sidecars_exist", t_embed_api_sidecars_exist),
+        run_test("lattice_attestation_pipeline", t_lattice_attestation_pipeline),
+    ]
+    sys.exit(summarise(results, "Phase 5"))
+
+
+if __name__ == "__main__":
+    main()

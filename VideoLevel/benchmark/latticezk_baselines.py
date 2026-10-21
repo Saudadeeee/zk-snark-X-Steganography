@@ -89,7 +89,7 @@ def measure_ml_dsa(runs: int) -> dict[str, Any]:
 
 def measure_groth16(runs: int) -> dict[str, Any]:
     try:
-        from benchmark.sec5_zkp import _measure_groth16
+        from benchmark.legacy.sec5_zkp import _measure_groth16
         return _measure_groth16(n_trials=runs)
     except Exception as error:  # node/snarkjs or circuit artifacts unavailable
         return {"error": f"{type(error).__name__}: {error}"}

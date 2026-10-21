@@ -18,9 +18,9 @@ from pathlib import Path
 
 import pytest
 
-from src import blind_sync_streaming as streaming
-from src.blind_payload_chunks import pack_payload_chunks
-from src.blind_sync import BlindOperatingContract
+from src.transport import blind_sync_streaming as streaming
+from src.transport.blind_payload_chunks import pack_payload_chunks
+from src.transport.blind_sync import BlindOperatingContract
 from src.core import analysis_cache, parallel_analysis
 
 ROOT = Path(__file__).resolve().parents[2]

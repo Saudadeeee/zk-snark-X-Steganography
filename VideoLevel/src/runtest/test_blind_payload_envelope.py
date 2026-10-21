@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.blind_sync import (
+from src.transport.blind_sync import (
     BLIND_ENVELOPE_HEADER_BYTES,
     pack_blind_payload,
     parse_blind_payload_header,

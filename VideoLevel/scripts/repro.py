@@ -86,11 +86,12 @@ TOUCHED_MODULE_PYTEST = (
 SCRIPT_SUITES = (
     "test_lattice_pq_stack.py",
     "test_zkp_registry.py",
-    "test_video_zkp_contract.py",
-    "test_video_zkp_context_relation.py",
-    "test_lattice_zkp.py",
+    "legacy/test_video_zkp_contract.py",
+    "legacy/test_video_zkp_context_relation.py",
+    "legacy/test_lattice_zkp.py",
 )
-COMPILE_TARGETS = ("src/lattice_zk", "research/bdlop_params", "benchmark", "scripts")
+COMPILE_TARGETS = ("src/lattice_zk", "src/transport", "src/registry", "src/core", "src/bitstream",
+                   "research/bdlop_params", "benchmark", "scripts")
 
 
 # --------------------------------------------------------------------------- #

@@ -26,9 +26,9 @@ from types import SimpleNamespace
 import pytest
 
 from benchmark.latticezk_video_e2e import CARRIER_CONTRACTS
-from src import blind_sync_streaming as transport
-from src.blind_payload_chunks import pack_payload_chunks
-from src.blind_sync import (
+from src.transport import blind_sync_streaming as transport
+from src.transport.blind_payload_chunks import pack_payload_chunks
+from src.transport.blind_sync import (
     GeometryOrderedAdaptiveContract,
     GeometryOrderedOperatingContract,
     derive_blind_positions_operating_contract,
@@ -44,11 +44,11 @@ from src.core.carrier_order import (
     priority_rows,
 )
 from src.core.chaos import ChaosTransformer
-from src.lattice_pq import LatticeSigner
+from src.registry.lattice_pq import LatticeSigner
 from src.lattice_zk import bdlop, codec
 from src.lattice_zk import video_pipeline as pipeline
 from src.lattice_zk.params import BDLOP_OPEN_128, TOY
-from src.zkp_registry import SignedZkpRelationRegistry
+from src.registry.zkp_registry import SignedZkpRelationRegistry
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "data" / "external" / "trust_corpus" / "mdn_friday_cif_q22_g1_30f.h264"

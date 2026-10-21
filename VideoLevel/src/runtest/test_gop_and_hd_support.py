@@ -1,6 +1,6 @@
 """GOP > 1 (IDR + P slices) and HD (720p/1080p, multi-slice) support.
 
-* slice-structure policies on hand-built NAL units (``src.gop_policy``);
+* slice-structure policies on hand-built NAL units (``src.transport.gop_policy``);
 * carrier-profile identifiers: all-intra unchanged, GOP policy distinct;
 * all-intra transport output byte-identical to commit dddb9d5;
 * a GOP > 1 lattice-proof round trip on a short synthetic CIF clip: carriers
@@ -21,20 +21,20 @@ from pathlib import Path
 
 import pytest
 
-from src import gop_policy
-from src.blind_payload_chunks import pack_payload_chunks
-from src.blind_sync import BlindOperatingContract
-from src import blind_sync_streaming as transport
+from src.transport import gop_policy
+from src.transport.blind_payload_chunks import pack_payload_chunks
+from src.transport.blind_sync import BlindOperatingContract
+from src.transport import blind_sync_streaming as transport
 from src.core.analysis_cache import (
     clear_video_analysis_cache,
     load_or_build_reconstruction_context,
     load_or_build_video_analysis,
 )
-from src.lattice_pq import LatticeSigner
+from src.registry.lattice_pq import LatticeSigner
 from src.lattice_zk import bdlop, codec
 from src.lattice_zk import video_pipeline as pipeline
 from src.lattice_zk.params import BDLOP_OPEN_128_V1, TOY
-from src.zkp_registry import SignedZkpRelationRegistry
+from src.registry.zkp_registry import SignedZkpRelationRegistry
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "data" / "external" / "trust_corpus" / "mdn_friday_cif_q22_g1_30f.h264"
@@ -333,7 +333,7 @@ def test_one_changed_p_slice_byte_rejects_the_proof(gop_run) -> None:
 
 def test_canonical_digest_binds_every_p_slice_byte(gop_run) -> None:
     """Digest-level check independent of whether the tampered stream still decodes."""
-    from src.video_canonicalization import canonical_h264_digest
+    from src.transport.video_canonicalization import canonical_h264_digest
 
     with tempfile.TemporaryDirectory() as directory:
         segments, _counts = transport._split_video_into_segments(

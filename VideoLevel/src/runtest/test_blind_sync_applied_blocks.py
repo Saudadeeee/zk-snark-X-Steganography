@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src import blind_sync
+from src.transport import blind_sync
 from src.bitstream.bitstream_ops import BitstreamReconstructor
 
 

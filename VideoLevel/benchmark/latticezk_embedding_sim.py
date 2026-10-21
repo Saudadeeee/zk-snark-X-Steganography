@@ -115,9 +115,9 @@ def _carriers(blocks: list) -> list[tuple[int, int]]:
 
 
 def simulate_case(name: str, segments_limit: int, densities: tuple[float, ...] = (1.0,)) -> dict[str, Any]:
-    from benchmark._common import load_or_extract_idr_blocks
+    from benchmark.legacy._common import load_or_extract_idr_blocks
     from src.bitstream.bitstream_ops import BitstreamReconstructor
-    from src.blind_sync_streaming import _split_video_into_segments
+    from src.transport.blind_sync_streaming import _split_video_into_segments
 
     cases = {case["name"]: case for case in json.loads(CASES_FILE.read_text(encoding="utf-8"))}
     case = cases[name]

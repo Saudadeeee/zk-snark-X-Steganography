@@ -32,9 +32,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from benchmark._common import load_or_extract_idr_blocks  # noqa: E402
+from benchmark.legacy._common import load_or_extract_idr_blocks  # noqa: E402
 from benchmark.latticezk_ml_steganalysis import decode_luma_native  # noqa: E402
-from benchmark.sec4_security import chi_square_t1_signs, rs_analysis, spa_estimate  # noqa: E402
+from benchmark.legacy.sec4_security import chi_square_t1_signs, rs_analysis, spa_estimate  # noqa: E402
 
 SCAN_POSITIONS = 16
 MAGNITUDE_BINS = 64

@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.runtest._helpers import run_test, section, summarise
-from src.video_canonicalization import (
+from src.transport.video_canonicalization import (
     canonical_h264_digest,
     canonical_video_sha256,
     canonicalize_carrier_coefficients,
@@ -195,7 +195,7 @@ def t_video_hash_uses_parsed_nal_and_carrier_ranges() -> None:
         with (
             patch("src.bitstream.h264.H264BitstreamParser") as parser_type,
             patch("src.core.pipeline.extract_all_idr_blocks", return_value=([], frames, {}, {}, {})),
-            patch("src.video_canonicalization.canonical_h264_digest", return_value="ab" * 32) as digest,
+            patch("src.transport.video_canonicalization.canonical_h264_digest", return_value="ab" * 32) as digest,
         ):
             parser = parser_type.return_value
             parser.nal_units = [nal]

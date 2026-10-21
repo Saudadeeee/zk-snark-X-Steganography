@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.blind_payload_chunks import (
+from src.transport.blind_payload_chunks import (
     assemble_payload_chunks,
     pack_payload_chunks,
     payload_chunk_count,

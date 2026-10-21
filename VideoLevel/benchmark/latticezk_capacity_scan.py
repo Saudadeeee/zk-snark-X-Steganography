@@ -24,9 +24,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmark.latticezk_video_e2e import CARRIER_CONTRACTS  # noqa: E402
-from src.blind_payload_chunks import CHUNK_HEADER  # noqa: E402
-from src.blind_sync import BLIND_ENVELOPE_HEADER_BYTES, derive_blind_positions_operating_contract  # noqa: E402
-from src.blind_sync_streaming import _split_video_into_segments  # noqa: E402
+from src.transport.blind_payload_chunks import CHUNK_HEADER  # noqa: E402
+from src.transport.blind_sync import BLIND_ENVELOPE_HEADER_BYTES, derive_blind_positions_operating_contract  # noqa: E402
+from src.transport.blind_sync_streaming import _split_video_into_segments  # noqa: E402
 from src.core.analysis_cache import clear_video_analysis_cache  # noqa: E402
 from src.lattice_zk import video_proof  # noqa: E402
 from src.lattice_zk.params import BDLOP_OPEN_128  # noqa: E402

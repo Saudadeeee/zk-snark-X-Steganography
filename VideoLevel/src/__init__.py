@@ -1,31 +1,17 @@
-"""
-Post-Quantum Lattice-Attested CAVLC Video Steganography.
-Core CAVLC-based steganography with ML-DSA lattice authentication.
+"""Lattice zero-knowledge proofs carried inside H.264 CAVLC video.
+
+Subpackages:
+
+* ``lattice_zk`` - BDLOP commitment, proofs, video statement and CLI;
+* ``transport``  - blind carrier selection, chunk framing, GOP policy;
+* ``registry``   - signed relation registry, verifier sessions, ML-DSA signer;
+* ``core``, ``bitstream`` - CAVLC carrier analysis and bitstream patching;
+* ``legacy``     - the pre-lattice-ZK system (Groth16 receipts, sidecar
+  manifest, near-blind verifiers, trust workflows); kept runnable, not used
+  by the lattice-ZK path.
+
+Importing ``src`` loads nothing else; import the subpackage you need.  The
+old one-shot API (``embed``, ``verify``, ...) lives in :mod:`src.legacy`.
 """
 
 __version__ = "4.0-lattice-attested"
-
-# Public APIs
-from .embedder import embed, EmbedResult
-from .verifier import verify, VerifyResult
-from .verifier_blind import verify_near_blind
-from .verify_modes import (
-    verify_strict,
-    verify_nearblind,
-    verify_benchmark,
-    verify_auto,
-)
-from .manifest import StegoManifest, compute_file_hash
-
-__all__ = [
-    "embed",
-    "EmbedResult",
-    "verify",
-    "VerifyResult",
-    "verify_near_blind",
-    "verify_strict",
-    "verify_benchmark",
-    "verify_auto",
-    "StegoManifest",
-    "compute_file_hash",
-]

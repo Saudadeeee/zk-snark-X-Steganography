@@ -1,0 +1,49 @@
+# Legacy (main-branch) CI job, kept for reference: GitHub only runs workflows
+# from the repository root .github/; the lattice-ZK job lives there.
+# Paths are relative to VideoLevel/.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  hardening:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install native codec tool
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg
+      - name: Install Python dependencies
+        run: python -m pip install --requirement requirements.lock
+      - name: Static Python check
+        run: python -m compileall -q src benchmark
+      - name: Build and test native realtime transport
+        run: |
+          cmake -S legacy/native -B legacy/native/build
+          cmake --build legacy/native/build
+          ctest --test-dir legacy/native/build --output-on-failure
+      - name: Native relay FFmpeg integration
+        run: python src/runtest/legacy/test_native_relay_ffmpeg.py
+      - name: Security hardening regression tests
+        run: python src/runtest/legacy/test_hardening.py
+      - name: Lattice post-quantum contracts
+        run: python src/runtest/test_lattice_pq_stack.py
+      - name: Transparent lattice ZKP contracts
+        run: python src/runtest/legacy/test_lattice_zkp.py
+      - name: LaZer Linux integration contracts
+        run: python src/runtest/legacy/test_lazer_backend.py
+      - name: Post-quantum video ZKP statement contracts
+        run: python src/runtest/legacy/test_video_zkp_contract.py
+      - name: Signed future-ZKP relation registry contracts
+        run: python src/runtest/test_zkp_registry.py
+      - name: Cost-guided matrix embedding contracts
+        run: python src/runtest/test_cost_guided_matrix_embedding.py
+      - name: Realtime Annex-B transport contracts
+        run: python src/runtest/legacy/test_realtime_transport.py
+      - name: Portable codec and FFmpeg integration test
+        run: python src/runtest/legacy/test_ffmpeg_fixture.py

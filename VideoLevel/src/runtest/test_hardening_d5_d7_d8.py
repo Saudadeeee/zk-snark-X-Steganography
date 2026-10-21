@@ -26,25 +26,25 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src import blind_sync_streaming as transport
-from src import gop_policy
-from src.blind_payload_chunks import pack_payload_chunks
-from src.blind_sync import BlindOperatingContract
+from src.transport import blind_sync_streaming as transport
+from src.transport import gop_policy
+from src.transport.blind_payload_chunks import pack_payload_chunks
+from src.transport.blind_sync import BlindOperatingContract
 from src.core.analysis_cache import clear_video_analysis_cache
-from src.lattice_pq import LatticeSigner
+from src.registry.lattice_pq import LatticeSigner
 from src.lattice_zk import binary_proof as bp
 from src.lattice_zk import bdlop, codec, equality_proof, linkage, opening_proof, video_proof
 from src.lattice_zk import video_pipeline as pipeline
 from src.lattice_zk.params import BDLOP_OPEN_128, BDLOP_OPEN_128_V1, BDLOP_OPEN_128_V2, TOY
 from src.runtest.test_latticezk_bdlop import forged_commitment
-from src.video_canonicalization import (
+from src.transport.video_canonicalization import (
     DIGEST_V1,
     DIGEST_V2,
     canonical_video_sha256,
     raw_segment_sha256,
 )
-from src.zkp_registry import SignedZkpRelationRegistry
-from src.zkp_sessions import SessionChallengeStore
+from src.registry.zkp_registry import SignedZkpRelationRegistry
+from src.registry.zkp_sessions import SessionChallengeStore
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "data" / "external" / "trust_corpus" / "mdn_friday_cif_q22_g1_30f.h264"
@@ -436,7 +436,7 @@ def _cut(target: Path, frames: int) -> Path:
 
 
 def _carrier_cut(directory: Path) -> tuple[Path, list[tuple[int, int, int]]]:
-    from src.blind_sync import derive_blind_positions_operating_contract
+    from src.transport.blind_sync import derive_blind_positions_operating_contract
 
     cover = _cut(directory / "cover_10f.h264", 10)
     positions, _ = derive_blind_positions_operating_contract(

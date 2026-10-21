@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.blind_sync import BlindOperatingContract, derive_blind_positions_operating_contract
+from src.transport.blind_sync import BlindOperatingContract, derive_blind_positions_operating_contract
 from src.runtest._helpers import run_test, section, summarise
 
 
@@ -32,7 +32,7 @@ def t_operating_contract_reuses_single_analysis_result() -> None:
         dedup_per_block=False,
     )
 
-    with patch("src.blind_sync.load_or_build_video_analysis", return_value=analysis) as load:
+    with patch("src.transport.blind_sync.load_or_build_video_analysis", return_value=analysis) as load:
         positions, metadata = derive_blind_positions_operating_contract(
             "unused.h264",
             b"sync-key",

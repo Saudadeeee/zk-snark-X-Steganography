@@ -5,13 +5,13 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
-from src.blind_sync import (
+from src.transport.blind_sync import (
     BlindOperatingContract,
     extract_blind_video_payload,
     pack_blind_payload,
 )
 from src.core.analysis_cache import _build_reconstruction_context
-from src.video_canonicalization import canonical_video_sha256
+from src.transport.video_canonicalization import canonical_video_sha256
 
 
 def test_reconstruction_context_keeps_the_parser_that_was_already_built(tmp_path):
@@ -38,9 +38,9 @@ def test_blind_extractor_reuses_decoded_analysis_for_header_and_payload():
         return [(0, 0, index) for index in range(required_bits)], Mock()
 
     with (
-        patch("src.blind_sync.load_or_build_video_analysis", return_value=analysis),
+        patch("src.transport.blind_sync.load_or_build_video_analysis", return_value=analysis),
         patch(
-            "src.blind_sync.derive_blind_positions_operating_contract",
+            "src.transport.blind_sync.derive_blind_positions_operating_contract",
             side_effect=derive_positions,
         ),
         patch(

@@ -7,7 +7,7 @@ the registered envelope fits under
 
 * the sweep's fixed-chunk rule (``latticezk_q2_sweep._auto_chunk``),
 * the best possible fixed chunk size (exhaustive search), and
-* the adaptive plan (``src.adaptive_chunks.plan_layout``) at the case density,
+* the adaptive plan (``src.transport.adaptive_chunks.plan_layout``) at the case density,
 
 with the segments the adaptive plan uses.  No video is touched.
 
@@ -28,9 +28,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.adaptive_chunks import FRAMING_BYTES, AdaptiveChunkPlan, plan_layout  # noqa: E402
-from src.blind_payload_chunks import CHUNK_HEADER as V1_CHUNK_HEADER  # noqa: E402
-from src.blind_payload_chunks import MAX_CHUNK_BYTES as V1_MAX_CHUNK_BYTES  # noqa: E402
+from src.transport.adaptive_chunks import FRAMING_BYTES, AdaptiveChunkPlan, plan_layout  # noqa: E402
+from src.transport.blind_payload_chunks import CHUNK_HEADER as V1_CHUNK_HEADER  # noqa: E402
+from src.transport.blind_payload_chunks import MAX_CHUNK_BYTES as V1_MAX_CHUNK_BYTES  # noqa: E402
 from src.lattice_zk import video_proof  # noqa: E402
 from src.lattice_zk.params import BDLOP_OPEN_128_V1, BDLOP_OPEN_128_V2  # noqa: E402
 

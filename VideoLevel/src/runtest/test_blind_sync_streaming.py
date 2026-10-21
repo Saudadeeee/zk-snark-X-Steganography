@@ -8,21 +8,21 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.blind_payload_chunks import pack_payload_chunks
-from src.blind_sync import BlindOperatingContract
-from src.blind_sync_streaming import (
+from src.transport.blind_payload_chunks import pack_payload_chunks
+from src.transport.blind_sync import BlindOperatingContract
+from src.transport.blind_sync_streaming import (
     _split_video_into_segments,
     derive_chunked_video_context,
     embed_chunked_video_payload,
     extract_chunked_video_payload,
 )
-from src.gop_policy import SegmentStructure
+from src.transport.gop_policy import SegmentStructure
 
 
 def _accept_fake_segments(monkeypatch) -> None:
     """The fake segments below are not H.264; skip the slice-structure check."""
     monkeypatch.setattr(
-        "src.blind_sync_streaming._inspect_segments",
+        "src.transport.blind_sync_streaming._inspect_segments",
         lambda segments, frame_counts, _policy: [
             SegmentStructure(count, count, count, 0, 0) for count in frame_counts
         ],
@@ -38,7 +38,7 @@ def test_segment_split_reports_probe_and_boundary_progress(monkeypatch, tmp_path
 
     probe_results = iter([6, 3, 3])
     monkeypatch.setattr(
-        "src.blind_sync_streaming._probe_frame_count",
+        "src.transport.blind_sync_streaming._probe_frame_count",
         lambda *_args: next(probe_results),
     )
 
@@ -47,7 +47,7 @@ def test_segment_split_reports_probe_and_boundary_progress(monkeypatch, tmp_path
         for index in range(2):
             output_pattern.with_name(f"segment_{index:05}.h264").write_bytes(b"segment")
 
-    monkeypatch.setattr("src.blind_sync_streaming._run", fake_run)
+    monkeypatch.setattr("src.transport.blind_sync_streaming._run", fake_run)
 
     segments, frame_counts = _split_video_into_segments(
         source,
@@ -94,7 +94,7 @@ def test_streaming_extractor_reads_declared_chunks_from_video_segments(
         return segments, [100] * len(segments)
 
     monkeypatch.setattr(
-        "src.blind_sync_streaming._split_video_into_segments",
+        "src.transport.blind_sync_streaming._split_video_into_segments",
         fake_split,
     )
     _accept_fake_segments(monkeypatch)
@@ -108,18 +108,18 @@ def test_streaming_extractor_reads_declared_chunks_from_video_segments(
             carrier_positions=[(0, 0, index)],
         )
 
-    monkeypatch.setattr("src.blind_sync.extract_blind_video_payload", fake_extract)
-    monkeypatch.setattr("src.blind_sync_streaming.clear_video_analysis_cache", lambda: 1)
+    monkeypatch.setattr("src.transport.blind_sync.extract_blind_video_payload", fake_extract)
+    monkeypatch.setattr("src.transport.blind_sync_streaming.clear_video_analysis_cache", lambda: 1)
     monkeypatch.setattr(
-        "src.blind_sync_streaming.load_or_build_reconstruction_context",
+        "src.transport.blind_sync_streaming.load_or_build_reconstruction_context",
         lambda *_args, **_kwargs: {"mb_count_per_slice": 396, "parser": object()},
     )
     monkeypatch.setattr(
-        "src.blind_sync_streaming.load_or_build_video_analysis",
+        "src.transport.blind_sync_streaming.load_or_build_video_analysis",
         lambda *_args, **_kwargs: ([], {0: ({}, {}, b"rbsp")}, {}, {}, {}, []),
     )
     monkeypatch.setattr(
-        "src.video_canonicalization.canonical_video_sha256",
+        "src.transport.video_canonicalization.canonical_video_sha256",
         lambda *_args, **_kwargs: "ab" * 32,
     )
 
@@ -170,12 +170,12 @@ def test_chunked_context_binds_global_positions_and_segment_hashes(
     local_positions = {}
     observed_hash_inputs = []
     monkeypatch.setattr(
-        "src.blind_sync_streaming._split_video_into_segments",
+        "src.transport.blind_sync_streaming._split_video_into_segments",
         lambda *_args, **_kwargs: (segments, [2, 2, 2]),
     )
     _accept_fake_segments(monkeypatch)
     monkeypatch.setattr(
-        "src.blind_sync.derive_blind_positions_operating_contract",
+        "src.transport.blind_sync.derive_blind_positions_operating_contract",
         lambda path, _key, required_bits, _contract, **_kwargs: (
             local_positions.setdefault(
                 segments.index(Path(path)),
@@ -188,11 +188,11 @@ def test_chunked_context_binds_global_positions_and_segment_hashes(
         ),
     )
     monkeypatch.setattr(
-        "src.blind_sync_streaming.load_or_build_reconstruction_context",
+        "src.transport.blind_sync_streaming.load_or_build_reconstruction_context",
         lambda *_args, **_kwargs: {"mb_count_per_slice": 396, "parser": object()},
     )
     monkeypatch.setattr(
-        "src.blind_sync_streaming.load_or_build_video_analysis",
+        "src.transport.blind_sync_streaming.load_or_build_video_analysis",
         lambda *_args, **_kwargs: ([], {0: ({}, {}, b"rbsp")}, {}, {}, {}, []),
     )
 
@@ -200,8 +200,8 @@ def test_chunked_context_binds_global_positions_and_segment_hashes(
         observed_hash_inputs.append((Path(path), positions))
         return "11" * 32 if Path(path) == segments[0] else "22" * 32
 
-    monkeypatch.setattr("src.video_canonicalization.canonical_video_sha256", fake_canonical)
-    monkeypatch.setattr("src.blind_sync_streaming.clear_video_analysis_cache", lambda: 1)
+    monkeypatch.setattr("src.transport.video_canonicalization.canonical_video_sha256", fake_canonical)
+    monkeypatch.setattr("src.transport.blind_sync_streaming.clear_video_analysis_cache", lambda: 1)
     progress_events = []
 
     result = derive_chunked_video_context(
@@ -250,7 +250,7 @@ def test_chunked_embed_reports_segment_progress(monkeypatch, tmp_path):
     events = []
 
     monkeypatch.setattr(
-        "src.blind_sync_streaming._split_video_into_segments",
+        "src.transport.blind_sync_streaming._split_video_into_segments",
         lambda *_args, **_kwargs: (segments, [2, 2]),
     )
     _accept_fake_segments(monkeypatch)
@@ -259,7 +259,7 @@ def test_chunked_embed_reports_segment_progress(monkeypatch, tmp_path):
         shutil.copyfile(segment, stego_segment)
         return SimpleNamespace(carriers_used=8)
 
-    monkeypatch.setattr("src.blind_sync.embed_blind_video_payload", fake_embed)
+    monkeypatch.setattr("src.transport.blind_sync.embed_blind_video_payload", fake_embed)
     monkeypatch.setattr("src.core.carrier_gate.strict_validate_h264_decode", lambda *_args: None)
 
     result = embed_chunked_video_payload(

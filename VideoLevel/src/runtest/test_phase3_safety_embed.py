@@ -219,7 +219,7 @@ def t_zero_coeffs_never_modified():
 
 
 def t_capacity_covers_groth16_blob():
-    from src.zk_proof import blob_bit_length
+    from src.legacy.zk_proof import blob_bit_length
     coefficients, nC_map, nal_length_map, t1_omap = _get_blocks()
     sf   = CAVLCSafetyFilter()
     spos = sf.get_safe_positions(

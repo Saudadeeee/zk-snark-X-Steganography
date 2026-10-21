@@ -14,8 +14,8 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from src.zkp_session_http import create_session_server
-from src.zkp_sessions import SessionChallengeStore
+from src.registry.zkp_session_http import create_session_server
+from src.registry.zkp_sessions import SessionChallengeStore
 
 
 @pytest.fixture
@@ -147,7 +147,7 @@ def test_module_cli_runs_http_session_issuer(tmp_path):
         [
             sys.executable,
             "-m",
-            "src.zkp_session_http",
+            "src.registry.zkp_session_http",
             "--database",
             str(tmp_path / "cli-sessions.sqlite3"),
             "--context-binding-hex",

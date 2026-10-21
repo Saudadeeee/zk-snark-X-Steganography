@@ -29,22 +29,22 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src import gop_policy as gop_policies  # noqa: E402
-from src.adaptive_chunks import AdaptiveChunkPlan  # noqa: E402
-from src.blind_sync import (  # noqa: E402
+from src.transport import gop_policy as gop_policies  # noqa: E402
+from src.transport.adaptive_chunks import AdaptiveChunkPlan  # noqa: E402
+from src.transport.blind_sync import (  # noqa: E402
     T1_SPS_GEOMETRY_CONTRACT_VERSION,
     AdaptiveOperatingContract,
     BlindOperatingContract,
     GeometryOrderedAdaptiveContract,
     GeometryOrderedOperatingContract,
 )
-from src.lattice_pq import LatticeSigner  # noqa: E402
+from src.registry.lattice_pq import LatticeSigner  # noqa: E402
 from src.lattice_zk import params as parameter_sets  # noqa: E402
 from src.lattice_zk import video_pipeline as pipeline  # noqa: E402
 from benchmark.latticezk_quality import frame_quality  # noqa: E402
 from src.lattice_zk import bdlop, codec, linkage, video_proof  # noqa: E402
-from src.zkp_registry import SignedZkpRelationRegistry  # noqa: E402
-from src.zkp_sessions import SessionChallengeStore  # noqa: E402
+from src.registry.zkp_registry import SignedZkpRelationRegistry  # noqa: E402
+from src.registry.zkp_sessions import SessionChallengeStore  # noqa: E402
 
 logger = logging.getLogger("latticezk_video_e2e")
 
@@ -272,13 +272,13 @@ def _trailing_rbsp_tamper_check(output, params, pins, profile, sync_key, pinned,
     NAL unit (D5); v2 hashes the full RBSP, so the copy must be rejected.
     """
     if profile.chunk_plan is None:
-        from src.blind_sync_streaming import extract_chunked_video_payload
+        from src.transport.blind_sync_streaming import extract_chunked_video_payload
 
         extracted = extract_chunked_video_payload(
             output, sync_key, profile.contract, **profile.options()
         )
     else:
-        from src.blind_sync_adaptive import extract_adaptive_video_payload
+        from src.transport.blind_sync_adaptive import extract_adaptive_video_payload
 
         extracted = extract_adaptive_video_payload(
             output, sync_key, profile.contract, plan=profile.chunk_plan, **profile.options()
@@ -447,7 +447,7 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
         # Only adaptive runs carry these keys; fixed-chunk reports are unchanged.
         report["chunk_bytes"] = None
         report["adaptive_chunking"] = {
-            "transport": "zkbc-v2 capacity-adaptive (src/blind_sync_adaptive.py)",
+            "transport": "zkbc-v2 capacity-adaptive (src/transport/blind_sync_adaptive.py)",
             "chunk_plan": profile.chunk_plan.descriptor(),
             "plan_id": profile.chunk_plan.plan_id().hex(),
             "segment_capacity_bits": list(embedded.segment_capacity_bits),

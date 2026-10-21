@@ -13,8 +13,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src import blind_sync
-from src.blind_sync import (
+from src.transport import blind_sync
+from src.transport.blind_sync import (
     AdaptiveOperatingContract,
     BlindOperatingContract,
     coded_carrier_layout,
@@ -403,8 +403,8 @@ def test_adaptive_carriers_round_trip_from_the_stego_video_alone(tmp_path):
 
 @pytest.mark.needs_data(COVER)
 def test_adaptive_segmented_context_matches_extraction(tmp_path):
-    from src.blind_payload_chunks import pack_payload_chunks
-    from src.blind_sync_streaming import (
+    from src.transport.blind_payload_chunks import pack_payload_chunks
+    from src.transport.blind_sync_streaming import (
         derive_chunked_video_context,
         embed_chunked_video_payload,
         extract_chunked_video_payload,

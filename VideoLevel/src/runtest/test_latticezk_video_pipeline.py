@@ -13,14 +13,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.blind_payload_chunks import CHUNK_HEADER, assemble_payload_chunks, pack_payload_chunks
-from src.blind_sync import BlindOperatingContract
-from src.lattice_pq import LatticeSigner
+from src.transport.blind_payload_chunks import CHUNK_HEADER, assemble_payload_chunks, pack_payload_chunks
+from src.transport.blind_sync import BlindOperatingContract
+from src.registry.lattice_pq import LatticeSigner
 from src.lattice_zk import video_pipeline as pipeline
 from src.lattice_zk.params import TOY
 from src.runtest.test_latticezk_bdlop import forged_commitment
-from src.zkp_registry import SignedZkpRelationRegistry
-from src.zkp_sessions import SessionChallengeStore
+from src.registry.zkp_registry import SignedZkpRelationRegistry
+from src.registry.zkp_sessions import SessionChallengeStore
 
 SYNC_KEY = b"k" * 32
 MARKER = b"\x00CARRIERS\x00"

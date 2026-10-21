@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from src.zkp_sessions import SessionChallengeStore
+from src.registry.zkp_sessions import SessionChallengeStore
 
 
 def test_issued_challenge_has_fixed_length_binding_and_expiry(tmp_path) -> None:
@@ -82,7 +82,7 @@ def test_challenge_that_expires_during_verification_is_not_consumed(
     store = SessionChallengeStore(tmp_path / "sessions.sqlite3", ttl_seconds=10)
     grant = store.issue(context_binding=b"e" * 32, now=20)
     times = iter((29, 30))
-    monkeypatch.setattr("src.zkp_sessions.time.time", lambda: next(times))
+    monkeypatch.setattr("src.registry.zkp_sessions.time.time", lambda: next(times))
 
     accepted = store.verify_and_consume(
         grant.challenge,

@@ -20,27 +20,27 @@ ROOT     = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 RUNTEST  = os.path.join(ROOT, 'src', 'runtest')
 
 PHASES = [
-    ("Phase 1", "Legacy Groth16 (not lattice)", "test_phase1_zk_proof.py"),
+    ("Phase 1", "Legacy Groth16 (not lattice)", "legacy/test_phase1_zk_proof.py"),
     ("Phase 2", "H264 Parser",         "test_phase2_h264_parser.py"),
     ("Phase 3", "Safety + Embed",      "test_phase3_safety_embed.py"),
     ("Phase 4", "Reconstruct",         "test_phase4_reconstruct.py"),
-    ("Phase 5", "Lattice receipt",    "test_phase5_extract_verify.py"),
-    ("Phase 6", "Near-blind + Manifest", "test_phase6_near_blind_manifest.py"),
-    ("Phase 7", "Regression Cases", "test_phase7_regression_cases.py"),
-    ("Phase 12", "Lattice capacity gate", "test_phase12_lattice_capacity_gate.py"),
-    ("Phase 13", "Streaming raw capacity scan", "test_phase13_streaming_capacity_scan.py"),
-    ("Phase 14", "LaZer backend preflight", "test_lazer_backend.py"),
+    ("Phase 5", "Lattice receipt",    "legacy/test_phase5_extract_verify.py"),
+    ("Phase 6", "Near-blind + Manifest", "legacy/test_phase6_near_blind_manifest.py"),
+    ("Phase 7", "Regression Cases", "legacy/test_phase7_regression_cases.py"),
+    ("Phase 12", "Lattice capacity gate", "legacy/test_phase12_lattice_capacity_gate.py"),
+    ("Phase 13", "Streaming raw capacity scan", "legacy/test_phase13_streaming_capacity_scan.py"),
+    ("Phase 14", "LaZer backend preflight", "legacy/test_lazer_backend.py"),
     ("Phase 15", "Exact-bit payload embedding", "test_phase15_payload_bits.py"),
     ("Phase 16", "Single-pass blind analysis", "test_phase16_blind_analysis_single_pass.py"),
-    ("Phase 17", "Isolated blind-analysis worker", "test_phase17_blind_worker_isolation.py"),
+    ("Phase 17", "Isolated blind-analysis worker", "legacy/test_phase17_blind_worker_isolation.py"),
     ("Phase 18", "Blind patchability contract", "test_phase18_blind_patchability_contract.py"),
-    ("Phase 28", "Fail-closed experimental lattice ZKP", "test_lattice_zkp.py"),
+    ("Phase 28", "Fail-closed experimental lattice ZKP", "legacy/test_lattice_zkp.py"),
 ]
 
 PYTEST_PHASES = [
-    ("Phase 20", "Strict H.264 output gate", "test_phase19_strict_decode_gate.py"),
+    ("Phase 20", "Strict H.264 output gate", "legacy/test_phase19_strict_decode_gate.py"),
     ("Phase 21", "Analysis-cache patchability context", "test_phase20_analysis_cache_patchability_context.py"),
-    ("Phase 22", "Application retry contract", "test_phase21_application_retry_contract.py"),
+    ("Phase 22", "Application retry contract", "legacy/test_phase21_application_retry_contract.py"),
     ("Phase 23", "Parser integrity trust gate", "test_phase22_parser_integrity_gate.py"),
     ("Phase 24", "Video-only blind carrier sync", "test_video_only_blind_sync_integration.py"),
     ("Phase 25", "Blind payload envelope", "test_blind_payload_envelope.py"),

@@ -87,9 +87,9 @@ def _count_changes(cover_blocks: list, stego_blocks: list) -> dict[str, int]:
 
 def features(cover: Path, case: str, work: Path) -> tuple[Path, dict[str, Any]]:
     """Steganalysis features of touched segments (``latticezk_ml_steganalysis`` format)."""
-    from benchmark._common import load_or_extract_idr_blocks
+    from benchmark.legacy._common import load_or_extract_idr_blocks
     from src.bitstream.bitstream_ops import BitstreamReconstructor
-    from src.blind_sync_streaming import _split_video_into_segments
+    from src.transport.blind_sync_streaming import _split_video_into_segments
 
     output = work / f"features_{case}.npz"
     counts_path = work / f"changes_{case}.json"

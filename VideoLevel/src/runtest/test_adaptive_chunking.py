@@ -17,17 +17,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from src import adaptive_chunks as ac
-from src import blind_sync_adaptive as transport
-from src.blind_payload_chunks import pack_payload_chunks, payload_chunk_count
-from src.blind_sync import BLIND_ENVELOPE_HEADER_BYTES, AdaptiveOperatingContract, BlindOperatingContract
-from src.gop_policy import SegmentStructure
-from src.lattice_pq import LatticeSigner
+from src.transport import adaptive_chunks as ac
+from src.transport import blind_sync_adaptive as transport
+from src.transport.blind_payload_chunks import pack_payload_chunks, payload_chunk_count
+from src.transport.blind_sync import BLIND_ENVELOPE_HEADER_BYTES, AdaptiveOperatingContract, BlindOperatingContract
+from src.transport.gop_policy import SegmentStructure
+from src.registry.lattice_pq import LatticeSigner
 from src.lattice_zk import video_pipeline as pipeline
 from src.lattice_zk.params import BDLOP_OPEN_128, BDLOP_OPEN_128_V1, TOY
 from src.lattice_zk.video_proof import envelope_size
-from src.zkp_registry import SignedZkpRelationRegistry
-from src.zkp_sessions import SessionChallengeStore
+from src.registry.zkp_registry import SignedZkpRelationRegistry
+from src.registry.zkp_sessions import SessionChallengeStore
 
 ROOT = Path(__file__).resolve().parents[2]
 CREW_4CIF_Q22 = [11093, 11762, 16852, 9642, 5613, 8794]  # capacity_crew4cif_q22_reg_s6.json
@@ -226,8 +226,8 @@ BASELINE_REGISTERED_MAGNITUDE = "93f63501a96424681ccb85c0c5c4ce221e5297f9baee9e6
 
 def test_existing_profiles_and_v1_framing_are_byte_identical() -> None:
     from benchmark.latticezk_video_e2e import CARRIER_CONTRACTS
-    from src import gop_policy
-    from src.blind_sync_streaming import _combine_segment_digests
+    from src.transport import gop_policy
+    from src.transport.blind_sync_streaming import _combine_segment_digests
 
     table = {}
     # The carriers that existed at 10bce11; later contracts (e.g. the *-geo
@@ -290,7 +290,7 @@ def _stand_in_segments(monkeypatch, tmp_path, capacities, extracted_chunks, stru
                         lambda *_a, **_k: ([], {0: ({}, {}, b"")}, {}, {}, {}, []))
     monkeypatch.setattr(transport, "load_or_build_reconstruction_context",
                         lambda *_a, **_k: {"mb_count_per_slice": 396, "parser": object()})
-    monkeypatch.setattr("src.video_canonicalization.canonical_video_sha256",
+    monkeypatch.setattr("src.transport.video_canonicalization.canonical_video_sha256",
                         lambda segment, *_a, **_k: hashlib.sha256(Path(segment).read_bytes()).hexdigest())
     seen = []
 
@@ -301,7 +301,7 @@ def _stand_in_segments(monkeypatch, tmp_path, capacities, extracted_chunks, stru
         return SimpleNamespace(payload=chunk, carriers_used=8 * len(chunk),
                                carrier_positions=((0, index, 1),))
 
-    monkeypatch.setattr("src.blind_sync.extract_blind_video_payload", fake_extract)
+    monkeypatch.setattr("src.transport.blind_sync.extract_blind_video_payload", fake_extract)
     video = tmp_path / "video.h264"
     video.write_bytes(b"video")
     return video, seen
@@ -372,7 +372,7 @@ def test_extractor_rejects_chunks_that_deviate_from_the_plan(monkeypatch, tmp_pa
 
 
 def test_plan_and_codec_policy_v2_are_bound_together(monkeypatch, tmp_path) -> None:
-    from src.video_canonicalization import DIGEST_V1, DIGEST_V2
+    from src.transport.video_canonicalization import DIGEST_V1, DIGEST_V2
 
     v2 = pipeline.CarrierProfile(MAGNITUDE, codec_policy=pipeline.CODEC_POLICY_V2)
     both = dataclasses.replace(v2, chunk_plan=PLAN)
@@ -664,7 +664,7 @@ def test_real_video_round_trip_skips_a_segment_and_recomputes_capacity(tmp_path,
     # The skipped segment is byte-identical (its first IDR slice is unchanged).
     cover_bytes, stego_bytes = FIXTURE.read_bytes(), output.read_bytes()
     assert cover_bytes != stego_bytes
-    from src.gop_policy import nal_unit_spans
+    from src.transport.gop_policy import nal_unit_spans
 
     first_cover = [cover_bytes[a:b] for a, b in nal_unit_spans(cover_bytes)][:12]
     first_stego = [stego_bytes[a:b] for a, b in nal_unit_spans(stego_bytes)][:12]

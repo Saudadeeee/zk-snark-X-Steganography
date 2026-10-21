@@ -101,7 +101,7 @@ def _auto_chunk(case: dict[str, Any], video: Path, results: Path, log: Path) -> 
         _log(f"{case['name']}: capacity scan is for {scan.get('video')}/{scan.get('carrier')}, "
              f"not {video.name}/{carrier}")
         return None
-    from src.blind_payload_chunks import MAX_CHUNK_BYTES
+    from src.transport.blind_payload_chunks import MAX_CHUNK_BYTES
 
     chunk = min(int(scan["min_chunk_bytes_supported"] * CHUNK_MARGIN * density), MAX_CHUNK_BYTES)
     envelope = video_proof.envelope_size(BDLOP_OPEN_128, registered=case.get("registered", True))

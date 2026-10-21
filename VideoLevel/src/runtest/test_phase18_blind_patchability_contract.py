@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.blind_sync import BlindOperatingContract, derive_blind_positions_operating_contract
+from src.transport.blind_sync import BlindOperatingContract, derive_blind_positions_operating_contract
 from src.runtest._helpers import run_test, section, summarise
 
 
@@ -29,7 +29,7 @@ def t_patchable_contract_uses_embedder_headroom_and_modification_limit() -> None
         assert max_modifications_per_block == 1
         return positions[:required_bits]
 
-    with patch("src.blind_sync.load_or_build_video_analysis", return_value=analysis), patch(
+    with patch("src.transport.blind_sync.load_or_build_video_analysis", return_value=analysis), patch(
         "src.core.carrier_gate.prune_patchable_positions", side_effect=retain_requested
     ) as prune:
         positions, _metadata = derive_blind_positions_operating_contract(

@@ -9,7 +9,8 @@ system does not import the legacy package:
 * :func:`strict_validate_h264_decode` fails unless FFmpeg decodes the whole
   patched stream without an H.264 error;
 * :func:`hash_positions` is the canonical SHA-256 of the applied positions
-  (identical bytes to the former ``src.manifest.hash_positions``).
+  (identical bytes to the former ``src.manifest.hash_positions``,
+  which ``src.legacy.manifest`` still re-exports).
 """
 
 from __future__ import annotations

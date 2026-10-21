@@ -48,16 +48,24 @@ data/external/trust_corpus/*
 *.zkey
 *.ptau
 *.r1cs
-circuits/build/payload_verify_js/
+legacy/circuits/build/payload_verify_js/
 node_modules/
 
-# Logs
+# Logs and LaTeX build output
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.synctex.gz
+*.toc
 *.log
 
 # Test outputs
 *.json
-!circuits/package.json
-!circuits/build/verification_key.json
+!legacy/circuits/package.json
+!legacy/circuits/build/verification_key.json
 !benchmark/results/sec*.json
 !benchmark/results/ringo_raw_capacity_coastguard_300f_20260930.json
 !benchmark/results/ringo_blind_stable_capacity_coastguard_300f_20260930.json
@@ -65,11 +73,11 @@ node_modules/
 !benchmark/results/ringo_blind_stable_capacity_akiyo_300f_fallback_20260930.json
 !benchmark/results/trust_architecture_diagnostic.json
 !benchmark/results/trust_corpus_validation.json
-!benchmark/trust_corpus_manifest.json
-!lazer/LAZER_TOOLKIT_CANDIDATE.lock.json
-!src/runtest/demo_embed_verify.py
-!src/runtest/test_*.py
-!src/runtest/test_future_trust_architecture.py
+!benchmark/legacy/trust_corpus_manifest.json
+!legacy/lazer/LAZER.lock.json
+!legacy/lazer/LAZER_TOOLKIT_CANDIDATE.lock.json
+!src/runtest/legacy/demo_embed_verify.py
+!src/runtest/**/test_*.py
 data/external/trust_corpus/*.mp4
 !data/external/trust_corpus/*_source.json
 
@@ -99,7 +107,7 @@ tmpclaude-*/
 tmpclaude-*-cwd
 
 # Local build trees and generated demo/E2E outputs
-native/*-build/
+legacy/native/*-build/
 demo/runs/
 demo/native_walkthrough/runs/
 tmp/

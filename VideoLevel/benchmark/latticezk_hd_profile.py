@@ -59,13 +59,13 @@ def _cut(video: Path, frames: int, target: Path) -> int:
 def _child(video: Path, frames: int, phases: list[str],
            carrier: str = "magnitude") -> dict[str, Any]:
     from benchmark.latticezk_video_e2e import CARRIER_CONTRACTS
-    from src import blind_sync_streaming as transport
+    from src.transport import blind_sync_streaming as transport
     from src.core.analysis_cache import (
         clear_video_analysis_cache,
         load_or_build_reconstruction_context,
         load_or_build_video_analysis,
     )
-    from src.gop_policy import ALL_INTRA, IDR_CARRIERS_INTER_RAW, inspect_segment
+    from src.transport.gop_policy import ALL_INTRA, IDR_CARRIERS_INTER_RAW, inspect_segment
 
     key = bytes(range(32))
     contract = CARRIER_CONTRACTS[carrier]
