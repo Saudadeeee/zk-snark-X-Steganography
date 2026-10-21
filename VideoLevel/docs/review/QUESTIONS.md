@@ -1,317 +1,322 @@
-# Open questions for the reviewer
+# Các câu hỏi mở dành cho người đánh giá
 
-The questions are ranked by how much of the security argument fails if the
-answer is "no". Every question names the claim it concerns, using the labels
-of `docs/paper/sections/security.tex` and `security_appendix.tex`, and the
-code it depends on. Line numbers are at commit `18c5123`. "Ours" marks what
-the authors currently believe, so the reviewer can confirm or reject it
-quickly.
+Các câu hỏi được xếp hạng theo mức độ lập luận an toàn sẽ đổ vỡ nếu câu trả
+lời là "không". Mỗi câu hỏi nêu tên tuyên bố mà nó liên quan, dùng các nhãn
+của `docs/paper/sections/security.tex` và `security_appendix.tex`, cùng mã
+nguồn mà nó phụ thuộc vào. Số dòng ứng với commit `18c5123`. "Quan điểm của
+chúng tôi" đánh dấu điều mà các tác giả hiện tin là đúng, để người đánh giá
+có thể xác nhận hoặc bác bỏ nhanh.
 
 ---
 
-## Tier 1: the main theorems depend on these
+## Hạng 1: các định lý chính phụ thuộc vào những điều này
 
-### Q1. Simulating the aborting prover in the classical ROM (Lemma `lem:sim`, hybrid G3)
+### Q1. Mô phỏng aborting prover trong classical ROM (Bổ đề `lem:sim`, hybrid G3)
 
-The simulator never reproduces the random-oracle queries of rejected
-attempts. The argument has two parts: (a) acceptance is *exactly*
-independent of the witness and of `c` (Lemma `lem:hvzk`); (b) every hidden
-query point contains `w = B1·y` with min-entropy at least
-`η = nN·log2(2B+1) ≈ 27 647` bits, because `B1 = [I_n | B1']`. The
-per-proof loss is `2(Q_H+Q_P)2^-256 + (A_max+1)(Q_H+(A_max+1)Q_P)2^-η`.
+Simulator không bao giờ tái tạo các truy vấn random-oracle của những lần thử
+bị rejected. Lập luận gồm hai phần: (a) việc chấp nhận *hoàn toàn* độc lập với
+witness và với `c` (Bổ đề `lem:hvzk`); (b) mọi điểm truy vấn ẩn đều chứa
+`w = B1·y` với min-entropy ít nhất `η = nN·log2(2B+1) ≈ 27 647` bit, bởi vì
+`B1 = [I_n | B1']`. Tổn thất (loss) trên mỗi proof là
+`2(Q_H+Q_P)2^-256 + (A_max+1)(Q_H+(A_max+1)Q_P)2^-η`.
 
-- Does this correctly avoid the flaw in earlier CMA-to-NMA proofs of
-  Fiat–Shamir with aborts, which Barbosa et al. (CRYPTO 2023) found and
-  Devevey et al. analysed? In particular, is it sound to replace a rejected
-  attempt's challenge by a uniform `h_i` that is never written into `H_fs`,
-  given that `y_i` comes from a hedged stream and not from fresh coins (G1–G2)?
-- Is the min-entropy bound for a mask *conditioned on rejection* right? The
-  paper uses `η_y − log2(1/(1−p_acc))`, which needs `η_y − 0.35 ≥ η`.
-- Ours: correct in the classical ROM. The exact-uniformity property is what
-  makes this simpler than the Gaussian case.
-- Code: `opening_proof.py:77–136`, `sampling.py:60–66`.
+- Điều này có tránh đúng cái lỗ hổng trong các chứng minh CMA-to-NMA trước đây
+  của Fiat–Shamir with aborts — lỗ hổng mà Barbosa et al. (CRYPTO 2023) đã phát
+  hiện và Devevey et al. đã phân tích — hay không? Cụ thể, liệu việc thay
+  challenge của một lần thử bị rejected bằng một `h_i` đều (uniform) mà không
+  bao giờ được ghi vào `H_fs` có hợp lệ (sound) hay không, khi mà `y_i` đến từ
+  một hedged stream chứ không phải từ coin tươi (fresh coins) (G1–G2)?
+- Cận min-entropy cho một mask *với điều kiện bị rejection* có đúng không? Bài
+  báo dùng `η_y − log2(1/(1−p_acc))`, điều này cần `η_y − 0.35 ≥ η`.
+- Quan điểm của chúng tôi: đúng trong classical ROM. Tính chất exact-uniformity
+  là thứ làm cho trường hợp này đơn giản hơn trường hợp Gaussian.
+- Mã: `opening_proof.py:77–136`, `sampling.py:60–66`.
 
-### Q2. Relaxed-opening soundness at the ℓ∞ bound 8κB (Theorems `thm:binding`, `thm:se`)
+### Q2. Soundness của relaxed-opening tại cận ℓ∞ 8κB (Định lý `thm:binding`, `thm:se`)
 
-Two extracted transcripts give `(r̄, f)` with `‖r̄‖∞ ≤ 2B` and `f ∈ C̄`.
-Binding against two relaxed openings needs M-SIS for `B1` with
-`‖x‖∞ ≤ β = 8κB = 62 885 280 ≈ 2^25.91`, which is about `q/17`. The
-constructor enforces `2β < q` (`params.py:66–68`).
+Hai transcript được trích xuất cho ra `(r̄, f)` với `‖r̄‖∞ ≤ 2B` và `f ∈ C̄`.
+Binding chống lại hai relaxed opening cần M-SIS cho `B1` với
+`‖x‖∞ ≤ β = 8κB = 62 885 280 ≈ 2^25.91`, tức khoảng `q/17`. Constructor cưỡng
+chế `2β < q` (`params.py:66–68`).
 
-- Is `‖f'r̄ − f r̄'‖∞ ≤ ‖f'‖₁‖r̄‖∞ + ‖f‖₁‖r̄'‖∞ = 8κB` the right bound to
-  estimate, and is `2β < q` the right side condition? (It makes `x ≢ 0 mod q`
-  equivalent to `x ≠ 0` over ℤ.)
-- The ℓ2 view is vacuous: `√(kN)·β ≈ 2^31.75 > q`, so `q·e1` already
-  satisfies the ℓ2 bound (the lattice-estimator reports "trivially easy").
-  Security therefore rests entirely on ℓ∞ M-SIS with a large bound. Are the
-  ℓ∞ cost models (CRYSTALS `SIS_linf_cost` and lattice-estimator
-  `SIS.lattice`, norm=∞) adequate this close to `q`? Is there an attack that
-  exploits `β/q ≈ 1/17`, e.g. many coordinates near `±q/2` or the ζ trick of
-  zeroing coordinates? The estimator optimum chose ζ = 0.
-- Can the bound be tightened? For example, extract with one challenge
-  difference fixed, or use the structure `r̄ = z − z'` (both in `[−B, B]`).
-  Ours: 8κB is a correct, loose worst case.
-- Numbers: β = 480, 140 / 127 bits (core-SVP classical/quantum) from both
-  estimators. See `research/bdlop_params/CROSSCHECK.md`.
+- `‖f'r̄ − f r̄'‖∞ ≤ ‖f'‖₁‖r̄‖∞ + ‖f‖₁‖r̄'‖∞ = 8κB` có phải là cận đúng để
+  ước lượng không, và `2β < q` có phải là điều kiện phụ (side condition) đúng
+  không? (Nó làm cho `x ≢ 0 mod q` tương đương với `x ≠ 0` trên ℤ.)
+- Góc nhìn ℓ2 là rỗng (vacuous): `√(kN)·β ≈ 2^31.75 > q`, nên `q·e1` đã thỏa
+  cận ℓ2 (lattice-estimator báo cáo "trivially easy"). Do đó an toàn hoàn toàn
+  dựa vào ℓ∞ M-SIS với một cận lớn. Các mô hình chi phí (cost model) ℓ∞
+  (CRYSTALS `SIS_linf_cost` và lattice-estimator `SIS.lattice`, norm=∞) có đủ
+  chính xác khi gần `q` đến vậy không? Có tấn công nào khai thác `β/q ≈ 1/17`,
+  ví dụ nhiều tọa độ gần `±q/2` hoặc mẹo ζ zeroing các tọa độ, hay không? Điểm
+  tối ưu của estimator đã chọn ζ = 0.
+- Cận có thể siết chặt hơn không? Ví dụ, trích xuất với một hiệu challenge cố
+  định, hoặc dùng cấu trúc `r̄ = z − z'` (cả hai đều trong `[−B, B]`). Quan điểm
+  của chúng tôi: 8κB là một trường hợp xấu nhất (worst case) đúng nhưng lỏng
+  (loose).
+- Số liệu: β = 480, 140 / 127 bit (core-SVP classical/quantum) từ cả hai
+  estimator. Xem `research/bdlop_params/CROSSCHECK.md`.
 
-### Q3. Invertibility of challenge differences for q ≡ 5 mod 8 (Lemma `lem:invertible`)
+### Q3. Tính khả nghịch của các hiệu challenge với q ≡ 5 mod 8 (Bổ đề `lem:invertible`)
 
-The paper cites Lyubashevsky–Seiler (EUROCRYPT 2018), Corollary 1.2 with
-k = 2: every nonzero `y` with `‖y‖∞ < √(q/2) ≈ 23 170` is invertible, and
-`‖f‖∞ ≤ 2` for `f ∈ C̄`.
+Bài báo trích dẫn Lyubashevsky–Seiler (EUROCRYPT 2018), Hệ quả 1.2 với
+k = 2: mọi `y` khác không với `‖y‖∞ < √(q/2) ≈ 23 170` đều khả nghịch, và
+`‖f‖∞ ≤ 2` với `f ∈ C̄`.
 
-- Please confirm that the hypotheses hold: q prime, q ≡ 5 (mod 8), N = 256.
-  Then `X^N+1 = (X^{N/2} − ρ)(X^{N/2} + ρ)` with `ρ² ≡ −1`, both factors
-  irreducible (the order of q modulo 2N is N/2).
-- Elementary check for k = 2, which we believe is enough: write
-  `f = a(X) + X^{N/2}·b(X)`. Then `f ≡ a ± ρb` in each factor. Since each
-  factor is irreducible, `f` is a non-unit only if `a_i ≡ ∓ρ b_i` for all i.
-  That gives `a_i² + b_i² ≡ 0 (mod q)` with `0 < a_i² + b_i² ≤ 8 < q`, which
-  is impossible. Is this airtight?
-- Code: `ring.py:42–57` (modulus check, `√−1`), `params.py:63–65` (the
-  constructor checks `2√2 < √q`), `ring.py:106–114` (`is_invertible`, used in
-  tests only).
+- Xin xác nhận rằng các giả thiết thỏa: q nguyên tố, q ≡ 5 (mod 8), N = 256.
+  Khi đó `X^N+1 = (X^{N/2} − ρ)(X^{N/2} + ρ)` với `ρ² ≡ −1`, cả hai nhân tử
+  đều bất khả quy (cấp của q modulo 2N là N/2).
+- Kiểm tra sơ cấp cho k = 2, mà chúng tôi tin là đủ: viết
+  `f = a(X) + X^{N/2}·b(X)`. Khi đó `f ≡ a ± ρb` trong mỗi nhân tử. Vì mỗi
+  nhân tử là bất khả quy, `f` là non-unit chỉ khi `a_i ≡ ∓ρ b_i` với mọi i.
+  Điều đó cho `a_i² + b_i² ≡ 0 (mod q)` với `0 < a_i² + b_i² ≤ 8 < q`, là điều
+  không thể xảy ra. Lập luận này có kín kẽ (airtight) không?
+- Mã: `ring.py:42–57` (kiểm tra modulus, `√−1`), `params.py:63–65` (constructor
+  kiểm tra `2√2 < √q`), `ring.py:106–114` (`is_invertible`, chỉ dùng trong
+  test).
 
-### Q4. Extraction loss and the meaning of "knowledge soundness" (Theorem `thm:se`, Lemma `lem:fork`)
+### Q4. Tổn thất extraction và ý nghĩa của "knowledge soundness" (Định lý `thm:se`, Bổ đề `lem:fork`)
 
-The bound has the usual square-root loss of the general forking lemma: for
-`Q_H = 2^64`, an extraction probability of `2^-128` gives only
+Cận này có tổn thất căn bậc hai (square-root loss) thường thấy của general
+forking lemma: với `Q_H = 2^64`, một xác suất extraction là `2^-128` chỉ cho
 `ε ≲ 2^-32`.
 
-- Is the theorem worth stating in this form, or should the main claim be
-  the tight SelfTargetMSIS route (Kiltz–Lyubashevsky–Schaffner 2018)? The
-  cost is a non-standard assumption with no separate estimate here.
-- The extractor outputs only a *relaxed* opening. The extracted message
-  `m̄ = t2 − f⁻¹⟨b2, r̄⟩` need not be in the payload encoder's image
-  (`codec.py:49–60`). Is it accurate to call the property "knowledge
-  soundness bound to the statement", given that the statement is only bound
-  to "some message" that a later disclosure must match? (Partly addressed
-  since: the optional payload range proof, Q16, shows that the extracted
-  message is `encode_payload(p)` for a public length `L`.)
-- Does the programmed-point case in Theorem `thm:se` (an adversary reusing
-  `(x_i, t_i, w_i)` with a new `z`) also cover a mauled `z` with the same
-  seed? The paper turns this case into an M-SIS solution of norm ≤ 2B.
+- Định lý có đáng phát biểu ở dạng này không, hay tuyên bố chính nên đi theo
+  hướng SelfTargetMSIS chặt (tight) (Kiltz–Lyubashevsky–Schaffner 2018)? Cái
+  giá phải trả là một giả định phi tiêu chuẩn (non-standard) mà ở đây không có
+  ước lượng riêng.
+- Extractor chỉ xuất ra một opening *relaxed*. Message được trích xuất
+  `m̄ = t2 − f⁻¹⟨b2, r̄⟩` không nhất thiết nằm trong ảnh (image) của payload
+  encoder (`codec.py:49–60`). Gọi tính chất này là "knowledge soundness ràng
+  buộc với statement" có chính xác không, khi mà statement chỉ ràng buộc với
+  "một message nào đó" mà một disclosure về sau phải khớp? (Đã được giải quyết
+  một phần kể từ đó: payload range proof tùy chọn, Q16, cho thấy message được
+  trích xuất là `encode_payload(p)` cho một độ dài công khai `L`.)
+- Trường hợp programmed-point trong Định lý `thm:se` (một adversary tái sử dụng
+  `(x_i, t_i, w_i)` với một `z` mới) có bao quát cả một `z` bị mauled với cùng
+  seed không? Bài báo biến trường hợp này thành một lời giải M-SIS có norm ≤ 2B.
 
-### Q5. M-LWE hiding instance and leakage through proofs (Theorem `thm:hiding`, Lemma `lem:mlwe-instance`)
+### Q5. Instance M-LWE hiding và leakage qua các proof (Định lý `thm:hiding`, Bổ đề `lem:mlwe-instance`)
 
-Hiding maps `Com(m; r)` to an M-LWE sample of rank λ = 7 with n+1 = 7 ring
-samples: `A ∈ R_q^{7×7}`, uniform ternary secret and error. Flattened, this
-is LWE with n = 1792, m = 1792, q = 2^30−35 and σ = √(2/3).
+Hiding ánh xạ `Com(m; r)` thành một mẫu M-LWE hạng (rank) λ = 7 với n+1 = 7
+ring sample: `A ∈ R_q^{7×7}`, secret và error ternary đều. Khi làm phẳng
+(flattened), đây là LWE với n = 1792, m = 1792, q = 2^30−35 và σ = √(2/3).
 
-- Is the map `(t1 − B'_{1,2}(t2 − m), t2 − m) = A·r3 + (r1, r2)` a bijection
-  for fixed m, and is `A` uniform? Ours: yes. D11 corrected a typo in the
-  specification.
-- Estimates (see CROSSCHECK.md). Primal uSVP: β = 580, 169 / 153 bits.
-  **Dual-hybrid in the lattice-estimator "rough" model: β = 564, 2^164.9
-  classical, and β = 567, 2^150.3 quantum.** This is below the 169 / 153
-  bits of the CRYSTALS primal/dual scripts and is the claimed 164 / 150. (For
-  `bdlop-open-128-v1`, λ = 6, the same attack gave 2^135.2 / 2^123.3, which is
-  why λ was raised to 7.) Is ~164 bits the correct headline? Should a hybrid attack on a
-  uniform ternary secret, with only 1792 samples, be considered beyond what
-  the estimator covers?
-- Leakage. Registered credentials are proven many times with the same `r`.
-  Each accepted `z` is exactly uniform on `[−B, B]^{kN}`, independent of `r`.
-  Does any other output depend on `r`? Candidates: the attempt count, which
-  is witness-independent; timing (CHECKLIST §7); and the hedged mask key
-  (Q7). Does any of these give an M-LWE "hint"?
+- Ánh xạ `(t1 − B'_{1,2}(t2 − m), t2 − m) = A·r3 + (r1, r2)` có phải là song
+  ánh (bijection) với m cố định không, và `A` có đều không? Quan điểm của chúng
+  tôi: có. D11 đã sửa một lỗi gõ (typo) trong đặc tả.
+- Ước lượng (xem CROSSCHECK.md). Primal uSVP: β = 580, 169 / 153 bit.
+  **Dual-hybrid trong mô hình "rough" của lattice-estimator: β = 564, 2^164.9
+  classical, và β = 567, 2^150.3 quantum.** Con số này thấp hơn 169 / 153 bit
+  của các script primal/dual của CRYSTALS và chính là mức 164 / 150 được tuyên
+  bố. (Với `bdlop-open-128-v1`, λ = 6, cùng tấn công đó cho 2^135.2 / 2^123.3,
+  đó là lý do λ được nâng lên 7.) ~164 bit có phải là con số tiêu đề (headline)
+  đúng không? Liệu một tấn công hybrid lên một secret ternary đều, chỉ với 1792
+  sample, có nên được coi là nằm ngoài phạm vi estimator bao quát không?
+- Leakage. Các registered credential được chứng minh nhiều lần với cùng `r`.
+  Mỗi `z` được chấp nhận đều phân bố chính xác đều trên `[−B, B]^{kN}`, độc lập
+  với `r`. Có output nào khác phụ thuộc vào `r` không? Các ứng viên: số lần thử
+  (attempt count), vốn độc lập với witness; timing (CHECKLIST §7); và hedged
+  mask key (Q7). Có cái nào trong số này cho một "hint" M-LWE không?
 
-### Q6. Zero knowledge from rejection sampling with uniform masks (Lemma `lem:hvzk`)
+### Q6. Zero knowledge từ rejection sampling với các mask đều (Bổ đề `lem:hvzk`)
 
-Masks are uniform on `[−γ+1, γ]`, which is asymmetric. A response is
-accepted iff `‖z‖∞ ≤ B = γ − κ − 1`. Since `‖c·r‖∞ ≤ κ`, every `z_i ∈ [−B, B]`
-corresponds to one mask value in `[−γ+1, γ−1]`.
+Các mask phân bố đều trên `[−γ+1, γ]`, vốn bất đối xứng. Một response được
+chấp nhận khi và chỉ khi `‖z‖∞ ≤ B = γ − κ − 1`. Vì `‖c·r‖∞ ≤ κ`, mỗi
+`z_i ∈ [−B, B]` tương ứng với đúng một giá trị mask trong `[−γ+1, γ−1]`.
 
-- Please confirm that acceptance is exactly
-  `p_acc = ((2B+1)/2γ)^{kN} ≈ 0.1912` for every witness and challenge, and
-  that accepted `z` is exactly uniform on `Z`. Also confirm that
-  `B = γ − κ − 1` is the largest bound that preserves this.
-- The mask sampler draws 18-bit values below `2γ = 2^18`, so there is no
-  rejection at all (`sampling.py:60–66`). Is the exact-uniformity claim
-  therefore immune to sampler bias?
-- The chi-square test `test_accepted_response_coordinate_is_uniform_for_any_witness`
-  only checks marginals on a tiny parameter set. Would the reviewer want a
-  stronger empirical check?
+- Xin xác nhận rằng việc chấp nhận là chính xác
+  `p_acc = ((2B+1)/2γ)^{kN} ≈ 0.1912` với mọi witness và challenge, và rằng
+  `z` được chấp nhận là chính xác đều trên `Z`. Cũng xin xác nhận rằng
+  `B = γ − κ − 1` là cận lớn nhất giữ được tính chất này.
+- Mask sampler rút các giá trị 18-bit nhỏ hơn `2γ = 2^18`, nên hoàn toàn không
+  có rejection nào (`sampling.py:60–66`). Vậy tuyên bố exact-uniformity có miễn
+  nhiễm với sampler bias không?
+- Test chi-square `test_accepted_response_coordinate_is_uniform_for_any_witness`
+  chỉ kiểm tra các phân phối biên (marginal) trên một bộ tham số rất nhỏ. Người
+  đánh giá có muốn một kiểm tra thực nghiệm mạnh hơn không?
 
 ---
 
-## Tier 2: design choices that could change parameters or wording
+## Hạng 2: các lựa chọn thiết kế có thể thay đổi tham số hoặc câu chữ
 
-### Q7. Hedged mask derivation and its domain separation (D7, open)
+### Q7. Suy dẫn hedged mask và domain separation của nó (D7, open)
 
-`K = SHA3-256(e ‖ u64(|x|) ‖ x ‖ u64(|t|) ‖ t ‖ u64(|r|) ‖ r)`, with 32
-bytes of entropy `e` (`opening_proof.py:77–90`). The masks are
-`y_i = SHAKE-256("…/bdlop-open/v1/mask\0" ‖ K ‖ u32(i))`. The equality proof
-uses its own mask tag but the same `K` construction, over both commitments
-and both witnesses (`equality_proof.py:124–131`).
+`K = SHA3-256(e ‖ u64(|x|) ‖ x ‖ u64(|t|) ‖ t ‖ u64(|r|) ‖ r)`, với 32
+byte entropy `e` (`opening_proof.py:77–90`). Các mask là
+`y_i = SHAKE-256("…/bdlop-open/v1/mask\0" ‖ K ‖ u32(i))`. Equality proof
+dùng mask tag riêng của nó nhưng cùng cách dựng `K`, trên cả hai commitment
+và cả hai witness (`equality_proof.py:124–131`).
 
-- The SHA3-256 input has no domain tag. Its separation from the other
-  (tagged) SHA3-256 uses relies on `e` being uniform. Should a tag be added?
-  This changes the KATs. Is the ROM treatment of `H_hg` in G1 still right
-  when `e` comes from a weak RNG?
-- Is binding `K` to `(x, t, r)` enough against fault and nonce-reuse attacks
-  of the "same mask, two challenges" kind? The opening and equality proofs
-  never share `K`, because their inputs and mask tags differ.
+- Đầu vào SHA3-256 không có domain tag. Việc tách biệt nó khỏi các lần dùng
+  SHA3-256 khác (có tag) dựa vào việc `e` là đều. Có nên thêm một tag không?
+  Điều này thay đổi các KAT. Cách xử lý ROM đối với `H_hg` trong G1 có còn đúng
+  khi `e` đến từ một RNG yếu không?
+- Việc ràng buộc `K` với `(x, t, r)` có đủ để chống lại các tấn công fault và
+  nonce-reuse kiểu "cùng mask, hai challenge" không? Opening proof và equality
+  proof không bao giờ dùng chung `K`, vì đầu vào và mask tag của chúng khác
+  nhau.
 
-### Q8. Equality proof: acceptance, attempt cap and the disclosure variant (Lemma `lem:eq-ss`, Theorem `thm:link`; D4 fixed)
+### Q8. Equality proof: việc chấp nhận, attempt cap và biến thể disclosure (Bổ đề `lem:eq-ss`, Định lý `thm:link`; D4 đã sửa)
 
-An attempt is accepted with probability `p_acc² ≈ 0.0463`. The cap is 4096,
-which gives a failure probability of about `2^-279`
-(`equality_proof.py:46–64`).
+Một lần thử được chấp nhận với xác suất `p_acc² ≈ 0.0463`. Cap là 4096, cho
+một xác suất thất bại khoảng `2^-279` (`equality_proof.py:46–64`).
 
-- Is a larger cap free for zero knowledge? `A_max` enters `ε_zk` only
-  through `2^-η` terms. Ours: yes.
-- Disclosure proves equality between `t` and `Com(enc(p); 0) = (0, enc(p))`
-  with witness `r_b = 0`, so `z_b = y_b`. Is the simulator for this
-  degenerate witness still correct? Does extraction really force `r̄_b = 0`
-  unless M-SIS is broken (appendix, "Disclosure by proof")?
-- The announcement `u = ⟨b2, y_a − y_b⟩` reveals a linear combination of
-  masks. Is min-entropy through `w_a` alone enough for the hidden-query
-  argument?
+- Một cap lớn hơn có "miễn phí" đối với zero knowledge không? `A_max` chỉ đi
+  vào `ε_zk` thông qua các số hạng `2^-η`. Quan điểm của chúng tôi: có.
+- Disclosure chứng minh đẳng thức giữa `t` và `Com(enc(p); 0) = (0, enc(p))`
+  với witness `r_b = 0`, nên `z_b = y_b`. Simulator cho witness suy biến
+  (degenerate) này có còn đúng không? Extraction có thực sự buộc `r̄_b = 0` trừ
+  khi M-SIS bị phá không (phụ lục, "Disclosure by proof")?
+- Announcement `u = ⟨b2, y_a − y_b⟩` tiết lộ một tổ hợp tuyến tính của các
+  mask. Min-entropy chỉ qua `w_a` có đủ cho lập luận hidden-query không?
 
-### Q9. One global commitment key (D9, open)
+### Q9. Một commitment key toàn cục duy nhất (D9, open)
 
-`ck` is expanded by SHAKE-256 from `parameter_id`, which is fixed and public
-(`bdlop.py:111–123`). Every user and every registry share one M-SIS matrix
-and one M-LWE matrix.
+`ck` được mở rộng bằng SHAKE-256 từ `parameter_id`, vốn cố định và công khai
+(`bdlop.py:111–123`). Mọi người dùng và mọi registry đều dùng chung một ma
+trận M-SIS và một ma trận M-LWE.
 
-- A one-time lattice reduction of cost about 2^140 against `[I | B1']`
-  would break binding for every commitment ever made. Multi-target hiding
-  loses a factor Q in Lemma `lem:row`. Should the key be per registry or per
-  issuer, e.g. derived from the registry root? Is the concrete-security
-  statement acceptable with a single key?
-- Is a key derived from public data in the ROM ("nothing up my sleeve") an
-  adequate model of a uniform key in the reductions? The appendix programs
-  the key-expansion point before the adversary starts.
+- Một lần lattice reduction (một lần duy nhất) với chi phí khoảng 2^140 chống
+  lại `[I | B1']` sẽ phá binding cho mọi commitment từng được tạo. Multi-target
+  hiding mất một thừa số Q trong Bổ đề `lem:row`. Key có nên là per registry
+  hoặc per issuer không, ví dụ suy dẫn từ registry root? Phát biểu
+  concrete-security có chấp nhận được với một key duy nhất không?
+- Một key suy dẫn từ dữ liệu công khai trong ROM ("nothing up my sleeve") có
+  phải là một mô hình thỏa đáng cho một key đều trong các reduction không? Phụ
+  lục program điểm key-expansion trước khi adversary bắt đầu.
 
-### Q10. Fiat–Shamir in the QROM (Section `sec:sec-qrom`; no theorem claimed)
+### Q10. Fiat–Shamir trong QROM (Mục `sec:sec-qrom`; không tuyên bố định lý nào)
 
-All theorems are classical-ROM. The paper says "plausibly post-quantum" and
-cites Barbosa et al. (QROM CMA-to-NMA for Fiat–Shamir with aborts), Don et
-al. 2019 and Liu–Zhandry 2019.
+Mọi định lý đều ở classical-ROM. Bài báo nói "plausibly post-quantum" và trích
+dẫn Barbosa et al. (QROM CMA-to-NMA cho Fiat–Shamir with aborts), Don et al.
+2019 và Liu–Zhandry 2019.
 
-- Do the measure-and-reprogram results of Don et al. apply to a Σ-protocol
-  with relaxed special soundness and an aborting prover? If so, what loss
-  should be quoted? Is "plausibly post-quantum" honest wording, or should it
-  be weaker?
-- The challenge seed has 256 bits and `|C| = 2^257`. Is that enough against
-  Grover-style search in the QROM soundness bound? Ours: yes for 128-bit
-  quantum security.
+- Các kết quả measure-and-reprogram của Don et al. có áp dụng được cho một
+  Σ-protocol với relaxed special soundness và một aborting prover không? Nếu
+  có, nên trích dẫn mức loss nào? "plausibly post-quantum" có phải là cách diễn
+  đạt trung thực không, hay nên yếu hơn?
+- Challenge seed có 256 bit và `|C| = 2^257`. Điều đó có đủ để chống lại tìm
+  kiếm kiểu Grover trong cận soundness QROM không? Quan điểm của chúng tôi: có,
+  đủ cho mức an toàn 128-bit quantum.
 
-### Q11. Statement binding and uniqueness of encodings (Theorem `thm:se`, appendix items 1, 2, 5)
+### Q11. Statement binding và tính duy nhất của các encoding (Định lý `thm:se`, các mục phụ lục 1, 2, 5)
 
-The opening proof hashes
-`SHAKE-256(tag ‖ pid ‖ u64(|x|) ‖ x ‖ enc(t) ‖ enc(w))`. Only `x` is length
-prefixed; `t` (6 720 bytes) and `w` (n·N big-endian 64-bit words) have
-lengths fixed by `pid` (`opening_proof.py:43–51`). The statement is a
-fixed-width 274-byte string (`video_proof.py:89–98`).
+Opening proof hash
+`SHAKE-256(tag ‖ pid ‖ u64(|x|) ‖ x ‖ enc(t) ‖ enc(w))`. Chỉ `x` được
+length-prefix; `t` (6 720 byte) và `w` (n·N từ (word) 64-bit big-endian) có
+độ dài cố định bởi `pid` (`opening_proof.py:43–51`). Statement là một chuỗi
+độ rộng cố định 274 byte (`video_proof.py:89–98`).
 
-- Is the transcript injective? Does it include everything the extractor's
-  statement needs? It hashes `t1` and `t2`, but not `ck` itself, which `pid`
-  determines.
-- The verifier takes only `N_s` from the envelope, and `N_s` is part of `x`.
-  It reads all other statement fields from its own pins and from
-  `Read(vid*)` (`video_pipeline.py:369–389`). Please check for any path
-  where a prover-controlled value enters `x` unverified.
-- Are the domain tags (key, randomness, Fiat–Shamir and mask for opening and
-  equality, challenge-poly; each ending in its only NUL byte) prefix-free
-  across *all* SHAKE-256 uses, including `XofStream` seeds?
-- The payload encoding has a 2-byte length and 3 bytes per coefficient
-  (`codec.py:36–60`). Is the "exact image" decoder enough for the
-  disclosure claim `enc(p) = m̄`?
+- Transcript có đơn ánh không? Nó có bao gồm mọi thứ mà statement của extractor
+  cần không? Nó hash `t1` và `t2`, nhưng không hash chính `ck`, cái mà `pid`
+  xác định.
+- Verifier chỉ lấy `N_s` từ envelope, và `N_s` là một phần của `x`. Nó đọc
+  mọi trường statement khác từ các pin của chính nó và từ
+  `Read(vid*)` (`video_pipeline.py:369–389`). Xin kiểm tra xem có đường dẫn nào
+  mà một giá trị do prover kiểm soát đi vào `x` mà không được xác minh không.
+- Các domain tag (key, randomness, Fiat–Shamir và mask cho opening và equality,
+  challenge-poly; mỗi tag kết thúc bằng NUL byte duy nhất của nó) có prefix-free
+  trên *tất cả* các lần dùng SHAKE-256 không, bao gồm cả các seed `XofStream`?
+- Payload encoding có độ dài 2 byte và 3 byte mỗi hệ số (`codec.py:36–60`).
+  Decoder "exact image" có đủ cho tuyên bố disclosure `enc(p) = m̄` không?
 
-### Q16. Binary and payload range proofs: Fiat–Shamir with aborts and the link to the payload (Theorems `thm:bin-ks`, `thm:pay`)
+### Q16. Binary và payload range proof: Fiat–Shamir with aborts và liên kết tới payload (Định lý `thm:bin-ks`, `thm:pay`)
 
-The binary proof (`binary_proof.py`) and the payload range proof
-(`payload_range_proof.py`, `docs/PAYLOAD_RANGE_PROOF.md`) are four-round
-protocols turned non-interactive with chained seeds; only the last round
-repeats on abort. The payload range proof shows that an existing payload
-commitment hides `encode_payload(p)` for a public length `L ≤ 128`.
+Binary proof (`binary_proof.py`) và payload range proof
+(`payload_range_proof.py`, `docs/PAYLOAD_RANGE_PROOF.md`) là các giao thức
+bốn vòng (four-round) được biến thành non-interactive bằng các seed xâu chuỗi
+(chained); chỉ vòng cuối lặp lại khi abort. Payload range proof cho thấy rằng
+một payload commitment đang tồn tại che giấu (hides) `encode_payload(p)` cho
+một độ dài công khai `L ≤ 128`.
 
-- Theorem `thm:bin-ks` bounds a cheating prover by
-  `(Q+1)·ε_rbr + Σ_i sqrt((Q+1)·α_i) + β + Q²·2^-256`: AFK22's Σ-protocol
-  extractor forks only the challenge oracle, and each statistical round
-  (lift, check, combine) is bounded against the computationally bound
-  messages by a plurality argument plus a forking M-SIS finder. Is the
-  plurality step right, and does AFK22 cover a prefix the adversary chooses
-  through three other oracles?
-- The link `m = e_L + A β` is folded into the check functionals with a fresh
-  `ρ^L_t`, and the bit polynomials are committed in the auxiliary commitment
-  *before* the lift challenge, with the lifts added later under the same
-  randomness `r'`. Are both steps sound (one error vector, one uniform
-  functional; incremental BDLOP rows under one `r'`)?
-- Ours: correct as sketched; per-round error `2^-149.99`
-  (`k = k' = 5`); the M-SIS terms are non-tight as for the opening proof (Q4).
-- Code: `payload_range_proof.py` (`_prove`, `_recomputed_seed`,
+- Định lý `thm:bin-ks` chặn một cheating prover bởi
+  `(Q+1)·ε_rbr + Σ_i sqrt((Q+1)·α_i) + β + Q²·2^-256`: extractor Σ-protocol
+  của AFK22 chỉ fork challenge oracle, và mỗi vòng thống kê (statistical round)
+  (lift, check, combine) được chặn so với các message bị ràng buộc về mặt tính
+  toán (computationally bound) bằng một lập luận đa số (plurality) cộng với một
+  forking M-SIS finder. Bước plurality có đúng không, và AFK22 có bao quát một
+  prefix mà adversary chọn thông qua ba oracle khác không?
+- Liên kết `m = e_L + A β` được gộp (folded) vào các check functional với một
+  `ρ^L_t` tươi, và các bit polynomial được commit trong auxiliary commitment
+  *trước* lift challenge, với các lift được thêm vào sau dưới cùng randomness
+  `r'`. Cả hai bước có sound không (một error vector, một functional đều; các
+  hàng (row) BDLOP tăng dần (incremental) dưới một `r'`)?
+- Quan điểm của chúng tôi: đúng như đã phác thảo; sai số mỗi vòng `2^-149.99`
+  (`k = k' = 5`); các số hạng M-SIS là non-tight giống như với opening proof
+  (Q4).
+- Mã: `payload_range_proof.py` (`_prove`, `_recomputed_seed`,
   `_check_challenges`), `binary_proof.py`.
 
 ---
 
-## Tier 3: engineering and wording (no parameter change expected)
+## Hạng 3: kỹ thuật và câu chữ (không dự kiến thay đổi tham số)
 
-### Q12. Production-strength enforcement only at pin resolution (resolved)
+### Q12. Cưỡng chế production-strength chỉ tại bước pin resolution (đã giải quyết)
 
-`require_production_strength()` (challenge space ≥ 2^256) runs in
-`pins_from_registry` (`video_pipeline.py:192–193`). It does not run in
-`verify_video_proof`, `verify_envelope` or `opening_proof.verify`. A caller
-that builds `VerifierPins` by hand with the `TOY` set would accept toy
-proofs. Should every verifier entry point refuse non-production parameters?
+`require_production_strength()` (challenge space ≥ 2^256) chạy trong
+`pins_from_registry` (`video_pipeline.py:192–193`). Nó không chạy trong
+`verify_video_proof`, `verify_envelope` hay `opening_proof.verify`. Một caller
+tự dựng `VerifierPins` bằng tay với bộ `TOY` sẽ chấp nhận các toy proof. Mọi
+entry point của verifier có nên từ chối các tham số non-production không?
 
-- **Resolved.** `video_proof.require_verifier_parameters` now runs first in
-  every application-level verifier: `verify_video_proof` (inside the
-  configuration check, before the video is read), `verify_envelope`,
+- **Đã giải quyết.** `video_proof.require_verifier_parameters` nay chạy đầu
+  tiên trong mọi verifier ở mức ứng dụng: `verify_video_proof` (bên trong bước
+  kiểm tra cấu hình, trước khi video được đọc), `verify_envelope`,
   `verify_registered_envelope`, `verify_disclosure_proof`,
-  `verify_commitment_disclosure`, `linkage.verify_linkage` and
-  `pins_from_registry`. Each raises `ValueError` for a set below 2^256 unless
-  the caller passes `allow_toy_parameters=True` (tests and the TOY benchmark
-  only). The proof primitives (`opening_proof.verify`, `equality_proof.verify`,
-  `binary_proof.verify`) stay parameter-agnostic building blocks; nothing in
-  the video pipeline calls them except through the verifiers above.
-  Tests: `src/runtest/test_hardening_d5_d7_d8.py` (hand-built TOY pins are
-  refused).
+  `verify_commitment_disclosure`, `linkage.verify_linkage` và
+  `pins_from_registry`. Mỗi hàm raise `ValueError` cho một bộ dưới 2^256 trừ
+  khi caller truyền `allow_toy_parameters=True` (chỉ test và TOY benchmark).
+  Các proof primitive (`opening_proof.verify`, `equality_proof.verify`,
+  `binary_proof.verify`) vẫn là các khối dựng (building block) không phụ thuộc
+  tham số; không có gì trong video pipeline gọi chúng ngoại trừ thông qua các
+  verifier ở trên. Test: `src/runtest/test_hardening_d5_d7_d8.py` (các TOY pin
+  dựng bằng tay bị từ chối).
 
-### Q13. Session and replay semantics (Theorem `thm:replay`)
+### Q13. Ngữ nghĩa session và replay (Định lý `thm:replay`)
 
-Store mode consumes `N_s` with a single conditional
-`UPDATE … WHERE consumed_at IS NULL AND expires_at > now` inside
-`BEGIN IMMEDIATE` (`zkp_sessions.py:181–205`). Stateless mode
-(`expected_session`) gives no replay protection, and no mode prevents
-relaying. Is this the right split of claims? Is the
-`Q_H·Q_I·2^-256` precomputation bound for (iii) stated correctly?
+Chế độ store tiêu thụ (consume) `N_s` bằng một
+`UPDATE … WHERE consumed_at IS NULL AND expires_at > now` có điều kiện duy
+nhất bên trong `BEGIN IMMEDIATE` (`zkp_sessions.py:181–205`). Chế độ stateless
+(`expected_session`) không cho bảo vệ chống replay nào, và không chế độ nào
+ngăn được relaying. Đây có phải là cách phân chia các tuyên bố đúng không? Cận
+precomputation `Q_H·Q_I·2^-256` cho (iii) có được phát biểu đúng không?
 
-### Q14. Remaining self-review items
+### Q14. Các mục tự đánh giá còn lại
 
-- **D5** (resolved by a new codec policy): scope of the canonical digest.
-  Unbound items were RBSP bits after the stop bit, raw-segment digests
-  without a tag, and the segmenter version. Codec policy v2
-  (`CODEC_POLICY_V2`, opt-in per carrier profile, new profile/policy/relation
-  identifiers) hashes the full RBSP of carrier IDR NAL units with its length,
-  tags raw-segment digests and types every segment digest, and pins the
-  segmentation: the segments must be exactly the access-unit partition of
-  the input, checked byte for byte, so the digest no longer depends on the
-  segmenter. The ffmpeg version is deliberately not hashed (it would bind the
-  verifier's installation, not the video). Codec policy v1 is unchanged byte
-  for byte for existing videos and still leaves zero bits after the stop bit
-  of a carrier NAL unit unbound: a zero byte appended there is accepted under
-  v1 and rejected under v2 through the real transport
+- **D5** (đã giải quyết bằng một codec policy mới): phạm vi của canonical
+  digest. Các mục chưa ràng buộc là các bit RBSP sau stop bit, các raw-segment
+  digest không có tag, và phiên bản của segmenter. Codec policy v2
+  (`CODEC_POLICY_V2`, opt-in theo từng carrier profile, các định danh
+  profile/policy/relation mới) hash toàn bộ RBSP của các carrier IDR NAL unit
+  kèm độ dài của nó, gắn tag cho các raw-segment digest và gắn type cho mọi
+  segment digest, và pin việc phân đoạn (segmentation): các segment phải đúng
+  là phân hoạch access-unit của đầu vào, kiểm tra từng byte một, nên digest
+  không còn phụ thuộc vào segmenter. Phiên bản ffmpeg được cố ý không hash (nó
+  sẽ ràng buộc cài đặt của verifier, chứ không phải video). Codec policy v1
+  không đổi từng byte cho các video hiện có và vẫn để lại không ràng buộc các
+  zero bit sau stop bit của một carrier NAL unit: một zero byte được chèn thêm
+  ở đó được chấp nhận dưới v1 và bị từ chối dưới v2 thông qua transport thật
   (`test_zero_bits_after_the_stop_bit_are_accepted_by_v1_and_rejected_by_v2`).
-- **D7** (resolved): the hedged mask key is domain-separated by a tag, the
-  protocol label and the parameter id. `bdlop-open-128-v1` keeps the untagged
-  derivation, so `kat_v1.json` is unchanged; `kat_v2.json` and the binary
-  KAT were regenerated (commitments unchanged). Verification never recomputes
-  a mask; proofs from either derivation verify.
-- **D8** (resolved): `Commitment` carries its parameter set and rejects
-  non-canonical coefficients at construction, holding read-only copies;
-  verifiers still re-check objects built around the constructor.
-- **D10** (open): `verify_statement_binding` serves only `lazer-v1`
-  (`zkp_registry.py:170–220`). The BDLOP path uses `pins_from_registry`.
-  This is API hygiene.
-- **D11** (open): specification §4.2 cites an "ML-DSA specification,
-  Appendix B" for the zero-knowledge argument. Please confirm or replace the
-  reference.
+- **D7** (đã giải quyết): hedged mask key được domain-separated bằng một tag,
+  protocol label và parameter id. `bdlop-open-128-v1` giữ cách suy dẫn không
+  tag, nên `kat_v1.json` không đổi; `kat_v2.json` và binary KAT đã được tái
+  tạo (các commitment không đổi). Verification không bao giờ tính lại một mask;
+  các proof từ cả hai cách suy dẫn đều verify được.
+- **D8** (đã giải quyết): `Commitment` mang theo bộ tham số của nó và từ chối
+  các hệ số non-canonical tại lúc construction, giữ các bản sao chỉ-đọc
+  (read-only); các verifier vẫn kiểm tra lại các đối tượng được dựng quanh
+  constructor.
+- **D10** (open): `verify_statement_binding` chỉ phục vụ `lazer-v1`
+  (`zkp_registry.py:170–220`). Đường dẫn BDLOP dùng `pins_from_registry`.
+  Đây là vấn đề vệ sinh API (API hygiene).
+- **D11** (open): đặc tả §4.2 trích dẫn một "ML-DSA specification,
+  Appendix B" cho lập luận zero-knowledge. Xin xác nhận hoặc thay thế tham
+  chiếu này.
 
-### Q15. Concrete-estimate methodology
+### Q15. Phương pháp luận ước lượng cụ thể (concrete-estimate)
 
-Core-SVP ignores reduction overheads, as for ML-DSA. The MATZOV cost model
-gives 194 / 190 (M-LWE primal/dual-hybrid) and 171 (M-SIS) bits. Is reporting
-core-SVP 140/127 (M-SIS) and 164/150 (M-LWE, the dual-hybrid minimum) the
-right convention for a 128-bit claim? The quantum M-SIS figure is just below 128. See `research/bdlop_params/CROSSCHECK.md`.
+Core-SVP bỏ qua các chi phí phụ (overhead) của reduction, giống như với
+ML-DSA. Mô hình chi phí MATZOV cho 194 / 190 (M-LWE primal/dual-hybrid) và 171
+(M-SIS) bit. Việc báo cáo core-SVP 140/127 (M-SIS) và 164/150 (M-LWE, mức tối
+thiểu dual-hybrid) có phải là quy ước đúng cho một tuyên bố 128-bit không? Con
+số M-SIS quantum chỉ ngay dưới 128. Xem `research/bdlop_params/CROSSCHECK.md`.
