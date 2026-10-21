@@ -1,0 +1,432 @@
+{
+  "protocol": "paired",
+  "config": {
+    "crop": 256,
+    "batch_pairs": 16,
+    "max_epochs": 40,
+    "steps_per_epoch": null,
+    "learning_rate": 0.0002,
+    "weight_decay": 0.0001,
+    "patience": 10,
+    "validation_fraction": 0.2,
+    "seed": 20261021,
+    "amp": true,
+    "curriculum_start": 6.0,
+    "curriculum_epochs": 15,
+    "amplify": 1.0
+  },
+  "device": "cuda",
+  "frame_pairs": 600,
+  "clips": [
+    "coastguard",
+    "container",
+    "deadline"
+  ],
+  "folds": [
+    {
+      "name": "paired_half_split",
+      "pairs": {
+        "train": 240,
+        "val": 60,
+        "test": 300
+      },
+      "training": {
+        "best_epoch": 24,
+        "epochs_run": 35,
+        "best_val_p_e": 0.4417
+      },
+      "history": [
+        {
+          "epoch": 0,
+          "train_loss": 0.6708,
+          "val_loss": 0.6953,
+          "val_p_e": 0.4417,
+          "val_auc": 0.5254,
+          "alpha": 6.0
+        },
+        {
+          "epoch": 1,
+          "train_loss": 0.6087,
+          "val_loss": 0.7177,
+          "val_p_e": 0.4667,
+          "val_auc": 0.5139,
+          "alpha": 5.667
+        },
+        {
+          "epoch": 2,
+          "train_loss": 0.5201,
+          "val_loss": 0.7923,
+          "val_p_e": 0.4583,
+          "val_auc": 0.511,
+          "alpha": 5.333
+        },
+        {
+          "epoch": 3,
+          "train_loss": 0.4381,
+          "val_loss": 0.7229,
+          "val_p_e": 0.4667,
+          "val_auc": 0.5092,
+          "alpha": 5.0
+        },
+        {
+          "epoch": 4,
+          "train_loss": 0.3669,
+          "val_loss": 1.0384,
+          "val_p_e": 0.4667,
+          "val_auc": 0.5138,
+          "alpha": 4.667
+        },
+        {
+          "epoch": 5,
+          "train_loss": 0.3468,
+          "val_loss": 0.9684,
+          "val_p_e": 0.4667,
+          "val_auc": 0.5158,
+          "alpha": 4.333
+        },
+        {
+          "epoch": 6,
+          "train_loss": 0.3166,
+          "val_loss": 0.7483,
+          "val_p_e": 0.4583,
+          "val_auc": 0.5157,
+          "alpha": 4.0
+        },
+        {
+          "epoch": 7,
+          "train_loss": 0.3164,
+          "val_loss": 1.5625,
+          "val_p_e": 0.4667,
+          "val_auc": 0.5143,
+          "alpha": 3.667
+        },
+        {
+          "epoch": 8,
+          "train_loss": 0.3018,
+          "val_loss": 1.2202,
+          "val_p_e": 0.4583,
+          "val_auc": 0.5254,
+          "alpha": 3.333
+        },
+        {
+          "epoch": 9,
+          "train_loss": 0.344,
+          "val_loss": 1.4681,
+          "val_p_e": 0.4667,
+          "val_auc": 0.5149,
+          "alpha": 3.0
+        },
+        {
+          "epoch": 10,
+          "train_loss": 0.3826,
+          "val_loss": 0.8325,
+          "val_p_e": 0.4583,
+          "val_auc": 0.5225,
+          "alpha": 2.667
+        },
+        {
+          "epoch": 11,
+          "train_loss": 0.4329,
+          "val_loss": 1.6292,
+          "val_p_e": 0.4667,
+          "val_auc": 0.5187,
+          "alpha": 2.333
+        },
+        {
+          "epoch": 12,
+          "train_loss": 0.5626,
+          "val_loss": 1.3725,
+          "val_p_e": 0.4667,
+          "val_auc": 0.5118,
+          "alpha": 2.0
+        },
+        {
+          "epoch": 13,
+          "train_loss": 0.588,
+          "val_loss": 0.9466,
+          "val_p_e": 0.4667,
+          "val_auc": 0.5094,
+          "alpha": 1.667
+        },
+        {
+          "epoch": 14,
+          "train_loss": 0.6578,
+          "val_loss": 0.7882,
+          "val_p_e": 0.4583,
+          "val_auc": 0.5111,
+          "alpha": 1.333
+        },
+        {
+          "epoch": 15,
+          "train_loss": 0.7238,
+          "val_loss": 0.779,
+          "val_p_e": 0.45,
+          "val_auc": 0.5067,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 16,
+          "train_loss": 0.7038,
+          "val_loss": 0.7075,
+          "val_p_e": 0.4667,
+          "val_auc": 0.5026,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 17,
+          "train_loss": 0.7027,
+          "val_loss": 0.7032,
+          "val_p_e": 0.475,
+          "val_auc": 0.5061,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 18,
+          "train_loss": 0.7022,
+          "val_loss": 0.6985,
+          "val_p_e": 0.475,
+          "val_auc": 0.5074,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 19,
+          "train_loss": 0.704,
+          "val_loss": 0.6944,
+          "val_p_e": 0.4667,
+          "val_auc": 0.5071,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 20,
+          "train_loss": 0.6957,
+          "val_loss": 0.6947,
+          "val_p_e": 0.4667,
+          "val_auc": 0.5081,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 21,
+          "train_loss": 0.6899,
+          "val_loss": 0.6947,
+          "val_p_e": 0.4583,
+          "val_auc": 0.5097,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 22,
+          "train_loss": 0.6899,
+          "val_loss": 0.6935,
+          "val_p_e": 0.4583,
+          "val_auc": 0.5175,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 23,
+          "train_loss": 0.6878,
+          "val_loss": 0.6936,
+          "val_p_e": 0.4667,
+          "val_auc": 0.5172,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 24,
+          "train_loss": 0.6915,
+          "val_loss": 0.6942,
+          "val_p_e": 0.4417,
+          "val_auc": 0.5236,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 25,
+          "train_loss": 0.6973,
+          "val_loss": 0.6961,
+          "val_p_e": 0.4583,
+          "val_auc": 0.5194,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 26,
+          "train_loss": 0.6928,
+          "val_loss": 0.7009,
+          "val_p_e": 0.4583,
+          "val_auc": 0.5172,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 27,
+          "train_loss": 0.6868,
+          "val_loss": 0.6985,
+          "val_p_e": 0.45,
+          "val_auc": 0.5183,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 28,
+          "train_loss": 0.6936,
+          "val_loss": 0.6974,
+          "val_p_e": 0.45,
+          "val_auc": 0.5179,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 29,
+          "train_loss": 0.6925,
+          "val_loss": 0.697,
+          "val_p_e": 0.4583,
+          "val_auc": 0.5175,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 30,
+          "train_loss": 0.6914,
+          "val_loss": 0.6956,
+          "val_p_e": 0.4583,
+          "val_auc": 0.5203,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 31,
+          "train_loss": 0.6888,
+          "val_loss": 0.6961,
+          "val_p_e": 0.4583,
+          "val_auc": 0.5181,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 32,
+          "train_loss": 0.6882,
+          "val_loss": 0.6954,
+          "val_p_e": 0.4667,
+          "val_auc": 0.5183,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 33,
+          "train_loss": 0.6973,
+          "val_loss": 0.6951,
+          "val_p_e": 0.4583,
+          "val_auc": 0.5186,
+          "alpha": 1.0
+        },
+        {
+          "epoch": 34,
+          "train_loss": 0.69,
+          "val_loss": 0.6948,
+          "val_p_e": 0.45,
+          "val_auc": 0.5239,
+          "alpha": 1.0
+        }
+      ],
+      "frame": {
+        "p_e": 0.4633,
+        "auc": 0.5302,
+        "p_e_at_0": 0.48
+      },
+      "frame_full_logit": {
+        "p_e": 0.4617,
+        "auc": 0.5267,
+        "p_e_at_0": 0.4833
+      },
+      "frame_per_clip": {
+        "coastguard": {
+          "p_e": 0.45,
+          "auc": 0.5391,
+          "p_e_at_0": 0.48
+        },
+        "container": {
+          "p_e": 0.465,
+          "auc": 0.5182,
+          "p_e_at_0": 0.48
+        },
+        "deadline": {
+          "p_e": 0.44,
+          "auc": 0.5454,
+          "p_e_at_0": 0.48
+        }
+      },
+      "frame_full_logit_on_amplified_test": {
+        "2.0": {
+          "p_e": 0.2067,
+          "auc": 0.8707,
+          "p_e_at_0": 0.2217
+        },
+        "4.0": {
+          "p_e": 0.0417,
+          "auc": 0.9836,
+          "p_e_at_0": 0.1317
+        }
+      },
+      "video_clip_units": [
+        {
+          "unit": "coastguard",
+          "label": 0,
+          "frames": 100,
+          "score": -0.023113520815968513
+        },
+        {
+          "unit": "coastguard",
+          "label": 1,
+          "frames": 100,
+          "score": -0.014232050627470016
+        },
+        {
+          "unit": "container",
+          "label": 0,
+          "frames": 100,
+          "score": -0.02748800814151764
+        },
+        {
+          "unit": "container",
+          "label": 1,
+          "frames": 100,
+          "score": -0.019081104546785355
+        },
+        {
+          "unit": "deadline",
+          "label": 0,
+          "frames": 100,
+          "score": 0.024071495980024338
+        },
+        {
+          "unit": "deadline",
+          "label": 1,
+          "frames": 100,
+          "score": 0.048016950488090515
+        }
+      ],
+      "video_clip_pairs_correct": "3/3",
+      "video_segment": {
+        "p_e": 0.3333,
+        "auc": 0.6389,
+        "p_e_at_0": 0.4167
+      },
+      "seconds": 115.1
+    }
+  ],
+  "summary": {
+    "frame_p_e_mean": 0.4633,
+    "frame_auc_mean": 0.5302,
+    "frame_full_logit_p_e_mean": 0.4617,
+    "video_clip_pooled": {
+      "p_e": 0.1667,
+      "auc": 0.7778,
+      "p_e_at_0": 0.5
+    },
+    "video_clip_pairs_correct": "3/3",
+    "video_segment_pooled": {
+      "p_e": 0.3333,
+      "auc": 0.6389,
+      "p_e_at_0": 0.4167
+    },
+    "video_segment_units": 12,
+    "seconds": 115.1
+  },
+  "case_set": "b1_magnitude",
+  "cases": [
+    "container_cif_q22_reg_b1mag",
+    "coastguard_cif_q22_reg_b1mag",
+    "deadline_cif_q22_reg_b1mag"
+  ],
+  "torch": "2.11.0+cu128",
+  "gpu": "NVIDIA GeForce RTX 3060 Laptop GPU"
+}
