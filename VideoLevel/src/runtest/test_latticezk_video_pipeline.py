@@ -18,6 +18,7 @@ from src.blind_sync import BlindOperatingContract
 from src.lattice_pq import LatticeSigner
 from src.lattice_zk import video_pipeline as pipeline
 from src.lattice_zk.params import TOY
+from src.runtest.test_latticezk_bdlop import forged_commitment
 from src.zkp_registry import SignedZkpRelationRegistry
 from src.zkp_sessions import SessionChallengeStore
 
@@ -109,7 +110,7 @@ def _embed(tmp_path: Path, pins, session: bytes, payload: bytes = b"hidden recor
 def _verify(stego: Path, pins, **options) -> pipeline.VerifyResult:
     return pipeline.verify_video_proof(
         stego, params=TOY, pins=pins, profile=PROFILE, sync_key=SYNC_KEY,
-        transport=FakeTransport(), **options,
+        transport=FakeTransport(), allow_toy_parameters=True, **options,
     )
 
 
@@ -215,7 +216,7 @@ def _embed_with_profile(tmp_path: Path, issuer, profile: pipeline.CarrierProfile
     def verify(video: Path) -> pipeline.VerifyResult:
         return pipeline.verify_video_proof(
             video, params=TOY, pins=profile_pins, profile=profile, sync_key=SYNC_KEY,
-            transport=FakeTransport(), expected_session=b"\x07" * 32,
+            transport=FakeTransport(), expected_session=b"\x07" * 32, allow_toy_parameters=True,
         )
 
     return stego, verify
@@ -263,7 +264,7 @@ def test_transport_without_framed_chunks_is_rejected(tmp_path, pins) -> None:
     stego = _embed(tmp_path, pins, b"\x07" * 32)
     result = pipeline.verify_video_proof(
         stego, params=TOY, pins=pins, profile=PROFILE, sync_key=SYNC_KEY,
-        transport=ChunklessTransport(), expected_session=b"\x07" * 32,
+        transport=ChunklessTransport(), expected_session=b"\x07" * 32, allow_toy_parameters=True,
     )
     assert not result.valid and "canonical chunking" in result.reason
 
@@ -276,7 +277,7 @@ def test_transport_failures_are_reported_as_rejection(tmp_path, pins) -> None:
     stego = _embed(tmp_path, pins, b"\x07" * 32)
     result = pipeline.verify_video_proof(
         stego, params=TOY, pins=pins, profile=PROFILE, sync_key=SYNC_KEY,
-        transport=BrokenTransport(), expected_session=b"\x07" * 32,
+        transport=BrokenTransport(), expected_session=b"\x07" * 32, allow_toy_parameters=True,
     )
     assert not result.valid and "RuntimeError" in result.reason
 
@@ -327,6 +328,7 @@ def test_registered_credential_round_trip_authenticates_the_holder(tmp_path, iss
     stego = _embed_registered(tmp_path, pins, credential, b"\x07" * 32)
     verify = functools.partial(
         pipeline.verify_video_proof, stego, params=TOY, pins=pins, profile=REGISTERED_PROFILE,
+        allow_toy_parameters=True,
         sync_key=SYNC_KEY, transport=FakeTransport(), expected_session=b"\x07" * 32,
     )
     assert verify(credential=credential.commitment).valid
@@ -381,7 +383,7 @@ def test_verified_envelope_supports_later_linkage_and_disclosure(tmp_path, pins)
         TOY, verified.envelope, embedded.opening, statement_id=verified.statement_id, nonce=nonce
     )
     assert video_proof.verify_disclosure_proof(
-        TOY, verified.envelope, disclosure, statement_id=verified.statement_id, nonce=nonce
+        TOY, verified.envelope, disclosure, statement_id=verified.statement_id, nonce=nonce, allow_toy_parameters=True
     )
     assert video_proof.decode_disclosure(TOY, disclosure).payload == b"device 42"
 
@@ -392,7 +394,7 @@ def test_verified_envelope_supports_later_linkage_and_disclosure(tmp_path, pins)
     proof = linkage.prove_linkage(
         TOY, context, in_video, embedded.opening.randomness, credential, randomness
     )
-    assert linkage.verify_linkage(TOY, context, in_video, credential, proof)
+    assert linkage.verify_linkage(TOY, context, in_video, credential, proof, allow_toy_parameters=True)
     rejected = _verify(stego, pins, expected_session=b"\x08" * 32)
     assert rejected.envelope is None
 
@@ -424,13 +426,15 @@ def test_malformed_verifier_configuration_is_refused_loudly(tmp_path, pins, issu
         with pytest.raises(ValueError):
             _verify(stego, pins, expected_session=session)
     _, registered_pins, credential = _registered_setup(issuer)
-    malformed = dataclasses.replace(credential.commitment, t2=credential.commitment.t2 + TOY.modulus)
+    with pytest.raises(ValueError):  # D8: an unreduced commitment cannot be constructed
+        dataclasses.replace(credential.commitment, t2=credential.commitment.t2 + TOY.modulus)
+    malformed = forged_commitment(credential.commitment.t1, credential.commitment.t2 + TOY.modulus)
     for pinned in (malformed, credential.commitment.to_bytes(TOY)):
         with pytest.raises(ValueError):
             pipeline.verify_video_proof(
                 stego, params=TOY, pins=registered_pins, profile=REGISTERED_PROFILE,
                 sync_key=SYNC_KEY, transport=FakeTransport(), expected_session=b"\x07" * 32,
-                credential=pinned,
+                credential=pinned, allow_toy_parameters=True,
             )
 
 
@@ -447,7 +451,7 @@ def test_malformed_transport_digests_reject_instead_of_raising(tmp_path, pins, f
     for options in ({"expected_session": b"\x07" * 32}, {"session_store": store}):
         result = pipeline.verify_video_proof(
             stego, params=TOY, pins=pins, profile=PROFILE, sync_key=SYNC_KEY,
-            transport=GarblingTransport(), **options,
+            transport=GarblingTransport(), allow_toy_parameters=True, **options,
         )
         assert not result.valid and result.reason.startswith("statement rejected")
 
@@ -491,7 +495,7 @@ def test_in_band_and_registered_pins_are_not_interchangeable(tmp_path, pins, iss
         pipeline.verify_video_proof(
             registered, params=TOY, pins=pins, profile=REGISTERED_PROFILE, sync_key=SYNC_KEY,
             transport=FakeTransport(), expected_session=b"\x07" * 32,
-            credential=credential.commitment,
+            credential=credential.commitment, allow_toy_parameters=True,
         )
     with pytest.raises(ValueError):
         _verify(in_band, (pins.relation_id, pins.registry_root), expected_session=b"\x07" * 32)
@@ -581,6 +585,7 @@ def test_holder_bound_video_verifies_only_with_its_holder_id(tmp_path, issuer) -
     stego = _embed_registered(tmp_path, pins, credential, b"\x07" * 32)
     verify = functools.partial(
         pipeline.verify_video_proof, stego, params=TOY, pins=pins, profile=REGISTERED_PROFILE,
+        allow_toy_parameters=True,
         sync_key=SYNC_KEY, transport=FakeTransport(), expected_session=b"\x07" * 32,
         credential=credential.commitment,
     )

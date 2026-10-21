@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from .. import gop_policy as gop_policies
+from .. import video_canonicalization as canonicalization
 from ..zkp_registry import BDLOP_OPEN_ZKP_SUITE, RelationRecord, SignedZkpRelationRegistry
 from ..zkp_sessions import SessionChallengeStore
 from . import bdlop, video_proof
@@ -26,7 +27,19 @@ from .params import BdlopParams
 from .video_proof import PayloadOpening, VerifierPins
 
 _DOMAIN = b"zkstego/lattice-zk/video-pipeline/v1/"
-CODEC_POLICY = "h264-baseline-cavlc/canonical-h264-carrier-normalized-sha256-v1"
+# Codec policies name the canonical-digest scope a statement binds (D5).  The
+# v1 string and its identifier are unchanged, so existing videos, registries
+# and statements keep verifying; v2 is opt-in per carrier profile.
+CODEC_POLICY_V1 = "h264-baseline-cavlc/canonical-h264-carrier-normalized-sha256-v1"
+CODEC_POLICY_V2 = (
+    "h264-baseline-cavlc/canonical-h264-carrier-normalized-sha256-v2"
+    "/full-rbsp/tagged-raw-segments/segmentation=" + canonicalization.SEGMENTATION_RULE_V2
+)
+CODEC_POLICY = CODEC_POLICY_V1
+CODEC_POLICIES = {
+    CODEC_POLICY_V1: canonicalization.DIGEST_V1,
+    CODEC_POLICY_V2: canonicalization.DIGEST_V2,
+}
 CONSTRAINT_MODULE = "bdlop-open-v1: knowledge of a relaxed opening of the in-band commitment"
 REGISTERED_CONSTRAINT_MODULE = (
     "bdlop-open-v1: knowledge of a relaxed opening of the registered commitment"
@@ -60,9 +73,17 @@ class CarrierProfile:
     # Slice structure the transport accepts (``src.gop_policy``). GOP > 1
     # streams need ``IDR_CARRIERS_INTER_RAW``; the default stays all-intra.
     gop_policy: str = gop_policies.ALL_INTRA
+    # Canonical-digest scope (D5); ``CODEC_POLICY_V2`` binds the full RBSP of
+    # carrier NAL units, tags raw segments and pins the segmentation rule.
+    codec_policy: str = CODEC_POLICY_V1
 
     def __post_init__(self) -> None:
         gop_policies.require_policy(self.gop_policy)
+        require_codec_policy(self.codec_policy)
+
+    @property
+    def digest_policy(self) -> str:
+        return CODEC_POLICIES[self.codec_policy]
 
     def profile_id(self, params: BdlopParams) -> bytes:
         description: dict[str, Any] = {
@@ -76,6 +97,9 @@ class CarrierProfile:
         # any other policy gives a different profile, policy hash and statement.
         if self.gop_policy != gop_policies.ALL_INTRA:
             description["gop_policy"] = self.gop_policy
+        # Same rule for the codec policy: v1 profiles keep their identifiers.
+        if self.codec_policy != CODEC_POLICY_V1:
+            description["codec_policy"] = self.codec_policy
         encoded = json.dumps(description, sort_keys=True, separators=(",", ":")).encode("ascii")
         return hashlib.sha256(_DOMAIN + b"carrier-profile\0" + encoded).digest()
 
@@ -83,6 +107,8 @@ class CarrierProfile:
         options: dict[str, Any] = {"frames_per_segment": self.frames_per_segment}
         if self.gop_policy != gop_policies.ALL_INTRA:
             options["gop_policy"] = self.gop_policy
+        if self.codec_policy != CODEC_POLICY_V1:
+            options["digest_policy"] = self.digest_policy
         return options
 
 
@@ -113,14 +139,22 @@ class VerifyResult:
     envelope: bytes | None = None
 
 
-def codec_policy_id() -> bytes:
-    return hashlib.sha256(_DOMAIN + b"codec-policy\0" + CODEC_POLICY.encode("ascii")).digest()
+def require_codec_policy(codec_policy: str) -> str:
+    if codec_policy not in CODEC_POLICIES:
+        raise ValueError(f"unknown codec policy {codec_policy!r}; expected one of {tuple(CODEC_POLICIES)}")
+    return codec_policy
+
+
+def codec_policy_id(codec_policy: str = CODEC_POLICY_V1) -> bytes:
+    """Identifier of a codec policy; the default is the unchanged v1 identifier."""
+    require_codec_policy(codec_policy)
+    return hashlib.sha256(_DOMAIN + b"codec-policy\0" + codec_policy.encode("ascii")).digest()
 
 
 def policy_hash(params: BdlopParams, profile: CarrierProfile) -> str:
     """Registry policy digest: codec policy plus carrier profile."""
     return hashlib.sha256(
-        _DOMAIN + b"policy\0" + codec_policy_id() + profile.profile_id(params)
+        _DOMAIN + b"policy\0" + codec_policy_id(profile.codec_policy) + profile.profile_id(params)
     ).hexdigest()
 
 
@@ -203,8 +237,7 @@ def pins_from_registry(
     challenge space below 2^256 are refused unless a test opts in.  A
     credential registered with a holder id resolves only with that same id.
     """
-    if not allow_toy_parameters:
-        params.require_production_strength()
+    video_proof.require_verifier_parameters(params, allow_toy_parameters=allow_toy_parameters)
     if not registry.verify(issuer_public_key):
         raise ValueError("relation registry signature did not verify against the issuer key")
     if registry.epoch < minimum_epoch:
@@ -222,7 +255,7 @@ def pins_from_registry(
         relation_id=bytes.fromhex(matches[0].relation_id),
         registry_root=bytes.fromhex(root),
         registry_epoch=epoch,
-        codec_policy_id=codec_policy_id(),
+        codec_policy_id=codec_policy_id(profile.codec_policy),
         carrier_profile_id=profile.profile_id(params),
     )
 
@@ -315,8 +348,11 @@ def _require_verifier_configuration(
     params: BdlopParams, pins: VerifierPins, profile: CarrierProfile,
     session_store: SessionChallengeStore | None, expected_session: bytes | None,
     credential: bdlop.Commitment | None, holder_id: str | None,
+    allow_toy_parameters: bool = False,
 ) -> None:
     """Reject verifier misconfiguration loudly; video content never reaches here."""
+    # Q12: production strength is enforced here too, not only in pins_from_registry.
+    video_proof.require_verifier_parameters(params, allow_toy_parameters=allow_toy_parameters)
     if (session_store is None) == (expected_session is None):
         raise ValueError("supply exactly one of session_store or expected_session")
     if expected_session is not None and (
@@ -331,6 +367,10 @@ def _require_verifier_configuration(
         raise ValueError("the pinned credential is not a canonical commitment for this parameter set")
     if not isinstance(pins, VerifierPins):
         raise ValueError("pins must be VerifierPins")
+    # The statement binds pins.codec_policy_id; it must name the codec policy
+    # whose digest scope this profile makes the transport compute.
+    if not hmac.compare_digest(pins.codec_policy_id, codec_policy_id(profile.codec_policy)):
+        raise ValueError("pinned codec policy does not match the carrier profile's codec policy")
     # The pins must name the relation of exactly this credential (and holder);
     # otherwise an unregistered credential would be verified under them.
     expected = relation_id(params, profile, credential, holder_id=holder_id)
@@ -346,6 +386,7 @@ def verify_video_proof(
     session_store: SessionChallengeStore | None = None, expected_session: bytes | None = None,
     credential: bdlop.Commitment | None = None, holder_id: str | None = None,
     transport: Transport | None = None, progress_callback: ProgressCallback | None = None,
+    allow_toy_parameters: bool = False,
 ) -> VerifyResult:
     """Blind-extract the envelope and verify it against a verifier-built statement.
 
@@ -356,10 +397,13 @@ def verify_video_proof(
     video: in particular when ``pins.relation_id`` is not the relation of
     ``(params, profile, credential, holder_id)``, e.g. pins resolved for one
     credential used with another, or in-band pins used for a registered
-    profile and vice versa.  Video content only ever yields ``valid=False``.
+    profile and vice versa, and for a parameter set below production strength
+    (challenge space < 2^256) unless ``allow_toy_parameters=True``.  Video
+    content only ever yields ``valid=False``.
     """
     _require_verifier_configuration(
-        params, pins, profile, session_store, expected_session, credential, holder_id
+        params, pins, profile, session_store, expected_session, credential, holder_id,
+        allow_toy_parameters,
     )
     channel = transport or _default_transport()
     try:
@@ -391,9 +435,12 @@ def verify_video_proof(
     def check(challenge: bytes) -> bool:
         statement = statement_for(challenge)
         if credential is None:
-            return video_proof.verify_envelope(params, statement, extracted.payload)
+            return video_proof.verify_envelope(
+                params, statement, extracted.payload, allow_toy_parameters=allow_toy_parameters
+            )
         return video_proof.verify_registered_envelope(
-            params, statement, credential, extracted.payload
+            params, statement, credential, extracted.payload,
+            allow_toy_parameters=allow_toy_parameters,
         )
 
     try:

@@ -9,7 +9,7 @@ import pytest
 
 from src.lattice_zk import equality_proof, video_proof
 from src.lattice_zk.params import BDLOP_OPEN_128, TOY
-from src.runtest.test_latticezk_bdlop import random_corruptions
+from src.runtest.test_latticezk_bdlop import forged_commitment, random_corruptions
 
 PINS = video_proof.VerifierPins(
     relation_id=b"R" * 32,
@@ -76,7 +76,7 @@ def test_envelope_round_trip_verifies_and_hides_the_payload() -> None:
     payload = b"secret provenance record"
     data, opening = video_proof.create_envelope(TOY, statement, payload)
     assert len(data) == video_proof.envelope_size(TOY) == len(video_proof.placeholder_envelope(TOY))
-    assert video_proof.verify_envelope(TOY, statement, data)
+    assert video_proof.verify_envelope(TOY, statement, data, allow_toy_parameters=True)
     assert payload not in data
     assert video_proof.self_check_opening(TOY, data, opening)
     forged = dataclasses.replace(opening, payload=b"another record")
@@ -99,7 +99,7 @@ def test_envelope_round_trip_verifies_and_hides_the_payload() -> None:
 )
 def test_envelope_is_rejected_under_any_other_statement(changed: dict) -> None:
     data, _ = video_proof.create_envelope(TOY, _statement(), b"payload")
-    assert not video_proof.verify_envelope(TOY, _statement(**changed), data)
+    assert not video_proof.verify_envelope(TOY, _statement(**changed), data, allow_toy_parameters=True)
 
 
 def test_envelope_rejects_tampering_and_malformed_framing() -> None:
@@ -109,10 +109,10 @@ def test_envelope_rejects_tampering_and_malformed_framing() -> None:
     for offset in (0, 4, 5, 37, 69, 69 + TOY.commitment_bytes, size - 1):
         mutated = bytearray(data)
         mutated[offset] ^= 0x01
-        assert not video_proof.verify_envelope(TOY, statement, bytes(mutated))
-    assert not video_proof.verify_envelope(TOY, statement, data[:-1])
-    assert not video_proof.verify_envelope(TOY, statement, data + b"\x00")
-    assert not video_proof.verify_envelope(TOY, statement, video_proof.placeholder_envelope(TOY))
+        assert not video_proof.verify_envelope(TOY, statement, bytes(mutated), allow_toy_parameters=True)
+    assert not video_proof.verify_envelope(TOY, statement, data[:-1], allow_toy_parameters=True)
+    assert not video_proof.verify_envelope(TOY, statement, data + b"\x00", allow_toy_parameters=True)
+    assert not video_proof.verify_envelope(TOY, statement, video_proof.placeholder_envelope(TOY), allow_toy_parameters=True)
     with pytest.raises(ValueError):
         video_proof.decode_envelope(TOY, b"")
 
@@ -122,14 +122,14 @@ def test_replaying_an_envelope_in_another_session_fails() -> None:
     data, _ = video_proof.create_envelope(TOY, first, b"payload")
     replay = bytearray(data)
     replay[37:69] = b"T" * 32  # rewrite the in-band session field
-    assert not video_proof.verify_envelope(TOY, _statement(session_challenge=b"T" * 32), bytes(replay))
+    assert not video_proof.verify_envelope(TOY, _statement(session_challenge=b"T" * 32), bytes(replay), allow_toy_parameters=True)
 
 
 def test_envelope_is_bound_to_the_pinned_parameter_set() -> None:
     statement = _statement()
     data, _ = video_proof.create_envelope(TOY, statement, b"payload")
     other = dataclasses.replace(TOY, name="bdlop-open-toy-v2")
-    assert not video_proof.verify_envelope(other, statement, data)
+    assert not video_proof.verify_envelope(other, statement, data, allow_toy_parameters=True)
     with pytest.raises(ValueError):
         video_proof.create_envelope(other, statement, b"payload")
     with pytest.raises(ValueError):
@@ -170,7 +170,7 @@ def test_registered_envelope_carries_only_the_proof() -> None:
     data = video_proof.create_registered_envelope(TOY, statement, commitment, randomness)
     assert len(data) == video_proof.envelope_size(TOY, registered=True) == 69 + TOY.proof_bytes
     assert len(data) == len(video_proof.placeholder_envelope(TOY, registered=True))
-    assert video_proof.verify_registered_envelope(TOY, statement, commitment, data)
+    assert video_proof.verify_registered_envelope(TOY, statement, commitment, data, allow_toy_parameters=True)
     assert video_proof.envelope_session(TOY, data, registered=True) == SESSION
 
 
@@ -179,18 +179,18 @@ def test_registered_envelope_authenticates_the_pinned_commitment() -> None:
     commitment, randomness = _credential()
     data = video_proof.create_registered_envelope(TOY, statement, commitment, randomness)
     other_commitment, other_randomness = _credential(b"d" * 32)
-    assert not video_proof.verify_registered_envelope(TOY, statement, other_commitment, data)
+    assert not video_proof.verify_registered_envelope(TOY, statement, other_commitment, data, allow_toy_parameters=True)
     with pytest.raises(ValueError):
         video_proof.create_registered_envelope(TOY, statement, commitment, other_randomness)
     impostor = video_proof.create_registered_envelope(
         TOY, statement, other_commitment, other_randomness
     )
-    assert not video_proof.verify_registered_envelope(TOY, statement, commitment, impostor)
+    assert not video_proof.verify_registered_envelope(TOY, statement, commitment, impostor, allow_toy_parameters=True)
     assert not video_proof.verify_registered_envelope(
-        TOY, _statement(session_challenge=b"T" * 32), commitment, data
+        TOY, _statement(session_challenge=b"T" * 32), commitment, data, allow_toy_parameters=True
     )
     assert not video_proof.verify_registered_envelope(
-        TOY, _statement(canonical_video_sha256=b"W" * 32), commitment, data
+        TOY, _statement(canonical_video_sha256=b"W" * 32), commitment, data, allow_toy_parameters=True
     )
 
 
@@ -199,10 +199,10 @@ def test_envelope_kinds_are_not_interchangeable() -> None:
     commitment, randomness = _credential()
     registered = video_proof.create_registered_envelope(TOY, statement, commitment, randomness)
     in_band, _ = video_proof.create_envelope(TOY, statement, b"payload")
-    assert not video_proof.verify_envelope(TOY, statement, registered)
-    assert not video_proof.verify_registered_envelope(TOY, statement, commitment, in_band)
+    assert not video_proof.verify_envelope(TOY, statement, registered, allow_toy_parameters=True)
+    assert not video_proof.verify_registered_envelope(TOY, statement, commitment, in_band, allow_toy_parameters=True)
     relabelled = b"ZKLB" + registered[4:]
-    assert not video_proof.verify_registered_envelope(TOY, statement, commitment, relabelled)
+    assert not video_proof.verify_registered_envelope(TOY, statement, commitment, relabelled, allow_toy_parameters=True)
     with pytest.raises(ValueError):
         video_proof.envelope_session(TOY, registered[:-1], registered=True)
 
@@ -228,13 +228,13 @@ def test_verifiers_return_false_for_non_statement_or_non_opening_inputs() -> Non
     commitment, randomness = _credential()
     registered = video_proof.create_registered_envelope(TOY, statement, commitment, randomness)
     for bogus in (None, statement.to_bytes(), dataclasses.asdict(statement)):
-        assert video_proof.verify_envelope(TOY, bogus, data) is False  # type: ignore[arg-type]
+        assert video_proof.verify_envelope(TOY, bogus, data, allow_toy_parameters=True) is False  # type: ignore[arg-type]
         assert video_proof.verify_registered_envelope(
-            TOY, bogus, commitment, registered  # type: ignore[arg-type]
+            TOY, bogus, commitment, registered, allow_toy_parameters=True  # type: ignore[arg-type]
         ) is False
-    for bogus_commitment in (None, b"commitment", dataclasses.replace(commitment, t2=commitment.t2[:-1])):
+    for bogus_commitment in (None, b"commitment", forged_commitment(commitment.t1, commitment.t2[:-1])):
         assert video_proof.verify_registered_envelope(
-            TOY, statement, bogus_commitment, registered  # type: ignore[arg-type]
+            TOY, statement, bogus_commitment, registered, allow_toy_parameters=True  # type: ignore[arg-type]
         ) is False
     for bogus_opening in (
         None, (opening.payload, opening.randomness),
@@ -265,7 +265,7 @@ def test_random_in_band_envelope_corruptions_never_verify() -> None:
     statement = _statement()
     data, _ = video_proof.create_envelope(TOY, statement, b"payload")
     for corrupted in random_corruptions(data, rng, 400):
-        assert video_proof.verify_envelope(TOY, statement, corrupted) is False
+        assert video_proof.verify_envelope(TOY, statement, corrupted, allow_toy_parameters=True) is False
         try:
             video_proof.decode_envelope(TOY, corrupted)
         except ValueError:
@@ -278,7 +278,7 @@ def test_random_registered_envelope_corruptions_never_verify() -> None:
     commitment, randomness = _credential()
     data = video_proof.create_registered_envelope(TOY, statement, commitment, randomness)
     for corrupted in random_corruptions(data, rng, 400):
-        assert video_proof.verify_registered_envelope(TOY, statement, commitment, corrupted) is False
+        assert video_proof.verify_registered_envelope(TOY, statement, commitment, corrupted, allow_toy_parameters=True) is False
 
 
 def test_random_garbage_never_decodes_as_an_envelope() -> None:
@@ -303,7 +303,7 @@ def test_random_statements_verify_only_their_own_envelope() -> None:
     envelopes = [video_proof.create_envelope(TOY, s, rng.randbytes(40))[0] for s in statements]
     for i, statement in enumerate(statements):
         for j, data in enumerate(envelopes):
-            assert video_proof.verify_envelope(TOY, statement, data) is (i == j)
+            assert video_proof.verify_envelope(TOY, statement, data, allow_toy_parameters=True) is (i == j)
 
 
 # -- zero-knowledge disclosure (no randomness handed over) ----------------- #
@@ -319,7 +319,7 @@ def _disclosed(payload: bytes = b"secret provenance record"):
 
 def _accepts(data: bytes, disclosure: bytes, statement_id: bytes, nonce: bytes = NONCE) -> bool:
     return video_proof.verify_disclosure_proof(
-        TOY, data, disclosure, statement_id=statement_id, nonce=nonce
+        TOY, data, disclosure, statement_id=statement_id, nonce=nonce, allow_toy_parameters=True
     )
 
 
@@ -389,7 +389,7 @@ def test_disclosure_is_bound_to_the_parameter_set_and_kind() -> None:
     statement, data, opening, disclosure = _disclosed()
     other = dataclasses.replace(TOY, name="bdlop-open-toy-v2")
     assert not video_proof.verify_disclosure_proof(
-        other, data, disclosure, statement_id=statement.statement_id, nonce=NONCE
+        other, data, disclosure, statement_id=statement.statement_id, nonce=NONCE, allow_toy_parameters=True
     )
     linkage_like = equality_proof.verify(  # not usable as an equality proof elsewhere
         TOY, statement.statement_id, video_proof.decode_envelope(TOY, data).commitment,
@@ -416,12 +416,12 @@ def test_registered_credential_disclosure_works_on_the_commitment() -> None:
         TOY, commitment, opening, statement_id=relation, nonce=NONCE
     )
     assert video_proof.verify_commitment_disclosure(
-        TOY, commitment, disclosure, statement_id=relation, nonce=NONCE
+        TOY, commitment, disclosure, statement_id=relation, nonce=NONCE, allow_toy_parameters=True
     )
     stranger, _ = _credential(b"d" * 32)
     assert not video_proof.verify_commitment_disclosure(
-        TOY, stranger, disclosure, statement_id=relation, nonce=NONCE
+        TOY, stranger, disclosure, statement_id=relation, nonce=NONCE, allow_toy_parameters=True
     )
     assert not video_proof.verify_commitment_disclosure(
-        TOY, b"commitment", disclosure, statement_id=relation, nonce=NONCE  # type: ignore[arg-type]
+        TOY, b"commitment", disclosure, statement_id=relation, nonce=NONCE, allow_toy_parameters=True  # type: ignore[arg-type]
     )

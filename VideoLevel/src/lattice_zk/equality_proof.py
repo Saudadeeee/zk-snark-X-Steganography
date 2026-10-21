@@ -32,6 +32,7 @@ import numpy as np
 from . import codec, ring, sampling
 from .bdlop import Commitment, derive_key, ternary_randomness
 from .opening_proof import (
+    HEDGE_EQUALITY,
     ProofResult,
     _canonical_or_none,
     _challenge_times,
@@ -123,7 +124,8 @@ def prove_with_stats(
     commitments = (first.to_bytes(params), second.to_bytes(params))
     entropy = prover_entropy(mask_seed)
     mask_key = hedged_mask_key(
-        entropy, statement, *commitments, first_randomness, second_randomness
+        entropy, statement, *commitments, first_randomness, second_randomness,
+        protocol=HEDGE_EQUALITY, parameter_id=params.parameter_id,
     )
     for attempt in range(1, MAX_ATTEMPTS + 1):
         stream = sampling.XofStream(_MASK_DOMAIN + mask_key + struct.pack(">I", attempt))

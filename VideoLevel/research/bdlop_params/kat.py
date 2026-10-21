@@ -4,6 +4,13 @@ Every input is derived from fixed seeds, so the commitment and proof bytes are
 reproducible on any platform.  The vectors pin SHA-256 digests of the full
 serialized outputs; regenerate them only for a deliberate format change.
 
+Mask keys (D7): ``bdlop-open-128-v1`` keeps the original untagged hedged mask
+key, so ``kat_v1.json`` is unchanged.  Every other set uses the tagged
+derivation of ``opening_proof.hedged_mask_key``; ``kat_v2.json`` was
+regenerated deliberately for it (commitments and keys are unchanged, proof
+digests and attempt counts changed).  Verification never recomputes a mask,
+so proofs made with either derivation verify.
+
     python research/bdlop_params/kat.py --parameter-set BDLOP_OPEN_128_V1 --output research/bdlop_params/kat_v1.json
     python research/bdlop_params/kat.py --parameter-set BDLOP_OPEN_128_V2 --output research/bdlop_params/kat_v2.json
 """

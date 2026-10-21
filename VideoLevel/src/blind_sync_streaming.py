@@ -31,7 +31,14 @@ from .core.analysis_cache import (
     load_or_build_video_analysis,
     park_video_analysis_for_content_reuse,
 )
-from .gop_policy import ALL_INTRA, SegmentStructure, inspect_segment, require_policy
+from .gop_policy import ALL_INTRA, SegmentStructure, inspect_segment, nal_unit_spans, require_policy
+from .video_canonicalization import (
+    DIGEST_V1,
+    DIGEST_V2,
+    SEGMENTATION_RULE_V2,
+    raw_segment_sha256,
+    require_digest_policy,
+)
 
 DEFAULT_STREAM_SEGMENT_FRAMES = 100
 DEFAULT_STREAM_CHUNK_BYTES = 1_250
@@ -127,8 +134,15 @@ def _split_video_into_segments(
     ffmpeg: str = "ffmpeg",
     ffprobe: str = "ffprobe",
     progress_callback: ProgressCallback | None = None,
+    digest_policy: str = DIGEST_V1,
 ) -> tuple[list[Path], list[int]]:
-    """Split at fixed frame intervals and reject cuts without exact boundaries."""
+    """Split at fixed frame intervals and reject cuts without exact boundaries.
+
+    Under ``DIGEST_V2`` the pieces must also be exactly the pinned access-unit
+    partition of the input (:func:`require_pinned_partition`), so the
+    segmenter (its version, muxer behaviour) cannot change what is hashed.
+    """
+    require_digest_policy(digest_policy)
     source = Path(video_path).resolve(strict=True)
     directory = Path(temp_dir).resolve(strict=True)
     frames_per_segment = _positive_int("frames_per_segment", frames_per_segment)
@@ -210,6 +224,8 @@ def _split_video_into_segments(
             "H.264 segment frame counts do not match requested cuts; "
             "choose boundaries aligned to IDR frames"
         )
+    if digest_policy == DIGEST_V2:
+        require_pinned_partition(source, segments, frames_per_segment)
     _emit_progress(
         progress_callback,
         "extract",
@@ -218,6 +234,62 @@ def _split_video_into_segments(
         frames_total=sum(frame_counts),
     )
     return segments, frame_counts
+
+
+_AU_PREFIX_NAL_TYPES = frozenset({6, 7, 8, 9, 14, 15, 16, 17, 18})
+
+
+def access_unit_offsets(data: bytes) -> list[int]:
+    """Byte offset where each primary coded picture's access unit starts.
+
+    H.264 7.4.1.2.3: an access unit starts at its first AUD, SPS, PPS, SEI
+    (or type 14-18) NAL unit after the previous picture's last VCL NAL unit,
+    else at the first slice with ``first_mb_in_slice == 0``.  An offset is the
+    first byte of that NAL unit's start code (the zero of a four-byte start
+    code included, as in :func:`src.gop_policy.nal_unit_spans`).
+    """
+    offsets: list[int] = []
+    pending: int | None = None
+    previous_end = 0
+    for index, (start, end) in enumerate(nal_unit_spans(data)):
+        start_code = 0 if index == 0 else previous_end
+        previous_end = end
+        nal_type = data[start] & 0x1F
+        if nal_type in (1, 5):
+            # first_mb_in_slice == 0 is the single ue(v) bit "1".
+            if end > start + 1 and data[start + 1] & 0x80:
+                offsets.append(pending if pending is not None else start_code)
+            pending = None
+        elif nal_type in _AU_PREFIX_NAL_TYPES and pending is None:
+            pending = start_code
+    return offsets
+
+
+def require_pinned_partition(source: Path, segments: list[Path], frames_per_segment: int) -> None:
+    """Fail closed unless ``segments`` are the pinned partition of ``source``.
+
+    Rule ``SEGMENTATION_RULE_V2``: segment ``k`` is exactly the bytes from the
+    start of access unit ``k * frames_per_segment`` (the file start for
+    ``k = 0``) to the start of the next segment's first access unit (the file
+    end for the last one).  Concatenating the segments therefore gives the
+    input byte for byte, and the cut points depend only on the input.
+    """
+    data = Path(source).read_bytes()
+    starts = access_unit_offsets(data)
+    expected_count = -(-len(starts) // frames_per_segment) if starts else 0
+    if len(segments) != expected_count:
+        raise ValueError(
+            f"segmenter output violates {SEGMENTATION_RULE_V2}: "
+            f"{len(segments)} segments for {len(starts)} pictures"
+        )
+    bounds = [0, *(starts[k * frames_per_segment] for k in range(1, expected_count)), len(data)]
+    view = memoryview(data)
+    for index, segment in enumerate(segments):
+        if Path(segment).read_bytes() != view[bounds[index]:bounds[index + 1]]:
+            raise ValueError(
+                f"segmenter output violates {SEGMENTATION_RULE_V2}: segment {index} is not "
+                f"input bytes [{bounds[index]}, {bounds[index + 1]})"
+            )
 
 
 def _inspect_segments(
@@ -253,21 +325,36 @@ def _concatenate_annexb_segments(segments: list[Path], candidate: Path) -> None:
 
 
 def _combine_segment_digests(
-    segment_digests: list[tuple[int, str]], frames_per_segment: int
+    segment_digests: list[tuple[int, str]], frames_per_segment: int,
+    digest_policy: str = DIGEST_V1, carrier_segments: int | None = None,
 ) -> str:
+    """Combine per-segment digests; ``DIGEST_V1`` output is unchanged.
+
+    ``DIGEST_V2`` uses its own domain, binds the segmentation rule and types
+    each segment digest (1: carrier-normalized, 0: raw): the first
+    ``carrier_segments`` segments carry chunks, the rest are raw.
+    """
+    require_digest_policy(digest_policy)
+    if digest_policy == DIGEST_V2:
+        if (
+            isinstance(carrier_segments, bool) or not isinstance(carrier_segments, int)
+            or not 0 <= carrier_segments <= len(segment_digests)
+        ):
+            raise ValueError("carrier segment count is required for the v2 digest")
+        rule = SEGMENTATION_RULE_V2.encode("ascii")
+        digest = hashlib.sha256(b"zkstego/canonical-h264-segmented/v2\x00")
+        digest.update(struct.pack(">H", len(rule)) + rule)
+        digest.update(struct.pack(">III", frames_per_segment, len(segment_digests), carrier_segments))
+        for index, (frame_count, segment_digest) in enumerate(segment_digests):
+            kind = 1 if index < carrier_segments else 0
+            digest.update(struct.pack(">IIB", index, frame_count, kind))
+            digest.update(bytes.fromhex(segment_digest))
+        return digest.hexdigest()
     digest = hashlib.sha256(b"zkstego/canonical-h264-segmented/v1\x00")
     digest.update(struct.pack(">II", frames_per_segment, len(segment_digests)))
     for index, (frame_count, segment_digest) in enumerate(segment_digests):
         digest.update(struct.pack(">II", index, frame_count))
         digest.update(bytes.fromhex(segment_digest))
-    return digest.hexdigest()
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
     return digest.hexdigest()
 
 
@@ -282,6 +369,7 @@ def derive_chunked_video_context(
     ffprobe: str = "ffprobe",
     progress_callback: ProgressCallback | None = None,
     gop_policy: str = ALL_INTRA,
+    digest_policy: str = DIGEST_V1,
 ) -> ChunkedVideoContext:
     """Select chunk carriers and compute verifier-reproducible video context.
 
@@ -291,8 +379,10 @@ def derive_chunked_video_context(
     Modified-segment digests normalize the selected carriers; untouched
     segments are hashed byte-for-byte. The exact segmentation policy is part
     of the domain-separated combined digest. ``gop_policy`` fixes the slice
-    structure every segment must have (``src.gop_policy``).
+    structure every segment must have (``src.gop_policy``). ``digest_policy``
+    selects the canonical-digest scope (``src.video_canonicalization``).
     """
+    require_digest_policy(digest_policy)
     source = Path(video_path).resolve(strict=True)
     if not source.is_file():
         raise ValueError("video_path must identify a regular file")
@@ -323,6 +413,7 @@ def derive_chunked_video_context(
             frames_per_segment,
             ffmpeg=ffmpeg,
             ffprobe=ffprobe,
+            digest_policy=digest_policy,
         )
         structures = _inspect_segments(segments, frame_counts, gop_policy)
         _emit_progress(
@@ -393,6 +484,7 @@ def derive_chunked_video_context(
                         positions,
                         parser=reconstruction_context["parser"],
                         frame_verified_data=analysis[1],
+                        digest_policy=digest_policy,
                     )
                     global_positions.extend(
                         (mb + slot_offset * current_mb_count, block, coefficient)
@@ -400,7 +492,7 @@ def derive_chunked_video_context(
                     )
                     segment_digests.append((frame_count, canonical_digest))
                 else:
-                    segment_digests.append((frame_count, _sha256_file(segment)))
+                    segment_digests.append((frame_count, raw_segment_sha256(segment, digest_policy)))
                 slot_offset += structures[index].coded_slices
                 if index < len(chunks) - 1:
                     clear_video_analysis_cache()
@@ -425,7 +517,7 @@ def derive_chunked_video_context(
     return ChunkedVideoContext(
         positions_hash=hash_positions(global_positions),
         canonical_video_sha256=_combine_segment_digests(
-            segment_digests, frames_per_segment
+            segment_digests, frames_per_segment, digest_policy, carrier_segments=len(chunks)
         ),
         global_positions=tuple(global_positions),
         segments_used=len(chunks),
@@ -446,11 +538,14 @@ def embed_chunked_video_payload(
     ffprobe: str = "ffprobe",
     progress_callback: ProgressCallback | None = None,
     gop_policy: str = ALL_INTRA,
+    digest_policy: str = DIGEST_V1,
 ) -> ChunkedVideoEmbedResult:
     """Embed ordered payload chunks while analyzing only one segment at a time.
 
     Only IDR slices are rewritten; every other NAL unit is copied unchanged.
+    Under ``DIGEST_V2`` the cover must split into the pinned partition.
     """
+    require_digest_policy(digest_policy)
     source = Path(cover_video_path).resolve(strict=True)
     output = Path(output_video_path).resolve()
     if not source.is_file():
@@ -472,6 +567,7 @@ def embed_chunked_video_payload(
             frames_per_segment,
             ffmpeg=ffmpeg,
             ffprobe=ffprobe,
+            digest_policy=digest_policy,
         )
         _inspect_segments(source_segments, source_frame_counts, gop_policy)
         _emit_progress(
@@ -565,8 +661,10 @@ def extract_chunked_video_payload(
     ffprobe: str = "ffprobe",
     progress_callback: ProgressCallback | None = None,
     gop_policy: str = ALL_INTRA,
+    digest_policy: str = DIGEST_V1,
 ) -> ChunkedVideoPayloadResult:
     """Blind-extract ordered pieces from video segments and validate reassembly."""
+    require_digest_policy(digest_policy)
     source = Path(video_path).resolve(strict=True)
     if not source.is_file():
         raise ValueError("video_path must identify a regular file")
@@ -581,6 +679,7 @@ def extract_chunked_video_payload(
             ffmpeg=ffmpeg,
             ffprobe=ffprobe,
             progress_callback=progress_callback,
+            digest_policy=digest_policy,
         )
         structures = _inspect_segments(segments, frame_counts, gop_policy)
         _emit_progress(
@@ -606,7 +705,7 @@ def extract_chunked_video_payload(
                         segment_index=index,
                         segments_total=len(segments),
                     )
-                    segment_digests.append((frame_count, _sha256_file(segment)))
+                    segment_digests.append((frame_count, raw_segment_sha256(segment, digest_policy)))
                     slot_offset += structures[index].coded_slices
                     continue
                 _emit_progress(
@@ -654,6 +753,7 @@ def extract_chunked_video_payload(
                             result.carrier_positions,
                             parser=reconstruction_context["parser"],
                             frame_verified_data=analysis[1],
+                            digest_policy=digest_policy,
                         ),
                     )
                 )
@@ -680,7 +780,7 @@ def extract_chunked_video_payload(
         carriers_used=carriers_used,
         positions_hash=hash_positions(global_positions),
         canonical_video_sha256=_combine_segment_digests(
-            segment_digests, frames_per_segment
+            segment_digests, frames_per_segment, digest_policy, carrier_segments=len(pieces)
         ),
         global_positions=tuple(global_positions),
         chunks=tuple(pieces),

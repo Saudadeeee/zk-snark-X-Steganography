@@ -280,7 +280,7 @@ def gop_run(tmp_path_factory):
     def verify(path: Path, verifier_profile=profile, verifier_pins=pins):
         return pipeline.verify_video_proof(
             path, params=TOY, pins=verifier_pins, profile=verifier_profile, sync_key=KEY,
-            expected_session=session, credential=commitment,
+            expected_session=session, credential=commitment, allow_toy_parameters=True,
         )
 
     return {"cover": cover, "stego": stego, "profile": profile, "embedded": embedded,
