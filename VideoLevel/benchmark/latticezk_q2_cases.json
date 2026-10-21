@@ -374,5 +374,17 @@
   "chunk_bytes": "auto",
   "scan_segments": 6,
   "note": "capacity from the first 6 segments only"
+ },
+ {
+  "name": "crew4cif_q18_reg",
+  "clip": "crew",
+  "video": "data/encoded/crew_4cif_q18_g1.h264",
+  "source_y4m": "data/raw/crew_4cif.y4m",
+  "qp": 18,
+  "registered": true,
+  "macroblocks_per_frame": 1584,
+  "chunk_bytes": "auto",
+  "scan_segments": 6,
+  "note": "QP 22 capacity is too uneven across segments for uniform chunks"
  }
 ]

@@ -1,0 +1,20 @@
+\begin{table}[t]
+\centering
+\caption{GOP $>1$ streams: carriers in IDR slices only, P slices bound byte for byte (CIF, QP\,22, registered). The 413-byte rows use the toy parameter set to fit short clips; the 7\,589-byte rows use \texttt{bdlop-open-128-v1} on looped sources.}
+\label{tab:gop}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllllllllll}
+\toprule
+Clip & GOP & Frames & Envelope (B) & kbit/100 fr. & P-slice tamper rej. & Frames mod. & PSNR all (dB) & PSNR mod. (dB) & Worst (dB) & Embed (s) & Verify (s) \\
+\midrule
+container & 1 & 200 & 413 & 50.8 & -- & 100 & 63.71 & 60.70 & 55.58 & 46 & 42 \\
+container & 8 & 200 & 413 & 6.4 & yes & 104 & 47.02 & 44.18 & 40.91 & 8 & 6 \\
+container & 25 & 200 & 413 & 2.0 & yes & 200 & 39.24 & 39.24 & 32.02 & 11 & 5 \\
+foreman & 1 & 300 & 413 & 14.2 & -- & 100 & 58.87 & 54.09 & 42.39 & 16 & 13 \\
+foreman & 8 & 300 & 413 & 1.8 & yes & 300 & 53.21 & 53.21 & 44.57 & 14 & 6 \\
+coastguard & 8 & 3000 & 7589 & 4.5 & yes & 1588 & 42.40 & 39.64 & 31.96 & 270 & 140 \\
+container & 8 & 3000 & 7589 & 6.2 & yes & 1400 & 44.11 & 40.80 & 32.63 & 179 & 77 \\
+container & 25 & 6000 & 7589 & 2.0 & yes & 3600 & 41.49 & 39.27 & 32.73 & 167 & 71 \\
+\bottomrule
+\end{tabular}}
+\end{table}

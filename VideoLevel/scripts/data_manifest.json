@@ -19,7 +19,11 @@
     {"name": "city_4cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/city_4cif.y4m", "size": 364957238, "frames": 600, "sha256": "06f9c001df816babf514a5713e8d4618233a217a39335e0810421a1519fd248e"},
     {"name": "crew_4cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/crew_4cif.y4m", "size": 364957238, "frames": 600, "sha256": "5faf4fc764a683ac1b97b5016ec940f61afa20c7a914fb80b5da82f6e9b04de1"},
     {"name": "harbour_4cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/harbour_4cif.y4m", "size": 364957238, "frames": 600, "sha256": "704c23e818baba916e28b83c193918c8e70ccc63ccf20d012017278402527950"},
-    {"name": "soccer_4cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/soccer_4cif.y4m", "size": 364957238, "frames": 600, "sha256": "fb7f392cb7b4eb8bd3bc1de5b40b927237a98ca1a25aea509238ac949106438f"}
+    {"name": "soccer_4cif.y4m", "url": "https://media.xiph.org/video/derf/y4m/soccer_4cif.y4m", "size": 364957238, "frames": 600, "sha256": "fb7f392cb7b4eb8bd3bc1de5b40b927237a98ca1a25aea509238ac949106438f"},
+    {"name": "park_joy_420_720p50.y4m", "url": "https://media.xiph.org/video/derf/y4m/park_joy_420_720p50.y4m", "size": 691203035, "frames": 500, "sha256": "b1e3784a6c74e07d53dd7077737b5a6edcd53e5ea07e4718c9affbe0ec36536f"},
+    {"name": "old_town_cross_420_720p50.y4m", "url": "https://media.xiph.org/video/derf/y4m/old_town_cross_420_720p50.y4m", "size": 691203035, "frames": 500, "sha256": "0fbc2ec0c552ad693528b2e49409c7449880b9230055a7696346473d1aaf4123"},
+    {"name": "pedestrian_area_1080p25.y4m", "url": "https://media.xiph.org/video/derf/y4m/pedestrian_area_1080p25.y4m", "size": 1166402286, "frames": 375, "sha256": "1c18cd50fec7dcfa6087564ed56343a99ff955ecfca70de91a5dbedae329353a"},
+    {"name": "riverbed_1080p25.y4m", "url": "https://media.xiph.org/video/derf/y4m/riverbed_1080p25.y4m", "size": 777601536, "frames": 250, "sha256": "b1c2b9e83c890dba7996b398926c7c9b3cc7b8f2c04d949ccf2ab66a56cbf7c5"}
   ],
   "encodes": [
     {"name": "akiyo_cif_q22_g1.h264", "source": "akiyo_cif.y4m", "qp": 22, "threads": 9, "sha256": "82782b47cd06bf7544b3542e013a95662c4ea7810fe5bc6880656dc65cf62ab1"},

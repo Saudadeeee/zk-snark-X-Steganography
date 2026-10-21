@@ -816,6 +816,29 @@ verifier already treats as rejection.
 \input{tables/adaptive_e2e}
 \input{tables/adaptive_steg}
 
+\subsection{Streams with P slices}
+\label{sec:gop}
+For Baseline streams with a GOP longer than one, the policy
+\texttt{idr-carriers-inter-raw-v1} places carriers in IDR slices only and
+binds every P-slice NAL unit byte for byte: the canonical digest hashes their
+RBSP, and the policy check rejects B/SP/SI slices, data partitioning, slice
+groups, arbitrary slice order, redundant pictures, CABAC and non-canonical
+emulation prevention, so binding the RBSP equals binding the bytes. Segments
+must be whole GOPs, and the policy enters the carrier-profile identifier, so a
+GOP$>1$ statement never verifies under the all-intra profile.
+Table~\ref{tab:gop} reports CIF runs. An IDR carries what an all-intra frame
+carries, so capacity per frame falls by the GOP length: the 128-bit
+registered envelope needs about 1\,000 frames of Container at GOP~8 and 3\,000
+at GOP~25 (we use looped sources). All runs verify from the video alone, all
+P slices are unchanged, and flipping one bit inside a P slice is rejected.
+Drift into P frames barely accumulates (Container loses 0.04--0.09\,dB over a
+GOP), but packing the envelope into fewer pictures lowers quality: modified
+frames average 39.3--40.8\,dB with a worst frame near 32\,dB, against
+42.1\,dB (worst 34.0\,dB) for all-intra Container at the same payload. Only IDR slices are parsed, so
+verification is cheap per frame.
+
+\input{tables/gop}
+
 \subsection{Comparison with alternative proof systems}
 Table~\ref{tab:baselines} compares schemes that could carry the claim.
 Groth16 is about fifty times smaller but not post-quantum and needs a
@@ -877,8 +900,9 @@ density but increases the number of frames that leak; reducing the number
 of changes, as the syndrome-trellis coding of Section~\ref{sec:stc} does,
 lowers the leakage of every frame and is the more promising direction.
 
-\paragraph{Capacity and codec scope} Only all-intra Baseline streams are
-supported, which is a real deployment restriction. A registered envelope
+\paragraph{Capacity and codec scope} Only Baseline (CAVLC) streams are
+supported; streams with P slices carry the proof in IDR slices only
+(Section~\ref{sec:gop}), which divides capacity by the GOP length. A registered envelope
 needs 61\,kbit, which smooth content and high QP do not provide within a few
 hundred frames. Appendix~\ref{sec:binary-proof} gives a proof that a commitment
 under the same parameter set hides a binary string (41\,870 bytes, 2.2\,s to
@@ -918,8 +942,9 @@ for partly scanned clips is extrapolated from the scanned segments.
 
 \paragraph{External validity} The evaluation uses a small set of standard
 CIF and 4CIF sequences, one encoder (x264), the Baseline profile, all-intra
-coding and fixed QP. Results may differ for camera footage, other encoders,
-rate control, P-slices or higher resolutions. The detectors are
+coding (plus short-GOP runs on looped CIF sources) and fixed QP. Results may
+differ for camera footage, other encoders, rate control, long GOPs or higher
+resolutions. The detectors are
 feature-based; a stronger learned detector may lower $P_E$.
 
 \paragraph{Conclusion validity} Learned results are averaged over five
@@ -940,8 +965,8 @@ and 4CIF content carries the proof in one to three hundred frames at
 detect it. A learned per-frame detector does better than chance, and the
 security argument rests on relaxed soundness in the classical random-oracle
 model. The next steps are cost-aware carrier selection against learned and
-pooled detectors, tying the binary proof to the payload encoding, support
-for P-slices and higher resolutions, and an independent review of the
+pooled detectors, tying the binary proof to the payload encoding, carriers
+inside P slices and an evaluation at HD resolutions, and an independent review of the
 cryptographic argument.
 
 % =====================================================================

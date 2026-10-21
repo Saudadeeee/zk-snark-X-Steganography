@@ -247,6 +247,26 @@ def build() -> str:
             headers, rows, "Learned steganalysis $P_E$ for direct and syndrome-trellis coded carriers "
             "(" + str(adaptive["frame_pairs"]) + " frame pairs per mode).", "tab:adaptive-steg")
 
+    gop_path = RESULTS / "gop_summary.json"
+    if gop_path.exists():
+        gop = [row for row in json.loads(gop_path.read_text(encoding="utf-8")) if row.get("verified")]
+        cases_path = ROOT / "benchmark" / "latticezk_gop_cases.json"
+        frames = ({case["name"]: case["frames"] for case in json.loads(cases_path.read_text(encoding="utf-8"))}
+                  if cases_path.exists() else {})
+        headers = ["Clip", "GOP", "Frames", "Envelope (B)", "kbit/100 fr.", "P-slice tamper rej.",
+                   "Frames mod.", "PSNR all (dB)", "PSNR mod. (dB)", "Worst (dB)", "Embed (s)", "Verify (s)"]
+        rows = [[r["clip"], _fmt(r["gop"]), _fmt(frames.get(r["name"])), _fmt(r.get("e2e_envelope_bytes")),
+                 _fmt(r["carrier_bits_per_100_frames"] / 1000, 1), _fmt(r.get("p_slice_tamper_rejected")),
+                 _fmt(r["frames_modified"]), _fmt(r["luma_psnr_all_frames_db"]),
+                 _fmt(r["luma_psnr_modified_frames_db"]), _fmt(r["luma_psnr_worst_frame_db"]),
+                 _fmt(r["embed_s"], 0), _fmt(r["verify_s"], 0)]
+                for r in sorted(gop, key=lambda r: (r.get("e2e_envelope_bytes") or 0, r["clip"], r["gop"]))]
+        sections += ["## GOP > 1 (IDR carriers, P slices bound raw)\n", _markdown(headers, rows)]
+        tables["gop"] = _latex(
+            headers, rows, "GOP $>1$ streams: carriers in IDR slices only, P slices bound byte for byte "
+            "(CIF, QP\\,22, registered). The 413-byte rows use the toy parameter set to fit short clips; "
+            "the 7\\,589-byte rows use \\texttt{bdlop-open-128-v1} on looped sources.", "tab:gop")
+
     baselines = sorted(RESULTS.glob("baselines*.json"))
     if baselines:
         base = json.loads(baselines[-1].read_text(encoding="utf-8"))
