@@ -10,7 +10,7 @@ import pytest
 
 from src.lattice_zk import bdlop, codec, equality_proof, opening_proof
 from src.lattice_zk.params import BDLOP_OPEN_128, BDLOP_OPEN_128_V1, TOY
-from src.runtest.test_latticezk_bdlop import random_corruptions
+from src.runtest.test_latticezk_bdlop import forged_commitment, random_corruptions
 
 STATEMENT = b"video statement"
 
@@ -59,7 +59,7 @@ def test_proof_is_bound_to_statement_order_and_both_commitments() -> None:
     assert not equality_proof.verify(TOY, STATEMENT + b"x", commitments[0], commitments[1], proof)
     assert not equality_proof.verify(TOY, STATEMENT, commitments[1], commitments[0], proof)
     shifted = [
-        bdlop.Commitment(c.t1, (c.t2 + 5) % TOY.modulus) for c in commitments
+        bdlop.Commitment(c.t1, (c.t2 + 5) % TOY.modulus, params=TOY) for c in commitments
     ]  # same message gap, different commitments
     assert not equality_proof.verify(TOY, STATEMENT, shifted[0], shifted[1], proof)
     other, _ = _pair(first_payload=b"z", second_payload=b"z")
@@ -113,9 +113,9 @@ def test_verify_never_raises_on_malformed_commitment_objects() -> None:
     first = commitments[0]
     for malformed in (
         None, "commitment",
-        bdlop.Commitment(first.t1.reshape(-1), first.t2),
-        bdlop.Commitment(first.t1, np.full_like(first.t2, TOY.modulus)),
-        bdlop.Commitment(first.t1.astype(np.float64), first.t2),
+        forged_commitment(first.t1.reshape(-1), first.t2),
+        forged_commitment(first.t1, np.full_like(first.t2, TOY.modulus)),
+        forged_commitment(first.t1.astype(np.float64), first.t2),
     ):
         assert equality_proof.verify(TOY, STATEMENT, malformed, commitments[1], proof) is False
         assert equality_proof.verify(TOY, STATEMENT, commitments[0], malformed, proof) is False
@@ -131,7 +131,8 @@ def test_commitment_integer_dtype_does_not_change_the_verdict() -> None:
     commitments, randomness = _pair()
     proof = _prove(commitments, randomness)
     narrow = [
-        bdlop.Commitment(c.t1.astype(np.uint32), c.t2.astype(np.uint32)) for c in commitments
+        bdlop.Commitment(c.t1.astype(np.uint32), c.t2.astype(np.uint32), params=TOY)
+        for c in commitments
     ]
     assert equality_proof.verify(TOY, STATEMENT, narrow[0], narrow[1], proof)
     def deterministic(pair, witnesses) -> bytes:

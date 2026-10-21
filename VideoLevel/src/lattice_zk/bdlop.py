@@ -13,7 +13,7 @@ Hiding reduces to M-LWE and binding to M-SIS for the pinned parameters.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 
 import numpy as np
@@ -73,17 +73,46 @@ class CommitmentKey:
         return (vector[n] + ring.mat_vec(self.b2_tail, vector[n + 1:], q)[0]) % q
 
 
+def _is_frozen(values: object) -> bool:
+    return isinstance(values, np.ndarray) and values.dtype == np.int64 and not values.flags.writeable
+
+
 @dataclass(frozen=True)
 class Commitment:
+    """A BDLOP commitment ``(t1, t2)`` that is canonical for ``params``.
+
+    Construction rejects anything but integer arrays of the exact shapes with
+    every coefficient in ``[0, q)`` and stores read-only ``int64`` copies, so
+    an unreduced or later-mutated commitment cannot reach a verifier, an
+    encoder or a pinned-credential comparison.
+    """
+
     t1: np.ndarray
     t2: np.ndarray
+    params: BdlopParams = field(kw_only=True, repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.params, BdlopParams):
+            raise TypeError("commitment params must be a BdlopParams set")
+        shapes = (("t1", (self.params.msis_rank, self.params.degree)), ("t2", (self.params.degree,)))
+        for name, shape in shapes:
+            values = reduced_array(self.params, getattr(self, name), shape, f"commitment {name}")
+            frozen = values.astype(np.int64, copy=True)
+            frozen.flags.writeable = False
+            object.__setattr__(self, name, frozen)
 
     def normalized(self, params: BdlopParams) -> "Commitment":
-        """Return an ``int64`` copy; raise unless ``t1`` is (n, N), ``t2`` is (N,), both reduced."""
-        return Commitment(
-            reduced_array(params, self.t1, (params.msis_rank, params.degree), "commitment t1"),
-            reduced_array(params, self.t2, (params.degree,), "commitment t2"),
-        )
+        """Return this commitment checked for ``params``; raise unless canonical there."""
+        own = getattr(self, "params", None)
+        if not isinstance(own, BdlopParams) or not isinstance(params, BdlopParams):
+            raise TypeError("commitment params must be a BdlopParams set")
+        t1, t2 = getattr(self, "t1", None), getattr(self, "t2", None)
+        if own == params and _is_frozen(t1) and _is_frozen(t2):
+            # Re-check: an object built around __init__ must not pass as canonical.
+            reduced_array(params, t1, (params.msis_rank, params.degree), "commitment t1")
+            reduced_array(params, t2, (params.degree,), "commitment t2")
+            return self
+        return Commitment(t1, t2, params=params)
 
     def validate(self, params: BdlopParams) -> None:
         self.normalized(params)
@@ -96,8 +125,8 @@ class Commitment:
         return True
 
     def to_bytes(self, params: BdlopParams) -> bytes:
-        self.validate(params)
-        coefficients = np.concatenate([self.t1.reshape(-1), self.t2])
+        checked = self.normalized(params)
+        coefficients = np.concatenate([checked.t1.reshape(-1), checked.t2])
         return codec.pack_uints(coefficients, params.modulus_bits)
 
     @classmethod
@@ -105,7 +134,7 @@ class Commitment:
         count = (params.msis_rank + 1) * params.degree
         values = codec.unpack_uints(data, count, params.modulus_bits, params.modulus)
         split = params.msis_rank * params.degree
-        return cls(values[:split].reshape(params.msis_rank, params.degree), values[split:])
+        return cls(values[:split].reshape(params.msis_rank, params.degree), values[split:], params=params)
 
 
 @lru_cache(maxsize=8)
@@ -138,7 +167,7 @@ def commit(params: BdlopParams, message: np.ndarray, randomness: np.ndarray) -> 
     message = reduced_array(params, message, (params.degree,), "message")
     key = derive_key(params)
     t2 = (key.apply_b2(reduced) + message) % params.modulus
-    return Commitment(key.apply_b1(reduced), t2)
+    return Commitment(key.apply_b1(reduced), t2, params=params)
 
 
 def verify_opening(

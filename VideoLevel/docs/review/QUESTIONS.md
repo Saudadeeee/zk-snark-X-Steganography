@@ -248,13 +248,26 @@ commitment hides `encode_payload(p)` for a public length `L ≤ 128`.
 
 ## Tier 3: engineering and wording (no parameter change expected)
 
-### Q12. Production-strength enforcement only at pin resolution
+### Q12. Production-strength enforcement only at pin resolution (resolved)
 
 `require_production_strength()` (challenge space ≥ 2^256) runs in
 `pins_from_registry` (`video_pipeline.py:192–193`). It does not run in
 `verify_video_proof`, `verify_envelope` or `opening_proof.verify`. A caller
 that builds `VerifierPins` by hand with the `TOY` set would accept toy
 proofs. Should every verifier entry point refuse non-production parameters?
+
+- **Resolved.** `video_proof.require_verifier_parameters` now runs first in
+  every application-level verifier: `verify_video_proof` (inside the
+  configuration check, before the video is read), `verify_envelope`,
+  `verify_registered_envelope`, `verify_disclosure_proof`,
+  `verify_commitment_disclosure`, `linkage.verify_linkage` and
+  `pins_from_registry`. Each raises `ValueError` for a set below 2^256 unless
+  the caller passes `allow_toy_parameters=True` (tests and the TOY benchmark
+  only). The proof primitives (`opening_proof.verify`, `equality_proof.verify`,
+  `binary_proof.verify`) stay parameter-agnostic building blocks; nothing in
+  the video pipeline calls them except through the verifiers above.
+  Tests: `src/runtest/test_hardening_d5_d7_d8.py` (hand-built TOY pins are
+  refused).
 
 ### Q13. Session and replay semantics (Theorem `thm:replay`)
 
@@ -267,10 +280,28 @@ relaying. Is this the right split of claims? Is the
 
 ### Q14. Remaining self-review items
 
-- **D5** (open): scope of the canonical digest. Unbound items are RBSP bits
-  after the stop bit, raw-segment digests without a tag, and the segmenter
-  version. This is outside the cryptographic core. Does it weaken Theorem
-  `thm:integrity` beyond the stated limits?
+- **D5** (resolved by a new codec policy): scope of the canonical digest.
+  Unbound items were RBSP bits after the stop bit, raw-segment digests
+  without a tag, and the segmenter version. Codec policy v2
+  (`CODEC_POLICY_V2`, opt-in per carrier profile, new profile/policy/relation
+  identifiers) hashes the full RBSP of carrier IDR NAL units with its length,
+  tags raw-segment digests and types every segment digest, and pins the
+  segmentation: the segments must be exactly the access-unit partition of
+  the input, checked byte for byte, so the digest no longer depends on the
+  segmenter. The ffmpeg version is deliberately not hashed (it would bind the
+  verifier's installation, not the video). Codec policy v1 is unchanged byte
+  for byte for existing videos and still leaves zero bits after the stop bit
+  of a carrier NAL unit unbound: a zero byte appended there is accepted under
+  v1 and rejected under v2 through the real transport
+  (`test_zero_bits_after_the_stop_bit_are_accepted_by_v1_and_rejected_by_v2`).
+- **D7** (resolved): the hedged mask key is domain-separated by a tag, the
+  protocol label and the parameter id. `bdlop-open-128-v1` keeps the untagged
+  derivation, so `kat_v1.json` is unchanged; `kat_v2.json` and the binary
+  KAT were regenerated (commitments unchanged). Verification never recomputes
+  a mask; proofs from either derivation verify.
+- **D8** (resolved): `Commitment` carries its parameter set and rejects
+  non-canonical coefficients at construction, holding read-only copies;
+  verifiers still re-check objects built around the constructor.
 - **D10** (open): `verify_statement_binding` serves only `lazer-v1`
   (`zkp_registry.py:170–220`). The BDLOP path uses `pins_from_registry`.
   This is API hygiene.

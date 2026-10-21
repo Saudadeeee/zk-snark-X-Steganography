@@ -57,6 +57,32 @@ class VerifierPins:
         _require_u64("registry_epoch", self.registry_epoch)
 
 
+def require_verifier_parameters(params: object, *, allow_toy_parameters: bool = False) -> BdlopParams:
+    """Refuse a parameter set below production strength unless a test opts in (Q12).
+
+    Production strength is a challenge space of at least 2^256
+    (:meth:`BdlopParams.require_production_strength`).  Every application-level
+    verifier calls this before it looks at any proof, so a hand-built
+    :class:`VerifierPins` with the ``TOY`` set no longer accepts toy proofs.
+    The proof primitives (``opening_proof.verify`` and friends) stay
+    parameter-agnostic building blocks.  Raises ``ValueError`` (verifier
+    misconfiguration), never returns ``False``.
+    """
+    if not isinstance(params, BdlopParams):
+        raise TypeError("params must be a BdlopParams set")
+    if not isinstance(allow_toy_parameters, bool):
+        raise TypeError("allow_toy_parameters must be a bool")
+    if not allow_toy_parameters:
+        try:
+            params.require_production_strength()
+        except ValueError as error:
+            raise ValueError(
+                f"parameter set {params.name!r} is below production strength ({error}); "
+                "verifiers refuse it unless allow_toy_parameters=True"
+            ) from None
+    return params
+
+
 def _require_digest(name: str, value: object) -> None:
     if not isinstance(value, bytes) or len(value) != 32:
         raise ValueError(f"{name} must be exactly 32 bytes")
@@ -212,8 +238,16 @@ def create_envelope(
     return encode_envelope(params, envelope), PayloadOpening(payload, randomness)
 
 
-def verify_envelope(params: BdlopParams, statement: VideoStatement, data: bytes) -> bool:
-    """Verify an extracted envelope against a verifier-built statement."""
+def verify_envelope(
+    params: BdlopParams, statement: VideoStatement, data: bytes,
+    *, allow_toy_parameters: bool = False,
+) -> bool:
+    """Verify an extracted envelope against a verifier-built statement.
+
+    Raises ``ValueError`` for a non-production parameter set unless
+    ``allow_toy_parameters`` is set; malformed input returns ``False``.
+    """
+    require_verifier_parameters(params, allow_toy_parameters=allow_toy_parameters)
     try:
         envelope = decode_envelope(params, data)
     except ValueError:
@@ -274,9 +308,15 @@ def envelope_session(params: BdlopParams, data: bytes, *, registered: bool = Fal
 
 
 def verify_registered_envelope(
-    params: BdlopParams, statement: VideoStatement, commitment: bdlop.Commitment, data: bytes
+    params: BdlopParams, statement: VideoStatement, commitment: bdlop.Commitment, data: bytes,
+    *, allow_toy_parameters: bool = False,
 ) -> bool:
-    """Verify a proof-only envelope against the verifier's pinned commitment."""
+    """Verify a proof-only envelope against the verifier's pinned commitment.
+
+    Raises ``ValueError`` for a non-production parameter set unless
+    ``allow_toy_parameters`` is set; malformed input returns ``False``.
+    """
+    require_verifier_parameters(params, allow_toy_parameters=allow_toy_parameters)
     try:
         session_challenge = envelope_session(params, data, registered=True)
     except ValueError:
@@ -374,14 +414,16 @@ def create_commitment_disclosure(
 
 def verify_commitment_disclosure(
     params: BdlopParams, commitment: bdlop.Commitment, data: bytes,
-    *, statement_id: bytes, nonce: bytes,
+    *, statement_id: bytes, nonce: bytes, allow_toy_parameters: bool = False,
 ) -> bool:
     """Accept iff ``data`` proves that ``commitment`` hides its disclosed payload.
 
     ``statement_id`` and ``nonce`` are the recipient's own values, never read
     from ``data``.  Read the payload with :func:`decode_disclosure` after
-    acceptance.  Malformed input returns ``False``.
+    acceptance.  Malformed input returns ``False``; a non-production
+    parameter set raises ``ValueError`` unless ``allow_toy_parameters``.
     """
+    require_verifier_parameters(params, allow_toy_parameters=allow_toy_parameters)
     try:
         disclosure = decode_disclosure(params, data)
         context = disclosure_context(params, statement_id, nonce)
@@ -403,13 +445,16 @@ def create_disclosure(
 
 
 def verify_disclosure_proof(
-    params: BdlopParams, envelope: bytes, data: bytes, *, statement_id: bytes, nonce: bytes
+    params: BdlopParams, envelope: bytes, data: bytes, *, statement_id: bytes, nonce: bytes,
+    allow_toy_parameters: bool = False,
 ) -> bool:
     """Verify a disclosure against a verified in-band envelope."""
+    require_verifier_parameters(params, allow_toy_parameters=allow_toy_parameters)
     try:
         commitment = decode_envelope(params, envelope).commitment
     except ValueError:
         return False
     return verify_commitment_disclosure(
-        params, commitment, data, statement_id=statement_id, nonce=nonce
+        params, commitment, data, statement_id=statement_id, nonce=nonce,
+        allow_toy_parameters=allow_toy_parameters,
     )

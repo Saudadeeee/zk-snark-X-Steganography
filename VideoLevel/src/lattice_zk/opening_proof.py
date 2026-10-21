@@ -26,12 +26,21 @@ import numpy as np
 
 from . import codec, ring, sampling
 from .bdlop import Commitment, CommitmentKey, derive_key, ternary_randomness
-from .params import CHALLENGE_SEED_BYTES, BdlopParams
+from .params import BDLOP_OPEN_128_V1, CHALLENGE_SEED_BYTES, BdlopParams
 
 _CHALLENGE_DOMAIN = b"zkstego/lattice-zk/bdlop-open/v1/fiat-shamir\0"
 _MASK_DOMAIN = b"zkstego/lattice-zk/bdlop-open/v1/mask\0"
 MAX_ATTEMPTS = 512
 ENTROPY_BYTES = 32
+# D7: domain tag of the hedged mask key, and the protocols that use it.
+_HEDGE_DOMAIN = b"zkstego/lattice-zk/hedged-mask-key/v2\0"
+HEDGE_OPENING = b"bdlop-open"
+HEDGE_EQUALITY = b"bdlop-equal"
+HEDGE_BINARY = b"bdlop-binary"
+HEDGE_PROTOCOLS = frozenset({HEDGE_OPENING, HEDGE_EQUALITY, HEDGE_BINARY})
+# Frozen pre-D7 derivation, kept only for bdlop-open-128-v1 (kat_v1.json).
+_UNTAGGED_HEDGE_PARAMETER_IDS = frozenset({BDLOP_OPEN_128_V1.parameter_id})
+_UNTAGGED_HEDGE_PROTOCOLS = frozenset({HEDGE_OPENING, HEDGE_EQUALITY})
 
 
 @dataclass(frozen=True)
@@ -74,20 +83,46 @@ def _canonical_or_none(params: BdlopParams, commitment: object) -> Commitment | 
         return None
 
 
-def hedged_mask_key(entropy: bytes, statement: bytes, *witness_context: bytes | np.ndarray) -> bytes:
+def hedged_mask_key(
+    entropy: bytes, statement: bytes, *witness_context: bytes | np.ndarray,
+    protocol: bytes, parameter_id: bytes,
+) -> bytes:
     """Bind mask randomness to the statement and witness, as hedged ML-DSA does.
 
     Reusing one mask for two challenges would reveal the witness, so the mask
     stream never depends on the entropy alone.  The entropy is not length
     prefixed, so it must have the fixed width ``ENTROPY_BYTES``.
+
+    The hash input starts with a domain tag, the proof protocol and the
+    parameter-set identifier (D7), so it is separated from every other
+    SHA3-256 use and from the other proofs' mask keys without relying on the
+    entropy being uniform.  Only ``bdlop-open-128-v1`` opening and equality
+    proofs keep the earlier untagged derivation, so its known-answer vectors
+    stay reproducible.  The derivation is prover-side only: a verifier never
+    recomputes a mask, so proofs from either derivation verify identically.
     """
     if not isinstance(entropy, bytes) or len(entropy) != ENTROPY_BYTES:
         raise ValueError(f"prover entropy must be exactly {ENTROPY_BYTES} bytes")
-    digest = hashlib.sha3_256(entropy + struct.pack(">Q", len(statement)) + statement)
+    if protocol not in HEDGE_PROTOCOLS:
+        raise ValueError("unknown proof protocol for the hedged mask key")
+    if not isinstance(parameter_id, bytes) or len(parameter_id) != 32:
+        raise ValueError("parameter id must be exactly 32 bytes")
+    if parameter_id in _UNTAGGED_HEDGE_PARAMETER_IDS and protocol in _UNTAGGED_HEDGE_PROTOCOLS:
+        digest = hashlib.sha3_256()
+    else:
+        digest = hashlib.sha3_256(_HEDGE_DOMAIN)
+        for label in (protocol, parameter_id):
+            digest.update(struct.pack(">Q", len(label)) + label)
+    digest.update(entropy + struct.pack(">Q", len(statement)) + statement)
     for item in witness_context:
         encoded = item if isinstance(item, bytes) else item.astype(">i8").tobytes()
         digest.update(struct.pack(">Q", len(encoded)) + encoded)
     return digest.digest()
+
+
+def uses_untagged_hedge(parameter_id: bytes, protocol: bytes) -> bool:
+    """True only for the frozen pre-D7 derivation (``bdlop-open-128-v1``)."""
+    return parameter_id in _UNTAGGED_HEDGE_PARAMETER_IDS and protocol in _UNTAGGED_HEDGE_PROTOCOLS
 
 
 def _challenge_times(challenge: np.ndarray, vector: np.ndarray, q: int) -> np.ndarray:
@@ -124,7 +159,10 @@ def prove_with_stats(
     if not np.array_equal(key.apply_b1(randomness % params.modulus), commitment.t1):
         raise ValueError("randomness does not open the commitment")
     entropy = prover_entropy(mask_seed)
-    mask_key = hedged_mask_key(entropy, statement, commitment_bytes, randomness)
+    mask_key = hedged_mask_key(
+        entropy, statement, commitment_bytes, randomness,
+        protocol=HEDGE_OPENING, parameter_id=params.parameter_id,
+    )
     for attempt in range(1, MAX_ATTEMPTS + 1):
         stream = sampling.XofStream(_MASK_DOMAIN + mask_key + struct.pack(">I", attempt))
         mask = sampling.mask_vector(stream, params.mask_bound, (params.width, params.degree))

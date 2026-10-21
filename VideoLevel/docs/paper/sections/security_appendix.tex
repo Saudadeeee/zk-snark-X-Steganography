@@ -555,5 +555,39 @@ proof of Section~\ref{sec:sec-soundness} and the randomness-revealing API was
 removed (D3); the equality proof has its own 4\,096-attempt cap (D4); and
 \texttt{verify\_video\_proof} recomputes the relation identifier of the
 supplied parameters, profile, credential and holder identifier and refuses
-mismatching pins (D6). D8 is mitigated: every verifier entry point checks that
-a pinned commitment is canonical. D5, D7 and D9--D11 remain as described.
+mismatching pins (D6). D5, D7 and D8 and the reviewer question on
+production-strength enforcement are closed in a second round, again each
+with negative tests (\texttt{src/runtest/test\_hardening\_d5\_d7\_d8.py}).
+D7: the hedged mask key hashes a domain tag, the protocol label
+(opening, equality or binary proof) and the parameter identifier before the
+entropy. Only \texttt{bdlop-open-128-v1} keeps the untagged derivation, so
+its known-answer vectors are unchanged; the \texttt{bdlop-open-128-v2} and
+binary-proof vectors were regenerated (commitments unchanged). The verifier
+never recomputes a mask, so proofs from either derivation verify, which the
+tests check. D8: a \texttt{Commitment} carries its parameter set and its
+constructor rejects coefficients outside $[0,q)$ and wrong shapes, storing
+read-only copies; verifiers still re-check objects built around the
+constructor. Production strength: every application-level verifier
+(\texttt{verify\_video\_proof}, the envelope, disclosure and linkage
+verifiers, and \texttt{pins\_from\_registry}) refuses a parameter set with a
+challenge space below $2^{256}$ unless the caller sets
+\texttt{allow\_toy\_parameters}; hand-built pins with the toy set are refused.
+D5 is closed by a new, opt-in codec policy (v2) with its own identifier, so
+it changes profile, policy, relation and statement identifiers, while codec
+policy v1 stays byte-identical for existing videos (recorded identifiers and
+digests are tested). Under v2 (a) a segment without carriers is hashed with a
+domain tag and its length and every segment digest is typed in the combined
+digest; (b) a carrier-bearing IDR NAL unit is hashed over its complete RBSP
+with its length, so zero bits after the stop bit are bound (under v1 a zero
+byte appended there is accepted; under v2 it is rejected, through the real
+H.264 transport); (c) the segmentation is pinned: the segments must be
+exactly the access-unit partition of the input, compared byte for byte, so
+the digest is a function of the input alone and a segmenter that cuts
+elsewhere fails closed. A registered \texttt{bdlop-open-128-v2} run on a
+200-frame CIF cut under v2 verified from the video alone, and the replayed
+session, a one-bit change and the zero-extended carrier NAL unit were
+rejected (\texttt{benchmark/results/q2/hardening\_e2e\_container\_cif\_200f\_v2.json}).
+The ffmpeg version is not hashed, because that
+would bind the verifier's installation rather than the video. Carrier blocks
+are still hashed as level vectors, which is what lets the proof bind the
+video without depending on its own bits. D9--D11 remain as described.

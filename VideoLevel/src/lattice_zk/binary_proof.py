@@ -49,7 +49,9 @@ import numpy as np
 
 from . import bdlop, codec, fast_ring, ring, sampling
 from .bdlop import Commitment, ternary_randomness
-from .opening_proof import ProofResult, hedged_mask_key, prover_entropy, require_commitment
+from .opening_proof import (
+    HEDGE_BINARY, ProofResult, hedged_mask_key, prover_entropy, require_commitment,
+)
 from .params import BDLOP_OPEN_128, CHALLENGE_SEED_BYTES, MAX_NAME_BYTES, TOY, BdlopParams
 
 _DOMAIN = b"zkstego/lattice-zk/bdlop-binary/v1/"
@@ -490,7 +492,8 @@ def _prove(
     commitment_bytes = commitment.to_bytes(base)
     # parameter_id pins the auxiliary key, so r' is never reused under two keys.
     mask_key = hedged_mask_key(
-        entropy, statement, params.parameter_id, commitment_bytes, message, randomness
+        entropy, statement, commitment_bytes, message, randomness,
+        protocol=HEDGE_BINARY, parameter_id=params.parameter_id,
     )
 
     lift_seed = _lift_seed(params, statement, commitment_bytes)

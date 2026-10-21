@@ -56,7 +56,10 @@ def prove_linkage(
 def verify_linkage(
     params: BdlopParams, context: tuple[bytes, ...],
     first: Commitment, second: Commitment, proof: bytes,
+    *, allow_toy_parameters: bool = False,
 ) -> bool:
+    """Verify a linkage proof; a non-production set raises unless a test opts in."""
+    video_proof.require_verifier_parameters(params, allow_toy_parameters=allow_toy_parameters)
     try:
         statement = linkage_statement(params, context)
     except TypeError:
