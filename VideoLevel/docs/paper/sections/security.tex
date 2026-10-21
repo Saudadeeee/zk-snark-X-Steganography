@@ -195,255 +195,258 @@ $w=B_1y$, $c=G(h)$, $z=y+cr\in Z$; bên kiểm chứng tính lại $w'=B_1z-ct_1
 kiểm tra $h$. Mọi trường sau $x$ đều có độ dài được cố định bởi $\pid$, nên đầu
 vào của hàm băm giải mã được một cách duy nhất.
 
-\subsection{Adversary model}
+\subsection{Mô hình đối thủ}
 \label{sec:sec-adversary}
 
-The adversary $\mathcal A$ is a classical probabilistic algorithm. It controls
-every channel, chooses covers and payloads, knows $k_s$ (no property below
-depends on its secrecy), and has the following oracles. $\mathcal O_{\mathsf{Iss}}$
-returns a fresh $N_s$. $\mathcal O_{\mathsf{Emb}}(\vid,p,N_s)$ runs an honest
-in-band $\mathsf{Embed}$ and returns the stego video;
-$\mathcal O_{\mathsf{EmbR}}(j,\vid,N_s)$ does the same for honest holder $j$'s
-registered credential. We let these oracles prove arbitrary statements $x$
-chosen by $\mathcal A$, which only strengthens the results. Their outputs form the list
-$L$ of triples $(x,t,\pi)$. $\mathcal O_{\mathsf{Ver}}$ runs $\mathsf{Verify}$
-with the shared store. $\mathcal O_{\mathsf{Link}}$ returns honest linkage
-proofs between recorded commitments. $\mathcal O_{\mathsf{Disc}}(i)$ returns
-the opening of the $i$-th honest commitment and marks it \emph{disclosed}.
-$\mathcal O_{\mathsf{Reg}}(e,\Delta,T)$ has the issuer sign a registry with
-epoch $e$ whose descriptors are the in-band descriptors $\Delta$ and the
-registered descriptors that the issuer computes from the credential
-commitments in $T$, all of $\mathcal A$'s choice; $T_{\mathsf{reg}}$ is the
-union of all queried $T$. (An issuer signs a registered descriptor only for a
-credential it has vetted, so registered descriptors enter only through $T$.)
-$Q_P$ bounds
-the number of proofs produced by honest parties.
+Đối thủ $\mathcal A$ là một thuật toán xác suất cổ điển. Nó kiểm soát mọi kênh,
+chọn các vật phủ và các tải trọng, biết $k_s$ (không tính chất nào dưới đây phụ
+thuộc vào tính bí mật của nó), và có các oracle sau. $\mathcal O_{\mathsf{Iss}}$
+trả về một $N_s$ mới. $\mathcal O_{\mathsf{Emb}}(\vid,p,N_s)$ chạy một
+$\mathsf{Embed}$ in-band trung thực và trả về video stego;
+$\mathcal O_{\mathsf{EmbR}}(j,\vid,N_s)$ làm điều tương tự cho chứng chỉ đã đăng
+ký của bên nắm giữ trung thực $j$. Chúng tôi cho phép các oracle này chứng minh
+các phát biểu $x$ tùy ý do $\mathcal A$ chọn, điều này chỉ làm mạnh thêm các kết
+quả. Các đầu ra của chúng tạo thành danh sách $L$ các bộ ba $(x,t,\pi)$.
+$\mathcal O_{\mathsf{Ver}}$ chạy $\mathsf{Verify}$ với kho dùng chung.
+$\mathcal O_{\mathsf{Link}}$ trả về các chứng minh liên kết trung thực giữa các
+cam kết đã ghi. $\mathcal O_{\mathsf{Disc}}(i)$ trả về phần mở của cam kết trung
+thực thứ $i$ và đánh dấu nó là \emph{đã tiết lộ}.
+$\mathcal O_{\mathsf{Reg}}(e,\Delta,T)$ khiến bên phát hành ký một sổ đăng ký
+với epoch $e$ mà các mô tả của nó là các mô tả in-band $\Delta$ và các mô tả đã
+đăng ký mà bên phát hành tính từ các cam kết chứng chỉ trong $T$, tất cả do
+$\mathcal A$ chọn; $T_{\mathsf{reg}}$ là hợp của mọi $T$ đã truy vấn. (Một bên
+phát hành chỉ ký một mô tả đã đăng ký cho một chứng chỉ mà nó đã thẩm định, nên
+các mô tả đã đăng ký chỉ đi vào qua $T$.) $Q_P$ chặn số chứng minh được tạo bởi
+các bên trung thực.
 
-The issuer and verifier are honest; the session store is linearizable and
-durable. Holder corruption is static (the adversary registers its own
-credentials through $\mathcal O_{\mathsf{Reg}}$); disclosure is the only form
-of adaptive corruption, and disclosed commitments are excluded from winning
-conditions. Side channels, codec bugs, and the transport's correctness are out
-of scope.
+Bên phát hành và bên kiểm chứng là trung thực; kho phiên là tuyến tính hóa được
+(linearizable) và bền vững. Việc làm hỏng bên nắm giữ là tĩnh (đối thủ đăng ký
+các chứng chỉ của riêng nó qua $\mathcal O_{\mathsf{Reg}}$); tiết lộ là hình
+thức làm hỏng thích nghi duy nhất, và các cam kết đã tiết lộ bị loại khỏi các
+điều kiện thắng. Các kênh phụ, lỗi codec, và tính đúng đắn của tầng vận chuyển
+nằm ngoài phạm vi.
 
-\subsection{Zero knowledge of the Fiat--Shamir-with-aborts proof}
+\subsection{Tính không tiết lộ tri thức của chứng minh Fiat--Shamir-with-aborts}
 \label{sec:sec-zk}
 
-\begin{lemma}[Witness-independent acceptance]
+\begin{lemma}[Chấp nhận độc lập với nhân chứng]
 \label{lem:hvzk}
-For every $r\in S_1^k$ and $c\in\Cset$, an attempt with $y\leftarrow Y$ is
-accepted with probability exactly $p_{\mathrm{acc}}$, and conditioned on
-acceptance $z=y+cr$ is uniform on $Z$.
+Với mọi $r\in S_1^k$ và $c\in\Cset$, một lần thử với $y\leftarrow Y$ được chấp
+nhận với xác suất đúng bằng $p_{\mathrm{acc}}$, và với điều kiện được chấp nhận
+thì $z=y+cr$ đều trên $Z$.
 \end{lemma}
 \noindent
-Each coefficient $v$ of $cr$ satisfies $|v|\le\kappa$, so the $2B+1$ values
-$z_i\in[-B,B]$ correspond to masks $z_i-v\in[-\gamma+1,\gamma-1]\subset
-[-\gamma+1,\gamma]$, each of probability $1/2\gamma$.
+Mỗi hệ số $v$ của $cr$ thỏa $|v|\le\kappa$, nên $2B+1$ giá trị
+$z_i\in[-B,B]$ tương ứng với các mặt nạ $z_i-v\in[-\gamma+1,\gamma-1]\subset
+[-\gamma+1,\gamma]$, mỗi cái có xác suất $1/2\gamma$.
 
-\begin{lemma}[Simulation]
+\begin{lemma}[Mô phỏng]
 \label{lem:sim}
-There is a simulator that, given only $(x,t)$ and programming access to
-$\Hfs$, outputs proofs whose joint distribution with the random oracles is
-within
+Tồn tại một bộ mô phỏng mà, chỉ với $(x,t)$ và quyền lập trình $\Hfs$, xuất ra
+các chứng minh có phân phối hợp với các oracle ngẫu nhiên nằm trong khoảng
 \begin{multline*}
 \epszk(Q_P,Q_H)=2Q_P(Q_H+Q_P)2^{-256}\\
 +(\Amax+1)Q_P\bigl(Q_H+(\Amax+1)Q_P\bigr)2^{-\eta}
 \end{multline*}
-of $Q_P$ real proofs, for any adversary making $Q_H$ queries. The same holds
-for $\Pi_{\mathsf{eq}}$ with $p_{\mathrm{acc}}^2$ in place of $p_{\mathrm{acc}}$.
+so với $Q_P$ chứng minh thực, với mọi đối thủ thực hiện $Q_H$ truy vấn. Điều
+tương tự đúng cho $\Pi_{\mathsf{eq}}$ với $p_{\mathrm{acc}}^2$ thay cho $p_{\mathrm{acc}}$.
 \end{lemma}
 \noindent
-The simulator samples the attempt count from the truncated geometric
-distribution with parameter $p_{\mathrm{acc}}$, outputs $\bot$ with probability
-$(1-p_{\mathrm{acc}})^{\Amax}$, and otherwise samples $h\leftarrow\{0,1\}^{256}$,
-$z\leftarrow Z$, sets $w=B_1z-G(h)t_1$ and programs $\Hfs$ at
-$(\pid,x,t,w)$. The delicate step is the random-oracle queries that the real
-prover makes in rejected attempts and never reveals: the earlier analyses of
-Fiat--Shamir with aborts mishandled the corresponding reprogramming in the
-CMA-to-NMA step, as identified and repaired by Barbosa et
-al.~\cite{ref:barbosa} and analysed in detail by Devevey et
-al.~\cite{ref:devevey}. Here the step is discharged in the classical ROM by
-two facts specific to this instantiation: acceptance is \emph{exactly}
-independent of the witness and of $c$ (Lemma~\ref{lem:hvzk}), and every hidden
-query point contains $w=B_1y$ of min-entropy at least $\eta$ (because
-$B_1=[I_n|B_1']$). Exact independence also means the attempt count leaks
-nothing, although the implementation is not constant time otherwise.
+Bộ mô phỏng lấy mẫu số lần thử từ phân phối hình học bị cắt cụt với tham số
+$p_{\mathrm{acc}}$, xuất ra $\bot$ với xác suất $(1-p_{\mathrm{acc}})^{\Amax}$,
+và ngược lại lấy mẫu $h\leftarrow\{0,1\}^{256}$, $z\leftarrow Z$, đặt
+$w=B_1z-G(h)t_1$ và lập trình $\Hfs$ tại $(\pid,x,t,w)$. Bước tế nhị là các truy
+vấn oracle ngẫu nhiên mà bên chứng minh thực thực hiện trong các lần thử bị loại
+và không bao giờ tiết lộ: các phân tích trước đây về Fiat--Shamir with aborts đã
+xử lý sai việc tái lập trình tương ứng trong bước CMA-to-NMA, như được Barbosa
+và cộng sự~\cite{ref:barbosa} chỉ ra và sửa chữa, và được Devevey và cộng
+sự~\cite{ref:devevey} phân tích chi tiết. Ở đây bước này được giải quyết trong
+ROM cổ điển nhờ hai sự kiện đặc thù của hiện thực này: sự chấp nhận là
+\emph{hoàn toàn} độc lập với nhân chứng và với $c$ (Bổ đề~\ref{lem:hvzk}), và
+mọi điểm truy vấn ẩn đều chứa $w=B_1y$ có min-entropy ít nhất $\eta$ (bởi vì
+$B_1=[I_n|B_1']$). Tính độc lập chính xác cũng có nghĩa là số lần thử không rò
+rỉ gì, dù rằng ngoài ra phần hiện thực không chạy trong thời gian hằng.
 
-\subsection{Knowledge soundness and binding to the video}
+\subsection{Tính đúng đắn tri thức và ràng buộc vào video}
 \label{sec:sec-soundness}
 
-\begin{definition}[Simulation-extractable video binding]
+\begin{definition}[Ràng buộc video trích xuất được qua mô phỏng]
 \label{def:se}
-In experiment $\mathsf{SE}$, $\mathcal A$ interacts with all oracles and
-outputs $\vid^*$. Let $x^*$ be the statement the verifier recomputes from
-$\vid^*$ and its own pins, and $(t^*,\pi^*)$ the commitment and proof it
-verifies. $\mathcal A$ \emph{wins} if $\mathsf{Verify}$ accepts and
-$(x^*,t^*,\pi^*)\notin L$. An extractor $\mathcal E^{\mathcal A}$
-\emph{succeeds} if it outputs $x^*$ and a relaxed opening of $t^*$, where
-$x^*$ is the verifier's statement in a winning run of $\mathcal A$.
+Trong thí nghiệm $\mathsf{SE}$, $\mathcal A$ tương tác với mọi oracle và xuất
+ra $\vid^*$. Gọi $x^*$ là phát biểu mà bên kiểm chứng tính lại từ $\vid^*$ và
+các mục ghim của chính nó, và $(t^*,\pi^*)$ là cam kết và chứng minh mà nó kiểm
+chứng. $\mathcal A$ \emph{thắng} nếu $\mathsf{Verify}$ chấp nhận và
+$(x^*,t^*,\pi^*)\notin L$. Một bộ trích xuất $\mathcal E^{\mathcal A}$
+\emph{thành công} nếu nó xuất ra $x^*$ và một phần mở nới lỏng của $t^*$, trong
+đó $x^*$ là phát biểu của bên kiểm chứng trong một lần chạy thắng của $\mathcal A$.
 \end{definition}
 
-\begin{theorem}[Knowledge soundness bound to the statement]
+\begin{theorem}[Tính đúng đắn tri thức ràng buộc vào phát biểu]
 \label{thm:se}
-Let $\mathcal A$ win $\mathsf{SE}$ with probability $\varepsilon$. There is
-an extractor $\mathcal E$ that runs $\mathcal A$ twice with simulated oracles
-and succeeds with probability $\varepsilon_{\mathsf{ext}}$ such that
+Giả sử $\mathcal A$ thắng $\mathsf{SE}$ với xác suất $\varepsilon$. Tồn tại một
+bộ trích xuất $\mathcal E$ chạy $\mathcal A$ hai lần với các oracle được mô
+phỏng và thành công với xác suất $\varepsilon_{\mathsf{ext}}$ sao cho
 \begin{multline*}
 \varepsilon\le\epszk(Q_P,Q_H)+\Adv^{\MSIS}+Q_H2^{-256}\\
 +\sqrt{Q_H\bigl(\varepsilon_{\mathsf{ext}}+Q_H2^{-256}+2^{-257}\bigr)}.
 \end{multline*}
 \end{theorem}
 \noindent
-\emph{Proof idea.} Replace honest proofs by simulated ones
-(Lemma~\ref{lem:sim}). If $\mathcal A$ re-uses a programmed point, i.e.\
-$(x^*,t^*)=(x_i,t_i)$ and $w^*=w_i$, then $h^*=h_i$, hence $c^*=c_i$ and
-$B_1(z^*-z_i)=0$ with $0<\norm{z^*-z_i}_\infty\le2B$: an M-SIS solution.
-Otherwise the verifier's query $(\pid,x^*,t^*,w^*)$ is answered by a fresh
-random value, and the general forking lemma of Bellare and
-Neven~\cite{ref:bn06} (Lemma~1) with output space $2^{256}$ yields two
-accepting proofs with the same $(x^*,t^*,w^*)$ and seeds $h\neq h'$. Then
-$c=G(h)\neq G(h')=c'$ except with probability $2^{-257}+Q_H2^{-256}$, and
-$B_1(z-z')=(c-c')t_1^*$ gives the relaxed opening $(z-z',c-c')$. The
-challenge difference is invertible by Lemma~\ref{lem:invertible}, which is
-what makes the opening define a unique message. Because the forked query
-contains $x^*$, the opening is bound to exactly the verifier-recomputed
-statement: its video commitment, carrier positions, session challenge,
-registry root and epoch, relation and policy. \qed
+\emph{Ý tưởng chứng minh.} Thay các chứng minh trung thực bằng các chứng minh
+được mô phỏng (Bổ đề~\ref{lem:sim}). Nếu $\mathcal A$ tái dùng một điểm đã lập
+trình, tức $(x^*,t^*)=(x_i,t_i)$ và $w^*=w_i$, thì $h^*=h_i$, do đó $c^*=c_i$ và
+$B_1(z^*-z_i)=0$ với $0<\norm{z^*-z_i}_\infty\le2B$: một nghiệm M-SIS. Ngược
+lại, truy vấn $(\pid,x^*,t^*,w^*)$ của bên kiểm chứng được trả lời bằng một giá
+trị ngẫu nhiên mới, và bổ đề rẽ nhánh tổng quát của Bellare và
+Neven~\cite{ref:bn06} (Bổ đề~1) với không gian đầu ra $2^{256}$ cho hai chứng
+minh được chấp nhận có cùng $(x^*,t^*,w^*)$ và các hạt giống $h\neq h'$. Khi đó
+$c=G(h)\neq G(h')=c'$ ngoại trừ với xác suất $2^{-257}+Q_H2^{-256}$, và
+$B_1(z-z')=(c-c')t_1^*$ cho phần mở nới lỏng $(z-z',c-c')$. Hiệu thách thức là
+khả nghịch theo Bổ đề~\ref{lem:invertible}, chính điều này khiến phần mở xác
+định một thông điệp duy nhất. Bởi vì truy vấn bị rẽ nhánh chứa $x^*$, phần mở
+được ràng buộc vào đúng phát biểu do bên kiểm chứng tính lại: cam kết video, các
+vị trí vật mang, thách thức phiên, gốc sổ đăng ký và epoch, quan hệ và chính
+sách của nó. \qed
 
-The square-root loss is the usual price of rewinding. For $Q_H=2^{64}$ the
-bound converts an extraction probability of $2^{-128}$ into $\varepsilon
-\lesssim2^{-32}$. For authenticity (Theorem~\ref{thm:auth}) a tight bound
-is available by the SelfTargetMSIS route of Kiltz, Lyubashevsky and
-Schaffner~\cite{ref:kls18}, at the cost of that non-standard assumption.
+Tổn thất căn bậc hai là cái giá thường thấy của việc tua lại (rewinding). Với
+$Q_H=2^{64}$, cận biến một xác suất trích xuất $2^{-128}$ thành $\varepsilon
+\lesssim2^{-32}$. Đối với tính xác thực (Định lý~\ref{thm:auth}), có một cận
+chặt nhờ hướng SelfTargetMSIS của Kiltz, Lyubashevsky và
+Schaffner~\cite{ref:kls18}, với cái giá là giả thiết phi chuẩn đó.
 
-\begin{theorem}[Binding with respect to relaxed openings]
+\begin{theorem}[Tính ràng buộc đối với các phần mở nới lỏng]
 \label{thm:binding}
-No adversary can output $t$ and two openings of $t$, each honest or relaxed,
-with different messages, except with probability $\Adv^{\MSIS}$.
+Không đối thủ nào có thể xuất ra $t$ và hai phần mở của $t$, mỗi phần mở trung
+thực hoặc nới lỏng, với các thông điệp khác nhau, ngoại trừ với xác suất
+$\Adv^{\MSIS}$.
 \end{theorem}
 \noindent
-Given $(\bar r,f,m)$ and $(\bar r',f',m')$, the vector
-$x=f'\bar r-f\bar r'$ satisfies $B_1x=0$; if $x=0$ then
-$\langle b_2,x\rangle=ff'(m-m')=0$, contradicting invertibility. Its norm is at
-most $2\cdot2\kappa\cdot2B=\beta$ for two relaxed openings, $2\kappa+2B$ for
-one honest and one relaxed, and $2$ for two honest ones, all below $q/2$
-(\texttt{params.py:53}), so $x\not\equiv0$ is an M-SIS solution.
+Cho $(\bar r,f,m)$ và $(\bar r',f',m')$, vector
+$x=f'\bar r-f\bar r'$ thỏa $B_1x=0$; nếu $x=0$ thì
+$\langle b_2,x\rangle=ff'(m-m')=0$, mâu thuẫn với tính khả nghịch. Chuẩn của nó
+tối đa là $2\cdot2\kappa\cdot2B=\beta$ cho hai phần mở nới lỏng, $2\kappa+2B$
+cho một trung thực và một nới lỏng, và $2$ cho hai trung thực, tất cả đều dưới
+$q/2$ (\texttt{params.py:53}), nên $x\not\equiv0$ là một nghiệm M-SIS.
 
 \noindent
-Together, Theorems~\ref{thm:se} and~\ref{thm:binding} say: whoever produces an
-accepted in-band video is bound to the message $\bar m$ the extractor
-computes, and any later disclosure that $\mathsf{VerDisc}$ accepts reveals a
-payload $p$ with $\mathsf{enc}(p)=\bar m$, unless M-SIS is broken.
+Gộp lại, các Định lý~\ref{thm:se} và~\ref{thm:binding} nói rằng: ai tạo ra một
+video in-band được chấp nhận đều bị ràng buộc vào thông điệp $\bar m$ mà bộ
+trích xuất tính ra, và bất kỳ lần tiết lộ về sau nào mà $\mathsf{VerDisc}$ chấp
+nhận đều bộc lộ một tải trọng $p$ với $\mathsf{enc}(p)=\bar m$, trừ khi M-SIS
+bị phá.
 
-\emph{Disclosure keeps the randomness private.} A disclosure is the payload
-$p$ together with an equality proof between $t$ and the deterministic
-commitment $\mathsf{Com}(\mathsf{enc}(p);0)$, bound by Fiat--Shamir to a
-recipient-chosen context (statement identifier and nonce). The recipient
-learns $p$ but no opening of $t$, so it cannot produce new opening proofs for
-$t$; by soundness of the equality proof, an accepted disclosure still
-satisfies $\mathsf{enc}(p)=\bar m$ unless M-SIS is broken. An earlier version
-revealed $r$ itself; this was item~D3 in Appendix~\ref{app:code-check} and is
-fixed. The theorems below still treat commitments whose \emph{opening} has
-leaked (e.g.\ by key compromise) as disclosed.
+\emph{Việc tiết lộ giữ cho tính ngẫu nhiên riêng tư.} Một lần tiết lộ là tải
+trọng $p$ cùng với một chứng minh đẳng thức giữa $t$ và cam kết tất định
+$\mathsf{Com}(\mathsf{enc}(p);0)$, được Fiat--Shamir ràng buộc vào một ngữ cảnh
+do bên nhận chọn (định danh phát biểu và nonce). Bên nhận biết $p$ nhưng không
+biết phần mở nào của $t$, nên nó không thể tạo các chứng minh mở mới cho $t$;
+theo tính đúng đắn của chứng minh đẳng thức, một lần tiết lộ được chấp nhận vẫn
+thỏa $\mathsf{enc}(p)=\bar m$ trừ khi M-SIS bị phá. Một phiên bản trước đây bộc
+lộ chính $r$; đây là mục~D3 trong Phụ lục~\ref{app:code-check} và đã được sửa.
+Các định lý dưới đây vẫn coi các cam kết mà \emph{phần mở} của chúng đã bị rò rỉ
+(ví dụ do lộ khóa) là đã tiết lộ.
 
-\begin{lemma}[One-wayness of honest commitments]
+\begin{lemma}[Tính một chiều của các cam kết trung thực]
 \label{lem:row}
-Given $\mathsf{ck}$ and $t^{(j)}=\Com(m_j;r_j)$, $j\le Q$, for
-$r_j\leftarrow S_1^k$ and messages $m_j$ chosen adaptively before each
-$t^{(j)}$ is drawn, no adversary outputs a relaxed opening of any $t^{(j)}$
-except with probability
+Cho $\mathsf{ck}$ và $t^{(j)}=\Com(m_j;r_j)$, $j\le Q$, với
+$r_j\leftarrow S_1^k$ và các thông điệp $m_j$ được chọn thích nghi trước khi mỗi
+$t^{(j)}$ được rút, không đối thủ nào xuất ra một phần mở nới lỏng của bất kỳ
+$t^{(j)}$ nào ngoại trừ với xác suất
 $\Adv^{\mathsf{row}}_Q=\Adv^{\MSIS}+Q\bigl(\Adv^{\MLWE}+3^{kN}q^{-(n+1)N}\bigr)$.
 \end{lemma}
 \noindent
-Put $x=fr_j-\bar r$, so $B_1x=0$ and $\norm{x}_\infty\le2\kappa+2B$. If
-$x\neq0$ it is an M-SIS solution (the reduction generated every $t^{(j)}$ and
-knows $r_j$). If $x=0$ the adversary has found $r_j=f^{-1}\bar r$, which a
-distinguisher that planted its M-LWE sample at a guessed $j$ checks against
-$t^{(j)}$; for uniform $t^{(j)}$ a ternary opening exists with probability at
-most $3^{kN}q^{-(n+1)N}$. Binding alone does not suffice here: an adversary
-that recovers $r_j$ opens $t^{(j)}$ to the right message.
+Đặt $x=fr_j-\bar r$, nên $B_1x=0$ và $\norm{x}_\infty\le2\kappa+2B$. Nếu
+$x\neq0$ thì nó là một nghiệm M-SIS (phép rút gọn đã sinh mọi $t^{(j)}$ và biết
+$r_j$). Nếu $x=0$ thì đối thủ đã tìm được $r_j=f^{-1}\bar r$, điều mà một bộ
+phân biệt cấy mẫu M-LWE của nó tại một $j$ được đoán sẽ kiểm tra đối chiếu với
+$t^{(j)}$; với $t^{(j)}$ đều, một phần mở bậc ba tồn tại với xác suất tối đa
+$3^{kN}q^{-(n+1)N}$. Chỉ riêng tính ràng buộc là không đủ ở đây: một đối thủ
+khôi phục được $r_j$ sẽ mở $t^{(j)}$ tới đúng thông điệp.
 
-\subsection{Payload hiding}
+\subsection{Che giấu tải trọng}
 \label{sec:sec-hiding}
 
-\begin{definition}[Payload indistinguishability]
+\begin{definition}[Tính không phân biệt được tải trọng]
 \label{def:hiding}
-In $\mathsf{IND}^b$, $\mathcal A$ has all oracles and submits once
-$(\vid,p_0,p_1,N_s)$ with $|p_0|,|p_1|\le766$ bytes; the challenger returns
-$\mathcal O_{\mathsf{Emb}}(\vid,p_b,N_s)$. $\mathcal A$ may not query
-$\mathcal O_{\mathsf{Disc}}$ or $\mathcal O_{\mathsf{Link}}$ on the challenge
-commitment. $\Adv^{\mathsf{ind}}=|\Pr[\mathsf{IND}^1=1]-\Pr[\mathsf{IND}^0=1]|$.
+Trong $\mathsf{IND}^b$, $\mathcal A$ có mọi oracle và nộp một lần
+$(\vid,p_0,p_1,N_s)$ với $|p_0|,|p_1|\le766$ byte; bên thách thức trả về
+$\mathcal O_{\mathsf{Emb}}(\vid,p_b,N_s)$. $\mathcal A$ không được truy vấn
+$\mathcal O_{\mathsf{Disc}}$ hoặc $\mathcal O_{\mathsf{Link}}$ trên cam kết
+thách thức. $\Adv^{\mathsf{ind}}=|\Pr[\mathsf{IND}^1=1]-\Pr[\mathsf{IND}^0=1]|$.
 \end{definition}
 
-\begin{theorem}[Hiding]
+\begin{theorem}[Che giấu]
 \label{thm:hiding}
 $\Adv^{\mathsf{ind}}\le2\,\epszk(Q_P+1,Q_H)+2\Adv^{\MLWE}$.
 \end{theorem}
 \noindent
-The stego video depends on $b$ only through $E$: $P$ and $D$ are fixed from a
-placeholder before proving, and the envelope has a fixed size, so the payload
-length is hidden too. Simulate the challenge proof (Lemma~\ref{lem:sim}), then
-replace $t$ by a uniform pair: with
-$B_1'=[B_{1,2}'\,|\,B_{1,3}']$ and $r=(r_1,r_2,r_3)$,
-$(t_1-B_{1,2}'(t_2-m),\,t_2-m)=A r_3+(r_1,r_2)$ with
+Video stego chỉ phụ thuộc vào $b$ thông qua $E$: $P$ và $D$ được cố định từ một
+placeholder trước khi chứng minh, và envelope có kích thước cố định, nên độ dài
+tải trọng cũng được che giấu. Mô phỏng chứng minh thách thức
+(Bổ đề~\ref{lem:sim}), rồi thay $t$ bằng một cặp đều: với
+$B_1'=[B_{1,2}'\,|\,B_{1,3}']$ và $r=(r_1,r_2,r_3)$,
+$(t_1-B_{1,2}'(t_2-m),\,t_2-m)=A r_3+(r_1,r_2)$ với
 $A=\bigl[\begin{smallmatrix}B_{1,3}'-B_{1,2}'b_2'\\ b_2'\end{smallmatrix}\bigr]$
-uniform, an M-LWE sample of rank $\lambda$ with $n+1$ ring samples; the map is
-a bijection for each fixed $m$. The experiment is then independent of $b$.
-Hiding is computational and is the only property that rests on M-LWE; it
-holds for the payload, not for the fact that a payload exists, which is a
-steganographic property evaluated empirically.
+đều, một mẫu M-LWE hạng $\lambda$ với $n+1$ mẫu vành; ánh xạ là một song ánh với
+mỗi $m$ cố định. Khi đó thí nghiệm độc lập với $b$. Tính che giấu mang tính tính
+toán và là tính chất duy nhất dựa trên M-LWE; nó đúng cho tải trọng, chứ không
+cho sự kiện rằng một tải trọng tồn tại, vốn là một tính chất giấu tin được đánh
+giá bằng thực nghiệm.
 
-\subsection{Replay resistance}
+\subsection{Khả năng chống phát lại}
 \label{sec:sec-replay}
 
-\begin{definition}[Replay]
+\begin{definition}[Phát lại]
 \label{def:replay}
-In $\mathsf{RPL}$, $\mathcal A$ has all oracles against a verifier with a
-session store and wins if (i) two calls of $\mathcal O_{\mathsf{Ver}}$ accept
-with the same $N_s$; or (ii) a call accepts with an $N_s$ that was not issued
-for $\mathsf{bind}(\mathsf{pins})$, or is expired; or (iii) a call accepts
-$\vid^*$ whose triple $(x^*,t^*,\pi^*)\notin L$ and $\mathcal A$ queried
-$\Hfs$ at the verifier's point $(\pid,x^*,t^*,w^*)$ before $N_s^*$ was issued.
+Trong $\mathsf{RPL}$, $\mathcal A$ có mọi oracle đối với một bên kiểm chứng có
+kho phiên và thắng nếu (i) hai lời gọi $\mathcal O_{\mathsf{Ver}}$ chấp nhận với
+cùng $N_s$; hoặc (ii) một lời gọi chấp nhận với một $N_s$ không được phát hành
+cho $\mathsf{bind}(\mathsf{pins})$, hoặc đã hết hạn; hoặc (iii) một lời gọi chấp
+nhận $\vid^*$ có bộ ba $(x^*,t^*,\pi^*)\notin L$ và $\mathcal A$ đã truy vấn
+$\Hfs$ tại điểm $(\pid,x^*,t^*,w^*)$ của bên kiểm chứng trước khi $N_s^*$ được
+phát hành.
 \end{definition}
 
-\begin{theorem}[Replay resistance]
+\begin{theorem}[Khả năng chống phát lại]
 \label{thm:replay}
-$\Pr[\text{(i) or (ii)}]\le\Adv^{\mathsf{cr}}_{\mathsf{SHA2}}+Q_I^22^{-257}$ and
-$\Pr[\text{(iii)}]\le Q_HQ_I2^{-256}$, with $Q_I$ issued sessions.
+$\Pr[\text{(i) hoặc (ii)}]\le\Adv^{\mathsf{cr}}_{\mathsf{SHA2}}+Q_I^22^{-257}$ và
+$\Pr[\text{(iii)}]\le Q_HQ_I2^{-256}$, với $Q_I$ phiên được phát hành.
 \end{theorem}
 \noindent
-(i) and (ii) follow from the store semantics: rows exist only for issued
-challenges (keyed by a SHA-256 digest of $N_s$), and consumption is a single
-conditional \texttt{UPDATE \dots\ WHERE consumed\_at IS NULL AND expires\_at>now}
-inside one write transaction, so at most one caller observes one updated row
-(\texttt{zkp\_sessions.py:181--241}). For (iii), $N_s^*$ is a substring of
-$x^*$, so a query made earlier predicts a uniform 256-bit value. Together
-with Theorem~\ref{thm:se}, an accepted session corresponds to a party that
-knew an opening and computed the proof after the session was issued.
+(i) và (ii) suy ra từ ngữ nghĩa của kho: các hàng chỉ tồn tại cho các thách
+thức đã phát hành (khóa theo một digest SHA-256 của $N_s$), và việc tiêu thụ là
+một \texttt{UPDATE \dots\ WHERE consumed\_at IS NULL AND expires\_at>now} có
+điều kiện đơn nhất bên trong một giao dịch ghi, nên nhiều nhất một bên gọi quan
+sát được một hàng đã cập nhật (\texttt{zkp\_sessions.py:181--241}). Với (iii),
+$N_s^*$ là một chuỗi con của $x^*$, nên một truy vấn thực hiện trước đó dự đoán
+một giá trị 256 bit đều. Cùng với Định lý~\ref{thm:se}, một phiên được chấp nhận
+tương ứng với một bên đã biết một phần mở và đã tính chứng minh sau khi phiên
+được phát hành.
 
-\emph{What a stateless verifier cannot give.} With a fixed $N_s$
-(\texttt{expected\_session}), (i) fails: any copy of an accepted video is
-accepted again, by anyone and any number of times, since a non-interactive
-proof is transferable. If $N_s$ is reused across verifications, (iii) fails
-as well and only video binding (Theorem~\ref{thm:se}) remains. No variant
-prevents relaying: in-band mode does not bind $N_s$ to a prover, so whoever
-first presents a valid video consumes the session.
+\emph{Điều mà một bên kiểm chứng không trạng thái không thể đem lại.} Với một
+$N_s$ cố định (\texttt{expected\_session}), (i) thất bại: bất kỳ bản sao nào của
+một video được chấp nhận đều lại được chấp nhận, bởi bất kỳ ai và bao nhiêu lần
+tùy ý, vì một chứng minh không tương tác có thể chuyển nhượng. Nếu $N_s$ bị tái
+dùng qua nhiều lần kiểm chứng, (iii) cũng thất bại và chỉ còn lại ràng buộc
+video (Định lý~\ref{thm:se}). Không biến thể nào ngăn được việc tiếp chuyển
+(relay): chế độ in-band không ràng buộc $N_s$ vào một bên chứng minh, nên ai
+trình ra một video hợp lệ trước thì tiêu thụ phiên.
 
-\subsection{Registered-mode authenticity}
+\subsection{Tính xác thực chế độ đã đăng ký}
 \label{sec:sec-auth}
 
-\begin{definition}[Authenticity]
+\begin{definition}[Tính xác thực]
 \label{def:auth}
-In $\mathsf{AUTH}$, the challenger creates honest credentials
-$t_c^{(j)}=\Com(m_j;r_j)$, $j\le Q_C$, with $m_j$ chosen by $\mathcal A$, and
-$\mathcal A$ has all oracles. $\mathcal A$ outputs $(\mathsf{Reg}^*,\vid^*,t^*)$
-and wins if a verifier pinning $\mathit{pk}_I$ and $t^*$ accepts $\vid^*$ with
-pins from $\mathsf{Reg}^*$, the triple $(x^*,t^*,\pi^*)\notin L$, and either
-(a) $t^*\notin T_{\mathsf{reg}}$ (never registered by the issuer), or
-(b) $t^*=t_c^{(j)}$ for an undisclosed honest $j$.
+Trong $\mathsf{AUTH}$, bên thách thức tạo các chứng chỉ trung thực
+$t_c^{(j)}=\Com(m_j;r_j)$, $j\le Q_C$, với $m_j$ do $\mathcal A$ chọn, và
+$\mathcal A$ có mọi oracle. $\mathcal A$ xuất ra $(\mathsf{Reg}^*,\vid^*,t^*)$
+và thắng nếu một bên kiểm chứng ghim $\mathit{pk}_I$ và $t^*$ chấp nhận $\vid^*$
+với các mục ghim từ $\mathsf{Reg}^*$, bộ ba $(x^*,t^*,\pi^*)\notin L$, và hoặc
+(a) $t^*\notin T_{\mathsf{reg}}$ (chưa bao giờ được bên phát hành đăng ký), hoặc
+(b) $t^*=t_c^{(j)}$ cho một $j$ trung thực chưa tiết lộ.
 \end{definition}
 
-\begin{theorem}[Authenticity]
+\begin{theorem}[Tính xác thực]
 \label{thm:auth}
 \begin{multline*}
 \Adv^{\mathsf{auth}}\le\Adv^{\mathsf{euf\text{-}cma}}_{\mathsf{ML\text{-}DSA}}
@@ -453,127 +456,129 @@ pins from $\mathsf{Reg}^*$, the triple $(x^*,t^*,\pi^*)\notin L$, and either
 \end{multline*}
 \end{theorem}
 \noindent
-Case (a) gives an ML-DSA forgery on the registry signing bytes or, if
-$\mathsf{Reg}^*$ was signed, a SHA-256 collision between the
-fixed-length inputs $B_1'\|b_2'\|t^*$ and $B_1'\|b_2'\|t'$ for some
-$t'\in T_{\mathsf{reg}}$, since the matching descriptor contains that digest. In case (b), Theorem~\ref{thm:se} applied
-to the simulated game extracts a relaxed opening of an honest credential,
-which Lemma~\ref{lem:row} rules out.
-The theorem is about credentials; the link to a person is only as strong as
-the issuer's check of the holder before signing. When the issuer binds a
-holder identifier, the signed descriptor contains a domain-separated digest
-of it next to the commitment, so the verifier's pinned relation names both
-(Appendix~\ref{app:code-check}, item~D2, fixed).
+Trường hợp (a) cho một chữ ký giả mạo ML-DSA trên các byte ký của sổ đăng ký
+hoặc, nếu $\mathsf{Reg}^*$ đã được ký, một va chạm SHA-256 giữa các đầu vào có
+độ dài cố định $B_1'\|b_2'\|t^*$ và $B_1'\|b_2'\|t'$ với một
+$t'\in T_{\mathsf{reg}}$ nào đó, vì mô tả khớp chứa digest đó. Trong trường hợp
+(b), Định lý~\ref{thm:se} áp dụng cho trò chơi được mô phỏng trích xuất một phần
+mở nới lỏng của một chứng chỉ trung thực, điều mà Bổ đề~\ref{lem:row} loại trừ.
+Định lý này nói về các chứng chỉ; sự liên kết tới một con người chỉ mạnh ngang
+với việc bên phát hành kiểm tra bên nắm giữ trước khi ký. Khi bên phát hành ràng
+buộc một định danh của bên nắm giữ, mô tả đã ký chứa một digest có tách miền của
+nó bên cạnh cam kết, nên quan hệ đã ghim của bên kiểm chứng nêu tên cả hai
+(Phụ lục~\ref{app:code-check}, mục~D2, đã sửa).
 
-\subsection{Linkage}
+\subsection{Liên kết}
 \label{sec:sec-linkage}
 
-\begin{definition}[Linkage soundness and hiding]
+\begin{definition}[Tính đúng đắn và tính che giấu của liên kết]
 \label{def:link}
-In $\mathsf{LNK\text{-}S}$, $\mathcal A$ outputs a context, $t_a,t_b$, an
-accepted $\pi_{\mathsf{eq}}$ not output by $\mathcal O_{\mathsf{Link}}$ for
-that triple, and openings (honest or relaxed) of $t_a$ and $t_b$ with
-different messages. In $\mathsf{LNK\text{-}H}^b$, $\mathcal A$ submits
-$(p_0,p_1,\mathit{ctx})$ and receives $t_a=\Com(p_b;r_a)$,
-$t_b=\Com(p_b;r_b)$ and $\pi_{\mathsf{eq}}$ for $\mathit{ctx}$.
+Trong $\mathsf{LNK\text{-}S}$, $\mathcal A$ xuất ra một ngữ cảnh, $t_a,t_b$, một
+$\pi_{\mathsf{eq}}$ được chấp nhận không do $\mathcal O_{\mathsf{Link}}$ xuất ra
+cho bộ ba đó, và các phần mở (trung thực hoặc nới lỏng) của $t_a$ và $t_b$ với
+các thông điệp khác nhau. Trong $\mathsf{LNK\text{-}H}^b$, $\mathcal A$ nộp
+$(p_0,p_1,\mathit{ctx})$ và nhận $t_a=\Com(p_b;r_a)$,
+$t_b=\Com(p_b;r_b)$ và $\pi_{\mathsf{eq}}$ cho $\mathit{ctx}$.
 \end{definition}
 
-\begin{theorem}[Linkage]
+\begin{theorem}[Liên kết]
 \label{thm:link}
-$\Adv^{\mathsf{lnk\text{-}s}}$ obeys the bound of Theorem~\ref{thm:se} with
-$\varepsilon_{\mathsf{ext}}\le\Adv^{\MSIS}$, and
+$\Adv^{\mathsf{lnk\text{-}s}}$ tuân theo cận của Định lý~\ref{thm:se} với
+$\varepsilon_{\mathsf{ext}}\le\Adv^{\MSIS}$, và
 $\Adv^{\mathsf{lnk\text{-}h}}\le2\,\epszk(Q_P+1,Q_H)+4\Adv^{\MLWE}$.
 \end{theorem}
 \noindent
-Two forked transcripts with one announcement $(w_a,w_b,u)$ give relaxed
-openings $(\bar r_a,f)$, $(\bar r_b,f)$ with a \emph{common} $f$ and
-$f(t_{2,a}-t_{2,b})=\langle b_2,\bar r_a-\bar r_b\rangle$, hence
-$\bar m_a=\bar m_b$; the adversary's two openings then contradict
-Theorem~\ref{thm:binding} for $t_a$ or for $t_b$. Linkage to a registered
-credential additionally authenticates its holder, as in
-Theorem~\ref{thm:auth}, because extraction also yields a relaxed opening of
-$t_c$. Hiding uses the simulator for $\Pi_{\mathsf{eq}}$ and two M-LWE hybrids;
-equality of the two payloads is revealed by design.
+Hai bản ghi bị rẽ nhánh với một thông báo $(w_a,w_b,u)$ cho các phần mở nới lỏng
+$(\bar r_a,f)$, $(\bar r_b,f)$ với một $f$ \emph{chung} và
+$f(t_{2,a}-t_{2,b})=\langle b_2,\bar r_a-\bar r_b\rangle$, do đó
+$\bar m_a=\bar m_b$; hai phần mở của đối thủ khi đó mâu thuẫn với
+Định lý~\ref{thm:binding} cho $t_a$ hoặc cho $t_b$. Việc liên kết tới một chứng
+chỉ đã đăng ký còn xác thực thêm bên nắm giữ của nó, như trong
+Định lý~\ref{thm:auth}, bởi vì việc trích xuất cũng cho ra một phần mở nới lỏng
+của $t_c$. Tính che giấu dùng bộ mô phỏng cho $\Pi_{\mathsf{eq}}$ và hai bước
+lai M-LWE; sự bằng nhau của hai tải trọng được bộc lộ theo thiết kế.
 
-\subsection{Integrity of the video content}
+\subsection{Tính toàn vẹn của nội dung video}
 \label{sec:sec-integrity}
 
-$\Canon$ splits the stream with the pinned segmenter (\texttt{ffmpeg -c:v copy
--f segment}, $F$ frames per segment) and combines per-segment digests with
-$F$ and the frame counts. A segment that carries envelope chunks is hashed
-through a length-delimited, tagged serialization: for every NAL unit its
-index, type, \texttt{forbidden\_zero\_bit}, \texttt{nal\_ref\_idc} and
-start-code size; the RBSP verbatim for NAL units without carriers; and, inside
-an IDR NAL unit with carriers, the RBSP bits between carrier blocks up to the
-stop bit, with each carrier block replaced by its coefficient vector in which
-every carrier is normalized (magnitude rounded down to even, sign kept). Other
-segments are hashed byte for byte.
+$\Canon$ chia luồng bằng bộ phân đoạn đã ghim (\texttt{ffmpeg -c:v copy
+-f segment}, $F$ khung mỗi đoạn) và kết hợp các digest của từng đoạn với
+$F$ và các số đếm khung. Một đoạn mang các chunk envelope được băm qua một phép
+tuần tự hóa có gắn thẻ, phân định bằng độ dài: với mỗi đơn vị NAL là chỉ số,
+kiểu, \texttt{forbidden\_zero\_bit}, \texttt{nal\_ref\_idc} và kích thước mã
+khởi đầu (start-code); RBSP nguyên văn cho các đơn vị NAL không có vật mang; và,
+bên trong một đơn vị NAL IDR có vật mang, các bit RBSP giữa các khối vật mang
+cho tới bit dừng (stop bit), với mỗi khối vật mang được thay bằng vector hệ số
+của nó trong đó mỗi vật mang được chuẩn hóa (độ lớn làm tròn xuống số chẵn, giữ
+dấu). Các đoạn khác được băm từng byte.
 
-\begin{lemma}[What the digest and the envelope determine]
+\begin{lemma}[Digest và envelope xác định những gì]
 \label{lem:canon}
-The serialization is uniquely decodable, so equal $V$ implies equal
-$\Canon$ except with probability $3\Adv^{\mathsf{cr}}_{\mathsf{SHA2}}$. Under
-the stable carrier rule ($|\ell|\ge4$, one parity bit) a carrier level is
-$\mathrm{sgn}(\ell)(2\lfloor|\ell|/2\rfloor+b)$, so $(\Canon,P)$ and the
-carrier bits determine the complete coefficient vector of every carrier block.
-If the carrier bit string is the unique encoding of $E$ under the pinned
-profile, $(\Canon,P,E)$ determines: the segmentation and frame counts; every
-byte of segments without carriers; every NAL header field and RBSP bit outside
-carrier blocks; and the coefficient vectors of carrier blocks.
+Phép tuần tự hóa giải mã được một cách duy nhất, nên $V$ bằng nhau kéo theo
+$\Canon$ bằng nhau ngoại trừ với xác suất $3\Adv^{\mathsf{cr}}_{\mathsf{SHA2}}$.
+Dưới quy tắc vật mang ổn định ($|\ell|\ge4$, một bit chẵn-lẻ), một mức vật mang
+là $\mathrm{sgn}(\ell)(2\lfloor|\ell|/2\rfloor+b)$, nên $(\Canon,P)$ và các bit
+vật mang xác định toàn bộ vector hệ số của mọi khối vật mang. Nếu chuỗi bit vật
+mang là mã hóa duy nhất của $E$ dưới hồ sơ đã ghim, thì $(\Canon,P,E)$ xác định:
+sự phân đoạn và các số đếm khung; mọi byte của các đoạn không có vật mang; mọi
+trường header NAL và bit RBSP bên ngoài các khối vật mang; và các vector hệ số
+của các khối vật mang.
 \end{lemma}
 
-\begin{theorem}[Integrity]
+\begin{theorem}[Tính toàn vẹn]
 \label{thm:integrity}
-Suppose an honest embedding produced $\vid_h$ for session $N_s$ with
-commitment $t$ (or credential $t_c$), and $\mathcal A$ outputs $\vid^*$ that
-is accepted for $N_s$ with the same commitment (or credential), not
-disclosed. Then $\Canon(\vid^*)=\Canon(\vid_h)$, $P^*=P_h$ and $E^*=E_h$,
-except with probability at most
+Giả sử một lần nhúng trung thực tạo ra $\vid_h$ cho phiên $N_s$ với cam kết $t$
+(hoặc chứng chỉ $t_c$), và $\mathcal A$ xuất ra $\vid^*$ được chấp nhận cho
+$N_s$ với cùng cam kết (hoặc chứng chỉ), không tiết lộ. Khi đó
+$\Canon(\vid^*)=\Canon(\vid_h)$, $P^*=P_h$ và $E^*=E_h$, ngoại trừ với xác suất
+tối đa
 \begin{multline*}
 4\Adv^{\mathsf{cr}}_{\mathsf{SHA2}}+\epszk(Q_P,Q_H)+\Adv^{\MSIS}+Q_H2^{-256}\\
 +\sqrt{Q_H\bigl(\Adv^{\mathsf{row}}_{Q_P}+Q_H2^{-256}+2^{-257}\bigr)}.
 \end{multline*}
 \end{theorem}
 \noindent
-If $x^*\neq x_h$, the triple is fresh and extraction yields a relaxed opening
-of an honest commitment. If $x^*=x_h$, the positions hash and $V$ agree, and
-Lemma~\ref{lem:canon} applies; the proof is then the honest one, otherwise the
-programmed-point case of Theorem~\ref{thm:se} gives an M-SIS solution.
+Nếu $x^*\neq x_h$, bộ ba là mới và việc trích xuất cho ra một phần mở nới lỏng
+của một cam kết trung thực. Nếu $x^*=x_h$, giá trị băm vị trí và $V$ khớp nhau,
+và Bổ đề~\ref{lem:canon} được áp dụng; khi đó chứng minh chính là chứng minh
+trung thực, ngược lại trường hợp điểm-đã-lập-trình của Định lý~\ref{thm:se} cho
+một nghiệm M-SIS.
 
-\paragraph{Limits of the integrity claim}
+\paragraph{Các giới hạn của khẳng định toàn vẹn}
 \begin{itemize}
-\item In-band mode binds content to a \emph{commitment}, not to a person:
-  anyone holding a live $N_s$ can re-embed any edited video with a fresh
-  commitment of its own, and it will be accepted.
-\item Carriers are protected only as envelope bits. Theorem~\ref{thm:integrity}
-  needs the carrier bits to be the unique encoding of $E$. The verifier
-  re-chunks $E$ under the pinned chunk size and rejects unless the extracted
-  pieces are exactly that encoding; without this check a single-chunk
-  envelope left its 16-bit \texttt{chunk\_size} field free (item~D1 in
-  Appendix~\ref{app:code-check}, fixed).
-\item Not bound: bytes that do not survive the pinned segmenter (container
-  data, other streams, data outside NAL units); RBSP alignment bits after the
-  stop bit in carrier-bearing IDR NAL units; alternative CAVLC codewords for
-  the same coefficient vector of a carrier block; the emulation-prevention
-  layer (the digest covers the RBSP); and the segmenter version, which the
-  codec policy names but does not pin.
-\item No codec-correctness claim: the digest covers syntax, not decoded
-  pixels. No provenance claim: nothing says a camera recorded $\vid_h$ or that
-  the payload is true.
+\item Chế độ in-band ràng buộc nội dung vào một \emph{cam kết}, chứ không vào
+  một con người: bất kỳ ai nắm một $N_s$ còn sống đều có thể nhúng lại bất kỳ
+  video đã chỉnh sửa nào với một cam kết mới của riêng nó, và nó sẽ được chấp
+  nhận.
+\item Các vật mang chỉ được bảo vệ như các bit envelope. Định lý~\ref{thm:integrity}
+  cần các bit vật mang là mã hóa duy nhất của $E$. Bên kiểm chứng chia lại chunk
+  của $E$ theo kích thước chunk đã ghim và từ chối trừ khi các mảnh trích xuất
+  được đúng là mã hóa đó; nếu không có phép kiểm này, một envelope một-chunk sẽ
+  để trống trường \texttt{chunk\_size} 16 bit của nó (mục~D1 trong
+  Phụ lục~\ref{app:code-check}, đã sửa).
+\item Không được ràng buộc: các byte không sống sót qua bộ phân đoạn đã ghim (dữ
+  liệu bộ chứa, các luồng khác, dữ liệu ngoài các đơn vị NAL); các bit căn lề
+  RBSP sau bit dừng trong các đơn vị NAL IDR có mang vật mang; các từ mã CAVLC
+  thay thế cho cùng một vector hệ số của một khối vật mang; tầng chống giả lập
+  (digest bao phủ RBSP); và phiên bản của bộ phân đoạn, vốn được chính sách
+  codec nêu tên nhưng không ghim.
+\item Không có khẳng định về tính đúng đắn codec: digest bao phủ cú pháp, không
+  bao phủ các điểm ảnh đã giải mã. Không có khẳng định về nguồn gốc: không gì
+  nói rằng một máy quay đã ghi $\vid_h$ hay rằng tải trọng là đúng sự thật.
 \end{itemize}
 
-\subsection{Quantum adversaries}
+\subsection{Các đối thủ lượng tử}
 \label{sec:sec-qrom}
 
-All theorems above are classical-ROM statements. Rewinding
-(Theorem~\ref{thm:se}) and adaptive programming (Lemma~\ref{lem:sim}) do not
-carry over to the QROM as stated. Barbosa et al.~\cite{ref:barbosa} give QROM
-proofs of the CMA-to-NMA step for Fiat--Shamir with aborts, and Don et
-al.~\cite{ref:dfms19} and Liu and Zhandry~\cite{ref:lz19} show that the
-Fiat--Shamir transform preserves (knowledge) soundness of suitable
-$\Sigma$-protocols against quantum adversaries with polynomial loss. We have
-not verified that their hypotheses hold for the relaxed extractor and the
-aborting prover used here, so we claim no QROM theorem. Our wording is
-``plausibly post-quantum'': the reductions target M-SIS, M-LWE, ML-DSA and
-hash collisions, none of which has a known efficient quantum attack at these
-parameters.
+Mọi định lý ở trên đều là các phát biểu trong ROM cổ điển. Việc tua lại
+(Định lý~\ref{thm:se}) và việc lập trình thích nghi (Bổ đề~\ref{lem:sim}) không
+chuyển sang QROM như đã phát biểu. Barbosa và cộng sự~\cite{ref:barbosa} đưa ra
+các chứng minh QROM của bước CMA-to-NMA cho Fiat--Shamir with aborts, và Don và
+cộng sự~\cite{ref:dfms19} cùng Liu và Zhandry~\cite{ref:lz19} chỉ ra rằng phép
+biến đổi Fiat--Shamir bảo toàn tính đúng đắn (tri thức) của các $\Sigma$-protocol
+phù hợp trước các đối thủ lượng tử với tổn thất đa thức. Chúng tôi chưa kiểm
+chứng rằng các giả thiết của họ đúng cho bộ trích xuất nới lỏng và bên chứng
+minh có loại bỏ được dùng ở đây, nên chúng tôi không khẳng định định lý QROM
+nào. Cách diễn đạt của chúng tôi là ``hậu lượng tử một cách hợp lý'': các phép
+rút gọn nhắm tới M-SIS, M-LWE, ML-DSA và va chạm băm, không cái nào có một tấn
+công lượng tử hiệu quả đã biết ở các tham số này.
