@@ -37,7 +37,7 @@ research/bdlop_params, benchmark, scripts`; (2) một lần `pytest` trên 27 fi
 (`test_lattice_pq_stack`, `test_zkp_registry`, và 3 suite legacy). Kỳ vọng:
 `RESULT: PASS`. Mã thoát mỗi suite: `0`=OK, `2`=INCOMPLETE (có case bị skip,
 vẫn tính đạt), khác=FAIL. Con số case cụ thể tùy phạm vi/môi trường
-(`docs/CLEANUP_INVENTORY.md` ghi "434 passed, 1 skipped" cho phần pytest sau dọn
+(đợt dọn dẹp 10/2026 ghi "434 passed, 1 skipped" cho phần pytest sau dọn
 dẹp; `ARTIFACT.md` ghi "174 passed, 1 skipped" cho wrapper, có chú thích "v2
 measurement pending"; `docs/review/README.md` ghi "209 passed" cho riêng
 `test_latticezk_*`) — **con số chính xác cần xác nhận lại khi chạy**.

@@ -20,6 +20,7 @@ thuật tiếng Anh đã có (`docs/LATTICE_ZK_BDLOP_SPEC.md`, `docs/paper/`,
 | `05_ket_qua.md` | Kết quả đánh giá đến nay: kiểm tra chức năng 7 chế độ, kích thước/bảo mật v2, dung lượng theo clip/QP, PSNR, steganalysis, GOP>1 và HD; đánh dấu rõ số v1 và phần hoãn |
 | `06_han_che_va_huong_phat_trien.md` | Giới hạn trung thực và hướng phát triển; ánh xạ tới `docs/ROADMAP.md` và `docs/review/QUESTIONS.md` |
 | `07_checklist_ban_giao.md` | Checklist bàn giao: cách xác nhận hệ thống khỏe mạnh, tài liệu/gói review chính thức ở đâu, phần hoãn, các quyết định mở cho chủ mới |
+| `08_don_dep_con_lai.md` | Dọn dẹp 10/2026 còn lại: danh sách xóa còn chờ phê duyệt và các file kết quả phải giữ (bản đồ di dời đầy đủ trong git history) |
 
 ## Thứ tự đọc đề xuất
 
@@ -44,5 +45,5 @@ thuật tiếng Anh đã có (`docs/LATTICE_ZK_BDLOP_SPEC.md`, `docs/paper/`,
 7. CLI tách-vai-trò (issuer / holder / verifier) nằm ở `src/lattice_zk/cli.py`:
    `python -m src.lattice_zk.cli --help`.
 8. Hướng dẫn tái lập đầy đủ (dữ liệu Xiph, mã hóa cover, bảng kết quả): `ARTIFACT.md`.
-9. Bản đồ di dời file sau đợt dọn dẹp 10/2026: `docs/CLEANUP_INVENTORY.md`.
+9. Bản đồ di dời file sau đợt dọn dẹp 10/2026: git history; phần dọn dẹp còn lại: `08_don_dep_con_lai.md`.
 10. Tài liệu mật mã chính thức: `docs/LATTICE_ZK_BDLOP_SPEC.md`; gói review ngoài: `docs/review/`.

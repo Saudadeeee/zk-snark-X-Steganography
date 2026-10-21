@@ -91,9 +91,8 @@ The legacy SEC1-SEC10 benchmark suite (`safe_benchmark_runner.py` and the
 cleanup, and most of its scripts were then removed; among the SEC scripts only
 `benchmark/legacy/sec4_security.py` and `benchmark/legacy/sec5_zkp.py` remain.
 The current evaluation is the lattice-ZK suite described in
-[`ARTIFACT.md`](ARTIFACT.md) (`scripts/repro.py`, `benchmark/latticezk_*`). See
-[`docs/CLEANUP_INVENTORY.md`](docs/CLEANUP_INVENTORY.md) for the full move/delete
-map. The command lines and result-file citations in the legacy sections below
+[`ARTIFACT.md`](ARTIFACT.md) (`scripts/repro.py`, `benchmark/latticezk_*`). The full move/delete map is in
+the October 2026 cleanup commits (git history). The command lines and result-file citations in the legacy sections below
 are kept for traceability and name scripts or result files that were moved or
 removed by that cleanup (for example `benchmark/results/sec4_security_data.json`,
 `sec5_zkp_data.json` and `sec6_performance_data.json` were removed).
@@ -195,9 +194,9 @@ Current committed SEC6 artifact (`benchmark/results/sec6_performance_data.json`)
 
 ## Project Structure
 
-The layout below reflects the October 2026 cleanup (see
-[`docs/CLEANUP_INVENTORY.md`](docs/CLEANUP_INVENTORY.md) for the full move/delete
-map). The pre-lattice-ZK embed/verify stack moved under `src/legacy/`, the
+The layout below reflects the October 2026 cleanup (the full move/delete map is
+in the October 2026 cleanup commits in git history). The pre-lattice-ZK
+embed/verify stack moved under `src/legacy/`, the
 transport and registry modules into `src/transport/` and `src/registry/`, and
 the Groth16 circuits, native relay and LaZer container under `legacy/`.
 
@@ -396,7 +395,7 @@ Test exit codes:
 The standalone `demo_embed_verify.py` script was removed in the October 2026
 layout cleanup. The legacy public embed/verify API it exercised now lives in
 `src.legacy` (`from src.legacy import embed, verify, verify_near_blind`); its
-tests are under `src/runtest/legacy/`. See `docs/CLEANUP_INVENTORY.md`.
+tests are under `src/runtest/legacy/`. See the October 2026 cleanup commits.
 
 ### Run benchmarks
 
@@ -476,7 +475,7 @@ corpus. It is enough for seed-scope evidence, but broad-public-dataset claims
 remain blocked until a larger external corpus with source, license, file
 metadata, and matching hashes is registered.
 (The step-by-step corpus playbook `doc/trust_corpus_onboarding.md` was removed in
-the October 2026 cleanup; see `docs/CLEANUP_INVENTORY.md`.)
+the October 2026 cleanup; see the cleanup commits in git history.)
 
 ---
 
@@ -592,7 +591,6 @@ npm run verify-artifacts
 - [`docs/LATTICE_ZK_BDLOP_SPEC.md`](docs/LATTICE_ZK_BDLOP_SPEC.md) - Lattice-ZK protocol specification
 - [`docs/LATTICE_BACKEND_SURVEY.md`](docs/LATTICE_BACKEND_SURVEY.md) - Lattice backend survey
 - [`ARTIFACT.md`](ARTIFACT.md) - Reproduction guide for the lattice-ZK evaluation
-- [`docs/CLEANUP_INVENTORY.md`](docs/CLEANUP_INVENTORY.md) - October 2026 move/delete map
 - [`docs/handoff/`](docs/handoff/README.md) - Vietnamese handoff documentation set
 - [`docs/legacy/LATTICE_PQ.md`](docs/legacy/LATTICE_PQ.md) - ML-DSA / ML-KEM attestation path (legacy)
 - [`docs/legacy/REALTIME.md`](docs/legacy/REALTIME.md) - Live Annex-B transport contract and native-backend boundary (legacy)
@@ -600,7 +598,7 @@ npm run verify-artifacts
 
 The pre-lattice-ZK notes `PAPER_EVIDENCE.md`, `OPERATING_ENVELOPE.md`,
 `ARTIFACT_POLICY.md` and `doc/system_video_embedding_walkthrough.tex` were
-removed in the October 2026 cleanup (see `docs/CLEANUP_INVENTORY.md`).
+removed in the October 2026 cleanup (git history).
 
 ### Benchmark Documentation
 The legacy SEC1-SEC10 benchmark scripts were moved to `benchmark/legacy/` and
