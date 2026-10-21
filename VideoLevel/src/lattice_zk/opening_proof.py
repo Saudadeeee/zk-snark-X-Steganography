@@ -37,7 +37,8 @@ _HEDGE_DOMAIN = b"zkstego/lattice-zk/hedged-mask-key/v2\0"
 HEDGE_OPENING = b"bdlop-open"
 HEDGE_EQUALITY = b"bdlop-equal"
 HEDGE_BINARY = b"bdlop-binary"
-HEDGE_PROTOCOLS = frozenset({HEDGE_OPENING, HEDGE_EQUALITY, HEDGE_BINARY})
+HEDGE_PAYLOAD_RANGE = b"bdlop-payload-range"
+HEDGE_PROTOCOLS = frozenset({HEDGE_OPENING, HEDGE_EQUALITY, HEDGE_BINARY, HEDGE_PAYLOAD_RANGE})
 # Frozen pre-D7 derivation, kept only for bdlop-open-128-v1 (kat_v1.json).
 _UNTAGGED_HEDGE_PARAMETER_IDS = frozenset({BDLOP_OPEN_128_V1.parameter_id})
 _UNTAGGED_HEDGE_PROTOCOLS = frozenset({HEDGE_OPENING, HEDGE_EQUALITY})

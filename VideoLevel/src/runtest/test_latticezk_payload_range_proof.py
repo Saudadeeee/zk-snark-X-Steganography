@@ -14,7 +14,7 @@ import pytest
 from src.lattice_zk import bdlop, binary_proof, codec, opening_proof, ring, video_proof
 from src.lattice_zk import payload_range_proof as pr
 from src.lattice_zk.params import BDLOP_OPEN_128, TOY
-from src.runtest.test_latticezk_bdlop import random_corruptions
+from src.runtest.test_latticezk_bdlop import forged_commitment, random_corruptions
 
 STATEMENT = b"payload range statement"
 P = pr.PAYLOAD_RANGE_TOY
@@ -241,11 +241,11 @@ def test_toy_completeness(length: int) -> None:
 def test_production_completeness_with_two_bit_polynomials() -> None:
     production = pr.PAYLOAD_RANGE_128
     payload, randomness, commitment = _setup(production, _payload(40), _seed("randomness/" + production.name))
-    result = pr.prove_with_stats(  # this seed is accepted on the first attempt
+    result = pr.prove_with_stats(  # deterministic: this seed needs 285 attempts
         production, b"kat statement", commitment, payload, randomness,
         mask_seed=_seed(f"mask/{production.name}/40/2"),
     )
-    assert result.attempts == 1 and len(result.proof) == production.proof_bytes(40)
+    assert result.attempts == 285 and len(result.proof) == production.proof_bytes(40)
     assert pr.verify(production, b"kat statement", commitment, 40, result.proof)
     assert not pr.verify(production, b"kat statement", commitment, 41, result.proof)
 
@@ -259,7 +259,8 @@ def test_payload_commitment_stays_compatible_with_disclosure_and_opening(toy_pro
         statement_id=b"\x01" * 32, nonce=b"\x02" * 32,
     )
     assert video_proof.verify_commitment_disclosure(
-        TOY, commitment, disclosure, statement_id=b"\x01" * 32, nonce=b"\x02" * 32
+        TOY, commitment, disclosure, statement_id=b"\x01" * 32, nonce=b"\x02" * 32,
+        allow_toy_parameters=True,
     )
     assert video_proof.decode_disclosure(TOY, disclosure).payload == payload
     assert pr.verify(P, STATEMENT, commitment, len(payload), proof)
@@ -290,15 +291,15 @@ KAT = {
         20,
         "a8f8d365c5afdca0d39aeac072dd4837bad94a7c0a153d3d983683f119111ca7",
         "dc406902eeaa050ec25aee2996a7e480fab731084d0f70ef9a1df73e4bc59f82",
-        "0fae4854b8b6f06435f4bb19c11ea8c45991640df82734abd1b5611064c4079e",
-        8,
+        "bb084a5cd3a1e82e4a9858f6d02dd0bcd8de1992515415b9e1e5b6e3d7a92751",
+        6,
     ),
     "bdlop-payload-range-128-v1": (
         32,
         "40cb8489b024556d7b35bbdb09527373b1c762bf5332d0645d06d38b327f0122",
         "f69d1efca0183cfb8e95be277e200ed896664a6fde55fa0432571211bb5a1c11",
-        "955a1102bf46ceee1effdfd6ddbb491f3e7d40f3bffd0e8387dd5455167c4126",
-        5,
+        "bcbcdc6606965a867af72d108f5379f5f842c36ba9df7b2d5216974a34f5530d",
+        41,
     ),
 }
 
@@ -491,9 +492,12 @@ def test_malformed_inputs_return_false(toy_proof) -> None:
     assert not pr.verify(P, "statement", commitment, length, proof)
     assert not pr.verify(P, STATEMENT, commitment, length, bytearray(proof))
     assert not pr.verify(P, STATEMENT, (commitment.t1, commitment.t2), length, proof)
-    assert not pr.verify(P, STATEMENT, bdlop.Commitment(commitment.t1.tolist(), commitment.t2), length, proof)
-    unreduced = bdlop.Commitment(commitment.t1, commitment.t2.copy())
-    unreduced.t2[0] += Q
+    # Objects built around the validating constructor (defence in depth).
+    listed = forged_commitment(commitment.t1.tolist(), commitment.t2, P.base)
+    assert not pr.verify(P, STATEMENT, listed, length, proof)
+    raised = commitment.t2.copy()
+    raised[0] += Q
+    unreduced = forged_commitment(commitment.t1, raised, P.base)
     assert not pr.verify(P, STATEMENT, unreduced, length, proof)
     assert not pr.verify(P, STATEMENT, commitment, length, b"")
     for bad_length in (-1, P.max_payload_bytes + 1, True, "6", None):

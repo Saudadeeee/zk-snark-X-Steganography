@@ -53,7 +53,9 @@ import numpy as np
 from . import bdlop, codec, fast_ring, ring, sampling
 from .bdlop import Commitment, ternary_randomness
 from .binary_proof import _base_key, _identity_block, _ones, _scalar_combination, sigma
-from .opening_proof import ProofResult, hedged_mask_key, prover_entropy, require_commitment
+from .opening_proof import (
+    HEDGE_PAYLOAD_RANGE, ProofResult, hedged_mask_key, prover_entropy, require_commitment,
+)
 from .params import (
     BDLOP_OPEN_128, CHALLENGE_SEED_BYTES, MAX_NAME_BYTES, PAYLOAD_LENGTH_BYTES, TOY, BdlopParams,
 )
@@ -510,8 +512,8 @@ def _prove(
     commitment_bytes = commitment.to_bytes(base)
     # parameter_id and L pin the auxiliary key, so r' is never reused under two keys.
     mask_key = hedged_mask_key(
-        entropy, statement, params.parameter_id, struct.pack(">I", length), commitment_bytes,
-        message, randomness, bits,
+        entropy, statement, struct.pack(">I", length), commitment_bytes, message, randomness, bits,
+        protocol=HEDGE_PAYLOAD_RANGE, parameter_id=params.parameter_id,
     )
     witness_stream = sampling.XofStream(_AUX_DOMAIN + mask_key)
     aux_randomness = sampling.ternary_vector(witness_stream, (layout.aux_width, degree))

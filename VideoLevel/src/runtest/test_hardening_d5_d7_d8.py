@@ -113,7 +113,7 @@ def test_hedged_mask_key_is_domain_separated_by_protocol_and_parameter_set() -> 
         for protocol in sorted(opening_proof.HEDGE_PROTOCOLS)
         for parameter_id in (TOY.parameter_id, BDLOP_OPEN_128_V2.parameter_id)
     }
-    assert len(keys) == 6
+    assert len(keys) == 2 * len(opening_proof.HEDGE_PROTOCOLS)
     assert _legacy_mask_key(entropy, STATEMENT, b"c", randomness) not in keys
 
 
