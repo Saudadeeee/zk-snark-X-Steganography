@@ -64,6 +64,13 @@ def e2e_rows() -> list[dict[str, Any]]:
     return rows
 
 
+def _envelope_bits(registered: bool) -> int:
+    from src.lattice_zk import video_proof
+    from src.lattice_zk.params import BDLOP_OPEN_128
+
+    return video_proof.envelope_size(BDLOP_OPEN_128, registered=registered) * 8
+
+
 def capacity_rows() -> list[dict[str, Any]]:
     rows = []
     for stem, reports in _load("capacity_*.json").items():
@@ -73,8 +80,8 @@ def capacity_rows() -> list[dict[str, Any]]:
                 "video": report["video"], "frames": report["frames"],
                 "bits_per_100_frames_min": min(bits), "bits_per_100_frames_mean": sum(bits) / len(bits),
                 "total_bits": sum(bits),
-                "registered_fits": sum(bits) >= 7_589 * 8 * 1.05,
-                "in_band_fits": sum(bits) >= 14_309 * 8 * 1.05,
+                "registered_fits": sum(bits) >= _envelope_bits(True) * 1.05,
+                "in_band_fits": sum(bits) >= _envelope_bits(False) * 1.05,
             })
     return rows
 
@@ -312,8 +319,8 @@ def _figures(e2e: list[dict[str, Any]], capacity: list[dict[str, Any]]) -> None:
         figure, axis = plt.subplots(figsize=(6, 3))
         axis.barh([row["video"].split("_q")[0] for row in ordered],
                   [row["bits_per_100_frames_mean"] / 1000 for row in ordered], color="#4c72b0")
-        for threshold, label in ((7_589 * 8 / 3 / 1000, "registered, 300 frames"),
-                                 (14_309 * 8 / 3 / 1000, "in-band, 300 frames")):
+        for threshold, label in ((_envelope_bits(True) / 3 / 1000, "registered, 300 frames"),
+                                 (_envelope_bits(False) / 3 / 1000, "in-band, 300 frames")):
             axis.axvline(threshold, linestyle="--", color="#c44e52" if "in" in label else "#55a868", label=label)
         axis.set_xlabel("Carrier capacity (kbit per 100 frames)")
         axis.legend(fontsize=7, loc="lower right")

@@ -4,7 +4,8 @@ Every input is derived from fixed seeds, so the commitment and proof bytes are
 reproducible on any platform.  The vectors pin SHA-256 digests of the full
 serialized outputs; regenerate them only for a deliberate format change.
 
-    python research/bdlop_params/kat.py --output research/bdlop_params/kat_v1.json
+    python research/bdlop_params/kat.py --parameter-set BDLOP_OPEN_128_V1 --output research/bdlop_params/kat_v1.json
+    python research/bdlop_params/kat.py --parameter-set BDLOP_OPEN_128_V2 --output research/bdlop_params/kat_v2.json
 """
 
 from __future__ import annotations

@@ -148,12 +148,12 @@ def _setup_seed(label: str) -> bytes:
     return hashlib.sha3_256(_PARAMETER_DOMAIN + b"setup-seed\0" + label.encode("ascii")).digest()
 
 
-# Production set.  Core-SVP estimates from research/bdlop_params/estimate.py
-# (CRYSTALS security-estimates model): M-SIS binding 140 classical / 127
-# quantum bits in the infinity norm, M-LWE hiding 138 / 125 bits (primal).
-# The lattice-estimator's dual hybrid gives 135 / 123 bits for M-LWE
-# (research/bdlop_params/CROSSCHECK.md); that lower figure is the one claimed.
-BDLOP_OPEN_128 = BdlopParams(
+# First production set, kept for its known-answer vectors and earlier results.
+# Core-SVP estimates (research/bdlop_params/estimate.py, CRYSTALS model):
+# M-SIS binding 140 / 127 bits in the infinity norm, M-LWE hiding 138 / 125
+# (primal); the lattice-estimator's dual hybrid gives 135 / 123 bits for M-LWE
+# (research/bdlop_params/CROSSCHECK.md), below 128 quantum bits.
+BDLOP_OPEN_128_V1 = BdlopParams(
     name="bdlop-open-128-v1",
     degree=256,
     modulus=(1 << 30) - 35,
@@ -163,6 +163,22 @@ BDLOP_OPEN_128 = BdlopParams(
     mask_bound=1 << 17,
     setup_seed=_setup_seed("bdlop-open-128-v1"),
 )
+
+# Current production set: M-LWE rank 7 restores a quantum margin for hiding;
+# M-SIS rank, modulus, challenges and masks are those of v1.  Estimates are in
+# research/bdlop_params/bdlop_open_128_v2.estimate.json and CROSSCHECK.md.
+BDLOP_OPEN_128_V2 = BdlopParams(
+    name="bdlop-open-128-v2",
+    degree=256,
+    modulus=(1 << 30) - 35,
+    msis_rank=6,
+    mlwe_rank=7,
+    challenge_weight=60,
+    mask_bound=1 << 17,
+    setup_seed=_setup_seed("bdlop-open-128-v2"),
+)
+
+BDLOP_OPEN_128 = BDLOP_OPEN_128_V2
 
 # Fast, insecure set for unit tests only.
 TOY = BdlopParams(

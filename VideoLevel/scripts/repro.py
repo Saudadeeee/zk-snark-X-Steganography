@@ -34,13 +34,14 @@ RUNTEST = "src/runtest"
 RESULTS = ROOT / "benchmark" / "results" / "q2"
 WORK = ROOT / "tmp" / "q2"
 PRODUCTION_PARAMETER_SET = "BDLOP_OPEN_128"
-PRODUCTION_PARAMETER_NAME = "bdlop-open-128-v1"
+PRODUCTION_PARAMETER_NAME = "bdlop-open-128-v2"
 DEFAULT_SMALL_VIDEO = "data/encoded/container_cif_q22_g1.h264"
-# Chunk size per carrier for the short run: the registered envelope (7 589 B)
-# must fit the carriers of the cut.  T1 sign carriers give 470-550 kbit per
-# 100 CIF frames, so one 100-frame segment holds it; the magnitude carrier
-# gives 10-51 kbit per 100 frames at QP 22 and needs >= 200 frames.
-SMALL_CHUNK_BYTES = {"t1": 8000, "magnitude": 3800}
+# Chunk size per carrier for the short run: the registered envelope (8 165 B
+# with bdlop-open-128-v2) must fit the carriers of the cut.  T1 sign carriers
+# give 470-550 kbit per 100 CIF frames, so one 100-frame segment holds it; the
+# magnitude carrier gives 10-51 kbit per 100 frames at QP 22 and needs two
+# 100-frame segments (run it with --frames 200).
+SMALL_CHUNK_BYTES = {"t1": 8200, "magnitude": 4200}
 
 # --------------------------------------------------------------------------- #
 # Test selection

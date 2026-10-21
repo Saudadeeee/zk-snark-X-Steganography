@@ -163,7 +163,11 @@ def main() -> int:
     parser.add_argument("--videos", nargs="+", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--envelope-bytes", type=int, default=7589)
+    from src.lattice_zk import video_proof
+    from src.lattice_zk.params import BDLOP_OPEN_128
+
+    parser.add_argument("--envelope-bytes", type=int,
+                        default=video_proof.envelope_size(BDLOP_OPEN_128, registered=True))
     parser.add_argument("--chunk-bytes", type=int, default=REGISTERED_ENVELOPE_CHUNK)
     parser.add_argument("--height", type=int, default=10)
     arguments = parser.parse_args()

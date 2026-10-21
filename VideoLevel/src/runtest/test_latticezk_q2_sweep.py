@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 
 from benchmark import latticezk_q2_sweep as sweep
+from src.lattice_zk import video_proof
+from src.lattice_zk.params import BDLOP_OPEN_128
+
+REGISTERED = video_proof.envelope_size(BDLOP_OPEN_128, registered=True)
 
 
 def _capacity(tmp_path, name: str, min_chunk: int, segments: int, total: int | None = None) -> None:
@@ -19,7 +23,7 @@ def test_chunk_stays_below_measured_capacity_and_fits(tmp_path) -> None:
     chunk = sweep._auto_chunk({"name": "case", "registered": True}, tmp_path / "v.h264",
                               tmp_path, tmp_path / "log")
     assert chunk == int(5_946 * sweep.CHUNK_MARGIN)
-    assert -(-7_589 // chunk) <= 3
+    assert -(-REGISTERED // chunk) <= 3
 
 
 def test_envelope_that_does_not_fit_is_reported(tmp_path) -> None:
@@ -46,7 +50,7 @@ def test_density_spreads_the_envelope_over_more_segments(tmp_path) -> None:
     quarter = sweep._auto_chunk({"name": "q", "capacity_from": "base", "density": 0.25},
                                 tmp_path / "v.h264", tmp_path, tmp_path / "log")
     assert quarter == int(13_000 * sweep.CHUNK_MARGIN * 0.25)
-    assert -(-7_589 // full) == 1 and -(-7_589 // quarter) == 3
+    assert -(-REGISTERED // full) == 1 and -(-REGISTERED // quarter) == 3
     # 10% needs more segments than the clip has.
     assert sweep._auto_chunk({"name": "t", "capacity_from": "base", "density": 0.05},
                              tmp_path / "v.h264", tmp_path, tmp_path / "log") is None

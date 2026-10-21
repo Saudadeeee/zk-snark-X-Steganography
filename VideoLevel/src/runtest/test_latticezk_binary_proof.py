@@ -129,14 +129,14 @@ def test_check_polynomial_constant_term_is_the_random_functional_of_the_error() 
 def test_parameter_sets_are_consistent() -> None:
     production = bp.BINARY_128
     assert production.base is BDLOP_OPEN_128
-    assert production.aux_slots == 11 and production.aux_width == 23
-    assert production.proof_bytes == 41_870
+    assert production.aux_slots == 11 and production.aux_width == 24
+    assert production.proof_bytes == 43_022
     assert production.soundness_bits > 149
     production.require_production_strength()
     with pytest.raises(ValueError):
         P.require_production_strength()
     assert set(production.round_soundness_log2) == {"lift", "check", "combine", "challenge"}
-    assert bp.abort_probability_log2(production) < -300
+    assert bp.abort_probability_log2(production) < -256
     assert bp.abort_probability_log2(P, 1) < 0
     assert production.parameter_id != P.parameter_id
     assert production.mlwe_samples == 17
@@ -253,11 +253,11 @@ KAT = {
         "80c3d543228e5256b051783f2f0ee7684e7a09645cf2169e9a0e1066afc43620",
         24,
     ),
-    "bdlop-binary-128-v1": (
-        "54e33dc9731e5c5713eaf9101b925ecfd367091bd984079ace01d09fd5a79801",
-        "c8701fe78bbaa61dbe40035382709dee9d71b1487485cd36309729e46f77c231",
-        "61b0b66ac0060c16e512ebc82ca4c06bc0bea7a6e9b95da3bc971cb284491b97",
-        10,
+    "bdlop-binary-128-v2": (
+        "1fc36ad8f392b1119c28b7c714b7cf31cb82ebf7033ede8860aeb1ca000379ca",
+        "cd4019d75376125df72e7093fb15c4b7cca9b7615ce88404934dc64bf4db3357",
+        "dd809cf28126d1c18c86bb8df6ede12e9b4325ba584f1d8681e3fd48a644ea65",
+        115,
     ),
 }
 

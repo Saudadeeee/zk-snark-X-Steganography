@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from src.lattice_zk import bdlop, codec, opening_proof, ring, sampling
-from src.lattice_zk.params import BDLOP_OPEN_128, TOY
+from src.lattice_zk.params import BDLOP_OPEN_128, BDLOP_OPEN_128_V1, BDLOP_OPEN_128_V2, TOY
 
 STATEMENT = b"canonical video statement"
 
@@ -320,13 +320,22 @@ def test_proving_is_deterministic_only_under_an_explicit_mask_seed() -> None:
 
 # -- production parameter set -------------------------------------------- #
 
-def test_production_set_meets_structural_requirements() -> None:
-    params = BDLOP_OPEN_128
+@pytest.mark.parametrize(
+    "params, width, proof_bytes, acceptance",
+    [(BDLOP_OPEN_128_V1, 13, 7_520, (0.2, 0.25)), (BDLOP_OPEN_128_V2, 14, 8_096, (0.18, 0.2))],
+    ids=lambda value: getattr(value, "name", ""),
+)
+def test_production_set_meets_structural_requirements(params, width, proof_bytes, acceptance) -> None:
     params.require_production_strength()
-    assert params.modulus % 8 == 5 and params.width == 13
-    assert params.commitment_bytes == 6_720 and params.proof_bytes == 7_520
+    assert params.modulus % 8 == 5 and params.width == width
+    assert params.commitment_bytes == 6_720 and params.proof_bytes == proof_bytes
     assert params.max_payload_bytes == 766
-    assert 0.2 < params.acceptance_probability < 0.25
+    assert acceptance[0] < params.acceptance_probability < acceptance[1]
+
+
+def test_current_production_set_is_v2() -> None:
+    assert BDLOP_OPEN_128 is BDLOP_OPEN_128_V2 and BDLOP_OPEN_128.mlwe_rank == 7
+    assert BDLOP_OPEN_128_V2.parameter_id != BDLOP_OPEN_128_V1.parameter_id
 
 
 def test_production_set_proves_and_rejects() -> None:

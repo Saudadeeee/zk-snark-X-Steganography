@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from src.lattice_zk import bdlop, codec, equality_proof, opening_proof
-from src.lattice_zk.params import BDLOP_OPEN_128, TOY
+from src.lattice_zk.params import BDLOP_OPEN_128, BDLOP_OPEN_128_V1, TOY
 from src.runtest.test_latticezk_bdlop import random_corruptions
 
 STATEMENT = b"video statement"
@@ -102,7 +102,7 @@ def test_production_parameters_prove_equality() -> None:
     params = BDLOP_OPEN_128
     commitments, randomness = _pair(params)
     proof = _prove(commitments, randomness, params)
-    assert len(proof) == 15_008
+    assert len(proof) == 16_160
     assert equality_proof.verify(params, STATEMENT, commitments[0], commitments[1], proof)
     assert not equality_proof.verify(params, b"other", commitments[0], commitments[1], proof)
 
@@ -217,6 +217,9 @@ def test_equality_prover_cap_gives_negligible_completeness_error(params) -> None
 
 
 def test_shared_opening_cap_would_not_have_sufficed_for_production() -> None:
-    capped = equality_proof.abort_probability_log2(BDLOP_OPEN_128, opening_proof.MAX_ATTEMPTS)
-    assert -36 < capped < -34  # the 2^-35 of the security review (item D4)
-    assert opening_proof.MAX_ATTEMPTS * math.log2(1 - BDLOP_OPEN_128.acceptance_probability) < -128
+    # The 2^-35 of the security review (item D4) was measured on v1.
+    capped = equality_proof.abort_probability_log2(BDLOP_OPEN_128_V1, opening_proof.MAX_ATTEMPTS)
+    assert -36 < capped < -34
+    for params in (BDLOP_OPEN_128_V1, BDLOP_OPEN_128):
+        assert opening_proof.MAX_ATTEMPTS * math.log2(1 - params.acceptance_probability) < -128
+        assert equality_proof.abort_probability_log2(params, opening_proof.MAX_ATTEMPTS) > -40

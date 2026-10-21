@@ -1,0 +1,40 @@
+{
+  "parameter_set": "bdlop-open-128-v2",
+  "parameter_id": "c10dafa50278f29eafdddcdbffcb2c377b6a0dccf800db59a393332ac1724e02",
+  "key_sha256": "17f766486181f0b5ee7f2de2fac2b553b9ac2c6a98b66acec9f4fb8dcd9ee2ee",
+  "vectors": [
+    {
+      "name": "empty-payload",
+      "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "payload_bytes": 0,
+      "statement_hex": "",
+      "commitment_sha256": "791eb801f2cec3291833800004dafdacaddae2626a7e12c86d3cb6e56d2e964e",
+      "opening_proof_sha256": "5591ade34a8531a9bcca403f6d9f10da33460caabbbc0a7d393633049b7d6192",
+      "opening_attempts": 2,
+      "equality_proof_sha256": "213edf42b30196ec26ea7bd09b265fc1650cc4c56bb41560df83bbcc8004da62",
+      "equality_attempts": 6
+    },
+    {
+      "name": "short-payload",
+      "payload_sha256": "bd32fc129825ccf4bb09408c6afadcfd549ae4cefbec97c7336e37aab65ae4a8",
+      "payload_bytes": 7,
+      "statement_hex": "6b61742073746174656d656e742031",
+      "commitment_sha256": "411cfd6fa2df7bb8f6c87775e61bb224eba79cee179d79761b8823b8fdd8bb91",
+      "opening_proof_sha256": "87a27cc5c26710c82f78f1a9d0f5d1d5fc4f1ba3c22e7f98bcecb3ef7f0f5f91",
+      "opening_attempts": 8,
+      "equality_proof_sha256": "87804a676569cbb5e7dd745c72c34356bf45612fe95363cfdab252b555e20578",
+      "equality_attempts": 31
+    },
+    {
+      "name": "max-payload",
+      "payload_sha256": "3a20f86f589272ced3f8f23251557d6ba981e4b9262e873baa3fa244e08b4a8a",
+      "payload_bytes": 766,
+      "statement_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "commitment_sha256": "46201178a8813183a763c0aff737bada665981de50cfd2747cf5eaa76cf0bd83",
+      "opening_proof_sha256": "f3dafdbb42d297c1061aae3a5eb38d96ff5c3ee39249b0e7d2ea3ed834849471",
+      "opening_attempts": 1,
+      "equality_proof_sha256": "40380453e7bba62da60e7f321886ac43f280c0105d783a8e0d9b76e2f92e3566",
+      "equality_attempts": 30
+    }
+  ]
+}

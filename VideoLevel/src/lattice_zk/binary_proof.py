@@ -4,7 +4,7 @@ Design and soundness analysis: ``docs/BINARY_PROOF_DESIGN.md``; theorem
 statements: ``docs/paper/sections/binary_proof.tex``.
 
 The statement commitment ``C = (t1, t2)`` is an ordinary commitment of
-``bdlop.commit`` under the base parameter set (``bdlop-open-128-v1`` in
+``bdlop.commit`` under the base parameter set (``bdlop-open-128-v2`` in
 production), so it also works with the opening, equality and disclosure
 proofs.  Each proof creates a fresh auxiliary BDLOP commitment ``D`` under its
 own key, with randomness ``r'`` that is never reused, and proves a quadratic
@@ -202,11 +202,11 @@ def _setup_seed(label: str) -> bytes:
 
 
 BINARY_128 = BinaryParams(
-    name="bdlop-binary-128-v1",
+    name="bdlop-binary-128-v2",
     base=BDLOP_OPEN_128,
     lift_repetitions=5,
     check_repetitions=5,
-    setup_seed=_setup_seed("bdlop-binary-128-v1"),
+    setup_seed=_setup_seed("bdlop-binary-128-v2"),
 )
 
 # Fast, insecure set for unit tests only.
