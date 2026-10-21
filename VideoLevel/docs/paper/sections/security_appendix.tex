@@ -403,193 +403,201 @@ là $2^{-156.7}$ và $2^{-220.0}$. Dưới ngưỡng chung 512 mà mã được 
 dùng, chứng minh đẳng thức thất bại với xác suất $2^{-35.0}$ cho
 \texttt{bdlop-open-128-v1} (trung bình $4.65$ và $21.6$); đây là mục~D4.
 
-\section{Specification and implementation cross-check}
+\section{Đối chiếu đặc tả và hiện thực}
 \label{app:code-check}
 
-Each item lists the property relied on above and where the implementation
-realizes it, at commit \texttt{ea96d60}. Paths are relative to
+Mỗi mục liệt kê tính chất được dựa vào ở trên và nơi phần hiện thực thực hiện
+nó, tại commit \texttt{ea96d60}. Các đường dẫn là tương đối so với
 \texttt{VideoLevel/src}; \texttt{opening\_proof.py}, \texttt{equality\_proof.py},
 \texttt{bdlop.py}, \texttt{params.py}, \texttt{ring.py}, \texttt{codec.py},
 \texttt{sampling.py}, \texttt{video\_proof.py}, \texttt{video\_pipeline.py}
-and \texttt{cli.py} are in \texttt{lattice\_zk/}.
+và \texttt{cli.py} nằm trong \texttt{lattice\_zk/}.
 
 \begin{enumerate}
-\item \emph{Statement.} Field order and widths: \texttt{u16} version,
-  $\mathit{rid}$, $\pid$, root, \texttt{u64} epoch, $N_s$, codec policy,
-  carrier profile, \texttt{u64} carrier count, positions hash, $V$; every
-  digest checked to be 32 bytes (\texttt{video\_proof.py:58--77}).
-  Matches the specification, \S3.6. \textbf{Consistent.}
-\item \emph{Fiat--Shamir input.} SHAKE-256 over the tag, $\pid$,
-  \texttt{u64}$(|x|)\|x$, the full commitment (6\,720 bytes) and $w$ as
-  big-endian 64-bit words; 32-byte output
-  (\texttt{opening\_proof.py:42--50}). Only $x$ is length-prefixed; the other
-  fields have lengths fixed by $\pid$. Equality proof: same with both
-  commitments and $(w_a,w_b,u)$ (\texttt{equality\_proof.py:40--51}).
-  \textbf{Consistent}; the specification's ``with length prefixes'' (\S4.7)
-  was imprecise and has been corrected.
-\item \emph{Hedging.} $K=\mathrm{SHA3}(e\|\text{length-prefixed }x,t,r)$
-  (\texttt{opening\_proof.py:53--63,99--100}). \textbf{Consistent} (see D7).
-\item \emph{Samplers.} Masks: exact uniform on $[-\gamma+1,\gamma]$ (18-bit
-  draws below $2\gamma=2^{18}$, \texttt{sampling.py:60--66}); challenges:
-  sign bits then Fisher--Yates with exact rejection, as in ML-DSA
-  \textsf{SampleInBall} (\texttt{:69--81}); ternary randomness by rejection on
-  2-bit draws (\texttt{:54--57}). \textbf{Consistent} with the uniformity used in
-  Lemmas~\ref{lem:hvzk} and~\ref{lem:fork}.
-\item \emph{Verification.} Exact proof length, packed responses below
-  $2B+1$, zero padding, recomputed $w'$, constant-time seed comparison
-  (\texttt{opening\_proof.py:118--138}). The packing has no padding bits at
-  these parameters, so the proof encoding is canonical. \textbf{Consistent.}
-\item \emph{Parameter checks.} Prime $q\equiv5\pmod8$, $2\sqrt2<\sqrt q$,
+\item \emph{Phát biểu.} Thứ tự và độ rộng các trường: \texttt{u16} phiên bản,
+  $\mathit{rid}$, $\pid$, root, \texttt{u64} epoch, $N_s$, chính sách codec,
+  hồ sơ vật mang, \texttt{u64} số đếm vật mang, giá trị băm các vị trí, $V$;
+  mỗi digest được kiểm tra là 32 byte (\texttt{video\_proof.py:58--77}).
+  Khớp với đặc tả, \S3.6. \textbf{Nhất quán.}
+\item \emph{Đầu vào Fiat--Shamir.} SHAKE-256 trên thẻ, $\pid$,
+  \texttt{u64}$(|x|)\|x$, cam kết đầy đủ (6\,720 byte) và $w$ dưới dạng các
+  từ 64 bit big-endian; đầu ra 32 byte
+  (\texttt{opening\_proof.py:42--50}). Chỉ $x$ có tiền tố độ dài; các trường
+  khác có độ dài được cố định bởi $\pid$. Chứng minh đẳng thức: tương tự với
+  cả hai cam kết và $(w_a,w_b,u)$ (\texttt{equality\_proof.py:40--51}).
+  \textbf{Nhất quán}; cụm ``with length prefixes'' của đặc tả (\S4.7)
+  đã thiếu chính xác và đã được chỉnh sửa.
+\item \emph{Phòng hộ (hedging).} $K=\mathrm{SHA3}(e\|x,t,r\text{ có tiền tố độ dài})$
+  (\texttt{opening\_proof.py:53--63,99--100}). \textbf{Nhất quán} (xem D7).
+\item \emph{Các bộ lấy mẫu.} Mặt nạ: đều chính xác trên $[-\gamma+1,\gamma]$
+  (các lần rút 18 bit dưới $2\gamma=2^{18}$, \texttt{sampling.py:60--66});
+  thách thức: các bit dấu rồi Fisher--Yates với loại bỏ chính xác, như trong
+  ML-DSA \textsf{SampleInBall} (\texttt{:69--81}); tính ngẫu nhiên bậc ba bằng
+  loại bỏ trên các lần rút 2 bit (\texttt{:54--57}). \textbf{Nhất quán} với
+  tính đều được dùng trong các Bổ đề~\ref{lem:hvzk} và~\ref{lem:fork}.
+\item \emph{Kiểm chứng.} Độ dài chứng minh chính xác, các đáp ứng đã đóng gói
+  dưới $2B+1$, phần đệm bằng không, $w'$ được tính lại, so sánh hạt giống
+  trong thời gian hằng (\texttt{opening\_proof.py:118--138}). Phần đóng gói
+  không có bit đệm nào ở các tham số này, nên mã hóa chứng minh là chuẩn tắc.
+  \textbf{Nhất quán.}
+\item \emph{Kiểm tra tham số.} Số nguyên tố $q\equiv5\pmod8$, $2\sqrt2<\sqrt q$,
   $2\cdot8\kappa B<q$ (\texttt{params.py:37--54}, \texttt{ring.py:52--58});
-  production pins require $|\Cset|\ge2^{256}$
+  các mục ghim sản xuất đòi hỏi $|\Cset|\ge2^{256}$
   (\texttt{params.py:127--130}, \texttt{video\_pipeline.py:144--145}).
-  \textbf{Consistent.}
-\item \emph{Envelope.} In-band: exact length, magic \texttt{ZKLB}, version,
-  pinned $\pid$, canonical commitment ($<q$ per coefficient), proof
-  (\texttt{video\_proof.py:142--153}); the header session must equal the
-  statement's (\texttt{:183}). Registered: \texttt{ZKLR}, header and proof only,
-  pinned commitment (\texttt{:218--244}). \textbf{Consistent} with \S3.7.
-\item \emph{Sessions.} One-use semantics as in the proof of
-  Theorem~\ref{thm:replay}; binding $\mathsf{bind}(\mathsf{pins})$ hashes
-  $\pid$, $\mathit{rid}$, root, epoch, codec policy and profile
-  (\texttt{video\_pipeline.py:166--172}), so in registered mode it also
-  depends on the credential through $\mathit{rid}$. Stateless mode requires
-  an explicit \texttt{expected\_session} (\texttt{:262--263}).
-  \textbf{Consistent.}
-\item \emph{Registry.} ML-DSA-65 over a tagged canonical JSON encoding; the
-  registered descriptor hashes the key and the credential
+  \textbf{Nhất quán.}
+\item \emph{Envelope.} In-band: độ dài chính xác, magic \texttt{ZKLB}, phiên
+  bản, $\pid$ đã ghim, cam kết chuẩn tắc ($<q$ mỗi hệ số), chứng minh
+  (\texttt{video\_proof.py:142--153}); phiên trong header phải bằng phiên của
+  phát biểu (\texttt{:183}). Đã đăng ký: \texttt{ZKLR}, chỉ header và chứng
+  minh, cam kết đã ghim (\texttt{:218--244}). \textbf{Nhất quán} với \S3.7.
+\item \emph{Các phiên.} Ngữ nghĩa dùng-một-lần như trong chứng minh
+  Định lý~\ref{thm:replay}; ràng buộc $\mathsf{bind}(\mathsf{pins})$ băm
+  $\pid$, $\mathit{rid}$, root, epoch, chính sách codec và hồ sơ
+  (\texttt{video\_pipeline.py:166--172}), nên trong chế độ đã đăng ký nó cũng
+  phụ thuộc vào chứng chỉ thông qua $\mathit{rid}$. Chế độ không trạng thái đòi
+  hỏi một \texttt{expected\_session} tường minh (\texttt{:262--263}).
+  \textbf{Nhất quán.}
+\item \emph{Sổ đăng ký.} ML-DSA-65 trên một mã hóa JSON chuẩn tắc có gắn thẻ;
+  mô tả đã đăng ký băm khóa và chứng chỉ
   (\texttt{video\_pipeline.py:109--131}, \texttt{zkp\_registry.py:128--147}).
-  \textbf{Consistent}, but see D2.
-\item \emph{Canonical digest.} As described in
-  Section~\ref{sec:sec-integrity}; the specification (\S3.6) described $D$ as
-  a single-stream digest and has been corrected to the segmented form.
-\item \emph{Domain tags.} SHAKE-256 tags \texttt{.../bdlop-open/v1/\{key,
+  \textbf{Nhất quán}, nhưng xem D2.
+\item \emph{Digest chuẩn tắc.} Như mô tả trong
+  Mục~\ref{sec:sec-integrity}; đặc tả (\S3.6) đã mô tả $D$ như một digest
+  luồng-đơn và đã được chỉnh lại thành dạng phân đoạn.
+\item \emph{Thẻ miền.} Các thẻ SHAKE-256 \texttt{.../bdlop-open/v1/\{key,
   randomness, fiat-shamir, mask\}\textbackslash0},
-  \texttt{.../bdlop-equal/v1/\{fiat-shamir, mask\}\textbackslash0} and
-  \texttt{.../challenge-poly/v1\textbackslash0} each end in the only NUL byte
-  and are pairwise distinct, hence prefix-free. \textbf{Consistent.}
+  \texttt{.../bdlop-equal/v1/\{fiat-shamir, mask\}\textbackslash0} và
+  \texttt{.../challenge-poly/v1\textbackslash0} mỗi cái kết thúc bằng byte NUL
+  duy nhất và đôi một phân biệt, do đó không-tiền-tố. \textbf{Nhất quán.}
 \end{enumerate}
 
-\subsection{Discrepancies and gaps}
+\subsection{Các điểm khác biệt và lỗ hổng}
 
 \begin{description}
-\item[D1 (medium): carrier bits are malleable with a single chunk.]
-  \texttt{blind\_payload\_chunks.py:12,84--137} accept a one-chunk set for any
-  \texttt{chunk\_size} in $[|E|,65\,535]$, and the verifier never compares the
-  extracted chunking with the pinned \texttt{profile.chunk\_bytes}
-  (\texttt{video\_pipeline.py:} \texttt{267--303}). When the profile's chunk
-  size is at least the envelope length, an adversary can rewrite the 16-bit
-  field and the outer CRC-32: up to 48 carrier coefficients change by $\pm1$
-  while $E$, $P$ and $D$ are unchanged, and the video is accepted. Rewriting
-  8\,000 to 20\,000 changed 21 carrier bits in a direct test of the framing
-  functions. This contradicts goal (iii) of the threat model (``any change to
-  the carriers is rejected''). Fix: the verifier recomputes
-  $\mathsf{Enc}_{\mathsf{prof}}(E)$, the chunks of $E$ under the pinned chunk
-  size, and requires it to equal the extracted pieces (or requires the
-  header field to equal the pinned size); add a negative test.
-\item[D2 (medium): no holder identity in the signed registry.] The registered
-  descriptor (\texttt{video\_pipeline.py:109--131}; field set
-  \texttt{zkp\_registry.py:29--35}) binds a credential commitment, not a
-  holder. ``Only the credential holder can produce the proof'' holds per
-  commitment; which person that is is not covered by the ML-DSA signature.
-  Fix: add a holder identifier (or its digest) to the registered descriptor.
-\item[D3 (medium): disclosure hands over the commitment.]
-  \texttt{verify\_disclosure} takes the randomness
-  (\texttt{video\_proof.py:84--89,188--197}). The recipient can then produce
-  fresh opening proofs for that commitment on new statements, i.e.\ accepted
-  in-band videos with the creator's commitment, or impersonate a holder if a
-  credential is disclosed. Fix: disclose $p$ with the equality proof against
-  $(0,\mathsf{enc}(p))$ and zero randomness, bound to a disclosure context
-  (proof above).
-\item[D4 (low): equality-proof completeness $2^{-35}$.]
-  \texttt{equality\_proof.py:29,83} reuses $\Amax=512$ with acceptance
-  $p_{\mathrm{acc}}^2$ (figures for \texttt{bdlop-open-128-v1}, the set
-  reviewed; $2^{-27.5}$ for \texttt{bdlop-open-128-v2}). Fix: a separate cap,
-  e.g.\ 4\,096 attempts ($\approx2^{-280}$ for v1, $2^{-220}$ for v2); a larger cap does not affect zero knowledge because
-  acceptance is witness-independent.
-\item[D5 (low): scope of the canonical digest.] The digest is over
-  ffmpeg-segmented files (\texttt{blind\_sync\_streaming.py:117--215}); segments
-  without carriers are hashed as raw files without a domain tag
-  (\texttt{:236--241,358,549}); RBSP bits after the stop bit of a carrier-bearing
-  IDR NAL unit are excluded (\texttt{video\_canonicalization.py:}
+\item[D1 (trung bình): các bit vật mang có thể bị uốn nắn với một chunk đơn lẻ.]
+  \texttt{blind\_payload\_chunks.py:12,84--137} chấp nhận một tập một-chunk cho
+  bất kỳ \texttt{chunk\_size} nào trong $[|E|,65\,535]$, và bên kiểm chứng
+  không bao giờ so sánh cách chia chunk trích xuất được với
+  \texttt{profile.chunk\_bytes} đã ghim (\texttt{video\_pipeline.py:}
+  \texttt{267--303}). Khi kích thước chunk của hồ sơ ít nhất bằng độ dài
+  envelope, một đối thủ có thể viết lại trường 16 bit và CRC-32 bên ngoài: tối
+  đa 48 hệ số vật mang thay đổi $\pm1$ trong khi $E$, $P$ và $D$ không đổi, và
+  video được chấp nhận. Việc viết lại 8\,000 thành 20\,000 đã thay đổi 21 bit
+  vật mang trong một phép kiểm trực tiếp các hàm đóng khung. Điều này mâu thuẫn
+  với mục tiêu (iii) của mô hình đe dọa (``mọi thay đổi đối với các vật mang
+  đều bị từ chối''). Khắc phục: bên kiểm chứng tính lại
+  $\mathsf{Enc}_{\mathsf{prof}}(E)$, các chunk của $E$ dưới kích thước chunk
+  đã ghim, và đòi hỏi nó bằng các mảnh trích xuất được (hoặc đòi hỏi trường
+  header bằng kích thước đã ghim); thêm một kiểm thử phủ định.
+\item[D2 (trung bình): không có danh tính bên nắm giữ trong sổ đăng ký đã ký.] Mô
+  tả đã đăng ký (\texttt{video\_pipeline.py:109--131}; tập trường
+  \texttt{zkp\_registry.py:29--35}) ràng buộc một cam kết chứng chỉ, chứ không
+  phải một bên nắm giữ. ``Chỉ bên nắm giữ chứng chỉ mới có thể tạo chứng minh''
+  đúng cho từng cam kết; người đó là ai thì không được chữ ký ML-DSA bao phủ.
+  Khắc phục: thêm một định danh bên nắm giữ (hoặc digest của nó) vào mô tả đã
+  đăng ký.
+\item[D3 (trung bình): việc tiết lộ trao đi cam kết.]
+  \texttt{verify\_disclosure} lấy tính ngẫu nhiên
+  (\texttt{video\_proof.py:84--89,188--197}). Khi đó bên nhận có thể tạo các
+  chứng minh mở mới cho cam kết đó trên các phát biểu mới, tức các video in-band
+  được chấp nhận với cam kết của người tạo, hoặc mạo danh một bên nắm giữ nếu
+  một chứng chỉ được tiết lộ. Khắc phục: tiết lộ $p$ bằng chứng minh đẳng thức
+  đối chiếu với $(0,\mathsf{enc}(p))$ và tính ngẫu nhiên bằng không, ràng buộc
+  vào một ngữ cảnh tiết lộ (chứng minh ở trên).
+\item[D4 (thấp): tính đầy đủ của chứng minh đẳng thức $2^{-35}$.]
+  \texttt{equality\_proof.py:29,83} tái dùng $\Amax=512$ với sự chấp nhận
+  $p_{\mathrm{acc}}^2$ (các con số cho \texttt{bdlop-open-128-v1}, bộ được rà
+  soát; $2^{-27.5}$ cho \texttt{bdlop-open-128-v2}). Khắc phục: một ngưỡng
+  riêng, ví dụ 4\,096 lần thử ($\approx2^{-280}$ cho v1, $2^{-220}$ cho v2);
+  một ngưỡng lớn hơn không ảnh hưởng tới tính không tiết lộ tri thức vì sự chấp
+  nhận độc lập với nhân chứng.
+\item[D5 (thấp): phạm vi của digest chuẩn tắc.] Digest được lấy trên các tệp đã
+  phân đoạn bằng ffmpeg (\texttt{blind\_sync\_streaming.py:117--215}); các đoạn
+  không có vật mang được băm như các tệp thô mà không có thẻ miền
+  (\texttt{:236--241,358,549}); các bit RBSP sau bit dừng của một đơn vị NAL IDR
+  có mang vật mang bị loại trừ (\texttt{video\_canonicalization.py:}
   \texttt{279, 303, 310--317});
-  carrier blocks are hashed as level vectors; the codec policy string
-  (\texttt{video\_pipeline.py:25,98--99}) does not pin the segmenter version.
-  None breaks Theorem~\ref{thm:integrity}, but each widens the set of
-  unbound changes listed in Section~\ref{sec:sec-integrity}. Fix: tag the
-  raw-segment digests, hash the full RBSP of carrier NAL units, and pin or
-  replace the segmenter.
-\item[D6 (low): API does not tie pins to the credential.]
-  \texttt{verify\_video\_proof} accepts \texttt{pins} and \texttt{credential}
-  separately (\texttt{video\_pipeline.py:250--265}) and does not check that
-  \texttt{pins.relation\_id} is the relation of that credential. The CLI derives
-  both together (\texttt{cli.py:98--107}), but a caller that pins one
-  credential and passes another verifies an unregistered credential. Fix:
-  recompute the descriptor of \texttt{credential} and compare relation
-  identifiers inside \texttt{verify\_video\_proof}.
-\item[D7 (info): hedging hash has no domain tag.]
-  \texttt{opening\_proof.py:59} hashes $e\|\dots$ directly. Separation from the
-  tagged SHA3-256 uses relies on $e$ being uniform; add a tag.
-\item[D8 (info): unreduced commitments.] \texttt{Commitment} objects built
-  without \texttt{from\_bytes} may hold coefficients in $[q,2^{30})$, which
-  \texttt{pack\_uints} accepts (\texttt{codec.py:10--16}). Envelopes are
-  unaffected (their decoder checks $<q$); pinned credentials loaded by other
-  code paths are. Fix: range check in \texttt{Commitment}.
-\item[D9 (info): one global key.] $\mathsf{ck}$ is expanded from a fixed public
-  seed (\texttt{params.py:133--149}); all users share one M-SIS/M-LWE
-  instance, so precomputation against it amortizes.
-\item[D10 (info):] \texttt{verify\_statement\_binding} hard-codes the
-  \texttt{lazer-v1} suite (\texttt{zkp\_registry.py:206--210}) and cannot serve
-  \texttt{bdlop-open-v1}; the BDLOP path uses \texttt{pins\_from\_registry}.
-\item[D11 (info): specification wording.] \S4.5 wrote the bijection as
-  $(t_1,t_2)\mapsto(t_1-B_{1,2}'t_2,t_2)$; the correct map uses $t_2-m$
-  (Lemma~\ref{lem:mlwe-instance}). Corrected. \S4.2 cites an ``ML-DSA
-  specification, Appendix~B'' for the zero-knowledge argument; this reference
-  should be checked.
+  các khối vật mang được băm như các vector mức; chuỗi chính sách codec
+  (\texttt{video\_pipeline.py:25,98--99}) không ghim phiên bản của bộ phân
+  đoạn. Không điều nào phá vỡ Định lý~\ref{thm:integrity}, nhưng mỗi điều mở
+  rộng tập các thay đổi không được ràng buộc được liệt kê trong
+  Mục~\ref{sec:sec-integrity}. Khắc phục: gắn thẻ các digest đoạn-thô, băm toàn
+  bộ RBSP của các đơn vị NAL vật mang, và ghim hoặc thay bộ phân đoạn.
+\item[D6 (thấp): API không gắn các mục ghim với chứng chỉ.]
+  \texttt{verify\_video\_proof} chấp nhận \texttt{pins} và \texttt{credential}
+  một cách riêng rẽ (\texttt{video\_pipeline.py:250--265}) và không kiểm tra
+  rằng \texttt{pins.relation\_id} là quan hệ của chứng chỉ đó. CLI dẫn xuất cả
+  hai cùng nhau (\texttt{cli.py:98--107}), nhưng một bên gọi ghim một chứng chỉ
+  và truyền vào một chứng chỉ khác sẽ kiểm chứng một chứng chỉ chưa đăng ký.
+  Khắc phục: tính lại mô tả của \texttt{credential} và so sánh các định danh
+  quan hệ bên trong \texttt{verify\_video\_proof}.
+\item[D7 (thông tin): hàm băm phòng hộ không có thẻ miền.]
+  \texttt{opening\_proof.py:59} băm $e\|\dots$ một cách trực tiếp. Việc tách
+  biệt khỏi các cách dùng SHA3-256 có gắn thẻ dựa vào việc $e$ là đều; hãy
+  thêm một thẻ.
+\item[D8 (thông tin): các cam kết chưa rút gọn.] Các đối tượng
+  \texttt{Commitment} được dựng mà không qua \texttt{from\_bytes} có thể giữ
+  các hệ số trong $[q,2^{30})$, điều mà \texttt{pack\_uints} chấp nhận
+  (\texttt{codec.py:10--16}). Các envelope không bị ảnh hưởng (bộ giải mã của
+  chúng kiểm tra $<q$); các chứng chỉ đã ghim được nạp bởi các đường mã khác
+  thì có. Khắc phục: kiểm tra khoảng trong \texttt{Commitment}.
+\item[D9 (thông tin): một khóa toàn cục.] $\mathsf{ck}$ được mở rộng từ một hạt
+  giống công khai cố định (\texttt{params.py:133--149}); mọi người dùng chia sẻ
+  một thể hiện M-SIS/M-LWE, nên việc tính toán trước đối với nó được phân bổ
+  đều (amortize).
+\item[D10 (thông tin):] \texttt{verify\_statement\_binding} mã hóa cứng bộ
+  \texttt{lazer-v1} (\texttt{zkp\_registry.py:206--210}) và không thể phục vụ
+  \texttt{bdlop-open-v1}; đường BDLOP dùng \texttt{pins\_from\_registry}.
+\item[D11 (thông tin): cách diễn đạt trong đặc tả.] \S4.5 đã viết song ánh là
+  $(t_1,t_2)\mapsto(t_1-B_{1,2}'t_2,t_2)$; ánh xạ đúng dùng $t_2-m$
+  (Bổ đề~\ref{lem:mlwe-instance}). Đã sửa. \S4.2 trích dẫn một ``ML-DSA
+  specification, Appendix~B'' cho lập luận không tiết lộ tri thức; tham chiếu
+  này cần được kiểm tra.
 \end{description}
 
-\paragraph{Status after the review.} D1--D4 and D6 are fixed in the code
-evaluated in Section~\ref{sec:evaluation}, each with a negative test: the
-verifier compares the extracted chunks with the canonical chunking of $E$
-under the pinned chunk size (D1); the registered descriptor can bind a
-holder-identifier digest (D2); disclosure is the zero-randomness equality
-proof of Section~\ref{sec:sec-soundness} and the randomness-revealing API was
-removed (D3); the equality proof has its own 4\,096-attempt cap (D4); and
-\texttt{verify\_video\_proof} recomputes the relation identifier of the
-supplied parameters, profile, credential and holder identifier and refuses
-mismatching pins (D6). D5, D7 and D8 and the reviewer question on
-production-strength enforcement are closed in a second round, again each
-with negative tests (\texttt{src/runtest/test\_hardening\_d5\_d7\_d8.py}).
-D7: the hedged mask key hashes a domain tag, the protocol label
-(opening, equality or binary proof) and the parameter identifier before the
-entropy. Only \texttt{bdlop-open-128-v1} keeps the untagged derivation, so
-its known-answer vectors are unchanged; the \texttt{bdlop-open-128-v2} and
-binary-proof vectors were regenerated (commitments unchanged). The verifier
-never recomputes a mask, so proofs from either derivation verify, which the
-tests check. D8: a \texttt{Commitment} carries its parameter set and its
-constructor rejects coefficients outside $[0,q)$ and wrong shapes, storing
-read-only copies; verifiers still re-check objects built around the
-constructor. Production strength: every application-level verifier
-(\texttt{verify\_video\_proof}, the envelope, disclosure and linkage
-verifiers, and \texttt{pins\_from\_registry}) refuses a parameter set with a
-challenge space below $2^{256}$ unless the caller sets
-\texttt{allow\_toy\_parameters}; hand-built pins with the toy set are refused.
-D5 is closed by a new, opt-in codec policy (v2) with its own identifier, so
-it changes profile, policy, relation and statement identifiers, while codec
-policy v1 stays byte-identical for existing videos (recorded identifiers and
-digests are tested). Under v2 (a) a segment without carriers is hashed with a
-domain tag and its length and every segment digest is typed in the combined
-digest; (b) a carrier-bearing IDR NAL unit is hashed over its complete RBSP
-with its length, so zero bits after the stop bit are bound (under v1 a zero
-byte appended there is accepted; under v2 it is rejected, through the real
-H.264 transport); (c) the segmentation is pinned: the segments must be
-exactly the access-unit partition of the input, compared byte for byte, so
-the digest is a function of the input alone and a segmenter that cuts
-elsewhere fails closed. A registered \texttt{bdlop-open-128-v2} run on a
-200-frame CIF cut under v2 verified from the video alone, and the replayed
-session, a one-bit change and the zero-extended carrier NAL unit were
-rejected (\texttt{benchmark/results/q2/hardening\_e2e\_container\_cif\_200f\_v2.json}).
-The ffmpeg version is not hashed, because that
-would bind the verifier's installation rather than the video. Carrier blocks
-are still hashed as level vectors, which is what lets the proof bind the
-video without depending on its own bits. D9--D11 remain as described.
+\paragraph{Trạng thái sau rà soát.} D1--D4 và D6 đã được sửa trong mã được đánh
+giá ở Mục~\ref{sec:evaluation}, mỗi cái kèm một kiểm thử phủ định: bên kiểm
+chứng so sánh các chunk trích xuất được với cách chia chunk chuẩn tắc của $E$
+dưới kích thước chunk đã ghim (D1); mô tả đã đăng ký có thể ràng buộc một digest
+định-danh-bên-nắm-giữ (D2); việc tiết lộ là chứng minh đẳng thức với tính ngẫu
+nhiên bằng không của Mục~\ref{sec:sec-soundness} và API làm lộ tính ngẫu nhiên
+đã bị gỡ bỏ (D3); chứng minh đẳng thức có ngưỡng 4\,096 lần thử riêng của nó
+(D4); và \texttt{verify\_video\_proof} tính lại định danh quan hệ của các tham
+số, hồ sơ, chứng chỉ và định danh bên nắm giữ được cung cấp và từ chối các mục
+ghim không khớp (D6). D5, D7 và D8 cùng câu hỏi của người rà soát về việc thực
+thi độ-mạnh-sản-xuất được đóng lại trong một vòng thứ hai, lại một lần nữa mỗi
+cái kèm các kiểm thử phủ định (\texttt{src/runtest/test\_hardening\_d5\_d7\_d8.py}).
+D7: khóa mặt nạ được phòng hộ băm một thẻ miền, nhãn giao thức
+(chứng minh mở, đẳng thức hoặc nhị phân) và định danh tham số trước phần
+entropy. Chỉ \texttt{bdlop-open-128-v1} giữ cách dẫn xuất không gắn thẻ, nên
+các vector câu-trả-lời-đã-biết của nó không đổi; các vector
+\texttt{bdlop-open-128-v2} và chứng minh nhị phân đã được tạo lại (các cam kết
+không đổi). Bên kiểm chứng không bao giờ tính lại một mặt nạ, nên các chứng minh
+từ cả hai cách dẫn xuất đều kiểm chứng được, điều mà các kiểm thử kiểm tra. D8:
+một \texttt{Commitment} mang theo bộ tham số của nó và hàm khởi tạo của nó từ
+chối các hệ số ngoài $[0,q)$ và các hình dạng sai, lưu các bản sao chỉ-đọc; các
+bên kiểm chứng vẫn kiểm tra lại các đối tượng được dựng quanh hàm khởi tạo. Độ
+mạnh sản xuất: mọi bên kiểm chứng ở mức ứng dụng (\texttt{verify\_video\_proof},
+các bên kiểm chứng envelope, tiết lộ và liên kết, và
+\texttt{pins\_from\_registry}) từ chối một bộ tham số có không gian thách thức
+dưới $2^{256}$ trừ khi bên gọi đặt \texttt{allow\_toy\_parameters}; các mục ghim
+dựng tay với bộ đồ chơi bị từ chối. D5 được đóng lại bằng một chính sách codec
+mới, chọn-tham-gia (v2) có định danh riêng, nên nó thay đổi các định danh hồ sơ,
+chính sách, quan hệ và phát biểu, trong khi chính sách codec v1 vẫn giống hệt
+từng byte cho các video hiện có (các định danh và digest đã ghi được kiểm thử).
+Dưới v2: (a) một đoạn không có vật mang được băm với một thẻ miền và độ dài của
+nó và mọi digest đoạn được gắn kiểu trong digest kết hợp; (b) một đơn vị NAL IDR
+có mang vật mang được băm trên toàn bộ RBSP của nó cùng độ dài, nên các bit
+không sau bit dừng được ràng buộc (dưới v1, một byte không được nối thêm ở đó
+được chấp nhận; dưới v2 nó bị từ chối, qua tầng vận chuyển H.264 thực); (c) sự
+phân đoạn được ghim: các đoạn phải đúng là phân hoạch theo đơn vị truy cập
+(access-unit) của đầu vào, so sánh từng byte, nên digest là một hàm chỉ của đầu
+vào và một bộ phân đoạn cắt ở chỗ khác sẽ thất bại theo hướng đóng. Một lần chạy
+\texttt{bdlop-open-128-v2} đã đăng ký trên một đoạn cắt CIF 200 khung dưới v2
+đã kiểm chứng được chỉ từ video, và phiên bị phát lại, một thay đổi một bit và
+đơn vị NAL vật mang bị mở rộng bằng số không đều bị từ chối
+(\texttt{benchmark/results/q2/hardening\_e2e\_container\_cif\_200f\_v2.json}).
+Phiên bản ffmpeg không được băm, vì điều đó sẽ ràng buộc bản cài đặt của bên
+kiểm chứng thay vì video. Các khối vật mang vẫn được băm như các vector mức,
+đó chính là điều cho phép chứng minh ràng buộc video mà không phụ thuộc vào
+chính các bit của nó. D9--D11 vẫn như đã mô tả.
