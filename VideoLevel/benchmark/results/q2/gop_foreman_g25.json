@@ -1,0 +1,65 @@
+{
+  "name": "foreman_g25",
+  "clip": "foreman",
+  "gop": 25,
+  "qp": 22,
+  "frames_per_segment": 100,
+  "gop_policy": "idr-carriers-inter-raw-v1",
+  "encode_command": "ffmpeg -hide_banner -nostdin -loglevel error -y -i data/raw/foreman_cif_300f.y4m -frames:v 300 -c:v libx264 -profile:v baseline -coder 0 -bf 0 -g 25 -keyint_min 25 -sc_threshold 0 -qp 22 -threads 4 -f h264 foreman_g25.h264",
+  "segment_structure": [
+    {
+      "frames": 100,
+      "coded_slices": 100,
+      "pictures": 100,
+      "idr_slices": 4,
+      "non_idr_slices": 96,
+      "p_slices": 96
+    },
+    {
+      "frames": 100,
+      "coded_slices": 100,
+      "pictures": 100,
+      "idr_slices": 4,
+      "non_idr_slices": 96,
+      "p_slices": 96
+    },
+    {
+      "frames": 100,
+      "coded_slices": 100,
+      "pictures": 100,
+      "idr_slices": 4,
+      "non_idr_slices": 96,
+      "p_slices": 96
+    }
+  ],
+  "capacity": {
+    "video": "foreman_g25.h264",
+    "carrier": "magnitude",
+    "frames": 300,
+    "segments_total": 3,
+    "segments_scanned": 3,
+    "carrier_bits_per_segment": [
+      522,
+      522,
+      522
+    ],
+    "min_chunk_bytes_supported": 28,
+    "scan_seconds": 3.4,
+    "registered_segments_needed_at_min_chunk": 272,
+    "registered_fits_estimate": false,
+    "in_band_segments_needed_at_min_chunk": 512,
+    "in_band_fits_estimate": false,
+    "carrier_bits_per_idr": 130.5,
+    "carrier_bits_per_100_frames": 522.0,
+    "registered_128_envelope_bytes": 7589,
+    "registered_128_segments_needed_at_min_chunk": 272,
+    "registered_128_frames_needed_estimate": 11631,
+    "in_band_128_envelope_bytes": 14309,
+    "in_band_128_segments_needed_at_min_chunk": 512,
+    "in_band_128_frames_needed_estimate": 21930
+  },
+  "e2e": {
+    "skipped": "TOY envelope of 413 B needs 16 segments at 27 B per segment; the clip has 3"
+  },
+  "quality": null
+}

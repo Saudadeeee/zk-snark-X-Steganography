@@ -1,0 +1,64 @@
+{
+  "video": "synthetic 1920x1080",
+  "runs": [
+    {
+      "frames": 3,
+      "pictures": 3,
+      "gop_policy": "all-intra",
+      "structure": {
+        "coded_slices": 3,
+        "pictures": 3,
+        "idr_slices": 3,
+        "non_idr_slices": 0,
+        "p_slices": 0
+      },
+      "analysis_s": 38.8,
+      "macroblocks_per_picture": 8160,
+      "coded_luma_blocks": 389808,
+      "stable_carriers": 3141,
+      "peak_after_analysis_mb": 530.1,
+      "payload_bytes": 76,
+      "embed_s": 43.2,
+      "peak_after_embed_mb": 644.0,
+      "extract_s": 39.8,
+      "extracted_ok": true,
+      "peak_after_extract_mb": 644.0
+    },
+    {
+      "frames": 6,
+      "pictures": 6,
+      "gop_policy": "all-intra",
+      "structure": {
+        "coded_slices": 6,
+        "pictures": 6,
+        "idr_slices": 6,
+        "non_idr_slices": 0,
+        "p_slices": 0
+      },
+      "analysis_s": 79.0,
+      "macroblocks_per_picture": 8160,
+      "coded_luma_blocks": 779606,
+      "stable_carriers": 6381,
+      "peak_after_analysis_mb": 978.0,
+      "payload_bytes": 76,
+      "embed_s": 86.9,
+      "peak_after_embed_mb": 1241.7,
+      "extract_s": 79.7,
+      "extracted_ok": true,
+      "peak_after_extract_mb": 1241.7
+    }
+  ],
+  "peak_mb_fit": {
+    "base_mb": 46.3,
+    "per_frame_mb": 199.2,
+    "fitted_peak": "peak_after_extract_mb"
+  },
+  "seconds_per_frame_analysis_embed_extract": 41.27,
+  "extrapolated_peak_mb_by_frames_per_segment": {
+    "10": 2039,
+    "20": 4031,
+    "25": 5027,
+    "50": 10008,
+    "100": 19970
+  }
+}

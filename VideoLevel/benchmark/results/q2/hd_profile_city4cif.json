@@ -1,0 +1,63 @@
+{
+  "video": "D:\\Code\\SourceCode\\Project\\zk-snark-X-Steganography\\VideoLevel\\data\\encoded\\city_4cif_q22_g1.h264",
+  "runs": [
+    {
+      "frames": 3,
+      "pictures": 3,
+      "gop_policy": "all-intra",
+      "structure": {
+        "coded_slices": 3,
+        "pictures": 3,
+        "idr_slices": 3,
+        "non_idr_slices": 0,
+        "p_slices": 0
+      },
+      "analysis_s": 10.4,
+      "macroblocks_per_picture": 1584,
+      "coded_luma_blocks": 72636,
+      "stable_carriers": 3605,
+      "peak_after_analysis_mb": 143.0,
+      "payload_bytes": 76,
+      "embed_s": 10.9,
+      "peak_after_embed_mb": 156.5,
+      "extract_s": 10.1,
+      "extracted_ok": true,
+      "peak_after_extract_mb": 156.5
+    },
+    {
+      "frames": 6,
+      "pictures": 6,
+      "gop_policy": "all-intra",
+      "structure": {
+        "coded_slices": 6,
+        "pictures": 6,
+        "idr_slices": 6,
+        "non_idr_slices": 0,
+        "p_slices": 0
+      },
+      "analysis_s": 19.9,
+      "macroblocks_per_picture": 1584,
+      "coded_luma_blocks": 144937,
+      "stable_carriers": 6830,
+      "peak_after_analysis_mb": 240.5,
+      "payload_bytes": 76,
+      "embed_s": 21.7,
+      "peak_after_embed_mb": 263.1,
+      "extract_s": 20.5,
+      "extracted_ok": true,
+      "peak_after_extract_mb": 263.1
+    }
+  ],
+  "peak_mb_fit": {
+    "base_mb": 49.9,
+    "per_frame_mb": 35.5
+  },
+  "seconds_per_frame_analysis_embed_extract": 10.23,
+  "extrapolated_peak_mb_by_frames_per_segment": {
+    "10": 405,
+    "20": 761,
+    "25": 938,
+    "50": 1827,
+    "100": 3603
+  }
+}

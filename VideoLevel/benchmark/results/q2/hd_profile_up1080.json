@@ -1,0 +1,59 @@
+{
+  "video": "tmp\\hd\\up1080_6f.h264",
+  "runs": [
+    {
+      "frames": 3,
+      "pictures": 3,
+      "gop_policy": "all-intra",
+      "structure": {
+        "coded_slices": 3,
+        "pictures": 3,
+        "idr_slices": 3,
+        "non_idr_slices": 0,
+        "p_slices": 0
+      },
+      "analysis_s": 12.6,
+      "macroblocks_per_picture": 8160,
+      "coded_luma_blocks": 211181,
+      "stable_carriers": 194,
+      "peak_after_analysis_mb": 447.0,
+      "payload_bytes": 0
+    },
+    {
+      "frames": 6,
+      "pictures": 6,
+      "gop_policy": "all-intra",
+      "structure": {
+        "coded_slices": 6,
+        "pictures": 6,
+        "idr_slices": 6,
+        "non_idr_slices": 0,
+        "p_slices": 0
+      },
+      "analysis_s": 25.9,
+      "macroblocks_per_picture": 8160,
+      "coded_luma_blocks": 422135,
+      "stable_carriers": 387,
+      "peak_after_analysis_mb": 798.4,
+      "payload_bytes": 8,
+      "embed_s": 31.1,
+      "peak_after_embed_mb": 922.9,
+      "extract_s": 28.0,
+      "extracted_ok": true,
+      "peak_after_extract_mb": 922.9
+    }
+  ],
+  "peak_mb_fit": {
+    "base_mb": 95.6,
+    "per_frame_mb": 117.1,
+    "fitted_peak": "peak_after_analysis_mb"
+  },
+  "seconds_per_frame_analysis_embed_extract": 24.13,
+  "extrapolated_peak_mb_by_frames_per_segment": {
+    "10": 1267,
+    "20": 2438,
+    "25": 3024,
+    "50": 5952,
+    "100": 11809
+  }
+}
