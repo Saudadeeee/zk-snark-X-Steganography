@@ -39,7 +39,7 @@ from src.core import adaptive_carriers as ac  # noqa: E402
 
 SEED = 20261021
 MACROBLOCKS = 396
-REGISTERED_ENVELOPE_CHUNK = 3800
+REGISTERED_ENVELOPE_CHUNK = 4200  # two chunks of the 8 165-byte v2 envelope
 
 
 def _segment_bits(envelope_bytes: int, chunk_bytes: int) -> list[int]:

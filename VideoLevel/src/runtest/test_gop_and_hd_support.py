@@ -33,7 +33,7 @@ from src.core.analysis_cache import (
 from src.lattice_pq import LatticeSigner
 from src.lattice_zk import bdlop, codec
 from src.lattice_zk import video_pipeline as pipeline
-from src.lattice_zk.params import BDLOP_OPEN_128, TOY
+from src.lattice_zk.params import BDLOP_OPEN_128_V1, TOY
 from src.zkp_registry import SignedZkpRelationRegistry
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -57,16 +57,17 @@ BASELINE = {
 BASELINE_PROFILE_IDS = {
     ("TOY", False): "8b1c4db13725d727ca1cee509a5409b3cd4e9307a1d477374e63ef6d28a3e54d",
     ("TOY", True): "ec341daed1e9bcfeab58f0ef3e1cdce780ad6acd0963058159ef8503f708b28d",
-    ("BDLOP_OPEN_128", False): "21f602967f0cf15193353603e2ee7a593df7c37ef143e3a894caf9862c1cf397",
-    ("BDLOP_OPEN_128", True): "9735e0f9bb5a20f84d73865852c7d5878ddf129ddc6fd2703c1e1f3382ac2a82",
+    ("BDLOP_OPEN_128_V1", False): "21f602967f0cf15193353603e2ee7a593df7c37ef143e3a894caf9862c1cf397",
+    ("BDLOP_OPEN_128_V1", True): "9735e0f9bb5a20f84d73865852c7d5878ddf129ddc6fd2703c1e1f3382ac2a82",
 }
 BASELINE_POLICY_HASHES = {
     ("TOY", False): "c758a839b49006f984a9f1d682e3f4872a6dbec94f90d59660532aaa19ee35ff",
     ("TOY", True): "b9b4a0fbe16d76e35e045b92251c09ef14e01ec25922c9043afc6a36c3fb58d9",
-    ("BDLOP_OPEN_128", False): "17950622611a7210721dad80568f4e86d3dd5f5a6e0bdf2e381b85612a75f2f8",
-    ("BDLOP_OPEN_128", True): "c9d6ec582d00c8873468c957ed9e0bcf6843e95780d0471b43fc239aafd95e12",
+    ("BDLOP_OPEN_128_V1", False): "17950622611a7210721dad80568f4e86d3dd5f5a6e0bdf2e381b85612a75f2f8",
+    ("BDLOP_OPEN_128_V1", True): "c9d6ec582d00c8873468c957ed9e0bcf6843e95780d0471b43fc239aafd95e12",
 }
-PARAMETER_SETS = {"TOY": TOY, "BDLOP_OPEN_128": BDLOP_OPEN_128}
+# Baselines were recorded with the v1 production set before the GOP policy existed.
+PARAMETER_SETS = {"TOY": TOY, "BDLOP_OPEN_128_V1": BDLOP_OPEN_128_V1}
 
 needs_ffmpeg = pytest.mark.skipif(
     shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,

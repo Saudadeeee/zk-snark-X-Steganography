@@ -138,7 +138,7 @@ def main() -> int:
     parser.add_argument("--covers", nargs="+", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--chunk-bytes", type=int, default=3800)
+    parser.add_argument("--chunk-bytes", type=int, default=4200)
     parser.add_argument("--modes", nargs="+", choices=sorted(MODES), default=sorted(MODES))
     arguments = parser.parse_args()
     arguments.work.mkdir(parents=True, exist_ok=True)
