@@ -2,7 +2,8 @@
 
 For every case it runs, in order, skipping steps whose output already exists:
 
-1. ``encode``  -- all-intra H.264 Baseline/CAVLC from a Y4M source (if needed);
+1. ``encode``  -- H.264 Baseline/CAVLC from a Y4M source (if needed): all-intra by
+   default, fixed GOP with ``"gop": N`` (then also ``"gop_policy"``);
 2. ``e2e``     -- embed, blind-extract and verify (``latticezk_video_e2e``);
 3. ``steg``    -- classical targeted steganalysis on the first touched frames;
 4. ``mlfeat``  -- per-frame features for learned steganalysis.
@@ -10,6 +11,10 @@ For every case it runs, in order, skipping steps whose output already exists:
 All outputs go to ``--work`` (stego videos, logs) and ``--results`` (JSON).
 
     python -m benchmark.latticezk_q2_sweep --cases benchmark/latticezk_q2_cases.json --workers 3
+
+Optional case keys beyond the CIF/4CIF defaults: ``gop``, ``gop_policy``,
+``frames_per_segment`` (also used by the capacity scan), ``parameter_set``,
+``x264_params``, ``stream_loop``, ``threads`` (see benchmark/latticezk_hd_cases.json).
 """
 
 from __future__ import annotations
@@ -42,11 +47,22 @@ def _run(command: list[str], log: Path) -> bool:
 
 
 def _encode(case: dict[str, Any], video: Path, log: Path) -> bool:
-    command = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", "-i", case["source_y4m"]]
+    command = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error"]
+    if case.get("stream_loop"):
+        command += ["-stream_loop", str(case["stream_loop"])]
+    command += ["-i", case["source_y4m"]]
     if case.get("frames"):
         command += ["-frames:v", str(case["frames"])]
-    command += ["-c:v", "libx264", "-profile:v", "baseline", "-g", "1", "-bf", "0",
-                "-qp", str(case["qp"]), "-f", "h264", str(video)]
+    gop = int(case.get("gop", 1))
+    command += ["-c:v", "libx264", "-profile:v", "baseline", "-g", str(gop), "-bf", "0"]
+    if gop > 1:
+        # Fixed GOP: no scene-cut IDRs, so segment cuts at multiples of the GOP are IDRs.
+        command += ["-coder", "0", "-keyint_min", str(gop), "-sc_threshold", "0"]
+    if case.get("threads"):
+        command += ["-threads", str(case["threads"])]
+    if case.get("x264_params"):
+        command += ["-x264-params", case["x264_params"]]
+    command += ["-qp", str(case["qp"]), "-f", "h264", str(video)]
     return _run(command, log)
 
 
@@ -70,6 +86,7 @@ def _auto_chunk(case: dict[str, Any], video: Path, results: Path, log: Path) -> 
         _log(f"{case['name']}: capacity scan")
         if not _run([PYTHON, "-B", "-m", "benchmark.latticezk_capacity_scan", str(video),
                      "--segments", str(case.get("scan_segments", 3)),
+                     "--frames-per-segment", str(case.get("frames_per_segment", 100)),
                      "--carrier", case.get("carrier", "magnitude"), "--output", str(capacity)], log):
             return None
     scan = json.loads(capacity.read_text(encoding="utf-8"))[0]
@@ -116,6 +133,9 @@ def run_case(case: dict[str, Any], work: Path, results: Path) -> dict[str, Any]:
         command = [PYTHON, "-B", "-m", "benchmark.latticezk_video_e2e", "--video", str(video),
                    "--output", str(stego), "--report", str(report),
                    "--chunk-bytes", str(chunk_bytes), "--carrier", case.get("carrier", "magnitude")]
+        for key in ("frames_per_segment", "gop_policy", "parameter_set"):
+            if key in case:
+                command += ["--" + key.replace("_", "-"), str(case[key])]
         if case.get("registered", True):
             command.append("--registered")
         if not case.get("security_checks", False):

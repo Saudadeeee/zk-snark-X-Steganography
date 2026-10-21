@@ -27,6 +27,11 @@ def _psnr(mse: float) -> float | None:
 
 def frame_quality(cover: Path, stego: Path, *, ffmpeg: str = "ffmpeg") -> dict[str, Any]:
     """Decode both streams and summarise per-frame luma MSE."""
+    return summarize_luma_mse(per_frame_luma_mse(cover, stego, ffmpeg=ffmpeg))
+
+
+def per_frame_luma_mse(cover: Path, stego: Path, *, ffmpeg: str = "ffmpeg") -> list[float]:
+    """Luma MSE of every decoded stego frame against the decoded cover frame."""
     with tempfile.TemporaryDirectory(prefix="latticezk-quality-") as directory:
         stats = Path(directory) / "psnr.log"
         escaped = str(stats).replace("\\", "/").replace(":", "\\:")
@@ -44,6 +49,10 @@ def frame_quality(cover: Path, stego: Path, *, ffmpeg: str = "ffmpeg") -> dict[s
         ]
     if not luma_mse:
         raise RuntimeError("no frames were compared")
+    return luma_mse
+
+
+def summarize_luma_mse(luma_mse: list[float]) -> dict[str, Any]:
     changed = [value for value in luma_mse if value > 0]
     return {
         "frames": len(luma_mse),

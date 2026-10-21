@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src import gop_policy as gop_policies  # noqa: E402
 from src.blind_sync import AdaptiveOperatingContract, BlindOperatingContract  # noqa: E402
 from src.lattice_pq import LatticeSigner  # noqa: E402
 from src.lattice_zk import params as parameter_sets  # noqa: E402
@@ -140,6 +141,53 @@ def _link_to_credential(params, embedded, verified) -> dict[str, Any] | None:
     }
 
 
+def _slice_nal_comparison(cover: Path, stego: Path) -> dict[str, int]:
+    """Count IDR / non-IDR slice NAL units that the embedding left byte-identical."""
+    cover_bytes, stego_bytes = cover.read_bytes(), stego.read_bytes()
+    cover_nals = [cover_bytes[a:b] for a, b in gop_policies.nal_unit_spans(cover_bytes)]
+    stego_nals = [stego_bytes[a:b] for a, b in gop_policies.nal_unit_spans(stego_bytes)]
+    report = {"nal_units": len(cover_nals), "nal_count_matches": len(cover_nals) == len(stego_nals),
+              "idr_slices": 0, "idr_slices_changed": 0, "non_idr_slices": 0,
+              "non_idr_slices_identical": 0, "other_nal_units_changed": 0}
+    for before, after in zip(cover_nals, stego_nals):
+        nal_type = before[0] & 0x1F
+        if nal_type == gop_policies.NAL_SLICE_IDR:
+            report["idr_slices"] += 1
+            report["idr_slices_changed"] += before != after
+        elif nal_type == gop_policies.NAL_SLICE_NON_IDR:
+            report["non_idr_slices"] += 1
+            report["non_idr_slices_identical"] += before == after
+        else:
+            report["other_nal_units_changed"] += before != after
+    return report
+
+
+def _verify_tampered(output, data: bytes, params, pins, profile, sync_key, pinned, challenge):
+    tampered = output.with_suffix(".tampered.h264")
+    tampered.write_bytes(data)
+    try:
+        result = pipeline.verify_video_proof(
+            tampered, params=params, pins=pins, profile=profile, sync_key=sync_key,
+            expected_session=challenge, credential=pinned,
+        )
+        return not result.valid, result.reason
+    except Exception as error:  # a corrupted stream may fail to parse at all
+        return True, f"{type(error).__name__}: {error}"
+    finally:
+        tampered.unlink(missing_ok=True)
+
+
+def _p_slice_tamper_check(output, params, pins, profile, sync_key, pinned, challenge):
+    """Flip one bit inside the first non-IDR slice; ``None`` for all-intra streams."""
+    data = bytearray(output.read_bytes())
+    for start, end in gop_policies.nal_unit_spans(bytes(data)):
+        if data[start] & 0x1F == gop_policies.NAL_SLICE_NON_IDR and end - start > 4:
+            data[(start + end) // 2] ^= 0x01
+            return _verify_tampered(output, bytes(data), params, pins, profile, sync_key,
+                                    pinned, challenge)
+    return None
+
+
 def _security_checks(output, params, pins, profile, sync_key, store, pinned, challenge):
     """Replay the consumed session, then verify a copy with one flipped bit."""
     replay = pipeline.verify_video_proof(
@@ -147,20 +195,11 @@ def _security_checks(output, params, pins, profile, sync_key, store, pinned, cha
         session_store=store, credential=pinned,
     )
     logger.info("replay_rejected=%s", not replay.valid)
-    tampered = output.with_suffix(".tampered.h264")
     stego_bytes = bytearray(output.read_bytes())
     stego_bytes[len(stego_bytes) // 2] ^= 0x01
-    tampered.write_bytes(bytes(stego_bytes))
-    try:
-        result = pipeline.verify_video_proof(
-            tampered, params=params, pins=pins, profile=profile, sync_key=sync_key,
-            expected_session=challenge, credential=pinned,
-        )
-        tamper_rejected, tamper_reason = not result.valid, result.reason
-    except Exception as error:  # a corrupted stream may fail to parse at all
-        tamper_rejected, tamper_reason = True, f"{type(error).__name__}: {error}"
-    finally:
-        tampered.unlink(missing_ok=True)
+    tamper_rejected, tamper_reason = _verify_tampered(
+        output, bytes(stego_bytes), params, pins, profile, sync_key, pinned, challenge
+    )
     return not replay.valid, tamper_rejected, tamper_reason
 
 
@@ -169,6 +208,7 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
     profile = pipeline.CarrierProfile(
         CARRIER_CONTRACTS[arguments.carrier], frames_per_segment=arguments.frames_per_segment,
         chunk_bytes=arguments.chunk_bytes, registered=arguments.registered,
+        gop_policy=arguments.gop_policy,
     )
     credential = None
     if arguments.registered:
@@ -211,9 +251,13 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
         logger.info("credential_linkage %s", json.dumps(linkage_report, sort_keys=True))
         replay_rejected = tamper_rejected = None
         tamper_reason = "not run (--skip-security-checks)"
+        p_slice_tamper = None
         if not arguments.skip_security_checks:
             replay_rejected, tamper_rejected, tamper_reason = _security_checks(
                 output, params, pins, profile, sync_key, store, pinned, grant.challenge
+            )
+            p_slice_tamper = _p_slice_tamper_check(
+                output, params, pins, profile, sync_key, pinned, grant.challenge
             )
 
     return {
@@ -235,12 +279,17 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
         "segments_used": embedded.segments_used,
         "frames_per_segment": profile.frames_per_segment,
         "chunk_bytes": profile.chunk_bytes,
+        "gop_policy": profile.gop_policy,
+        "carrier_profile_id": profile.profile_id(params).hex(),
         "statement_id": embedded.statement_id.hex(),
         "blind_video_only_verification": verified.valid,
         "verify_reason": verified.reason,
         "replay_rejected": replay_rejected,
         "tamper_rejected": tamper_rejected,
         "tamper_reason": tamper_reason,
+        "p_slice_tamper_rejected": None if p_slice_tamper is None else p_slice_tamper[0],
+        "p_slice_tamper_reason": None if p_slice_tamper is None else p_slice_tamper[1],
+        "slice_nal_comparison": _slice_nal_comparison(cover, output),
         "payload_absent_from_output": DEMO_PAYLOAD not in output.read_bytes(),
         "decoded_quality": _decoded_quality(cover, output),
         "frame_quality": frame_quality(cover, output),
@@ -268,6 +317,11 @@ def main() -> int:
         help="skip the replay and tamper re-verifications (each re-extracts the whole video)",
     )
     parser.add_argument(
+        "--gop-policy", choices=gop_policies.POLICIES, default=gop_policies.ALL_INTRA,
+        help="all-intra: GOP=1 streams only; idr-carriers-inter-raw-v1: GOP>1 Baseline streams, "
+        "carriers in IDR slices, P slices bound byte-exactly (docs/GOP_HD_SUPPORT.md)",
+    )
+    parser.add_argument(
         "--registered", action="store_true",
         help="prove a registry-pinned credential commitment; the video carries only the proof",
     )
@@ -278,9 +332,15 @@ def main() -> int:
     report = run(arguments)
     arguments.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     sys.stdout.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    passed = report["blind_video_only_verification"] and (
+    slices = report["slice_nal_comparison"]
+    # Embedding may rewrite only IDR slices.
+    untouched = (slices["nal_count_matches"] and slices["other_nal_units_changed"] == 0
+                 and slices["non_idr_slices_identical"] == slices["non_idr_slices"])
+    p_slice_check = (report["p_slice_tamper_rejected"] is True if slices["non_idr_slices"]
+                     else report["p_slice_tamper_rejected"] is None)
+    passed = report["blind_video_only_verification"] and untouched and (
         arguments.skip_security_checks
-        or (report["replay_rejected"] and report["tamper_rejected"])
+        or (report["replay_rejected"] and report["tamper_rejected"] and p_slice_check)
     )
     return 0 if passed else 1
 
