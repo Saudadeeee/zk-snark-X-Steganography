@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
+from .. import gop_policy as gop_policies
 from ..zkp_registry import BDLOP_OPEN_ZKP_SUITE, RelationRecord, SignedZkpRelationRegistry
 from ..zkp_sessions import SessionChallengeStore
 from . import bdlop, video_proof
@@ -56,20 +57,33 @@ class CarrierProfile:
     chunk_bytes: int = DEFAULT_CHUNK_BYTES
     # True: the commitment is pinned by the registry and the video carries only the proof.
     registered: bool = False
+    # Slice structure the transport accepts (``src.gop_policy``). GOP > 1
+    # streams need ``IDR_CARRIERS_INTER_RAW``; the default stays all-intra.
+    gop_policy: str = gop_policies.ALL_INTRA
+
+    def __post_init__(self) -> None:
+        gop_policies.require_policy(self.gop_policy)
 
     def profile_id(self, params: BdlopParams) -> bytes:
-        description = {
+        description: dict[str, Any] = {
             "contract": dataclasses.asdict(self.contract),
             "frames_per_segment": self.frames_per_segment,
             "chunk_bytes": self.chunk_bytes,
             "envelope_bytes": video_proof.envelope_size(params, registered=self.registered),
             "registered": self.registered,
         }
+        # Omitted for the default so all-intra profiles keep their identifiers;
+        # any other policy gives a different profile, policy hash and statement.
+        if self.gop_policy != gop_policies.ALL_INTRA:
+            description["gop_policy"] = self.gop_policy
         encoded = json.dumps(description, sort_keys=True, separators=(",", ":")).encode("ascii")
         return hashlib.sha256(_DOMAIN + b"carrier-profile\0" + encoded).digest()
 
-    def options(self) -> dict[str, int]:
-        return {"frames_per_segment": self.frames_per_segment}
+    def options(self) -> dict[str, Any]:
+        options: dict[str, Any] = {"frames_per_segment": self.frames_per_segment}
+        if self.gop_policy != gop_policies.ALL_INTRA:
+            options["gop_policy"] = self.gop_policy
+        return options
 
 
 @dataclass(frozen=True)

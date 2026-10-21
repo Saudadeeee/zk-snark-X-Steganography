@@ -130,6 +130,15 @@ the envelope, the proof can bind the video without depending on its own bits.
 What `D` does not bind is listed in the paper's security section
 (`docs/paper/sections/security.tex`, integrity limits).
 
+The carrier profile also fixes a GOP policy (`src/gop_policy.py`), checked on
+every segment before analysis: `all-intra` (default; every coded slice is IDR)
+or `idr-carriers-inter-raw-v1` (GOP > 1: carriers only in IDR slices, P and
+non-IDR I slices hashed as raw RBSP in `d_i`, every segment starting with an
+IDR). Both require canonical emulation prevention, so RBSP equality is NAL
+byte equality. A non-default policy is added to the carrier-profile
+description as `"gop_policy"`; all-intra profile identifiers are unchanged.
+See `docs/GOP_HD_SUPPORT.md`.
+
 ### 3.7 Envelope
 
 ```text

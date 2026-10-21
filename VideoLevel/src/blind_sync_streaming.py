@@ -31,6 +31,7 @@ from .core.analysis_cache import (
     load_or_build_video_analysis,
     park_video_analysis_for_content_reuse,
 )
+from .gop_policy import ALL_INTRA, SegmentStructure, inspect_segment, require_policy
 
 DEFAULT_STREAM_SEGMENT_FRAMES = 100
 DEFAULT_STREAM_CHUNK_BYTES = 1_250
@@ -219,6 +220,31 @@ def _split_video_into_segments(
     return segments, frame_counts
 
 
+def _inspect_segments(
+    segments: list[Path], frame_counts: list[int], gop_policy: str
+) -> list[SegmentStructure]:
+    """Check every segment's slice structure against the GOP policy; fail closed.
+
+    Each segment must start with an IDR slice (so cuts fall on IDR access
+    units and no segment references another) and must contain exactly as many
+    pictures as its decoded frame count.
+    """
+    require_policy(gop_policy)
+    structures = []
+    for index, (segment, frame_count) in enumerate(zip(segments, frame_counts, strict=True)):
+        try:
+            structure = inspect_segment(segment, gop_policy)
+        except ValueError as error:
+            raise ValueError(f"H.264 segment {index}: {error}") from None
+        if structure.pictures != frame_count:
+            raise ValueError(
+                f"H.264 segment {index}: {structure.pictures} coded pictures "
+                f"but {frame_count} decoded frames"
+            )
+        structures.append(structure)
+    return structures
+
+
 def _concatenate_annexb_segments(segments: list[Path], candidate: Path) -> None:
     with candidate.open("xb") as output:
         for segment in segments:
@@ -255,13 +281,17 @@ def derive_chunked_video_context(
     ffmpeg: str = "ffmpeg",
     ffprobe: str = "ffprobe",
     progress_callback: ProgressCallback | None = None,
+    gop_policy: str = ALL_INTRA,
 ) -> ChunkedVideoContext:
     """Select chunk carriers and compute verifier-reproducible video context.
 
     Positions are globalized by adding each segment's preceding macroblock
-    count. Modified-segment digests normalize the selected carriers; untouched
+    count (one picture-sized slot per coded slice, as the analysis numbers
+    them; for single-slice pictures this is frames x macroblocks per frame).
+    Modified-segment digests normalize the selected carriers; untouched
     segments are hashed byte-for-byte. The exact segmentation policy is part
-    of the domain-separated combined digest.
+    of the domain-separated combined digest. ``gop_policy`` fixes the slice
+    structure every segment must have (``src.gop_policy``).
     """
     source = Path(video_path).resolve(strict=True)
     if not source.is_file():
@@ -294,6 +324,7 @@ def derive_chunked_video_context(
             ffmpeg=ffmpeg,
             ffprobe=ffprobe,
         )
+        structures = _inspect_segments(segments, frame_counts, gop_policy)
         _emit_progress(
             progress_callback,
             "carrier_context",
@@ -308,7 +339,7 @@ def derive_chunked_video_context(
 
         global_positions: list[tuple[int, int, int]] = []
         segment_digests: list[tuple[int, str]] = []
-        frame_offset = 0
+        slot_offset = 0
         macroblocks_per_frame: int | None = None
         completed = False
         try:
@@ -364,13 +395,13 @@ def derive_chunked_video_context(
                         frame_verified_data=analysis[1],
                     )
                     global_positions.extend(
-                        (mb + frame_offset * current_mb_count, block, coefficient)
+                        (mb + slot_offset * current_mb_count, block, coefficient)
                         for mb, block, coefficient in positions
                     )
                     segment_digests.append((frame_count, canonical_digest))
                 else:
                     segment_digests.append((frame_count, _sha256_file(segment)))
-                frame_offset += frame_count
+                slot_offset += structures[index].coded_slices
                 if index < len(chunks) - 1:
                     clear_video_analysis_cache()
                 _emit_progress(
@@ -414,8 +445,12 @@ def embed_chunked_video_payload(
     ffmpeg: str = "ffmpeg",
     ffprobe: str = "ffprobe",
     progress_callback: ProgressCallback | None = None,
+    gop_policy: str = ALL_INTRA,
 ) -> ChunkedVideoEmbedResult:
-    """Embed ordered payload chunks while analyzing only one segment at a time."""
+    """Embed ordered payload chunks while analyzing only one segment at a time.
+
+    Only IDR slices are rewritten; every other NAL unit is copied unchanged.
+    """
     source = Path(cover_video_path).resolve(strict=True)
     output = Path(output_video_path).resolve()
     if not source.is_file():
@@ -431,13 +466,14 @@ def embed_chunked_video_payload(
     _positive_int("frames_per_segment", frames_per_segment)
     with tempfile.TemporaryDirectory(prefix="zkstego-stream-", dir=output.parent) as temp_name:
         temp_dir = Path(temp_name)
-        source_segments, _ = _split_video_into_segments(
+        source_segments, source_frame_counts = _split_video_into_segments(
             source,
             temp_dir,
             frames_per_segment,
             ffmpeg=ffmpeg,
             ffprobe=ffprobe,
         )
+        _inspect_segments(source_segments, source_frame_counts, gop_policy)
         _emit_progress(
             progress_callback,
             "embed",
@@ -528,6 +564,7 @@ def extract_chunked_video_payload(
     ffmpeg: str = "ffmpeg",
     ffprobe: str = "ffprobe",
     progress_callback: ProgressCallback | None = None,
+    gop_policy: str = ALL_INTRA,
 ) -> ChunkedVideoPayloadResult:
     """Blind-extract ordered pieces from video segments and validate reassembly."""
     source = Path(video_path).resolve(strict=True)
@@ -545,6 +582,7 @@ def extract_chunked_video_payload(
             ffprobe=ffprobe,
             progress_callback=progress_callback,
         )
+        structures = _inspect_segments(segments, frame_counts, gop_policy)
         _emit_progress(
             progress_callback,
             "extract",
@@ -556,7 +594,7 @@ def extract_chunked_video_payload(
         expected_count: int | None = None
         global_positions: list[tuple[int, int, int]] = []
         segment_digests: list[tuple[int, str]] = []
-        frame_offset = 0
+        slot_offset = 0
         macroblocks_per_frame: int | None = None
         try:
             for index, (segment, frame_count) in enumerate(zip(segments, frame_counts, strict=True)):
@@ -569,7 +607,7 @@ def extract_chunked_video_payload(
                         segments_total=len(segments),
                     )
                     segment_digests.append((frame_count, _sha256_file(segment)))
-                    frame_offset += frame_count
+                    slot_offset += structures[index].coded_slices
                     continue
                 _emit_progress(
                     progress_callback,
@@ -603,7 +641,7 @@ def extract_chunked_video_payload(
                 elif current_mb_count != macroblocks_per_frame:
                     raise ValueError("video resolution changes between H.264 segments")
                 global_positions.extend(
-                    (mb + frame_offset * current_mb_count, block, coefficient)
+                    (mb + slot_offset * current_mb_count, block, coefficient)
                     for mb, block, coefficient in result.carrier_positions
                 )
                 from .video_canonicalization import canonical_video_sha256
@@ -619,7 +657,7 @@ def extract_chunked_video_payload(
                         ),
                     )
                 )
-                frame_offset += frame_count
+                slot_offset += structures[index].coded_slices
                 clear_video_analysis_cache()
                 _emit_progress(
                     progress_callback,

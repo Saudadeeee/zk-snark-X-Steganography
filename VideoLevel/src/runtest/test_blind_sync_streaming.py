@@ -16,6 +16,17 @@ from src.blind_sync_streaming import (
     embed_chunked_video_payload,
     extract_chunked_video_payload,
 )
+from src.gop_policy import SegmentStructure
+
+
+def _accept_fake_segments(monkeypatch) -> None:
+    """The fake segments below are not H.264; skip the slice-structure check."""
+    monkeypatch.setattr(
+        "src.blind_sync_streaming._inspect_segments",
+        lambda segments, frame_counts, _policy: [
+            SegmentStructure(count, count, count, 0, 0) for count in frame_counts
+        ],
+    )
 
 
 def test_segment_split_reports_probe_and_boundary_progress(monkeypatch, tmp_path):
@@ -86,6 +97,7 @@ def test_streaming_extractor_reads_declared_chunks_from_video_segments(
         "src.blind_sync_streaming._split_video_into_segments",
         fake_split,
     )
+    _accept_fake_segments(monkeypatch)
 
     def fake_extract(path, *_args, **_kwargs):
         seen.append(Path(path))
@@ -161,6 +173,7 @@ def test_chunked_context_binds_global_positions_and_segment_hashes(
         "src.blind_sync_streaming._split_video_into_segments",
         lambda *_args, **_kwargs: (segments, [2, 2, 2]),
     )
+    _accept_fake_segments(monkeypatch)
     monkeypatch.setattr(
         "src.blind_sync.derive_blind_positions_operating_contract",
         lambda path, _key, required_bits, _contract, **_kwargs: (
@@ -240,6 +253,7 @@ def test_chunked_embed_reports_segment_progress(monkeypatch, tmp_path):
         "src.blind_sync_streaming._split_video_into_segments",
         lambda *_args, **_kwargs: (segments, [2, 2]),
     )
+    _accept_fake_segments(monkeypatch)
 
     def fake_embed(segment, stego_segment, *_args, **_kwargs):
         shutil.copyfile(segment, stego_segment)
