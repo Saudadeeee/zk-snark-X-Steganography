@@ -185,25 +185,33 @@ def test_cost_model_prefers_large_levels_in_textured_macroblocks():
 
 def test_direct_contract_serialisation_and_profile_ids_are_unchanged():
     from src.lattice_zk import video_pipeline as pipeline
-    from src.lattice_zk.params import BDLOP_OPEN_128
+    from src.lattice_zk.params import BDLOP_OPEN_128, BDLOP_OPEN_128_V1
 
     assert [field.name for field in dataclasses.fields(BlindOperatingContract)] == [
         "version", "signbit_only", "bottom_rows", "dedup_per_block", "max_bits_per_idr",
         "metadata_bound", "require_bitstream_patchable", "patchability_headroom",
         "max_modifications_per_block", "stable_carriers_only",
     ]
-    expected = {
-        # Profile ids computed at commit 18c5123, before adaptive carriers existed.
+    # The profile id binds the parameter set (it hashes the envelope size), so it
+    # differs between parameter sets; adding features must not change it within a
+    # set. The v1 digests were frozen at commit 18c5123 before adaptive carriers.
+    frozen_v1 = {
         MAGNITUDE.version: "ff66b446eef5d8c5c9aa1312395dee5dd94487e5e902f573b89a025e574664b7",
         T1_SIGN.version: "f97e7878b023901a9c4d0a250d6da745d0b1ca8119a75e90334b279f5e6fac28",
     }
-    profiles = {}
-    for contract in (MAGNITUDE, T1_SIGN, AdaptiveOperatingContract()):
-        profile = pipeline.CarrierProfile(contract, chunk_bytes=3800, registered=True)
-        profiles[contract.version] = profile.profile_id(BDLOP_OPEN_128).hex()
-    for version, digest in expected.items():
-        assert profiles[version] == digest
-    assert len(set(profiles.values())) == 3
+    # Current production set bdlop-open-128-v2 (8 165-byte registered envelope).
+    frozen_v2 = {
+        MAGNITUDE.version: "ad6321a5a63740c676152fa26e983fee18ad71a1115c60e3c425c5e6470c8341",
+        T1_SIGN.version: "ab7dfadcfa22673d9f48bcf385f9f5a7e15bc2b4d09ff06fd9e8f9803d3d6dd7",
+    }
+    for params, expected in ((BDLOP_OPEN_128_V1, frozen_v1), (BDLOP_OPEN_128, frozen_v2)):
+        profiles = {}
+        for contract in (MAGNITUDE, T1_SIGN, AdaptiveOperatingContract()):
+            profile = pipeline.CarrierProfile(contract, chunk_bytes=3800, registered=True)
+            profiles[contract.version] = profile.profile_id(params).hex()
+        for version, digest in expected.items():
+            assert profiles[version] == digest
+        assert len(set(profiles.values())) == 3
     assert not is_syndrome_coded(MAGNITUDE) and not is_syndrome_coded(T1_SIGN)
     assert is_syndrome_coded(AdaptiveOperatingContract())
 
