@@ -14,7 +14,7 @@ every chunk.  Here the chunk sizes follow the per-segment carrier capacity:
   to be byte-equal to :func:`pack_adaptive_chunks` of the recomputed plan.
 
 The plan parameters are part of the carrier profile id (and hence of the
-relation and statement), see ``docs/ADAPTIVE_CHUNKING.md``.
+relation and statement), see ``docs/CARRIERS_VA_CHUNKING.md``.
 """
 
 from __future__ import annotations

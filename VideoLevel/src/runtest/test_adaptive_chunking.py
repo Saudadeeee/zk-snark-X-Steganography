@@ -1,7 +1,7 @@
 """Capacity-adaptive chunking (ZKBC v2): plan, framing, transport and pipeline.
 
 The real H.264 round trip at production size is ``benchmark/latticezk_video_e2e.py
---adaptive-chunks`` (docs/ADAPTIVE_CHUNKING.md); here a 30-frame fixture covers
+--adaptive-chunks`` (docs/CARRIERS_VA_CHUNKING.md); here a 30-frame fixture covers
 the real transport and a stand-in channel covers the proof pipeline.
 """
 

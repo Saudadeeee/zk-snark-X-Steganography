@@ -223,7 +223,7 @@ length-prefix; `t` (6 720 byte) và `w` (n·N từ (word) 64-bit big-endian) có
 ### Q16. Binary và payload range proof: Fiat–Shamir with aborts và liên kết tới payload (Định lý `thm:bin-ks`, `thm:pay`)
 
 Binary proof (`binary_proof.py`) và payload range proof
-(`payload_range_proof.py`, `docs/PAYLOAD_RANGE_PROOF.md`) là các giao thức
+(`payload_range_proof.py`, `docs/PROOF_NHI_PHAN_VA_KHOANG.md`) là các giao thức
 bốn vòng (four-round) được biến thành non-interactive bằng các seed xâu chuỗi
 (chained); chỉ vòng cuối lặp lại khi abort. Payload range proof cho thấy rằng
 một payload commitment đang tồn tại che giấu (hides) `encode_payload(p)` cho

@@ -1,6 +1,6 @@
 """Proof that a BDLOP commitment hides a binary message (every coefficient in {0, 1}).
 
-Design and soundness analysis: ``docs/BINARY_PROOF_DESIGN.md``; theorem
+Design and soundness analysis: ``docs/PROOF_NHI_PHAN_VA_KHOANG.md``; theorem
 statements: ``docs/paper/sections/binary_proof.tex``.
 
 The statement commitment ``C = (t1, t2)`` is an ordinary commitment of

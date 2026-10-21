@@ -1,6 +1,6 @@
 """Proof that a payload commitment hides ``codec.encode_payload(p)`` for an L-byte ``p``.
 
-Design, cost comparison and soundness: ``docs/PAYLOAD_RANGE_PROOF.md``;
+Design, cost comparison and soundness: ``docs/PROOF_NHI_PHAN_VA_KHOANG.md``;
 theorem statements: ``docs/paper/sections/binary_proof.tex``.
 
 The statement is ``(x, L, C)`` with ``C = (t1, t2)`` an unchanged base

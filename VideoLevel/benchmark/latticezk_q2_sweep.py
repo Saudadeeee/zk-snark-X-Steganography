@@ -17,7 +17,7 @@ Optional case keys beyond the CIF/4CIF defaults: ``gop``, ``gop_policy``,
 ``x264_params``, ``stream_loop``, ``threads`` (see benchmark/latticezk_hd_cases.json),
 ``adaptive_chunks`` (capacity-adaptive ZKBC v2 transport instead of a fixed chunk
 size; ``density`` then becomes the plan's ``fill_permille``, ``min_chunk_bytes``
-its skip threshold; see docs/ADAPTIVE_CHUNKING.md), ``carrier`` (any
+its skip threshold; see docs/CARRIERS_VA_CHUNKING.md), ``carrier`` (any
 ``latticezk_video_e2e --carrier`` choice, e.g. ``magnitude-geo`` for the
 SPS-geometry carrier order at 4CIF/HD; see docs/GOP_HD_SUPPORT.md).
 """

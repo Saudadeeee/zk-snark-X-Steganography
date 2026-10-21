@@ -68,7 +68,7 @@ T1_SIGN_CONTRACT = BlindOperatingContract(
     stable_carriers_only=True,
 )
 # Same stable magnitude carriers, cost-adaptive syndrome-trellis coded
-# (docs/ADAPTIVE_CARRIERS.md): fewer, cheaper changes for the same envelope.
+# (docs/CARRIERS_VA_CHUNKING.md): fewer, cheaper changes for the same envelope.
 ADAPTIVE_CONTRACT = AdaptiveOperatingContract()
 ADAPTIVE_TEXTURE_CONTRACT = AdaptiveOperatingContract(cost_model="texture-magnitude-v1")
 # Resolution-aware variants (src/core/carrier_order.py): the same carriers in
@@ -485,7 +485,7 @@ def main() -> int:
     parser.add_argument(
         "--adaptive-chunks", action="store_true",
         help="capacity-adaptive ZKBC v2 transport: chunk sizes follow each segment's capacity, "
-        "low-capacity segments are skipped (docs/ADAPTIVE_CHUNKING.md); replaces --chunk-bytes",
+        "low-capacity segments are skipped (docs/CARRIERS_VA_CHUNKING.md); replaces --chunk-bytes",
     )
     defaults = AdaptiveChunkPlan()
     parser.add_argument("--min-chunk-bytes", type=int, default=defaults.min_chunk_bytes,

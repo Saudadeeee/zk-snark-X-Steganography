@@ -165,7 +165,7 @@ class AdaptiveOperatingContract(BlindOperatingContract):
     # exactly the segments the direct magnitude contract fits.
     header_carriers_per_bit: int = 1
     # "uniform" minimises the number of changes, which measured best against the
-    # learned detectors (docs/ADAPTIVE_CARRIERS.md); "texture-magnitude-v1" weights them.
+    # learned detectors (docs/CARRIERS_VA_CHUNKING.md); "texture-magnitude-v1" weights them.
     cost_model: str = "uniform"
 
 

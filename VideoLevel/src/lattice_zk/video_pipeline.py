@@ -90,7 +90,7 @@ class CarrierProfile:
     # Canonical-digest scope (D5); ``CODEC_POLICY_V2`` binds the full RBSP of
     # carrier NAL units, tags raw segments and pins the segmentation rule.
     codec_policy: str = CODEC_POLICY_V1
-    # Opt-in capacity-adaptive ZKBC v2 transport (docs/ADAPTIVE_CHUNKING.md).
+    # Opt-in capacity-adaptive ZKBC v2 transport (docs/CARRIERS_VA_CHUNKING.md).
     # ``None`` keeps the fixed ``chunk_bytes`` ZKBC v1 transport and its ids.
     chunk_plan: AdaptiveChunkPlan | None = None
 
