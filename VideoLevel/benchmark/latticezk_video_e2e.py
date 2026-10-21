@@ -70,6 +70,7 @@ CARRIER_CONTRACTS = {
     "adaptive": ADAPTIVE_CONTRACT, "adaptive-texture": ADAPTIVE_TEXTURE_CONTRACT,
 }
 DEMO_PAYLOAD = b"zkstego lattice-ZK demo payload: hidden provenance record #0001"
+CODEC_POLICIES = {"v1": pipeline.CODEC_POLICY_V1, "v2": pipeline.CODEC_POLICY_V2}
 
 
 def _sha256_file(path: Path) -> str:
@@ -100,7 +101,7 @@ def _decoded_quality(cover: Path, stego: Path) -> dict[str, float | None]:
     }
 
 
-def _link_to_credential(params, embedded, verified) -> dict[str, Any] | None:
+def _link_to_credential(params, embedded, verified, allow_toy: bool = False) -> dict[str, Any] | None:
     """Link the commitment extracted from the video to a credential commitment.
 
     Only meaningful for in-band envelopes: shows, from the bytes the verifier
@@ -131,14 +132,17 @@ def _link_to_credential(params, embedded, verified) -> dict[str, Any] | None:
     return {
         "proof_bytes": len(proof),
         "prove_s": round(prove_s, 3),
-        "linked_to_credential": linkage.verify_linkage(params, context, in_video, credential, proof),
+        "linked_to_credential": linkage.verify_linkage(
+            params, context, in_video, credential, proof, allow_toy_parameters=allow_toy
+        ),
         "other_credential_rejected": not linkage.verify_linkage(
-            params, context, in_video, stranger, proof
+            params, context, in_video, stranger, proof, allow_toy_parameters=allow_toy
         ),
         "disclosure_bytes": len(disclosure),
         "disclose_s": round(disclose_s, 3),
         "disclosure_verifies": video_proof.verify_disclosure_proof(
-            params, verified.envelope, disclosure, statement_id=verified.statement_id, nonce=nonce
+            params, verified.envelope, disclosure, statement_id=verified.statement_id, nonce=nonce,
+            allow_toy_parameters=allow_toy,
         ),
     }
 
@@ -171,6 +175,7 @@ def _verify_tampered(output, data: bytes, params, pins, profile, sync_key, pinne
         result = pipeline.verify_video_proof(
             tampered, params=params, pins=pins, profile=profile, sync_key=sync_key,
             expected_session=challenge, credential=pinned,
+            allow_toy_parameters=params.challenge_space_bits < 256,
         )
         return not result.valid, result.reason
     except Exception as error:  # a corrupted stream may fail to parse at all
@@ -226,11 +231,12 @@ def _adaptive_checks(output, embedded, params, pins, profile, sync_key, pinned, 
     ).sign(issuer_private, signer_id="e2e-other-plan")
     other_pins = pipeline.pins_from_registry(
         registry, issuer_public, params, other_profile, minimum_epoch=1,
-        allow_toy_parameters=params.name.startswith("bdlop-open-toy"), credential=pinned,
+        allow_toy_parameters=params.challenge_space_bits < 256, credential=pinned,
     )
     mismatch = pipeline.verify_video_proof(
         output, params=params, pins=other_pins, profile=other_profile, sync_key=sync_key,
         expected_session=challenge, credential=pinned,
+        allow_toy_parameters=params.challenge_space_bits < 256,
     )
     return {
         "skipped_segments": skipped,
@@ -242,11 +248,54 @@ def _adaptive_checks(output, embedded, params, pins, profile, sync_key, pinned, 
     }
 
 
+def _trailing_rbsp_tamper_check(output, params, pins, profile, sync_key, pinned, challenge):
+    """Append one zero byte after the RBSP stop bit of a carrier-bearing IDR NAL unit.
+
+    Codec policy v1 does not bind zero bits after the stop bit of a carrier
+    NAL unit (D5); v2 hashes the full RBSP, so the copy must be rejected.
+    """
+    if profile.chunk_plan is None:
+        from src.blind_sync_streaming import extract_chunked_video_payload
+
+        extracted = extract_chunked_video_payload(
+            output, sync_key, profile.contract, **profile.options()
+        )
+    else:
+        from src.blind_sync_adaptive import extract_adaptive_video_payload
+
+        extracted = extract_adaptive_video_payload(
+            output, sync_key, profile.contract, plan=profile.chunk_plan, **profile.options()
+        )
+    data = output.read_bytes()
+    idr = [span for span in gop_policies.nal_unit_spans(data)
+           if data[span[0]] & 0x1F == gop_policies.NAL_SLICE_IDR]
+    macroblocks = len(extracted.global_positions) and max(
+        position[0] for position in extracted.global_positions
+    )
+    # Every coded slice has a picture-sized macroblock slot, so (all-intra)
+    # the slot of a carrier's macroblock is the index of its IDR NAL unit.
+    sps = next(data[s:e] for s, e in gop_policies.nal_unit_spans(data) if data[s] & 0x1F == 7)
+    per_picture = gop_policies._check_sps(sps[1:].replace(b"\x00\x00\x03", b"\x00\x00"))
+    frames = sorted({mb // per_picture for mb, _block, _coefficient in extracted.global_positions})
+    for frame in reversed(frames):
+        _start, end = idr[frame]
+        if end == len(data) or data[end:end + 4] == b"\x00\x00\x00\x01":
+            rejected, reason = _verify_tampered(
+                output, data[:end] + b"\x00" + data[end:], params, pins, profile, sync_key,
+                pinned, challenge,
+            )
+            return {"carrier_frame": frame, "carrier_frames": len(frames),
+                    "max_carrier_macroblock": macroblocks, "inserted_at_byte": end,
+                    "rejected": rejected, "reason": reason}
+    return None
+
+
 def _security_checks(output, params, pins, profile, sync_key, store, pinned, challenge):
     """Replay the consumed session, then verify a copy with one flipped bit."""
     replay = pipeline.verify_video_proof(
         output, params=params, pins=pins, profile=profile, sync_key=sync_key,
         session_store=store, credential=pinned,
+        allow_toy_parameters=params.challenge_space_bits < 256,
     )
     logger.info("replay_rejected=%s", not replay.valid)
     stego_bytes = bytearray(output.read_bytes())
@@ -271,7 +320,8 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
     profile = pipeline.CarrierProfile(
         CARRIER_CONTRACTS[arguments.carrier], frames_per_segment=arguments.frames_per_segment,
         chunk_bytes=arguments.chunk_bytes, registered=arguments.registered,
-        gop_policy=arguments.gop_policy, chunk_plan=_chunk_plan(arguments),
+        gop_policy=arguments.gop_policy, codec_policy=CODEC_POLICIES[arguments.codec_policy],
+        chunk_plan=_chunk_plan(arguments),
     )
     credential = None
     if arguments.registered:
@@ -307,15 +357,19 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
         verified = pipeline.verify_video_proof(
             output, params=params, pins=pins, profile=profile, sync_key=sync_key,
             session_store=store, credential=pinned, progress_callback=_log_progress,
+            allow_toy_parameters=arguments.parameter_set == "TOY",
         )
         timings["verify_s"] = time.perf_counter() - started
         logger.info("verified=%s", verified.valid)
-        linkage_report = _link_to_credential(params, embedded, verified)
+        linkage_report = _link_to_credential(
+            params, embedded, verified, allow_toy=arguments.parameter_set == "TOY"
+        )
         logger.info("credential_linkage %s", json.dumps(linkage_report, sort_keys=True))
         replay_rejected = tamper_rejected = None
         tamper_reason = "not run (--skip-security-checks)"
         p_slice_tamper = None
         adaptive_checks = None
+        trailing_rbsp_tamper = None
         if not arguments.skip_security_checks:
             replay_rejected, tamper_rejected, tamper_reason = _security_checks(
                 output, params, pins, profile, sync_key, store, pinned, grant.challenge
@@ -328,6 +382,10 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
                     output, embedded, params, pins, profile, sync_key, pinned, grant.challenge
                 )
                 logger.info("adaptive_checks %s", json.dumps(adaptive_checks, sort_keys=True))
+            if arguments.trailing_rbsp_check:
+                trailing_rbsp_tamper = _trailing_rbsp_tamper_check(
+                    output, params, pins, profile, sync_key, pinned, grant.challenge
+                )
 
     report = {
         "protocol": "bdlop-open-v1 in-band H.264 CAVLC",
@@ -349,6 +407,8 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
         "frames_per_segment": profile.frames_per_segment,
         "chunk_bytes": profile.chunk_bytes,
         "gop_policy": profile.gop_policy,
+        "codec_policy": profile.codec_policy,
+        "codec_policy_id": pipeline.codec_policy_id(profile.codec_policy).hex(),
         "carrier_profile_id": profile.profile_id(params).hex(),
         "statement_id": embedded.statement_id.hex(),
         "blind_video_only_verification": verified.valid,
@@ -358,6 +418,7 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
         "tamper_reason": tamper_reason,
         "p_slice_tamper_rejected": None if p_slice_tamper is None else p_slice_tamper[0],
         "p_slice_tamper_reason": None if p_slice_tamper is None else p_slice_tamper[1],
+        "trailing_rbsp_zero_tamper": trailing_rbsp_tamper,
         "slice_nal_comparison": _slice_nal_comparison(cover, output),
         "payload_absent_from_output": DEMO_PAYLOAD not in output.read_bytes(),
         "decoded_quality": _decoded_quality(cover, output),
@@ -418,6 +479,16 @@ def main() -> int:
     parser.add_argument("--max-chunk-bytes", type=int, default=defaults.max_chunk_bytes,
                         help="adaptive plan: largest chunk per segment")
     parser.add_argument(
+        "--codec-policy", choices=sorted(CODEC_POLICIES), default="v1",
+        help="v1: original canonical digest (default, unchanged identifiers); v2: full RBSP of "
+        "carrier NAL units, tagged raw segments, pinned access-unit segmentation (D5)",
+    )
+    parser.add_argument(
+        "--trailing-rbsp-check", action="store_true",
+        help="also verify a copy with a zero byte appended after the RBSP stop bit of a "
+        "carrier-bearing IDR NAL unit (one extra extraction and verification)",
+    )
+    parser.add_argument(
         "--registered", action="store_true",
         help="prove a registry-pinned credential commitment; the video carries only the proof",
     )
@@ -441,10 +512,17 @@ def main() -> int:
         adaptive["other_plan_rejected"]
         and adaptive["skipped_segment_tamper_rejected"] in (True, None)
     )
+    trailing = report["trailing_rbsp_zero_tamper"]
+    # Under v2 the zero-extended carrier NAL unit must be rejected (D5); under
+    # v1 the outcome is recorded only, since v1 does not bind those bits.
+    trailing_check = (
+        not arguments.trailing_rbsp_check or arguments.codec_policy != "v2"
+        or (trailing is not None and trailing["rejected"] is True)
+    )
     passed = report["blind_video_only_verification"] and untouched and (
         arguments.skip_security_checks
         or (report["replay_rejected"] and report["tamper_rejected"] and p_slice_check
-            and adaptive_check)
+            and adaptive_check and trailing_check)
     )
     return 0 if passed else 1
 

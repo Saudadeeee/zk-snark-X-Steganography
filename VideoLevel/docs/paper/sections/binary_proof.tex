@@ -1,10 +1,11 @@
 % Binary-message proof for BDLOP commitments (roadmap B2). DRAFT.
 %
-% Not wired into main.tex; the integrator decides. Requires amsmath, amssymb,
-% amsthm and the theorem environments of main.tex, and the macros below (all
-% \providecommand, so they coexist with sections/security.tex).
-% Code: src/lattice_zk/binary_proof.py (parameter set bdlop-binary-128-v2),
-% design notes: docs/BINARY_PROOF_DESIGN.md.
+% Input by main.tex after the security appendix when present. Requires amsmath,
+% amssymb, amsthm and the theorem environments of main.tex, and the macros
+% below (all \providecommand, so they coexist with sections/security.tex).
+% Code: src/lattice_zk/binary_proof.py (parameter set bdlop-binary-128-v2) and
+% src/lattice_zk/payload_range_proof.py (bdlop-payload-range-128-v1);
+% design notes: docs/BINARY_PROOF_DESIGN.md, docs/PAYLOAD_RANGE_PROOF.md.
 
 \providecommand{\Rq}{\mathcal{R}_q}
 \providecommand{\norm}[1]{\lVert #1 \rVert}
@@ -199,24 +200,124 @@ challenges are roots. By Lemma~\ref{lem:bin-consistent} an accepting
 transcript needs a root.
 \end{proof}
 
-\begin{theorem}[Knowledge soundness of the non-interactive proof, informal]
+\paragraph{The non-interactive proof.}
+Write $H_1,\dots,H_4$ for the four domain-separated oracles (lift, check,
+combine, challenge), modelled as independent random oracles, and
+$\varepsilon_1=q^{-k}$, $\varepsilon_2=q^{-k'}$, $\varepsilon_3=q^{-N/2}$,
+$\varepsilon_4=2/|\Cset|$ for the four terms of Theorem~\ref{thm:bin-rbr}
+(we model $c=\mathsf{SampleInBall}(H_4(\cdot))$ as uniform on $\Cset$). The
+seeds are chained: the input of $H_{i+1}$ contains the output $s_i$ of $H_i$.
+For a relaxed opening with messages $\bar s$ of the rows hashed into an
+$H_i$-query, call the answer of that query \emph{bad} if it is the bad event
+of round $i$ in the proof of Theorem~\ref{thm:bin-rbr}: all
+$\langle\gamma_i,\bar v\rangle=0$ while $\bar v=\bar m\circ(\bar m-J)\ne0$
+($i=1$); $\delta_t+\varphi_t(e)=0$ for all $t$ while $e\ne0$ ($i=2$);
+$\sum_t\alpha_t\bar P_t=0$ while some $\bar P_t\ne0$ ($i=3$). Each of these
+depends only on the query input (it contains $C$, the rows of $D$ sent so
+far, $(h_t)_t$ and, through the chained seed, the earlier challenges) and on
+the answer, and for every fixed $\bar s$ it has probability at most
+$\varepsilon_i$ over the answer.
+
+\begin{theorem}[Knowledge soundness of the non-interactive proof]
 \label{thm:bin-ks}
-Let $\mathcal A$ make at most $Q_H$ random-oracle queries and output an
-accepting $(x,C,\pi)$ with probability $\varepsilon$. There is an extractor that
-rewinds $\mathcal A$ at the last oracle query (the general forking lemma, as in
-Lemma~\ref{lem:fork}, with three forks) and outputs a relaxed opening of $C$
-whose message is binary, or an \MSIS{} solution for $B_1$ or $B_1'$ with
-$\ell_\infty$ norm $\le8\kappa B$, with probability polynomially related to
-$\varepsilon-(Q_H+1)\erbr$.
+Let $\mathcal A$ make at most $Q$ queries to $H_1,\dots,H_4$ in total and
+output $(x,C,\pi)$ that the verifier accepts with probability $\varepsilon$.
+There is an extractor $\mathcal E$ that runs $\mathcal A$ an expected number of
+at most $3+2Q$ times, and for $i=1,2,3$ an algorithm $\mathcal F_i$ that runs
+$\mathcal E$ twice, such that $\mathcal E$ outputs a relaxed opening of $C$
+whose message is binary with probability at least
+\[
+\varepsilon-(Q+1)\sum_{i=1}^{4}\varepsilon_i-\sum_{i=1}^{3}\sqrt{(Q+1)\,\alpha_i}
+-\beta-\frac{Q^2}{2^{256}},
+\]
+where $\beta$ (resp.\ $\alpha_i$) is the probability that $\mathcal E$
+(resp.\ $\mathcal F_i$) outputs an \MSIS{} solution of $\ell_\infty$ norm at
+most $8\kappa B$ for $B_1$ or $B_1'$. In particular, if $C$ has no relaxed
+opening with a binary message, then
+$\varepsilon\le(Q+1)\erbr+\sum_i\sqrt{(Q+1)\alpha_i}+\beta+Q^22^{-256}$ with
+$\erbr\le2^{-149.99}$ for \texttt{bdlop-binary-128-v2}.
 \end{theorem}
-\noindent\emph{Status.} The round-by-round bound of
-Theorem~\ref{thm:bin-rbr} transfers to Fiat--Shamir with a loss of
-$Q_H+1$~\cite{ref:ccHLRR19}; the extraction of a binary opening combines it
-with the forking argument for the last round, in the style of
-Attema, Fehr and Klo{\ss}~\cite{ref:afk22}. We have not written out this
-composition for Fiat--Shamir \emph{with aborts}, in which only the last round
-is repeated after an abort; the treatment of aborts in
-\cite{ref:barbosa,ref:devevey} is expected to apply but this is a gap.
+\begin{proof}[Proof sketch]
+\emph{Aborts.} The prover repeats only steps~6--7 after an abort; the seeds
+$s_1,s_2,s_3$, the commitment $D$ and the masks $(h_t)_t$ are fixed before
+the first attempt. To the verifier and to a cheating prover, a rejected
+attempt is an $H_4$-query whose answer is discarded, so it is counted in $Q$
+and needs no further treatment for soundness. (For zero knowledge, rounds
+1--3 never abort, so the simulator obtains $\gamma,\rho,\mu,\alpha$ by plain
+oracle queries on its simulated $D$ and $h$, and only the aborting last round
+is simulated by programming $H_4$, exactly as for the opening proof in
+Lemma~\ref{lem:sim}, following~\cite{ref:barbosa,ref:devevey}.)
+
+\emph{Query order.} Without loss of generality $\mathcal A$ queries the four
+oracle inputs of its output (one more query each). Because the input of
+$H_{i+1}$ contains the 256-bit output of $H_i$, except with probability
+$Q^2/2^{256}$ these four queries occur in the order $H_1,H_2,H_3,H_4$ and the
+$H_4$-query is the last of them.
+
+\emph{The last round.} Fix $\mathcal A$'s coins and the answers to all queries
+before the critical $H_4$-query. Its input fixes the prefix
+$\mathit{pre}=(x,C,D,(h_t)_t,s_3)$ and the announcement $(t_G,w,w',v)$, and
+the remaining protocol is a $\Sigma$-protocol for the statement $\mathit{pre}$
+with challenge $c$ and response $(z,z')$. By Lemma~\ref{lem:bin-consistent} it
+is $3$-special sound for the relation ``relaxed openings of $C$ and $D$ with
+a common $\bar f\in\Cdiff$ whose messages satisfy $P_{\mathit{pre}}(\bar s)=0$,
+or an \MSIS{} solution of norm $\le8\kappa B$''. The Fiat--Shamir extractor
+of Attema, Fehr and Klo{\ss}~\cite{ref:afk22} for $k$-special-sound
+$\Sigma$-protocols ($k=3$; it rewinds only the critical query of the
+challenge oracle and treats the statement and every other oracle as part of
+$\mathcal A$) runs $\mathcal A$ an expected $k+Q(k-1)=3+2Q$ times and
+succeeds with probability at least
+$(\varepsilon-(Q+1)\varepsilon_4)/(1-\varepsilon_4)\ge\varepsilon-(Q+1)\varepsilon_4$.
+
+\emph{The statistical rounds.} If $\mathcal E$ outputs openings with messages
+$\bar s$ and none of the three round challenges of the output is bad for
+$\bar s$, the chain of Theorem~\ref{thm:bin-rbr} applies verbatim: a
+non-binary $\bar m$ would give $P_{\mathit{pre}}(\bar s)\ne0$. It remains to
+bound the event $\mathsf{Bad}_i$ that the round-$i$ challenge is bad for the
+extracted $\bar s$. The difficulty is that $\bar s$ is extracted \emph{after}
+the challenge and is fixed by the earlier rows only computationally (binding
+w.r.t.\ relaxed openings). Fix $j\le Q$ and everything before the $j$-th
+$H_i$-query (the ``prefix''); let $\xi$ be the rest of the randomness of
+$\mathcal E$, including the answer $\gamma^{(j)}$ to that query. For each
+message vector $m$ of the rows hashed into the query let
+$p_m=\Pr_\xi[\mathcal E \text{ outputs openings, the output uses query }j,
+\bar s|_{\mathrm{rows}}=m]$, $P=\sum_mp_m$, and let $m^\star$ maximise
+$p_m$; $m^\star$ depends on the prefix only, hence is independent of
+$\gamma^{(j)}$. Then
+\[
+\Pr_\xi[\mathsf{Bad}_i\wedge\text{query }j]
+\le\Pr[\gamma^{(j)}\text{ bad for }m^\star]+\Pr_\xi[\bar s|_{\mathrm{rows}}\ne m^\star]
+\le\varepsilon_i+(P-p_{m^\star}).
+\]
+$\mathcal F_i$ runs $\mathcal E$, and if the output uses the $j$-th
+$H_i$-query it reruns $\mathcal E$ from that query with fresh $\xi'$; it
+succeeds if both runs use query $j$ and their messages on the hashed rows
+differ. Two relaxed openings $(\bar r,\bar f)$, $(\bar r',\bar f')$ of the
+same $t_1$ (or $t_1'$) with different messages give the \MSIS{} solution
+$\bar f'\bar r-\bar f\bar r'\ne0$ of norm $\le8\kappa B$, as in
+Theorem~\ref{thm:binding}. Given the prefix, the success probability is
+$P^2-\sum_mp_m^2\ge P(P-p_{m^\star})\ge(P-p_{m^\star})^2$. Summing over $j$,
+with Jensen's and the Cauchy--Schwarz inequality,
+$\sum_j\mathbb E[P-p_{m^\star}]\le\sqrt{(Q+1)\alpha_i}$, so
+$\Pr[\mathsf{Bad}_i]\le(Q+1)\varepsilon_i+\sqrt{(Q+1)\alpha_i}$.
+Collecting the terms gives the bound.
+\end{proof}
+
+\noindent\emph{Status and remaining gaps.} This closes the composition
+that earlier drafts left open: aborts touch only the last round, the
+statistical rounds lose the usual factor $Q+1$ of
+round-by-round soundness~\cite{ref:ccHLRR19}, and only the last oracle is
+forked. What remains is (i) the \MSIS{} terms $\sqrt{(Q+1)\alpha_i}$, which
+carry the same square-root (forking) loss as the opening proof
+(Lemma~\ref{lem:fork}) and make the reduction non-tight;
+(ii) the use of the Attema--Fehr--Klo{\ss} $\Sigma$-protocol bound with a
+statement (the prefix) chosen adaptively by $\mathcal A$ through other oracles,
+which we believe is covered by their adaptive formulation but have not
+checked line by line; (iii) the modelling of
+$\mathsf{SampleInBall}\circ H_4$ as a uniform challenge (the seed has 256
+bits and $|\Cset|=2^{257}$); and (iv) a classical-ROM argument only, as for
+every theorem here. The proof is a sketch and has not been checked
+independently.
 
 \begin{theorem}[Honest-verifier zero knowledge]
 \label{thm:bin-zk}
@@ -242,6 +343,82 @@ rejection-sampled responses, and $r'$ is fresh in each proof, so the
 hybrids compose over many proofs.
 \end{proof}
 
+\subsection{Binding the proof to the payload encoding}
+\label{sec:payload-range}
+
+$\Pibin$ applies to a commitment of a 256-bit string, whereas the payload
+commitments of Section~\ref{sec:sec-notation} encode $\mathrm{len}(p)\,\|\,p$
+with three bytes per coefficient. A variant $\Pi_{\mathsf{pay}}$
+(\texttt{payload\_range\_proof.py}, set \texttt{bdlop-payload-range-128-v1})
+proves a statement about the payload commitment itself.
+
+\paragraph{Statement.} Public input $(x,L,C)$ with $C$ an unchanged base
+commitment and a public length $L\le128$ bytes. Write
+$\mathrm{Enc}(p)=e_L+A\beta(p)$, where $\beta(p)\in\{0,1\}^{\ell N}$ are the
+bits of $p$ (most significant first, $\ell=\lceil8L/N\rceil$ binary
+polynomials $\beta_j$), $e_L=\mathrm{Enc}(0^L)$ carries the length field, and
+$A$ is the public $\mathbb Z_q$-linear map that sends payload bit $s$ to
+coefficient $\lfloor(2+\lfloor s/8\rfloor)/3\rfloor$ with weight
+$2^{8(2-(2+\lfloor s/8\rfloor)\bmod3)+7-s\bmod8}$. $\Pi_{\mathsf{pay}}$ proves
+knowledge of a relaxed opening of $C$ whose message is $\mathrm{Enc}(p)$ for
+some $p\in\{0,1\}^{8L}$: every coefficient lies in $[0,2^{24})$ and is the
+packing of payload bytes, coefficient~$0$ carries $L$, and all coefficients
+beyond $\lceil(L+2)/3\rceil$ vanish. It reveals $L$ and nothing else about $p$.
+
+\paragraph{Protocol.} It is $\Pibin$ with three changes. (1) The binary
+polynomials live in the first $\ell$ slots of the auxiliary commitment $D$,
+whose rows $D_0=(t_1',t_{\beta_j})$ are hashed into $H_1$ together with
+$(\pid,x,L,C)$; the lifts and masks are added afterwards as further rows of
+$D$ under the same randomness $r'$. (2) There are $k$ lifts per binary
+polynomial, $u_{j,i}=\sigma(\gamma_{j,i}\circ\beta_j)$. (3) Each check
+functional gets a link term with a fresh $\rho^L_t\in\mathbb Z_q^N$:
+$E_t$ gains $\sigma(\rho^L_t)m-\sum_j\sigma(A_j^{\mathsf T}\rho^L_t)\beta_j
+-\langle\rho^L_t,e_L\rangle$, whose constant coefficient is
+$\langle\rho^L_t,\,m-A\beta-e_L\rangle$ by Lemma~\ref{lem:bin-lin}(i). The
+combined relation is $\sum_j\psi_j\beta_j+L(s)-H'=0$ with
+$\psi_j=\sum_i\beta_{j,i}u_{j,i}$, proved with one garbage polynomial as before.
+
+\begin{theorem}[Payload range proof]
+\label{thm:pay}
+Completeness holds as in Theorem~\ref{thm:bin-complete} with
+$k_{\mathrm{aux}}=n+\ell(k+1)+k'+1+\lambda$ (acceptance $0.0100$ for
+$\ell=1$, $0.0012$ for $\ell=4$; cap $2^{17}$ attempts). Theorems
+\ref{thm:bin-rbr} and \ref{thm:bin-ks} hold for $\Pi_{\mathsf{pay}}$ with the
+same four round errors and with ``binary message'' replaced by ``message
+$\mathrm{Enc}(p)$ for some $p\in\{0,1\}^{8L}$''. Zero knowledge holds as in
+Theorem~\ref{thm:bin-zk}; the simulator is given $(x,L,C)$.
+\end{theorem}
+\begin{proof}[Proof sketch]
+Lift round: if some $\bar\beta_j$ is not binary, the $k$ functionals
+$\langle\gamma_{j,i},\bar\beta_j\circ(\bar\beta_j-J)\rangle$ all vanish with
+probability $q^{-k}$, as $\bar\beta$ is fixed by $D_0$ before $\gamma$. Check
+round: the error vector $e$ now also contains
+$e_{\mathrm{link}}=\bar m-A\bar\beta-e_L$, which is fixed by $C$ and $D_0$
+before $\rho^L$, and $\varphi_t(e)$ gains
+$\langle\rho^L_t,e_{\mathrm{link}}\rangle$; it stays uniform when $e\ne0$.
+The combine and challenge rounds and the extraction are unchanged
+(Lemma~\ref{lem:bin-consistent} for $C$ and $D$). If no bad event occurs,
+$\bar\beta$ is binary and $\bar m=A\bar\beta+e_L$ holds in $\mathbb Z_q^N$;
+since $A\bar\beta+e_L$ has integer coefficients below $2^{24}<q$, $\bar m$ is
+exactly $\mathrm{Enc}(p)$ for the $p$ whose bits are the first $8L$ entries
+of $\bar\beta$.
+\end{proof}
+
+For \texttt{bdlop-payload-range-128-v1} the proof has $44\,558$ bytes for
+$L\le32$ ($\ell=1$) and grows by $9\,216$ bytes per further 32 payload bytes
+(72\,206 bytes at $L=128$). The auxiliary \MSIS{} ($n\times25$ to
+$n\times43$) and \MLWE{} (18 to 36 samples) instances give the same pinned
+estimates as the base set
+(\texttt{research/bdlop\_params/bdlop\_payload\_range\_128\_l\{1,4\}.estimate.json}).
+Two alternatives are worse. Encoding the payload in binary from the start
+(one bit per coefficient) lets $\Pibin$ apply directly, at
+$6\,720+43\,022$ bytes per 32 payload bytes, but needs a new envelope format
+and disclosure encoding. A range proof of all $256$ payload coefficients
+($\ell=24$ bit-planes) would need $177$ response polynomials,
+$256\,526$ bytes and an acceptance probability of $8\cdot10^{-10}$ per attempt
+with the fixed mask bound $\gamma=2^{17}$, so it is impractical without a
+larger auxiliary mask bound and a new \MSIS{} estimate.
+
 \begin{remark}[Limits]
 The theorems are classical-ROM statements; no QROM claim is made. The
 auxiliary key's \MSIS{} ($n\times24$ instead of $n\times14$) and \MLWE{}
@@ -252,15 +429,13 @@ sub-dimension ($\approx3\,022$) is below both widths
 (\texttt{research/bdlop\_params/bdlop\_binary\_128\_v2.estimate.json}); the
 dual-hybrid caveat of Section~\ref{sec:proof} applies equally. The
 soundness error $2^{-150}$ per round is below the $2^{-256}$ of the opening
-proof; $k=k'=9$ would match it at about 12\,KB more. The proof does not
-relate a binary commitment to the payload commitments of
-Section~\ref{sec:sec-notation}, which use a 24-bit-per-coefficient encoding.
+proof; $k=k'=9$ would match it at about 12\,KB more. $\Pi_{\mathsf{pay}}$
+makes the length $L$ public and covers payloads of at most 128 bytes; a
+hidden length would need a proof that the bytes after an unknown length are
+zero, and statements about the payload \emph{value} (beyond its encoding)
+are not proved, although any public affine constraint on the payload bits
+could be added as one more link functional.
 \end{remark}
 
-% Bibliography: ref:als20, ref:lnp22, ref:barbosa, ref:devevey, ref:bn06 exist
-% in references.bib. Two entries must be added:
-%  ref:ccHLRR19 R. Canetti, Y. Chen, J. Holmgren, A. Lombardi, G. N. Rothblum,
-%              R. D. Rothblum, D. Wichs. Fiat-Shamir: from practice to theory.
-%              STOC 2019 (round-by-round soundness).
-%  ref:afk22   T. Attema, S. Fehr, M. Kloss. Fiat-Shamir transformation of
-%              multi-round interactive proofs. TCC 2022.
+% Bibliography: ref:als20, ref:lnp22, ref:barbosa, ref:devevey, ref:ccHLRR19
+% and ref:afk22 are in references.bib.

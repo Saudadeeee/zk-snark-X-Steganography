@@ -16,7 +16,7 @@ def _video(session: bytes, payload: bytes, digest: bytes):
         canonical_video_sha256=digest,
     )
     envelope, opening = video_proof.create_envelope(TOY, statement, payload)
-    assert video_proof.verify_envelope(TOY, statement, envelope)
+    assert video_proof.verify_envelope(TOY, statement, envelope, allow_toy_parameters=True)
     return statement, envelope, opening
 
 
@@ -28,7 +28,7 @@ def test_two_videos_with_one_payload_can_be_linked_without_revealing_it() -> Non
     proof = linkage.prove_linkage(
         TOY, context, commitments[0], first[2].randomness, commitments[1], second[2].randomness
     )
-    assert linkage.verify_linkage(TOY, context, commitments[0], commitments[1], proof)
+    assert linkage.verify_linkage(TOY, context, commitments[0], commitments[1], proof, allow_toy_parameters=True)
     assert b"owner record" not in proof
 
 
@@ -53,11 +53,11 @@ def test_linkage_does_not_transfer_to_other_videos_or_contexts() -> None:
     proof = linkage.prove_linkage(
         TOY, context, commitments[0], first[2].randomness, commitments[1], second[2].randomness
     )
-    assert not linkage.verify_linkage(TOY, context, commitments[0], commitments[2], proof)
-    assert not linkage.verify_linkage(TOY, context[::-1], commitments[0], commitments[1], proof)
+    assert not linkage.verify_linkage(TOY, context, commitments[0], commitments[2], proof, allow_toy_parameters=True)
+    assert not linkage.verify_linkage(TOY, context[::-1], commitments[0], commitments[1], proof, allow_toy_parameters=True)
     other_context = (first[0].statement_id, third[0].statement_id)
-    assert not linkage.verify_linkage(TOY, other_context, commitments[0], commitments[1], proof)
-    assert not linkage.verify_linkage(TOY, ("text",), commitments[0], commitments[1], proof)  # type: ignore[arg-type]
+    assert not linkage.verify_linkage(TOY, other_context, commitments[0], commitments[1], proof, allow_toy_parameters=True)
+    assert not linkage.verify_linkage(TOY, ("text",), commitments[0], commitments[1], proof, allow_toy_parameters=True)  # type: ignore[arg-type]
 
 
 def test_video_payload_can_be_linked_to_a_registered_credential() -> None:
@@ -71,12 +71,12 @@ def test_video_payload_can_be_linked_to_a_registered_credential() -> None:
     proof = linkage.prove_linkage(
         TOY, context, in_video, opening.randomness, credential, credential_randomness
     )
-    assert linkage.verify_linkage(TOY, context, in_video, credential, proof)
+    assert linkage.verify_linkage(TOY, context, in_video, credential, proof, allow_toy_parameters=True)
 
     stranger = bdlop.commit(
         TOY, codec.encode_payload(TOY, b"device 42"), bdlop.sample_randomness(TOY, b"d" * 32)
     )
-    assert not linkage.verify_linkage(TOY, context, in_video, stranger, proof)
+    assert not linkage.verify_linkage(TOY, context, in_video, stranger, proof, allow_toy_parameters=True)
 
 
 def test_context_encoding_is_unambiguous() -> None:

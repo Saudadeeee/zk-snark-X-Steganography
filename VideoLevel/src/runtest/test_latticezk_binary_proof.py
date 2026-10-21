@@ -14,7 +14,7 @@ import pytest
 from src.lattice_zk import binary_proof as bp
 from src.lattice_zk import bdlop, codec, equality_proof, fast_ring, opening_proof, ring
 from src.lattice_zk.params import BDLOP_OPEN_128, TOY
-from src.runtest.test_latticezk_bdlop import random_corruptions
+from src.runtest.test_latticezk_bdlop import forged_commitment, random_corruptions
 
 STATEMENT = b"binary statement"
 P = bp.BINARY_TOY
@@ -246,18 +246,21 @@ def test_explicit_mask_seed_is_deterministic(toy_proof) -> None:
 
 
 # Known-answer vectors: SHA-256 of the commitment and of the proof bytes.
+# Proof digests and attempt counts were regenerated deliberately for the D7
+# domain-separated hedged mask key (commitments are unchanged); proofs made
+# with the earlier derivation still verify, the verifier never sees the mask.
 KAT = {
     "bdlop-binary-toy-v1": (
         "0d5e22ce9b3c581f5727c3ce2abcbeb3f198f6e2f1700fce5b851d7289fef818",
         "6048b6b2d3095c5a0a1cb9515de3e4f98663b7cddc61a4163df3e8aa0cadfee3",
-        "80c3d543228e5256b051783f2f0ee7684e7a09645cf2169e9a0e1066afc43620",
-        24,
+        "69fe5f7f909b148399346e4db7bdf319bca5e3b35d857f8eecf803939f579365",
+        9,
     ),
     "bdlop-binary-128-v2": (
         "1fc36ad8f392b1119c28b7c714b7cf31cb82ebf7033ede8860aeb1ca000379ca",
         "cd4019d75376125df72e7093fb15c4b7cca9b7615ce88404934dc64bf4db3357",
-        "dd809cf28126d1c18c86bb8df6ede12e9b4325ba584f1d8681e3fd48a644ea65",
-        115,
+        "990498570a7b8d575fcf295ac0fa75cc63fe185467df83faf74b898aa62cac8d",
+        102,
     ),
 }
 
@@ -395,10 +398,13 @@ def test_malformed_inputs_return_false(toy_proof) -> None:
     assert not bp.verify(P, "statement", commitment, proof)
     assert not bp.verify(P, STATEMENT, commitment, bytearray(proof))
     assert not bp.verify(P, STATEMENT, (commitment.t1, commitment.t2), proof)
-    wrapped = bdlop.Commitment(commitment.t1.tolist(), commitment.t2)
+    wrapped = forged_commitment(commitment.t1.tolist(), commitment.t2, P.base)
     assert not bp.verify(P, STATEMENT, wrapped, proof)
-    unreduced = bdlop.Commitment(commitment.t1, commitment.t2.copy())
-    unreduced.t2[0] += Q
+    unreduced_t2 = commitment.t2.copy()
+    unreduced_t2[0] += Q
+    with pytest.raises(ValueError):
+        bdlop.Commitment(commitment.t1, unreduced_t2, params=P.base)
+    unreduced = forged_commitment(commitment.t1, unreduced_t2, P.base)
     assert not bp.verify(P, STATEMENT, unreduced, proof)
     assert not bp.verify(P, STATEMENT, commitment, b"")
 

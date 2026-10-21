@@ -49,7 +49,6 @@ from .blind_sync_streaming import (
     _emit_progress,
     _inspect_segments,
     _positive_int,
-    _sha256_file,
     _split_video_into_segments,
 )
 from .core.analysis_cache import (
@@ -59,11 +58,20 @@ from .core.analysis_cache import (
     park_video_analysis_for_content_reuse,
 )
 from .gop_policy import ALL_INTRA
+from .video_canonicalization import (
+    DIGEST_V1,
+    DIGEST_V2,
+    SEGMENTATION_RULE_V2,
+    raw_segment_sha256,
+    require_digest_policy,
+)
 
 ROLE_UNUSED = 0  # after the payload: not analysed, hashed byte-for-byte
 ROLE_SKIPPED = 1  # analysed, below the plan threshold: hashed byte-for-byte
 ROLE_CARRIER = 2  # carries one chunk; the digest normalises its carriers
 _DIGEST_DOMAIN = b"zkstego/canonical-h264-segmented-adaptive/v1\x00"
+# DIGEST_V2 (codec policy v2): own domain plus the pinned segmentation rule.
+_DIGEST_DOMAIN_V2 = b"zkstego/canonical-h264-segmented-adaptive/v2\x00"
 
 
 @dataclass(frozen=True)
@@ -186,9 +194,20 @@ def combine_adaptive_segment_digests(
     frames_per_segment: int,
     plan: AdaptiveChunkPlan,
     payload_bytes: int,
+    digest_policy: str = DIGEST_V1,
 ) -> str:
-    """Domain-separated digest of the segmentation, the plan and every segment."""
-    digest = hashlib.sha256(_DIGEST_DOMAIN)
+    """Domain-separated digest of the segmentation, the plan and every segment.
+
+    Roles already type every segment digest; ``DIGEST_V2`` additionally uses
+    its own domain and binds the pinned segmentation rule.
+    """
+    require_digest_policy(digest_policy)
+    if digest_policy == DIGEST_V2:
+        rule = SEGMENTATION_RULE_V2.encode("ascii")
+        digest = hashlib.sha256(_DIGEST_DOMAIN_V2)
+        digest.update(struct.pack(">H", len(rule)) + rule)
+    else:
+        digest = hashlib.sha256(_DIGEST_DOMAIN)
     digest.update(_require_plan(plan).plan_id())
     digest.update(struct.pack(">III", frames_per_segment, payload_bytes, len(records)))
     for expected, record in enumerate(records):
@@ -205,7 +224,8 @@ def combine_adaptive_segment_digests(
 
 
 def _canonical_segment_digest(segment: Path, positions, global_offset_slots: int,
-                              macroblocks: list[int]) -> tuple[str, list[tuple[int, int, int]]]:
+                              macroblocks: list[int], digest_policy: str,
+                              ) -> tuple[str, list[tuple[int, int, int]]]:
     """Canonical digest of a carrier segment and its globalised positions."""
     from .video_canonicalization import canonical_video_sha256
 
@@ -217,7 +237,8 @@ def _canonical_segment_digest(segment: Path, positions, global_offset_slots: int
     elif current != macroblocks[0]:
         raise ValueError("video resolution changes between H.264 segments")
     digest = canonical_video_sha256(
-        segment, positions, parser=reconstruction["parser"], frame_verified_data=analysis[1]
+        segment, positions, parser=reconstruction["parser"], frame_verified_data=analysis[1],
+        digest_policy=digest_policy,
     )
     shifted = [(mb + global_offset_slots * current, block, coefficient)
                for mb, block, coefficient in positions]
@@ -228,7 +249,7 @@ def _walk(
     segments: list[Path], frame_counts: list[int], structures: list[Any], *,
     payload_bytes: int | None, plan: AdaptiveChunkPlan, sync_key: bytes, contract: Any,
     carry: Carry, bind: bool, phase: str, progress_callback: ProgressCallback | None,
-    keep_last_analysis: bool = False,
+    keep_last_analysis: bool = False, digest_policy: str = DIGEST_V1,
 ) -> _Walk:
     """Visit segments in order, applying the greedy plan; fail closed on any deviation.
 
@@ -254,7 +275,7 @@ def _walk(
         if total is not None and offset == total:
             _emit_progress(progress_callback, phase, "segment_unused", **events)
             records.append(SegmentRecord(index, frame_count, ROLE_UNUSED, 0, 0,
-                                         _sha256_file(segment) if bind else ""))
+                                         raw_segment_sha256(segment, digest_policy) if bind else ""))
             outputs.append(segment)
             slot_offset += coded_slices
             continue
@@ -264,7 +285,7 @@ def _walk(
         usable = plan.chunk_capacity_bytes(capacity)
         if usable == 0:
             records.append(SegmentRecord(index, frame_count, ROLE_SKIPPED, capacity, 0,
-                                         _sha256_file(segment) if bind else ""))
+                                         raw_segment_sha256(segment, digest_policy) if bind else ""))
             outputs.append(segment)
             slot_offset += coded_slices
             clear_video_analysis_cache()
@@ -295,7 +316,7 @@ def _walk(
         digest = ""
         if bind:
             digest, shifted = _canonical_segment_digest(
-                segment, carried.positions, slot_offset, macroblocks
+                segment, carried.positions, slot_offset, macroblocks, digest_policy
             )
             global_positions.extend(shifted)
         records.append(SegmentRecord(index, frame_count, ROLE_CARRIER, capacity, planned, digest))
@@ -319,11 +340,13 @@ def _walk(
 
 def _prepare(video_path: str | Path, temp_dir: str, frames_per_segment: int, ffmpeg: str,
              ffprobe: str, gop_policy: str, progress_callback: ProgressCallback | None,
-             phase: str) -> tuple[list[Path], list[int], list[Any]]:
+             phase: str, digest_policy: str) -> tuple[list[Path], list[int], list[Any]]:
     _positive_int("frames_per_segment", frames_per_segment)
+    require_digest_policy(digest_policy)
     segments, frame_counts = _split_video_into_segments(
         video_path, temp_dir, frames_per_segment, ffmpeg=ffmpeg, ffprobe=ffprobe,
         progress_callback=progress_callback if phase == "extract" else None,
+        digest_policy=digest_policy,
     )
     structures = _inspect_segments(segments, frame_counts, gop_policy)
     _emit_progress(progress_callback, phase, "segments_ready",
@@ -343,6 +366,7 @@ def derive_adaptive_video_context(
     plan: AdaptiveChunkPlan, frames_per_segment: int = DEFAULT_STREAM_SEGMENT_FRAMES,
     ffmpeg: str = "ffmpeg", ffprobe: str = "ffprobe",
     progress_callback: ProgressCallback | None = None, gop_policy: str = ALL_INTRA,
+    digest_policy: str = DIGEST_V1,
 ) -> AdaptiveVideoContext:
     """Plan the chunks, select their carriers and compute the bound video context.
 
@@ -386,14 +410,15 @@ def derive_adaptive_video_context(
     with tempfile.TemporaryDirectory(prefix="zkstego-adaptive-context-") as temp_name:
         segments, frame_counts, structures = _prepare(
             source, temp_name, frames_per_segment, ffmpeg, ffprobe, gop_policy,
-            progress_callback, "carrier_context",
+            progress_callback, "carrier_context", digest_policy,
         )
         completed = False
         try:
             walk = _walk(segments, frame_counts, structures, payload_bytes=len(payload),
                          plan=plan, sync_key=sync_key, contract=contract, carry=carry,
                          bind=True, phase="carrier_context",
-                         progress_callback=progress_callback, keep_last_analysis=True)
+                         progress_callback=progress_callback, keep_last_analysis=True,
+                         digest_policy=digest_policy)
             completed = True
         finally:
             if completed:
@@ -405,7 +430,7 @@ def derive_adaptive_video_context(
     return AdaptiveVideoContext(
         positions_hash=hash_positions(list(walk.global_positions)),
         canonical_video_sha256=combine_adaptive_segment_digests(
-            walk.records, frames_per_segment, plan, walk.payload_bytes
+            walk.records, frames_per_segment, plan, walk.payload_bytes, digest_policy
         ),
         global_positions=walk.global_positions,
         segments_used=len(walk.layout),
@@ -422,6 +447,7 @@ def embed_adaptive_video_payload(
     frames_per_segment: int = DEFAULT_STREAM_SEGMENT_FRAMES,
     ffmpeg: str = "ffmpeg", ffprobe: str = "ffprobe",
     progress_callback: ProgressCallback | None = None, gop_policy: str = ALL_INTRA,
+    digest_policy: str = DIGEST_V1,
 ) -> AdaptiveVideoEmbedResult:
     """Embed ZKBC v2 chunks under the plan; only IDR slices of carrier segments change.
 
@@ -460,7 +486,7 @@ def embed_adaptive_video_payload(
 
         segments, frame_counts, structures = _prepare(
             source, temp_name, frames_per_segment, ffmpeg, ffprobe, gop_policy,
-            progress_callback, "embed",
+            progress_callback, "embed", digest_policy,
         )
         try:
             walk = _walk(segments, frame_counts, structures, payload_bytes=len(payload),
@@ -493,6 +519,7 @@ def extract_adaptive_video_payload(
     payload_bytes: int | None = None, frames_per_segment: int = DEFAULT_STREAM_SEGMENT_FRAMES,
     ffmpeg: str = "ffmpeg", ffprobe: str = "ffprobe",
     progress_callback: ProgressCallback | None = None, gop_policy: str = ALL_INTRA,
+    digest_policy: str = DIGEST_V1,
 ) -> AdaptiveVideoPayloadResult:
     """Recompute capacities and plan from the video alone, then extract and check.
 
@@ -514,12 +541,13 @@ def extract_adaptive_video_payload(
     with tempfile.TemporaryDirectory(prefix="zkstego-adaptive-extract-") as temp_name:
         segments, frame_counts, structures = _prepare(
             source, temp_name, frames_per_segment, ffmpeg, ffprobe, gop_policy,
-            progress_callback, "extract",
+            progress_callback, "extract", digest_policy,
         )
         try:
             walk = _walk(segments, frame_counts, structures, payload_bytes=payload_bytes,
                          plan=plan, sync_key=sync_key, contract=contract, carry=carry,
-                         bind=True, phase="extract", progress_callback=progress_callback)
+                         bind=True, phase="extract", progress_callback=progress_callback,
+                         digest_policy=digest_policy)
         finally:
             clear_video_analysis_cache()
     # Recompute the whole plan from the capacities and require it to match.
@@ -531,7 +559,7 @@ def extract_adaptive_video_payload(
         carriers_used=walk.carriers_used,
         positions_hash=hash_positions(list(walk.global_positions)),
         canonical_video_sha256=combine_adaptive_segment_digests(
-            walk.records, frames_per_segment, plan, walk.payload_bytes
+            walk.records, frames_per_segment, plan, walk.payload_bytes, digest_policy
         ),
         global_positions=walk.global_positions,
         chunks=walk.chunks,

@@ -20,6 +20,65 @@ CarrierPosition = tuple[int, int, int]
 ModifiedBlock = tuple[int, int, list[int]]
 MagnitudePair = Literal["even_down", "native_odd_anchor_v1"]
 
+# Canonical-digest scope versions (security appendix, D5).
+#
+# ``DIGEST_V1`` is the original digest; it is kept byte-identical so existing
+# videos, registries and statements keep verifying.  It hashes carrier-bearing
+# IDR NAL units only up to their RBSP stop bit (trailing zero bits are not
+# bound), hashes a carrier-free transport segment as an untagged SHA-256 of
+# its bytes, and relies on whatever segmentation ffmpeg produces.
+#
+# ``DIGEST_V2`` closes those gaps: (a) carrier-free segments are hashed with a
+# domain tag and their length, and every segment digest is typed in the
+# combined digest; (b) the complete RBSP of every carrier-bearing IDR NAL
+# unit, including all bits after the stop bit, is hashed together with its
+# byte length; (c) the segmentation is pinned: segments must be exactly the
+# access-unit partition of the input (``SEGMENTATION_RULE_V2``), so the
+# digest is a function of the input bytes alone, whatever segmenter produced
+# the pieces.  It also hashes the leading zero bytes of a segment and refuses
+# NAL unit types the parser does not model, so no byte of a carrier segment is
+# outside the digest except the carrier codewords it replaces by levels.
+DIGEST_V1 = "carrier-normalized-v1"
+DIGEST_V2 = "carrier-normalized-full-rbsp-v2"
+DIGEST_POLICIES = (DIGEST_V1, DIGEST_V2)
+SEGMENTATION_RULE_V2 = "annexb-access-unit-exact-partition-v1"
+_RAW_SEGMENT_DOMAIN_V2 = b"zkstego/canonical-h264-raw-segment/v2\x00"
+
+
+def require_digest_policy(digest_policy: str) -> str:
+    if digest_policy not in DIGEST_POLICIES:
+        raise ValueError(f"unknown canonical digest policy {digest_policy!r}; expected one of {DIGEST_POLICIES}")
+    return digest_policy
+
+
+def raw_segment_sha256(path: str | Path, digest_policy: str = DIGEST_V1) -> str:
+    """Digest of a transport segment without carriers.
+
+    ``DIGEST_V1``: plain SHA-256 of the bytes (kept for existing videos).
+    ``DIGEST_V2``: SHA-256 over a domain tag, the byte length and the bytes,
+    so a raw-segment digest never equals a carrier-normalized one.
+    """
+    require_digest_policy(digest_policy)
+    source = Path(path)
+    if digest_policy == DIGEST_V1:
+        digest = hashlib.sha256()
+    else:
+        digest = hashlib.sha256(_RAW_SEGMENT_DOMAIN_V2 + struct.pack(">Q", source.stat().st_size))
+    with source.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _require_canonical_annexb(data: bytes) -> None:
+    """V2: every byte belongs to a start code or a minimally escaped NAL unit."""
+    from .gop_policy import _is_canonically_escaped, _require_framed_stream, nal_unit_spans
+
+    _require_framed_stream(data)
+    for start, end in nal_unit_spans(data):
+        if not _is_canonically_escaped(data[start + 1:end]):
+            raise ValueError("NAL unit with non-canonical emulation prevention")
+
 
 def canonicalize_carrier_coefficients(
     coefficients: Sequence[CoefficientBlock],
@@ -138,6 +197,7 @@ def canonical_video_sha256(
     parser: Any | None = None,
     frame_verified_data: Mapping[int, tuple[dict, dict, bytes]] | None = None,
     magnitude_pair: MagnitudePair = "even_down",
+    digest_policy: str = DIGEST_V1,
 ) -> str:
     """Hash the carrier-normalized H.264 syntax without re-encoding slices.
 
@@ -146,7 +206,9 @@ def canonical_video_sha256(
     committed verbatim. Each luma residual block containing a carrier is
     represented by its canonicalized coefficient vector instead of its
     variable-length CAVLC codeword. The source video is never modified.
+    ``digest_policy`` selects the digest scope (``DIGEST_V1`` or ``DIGEST_V2``).
     """
+    require_digest_policy(digest_policy)
     source = Path(video_path).expanduser().resolve(strict=True)
     if not source.is_file():
         raise ValueError("video_path must identify a regular file")
@@ -164,7 +226,11 @@ def canonical_video_sha256(
         raise ValueError("unknown magnitude pair profile")
 
     if not carrier_positions:
+        if digest_policy == DIGEST_V2:
+            return raw_segment_sha256(source, DIGEST_V2)
         return digest_file(source)
+    if digest_policy == DIGEST_V2:
+        _require_canonical_annexb(source.read_bytes())
 
     if parser is None:
         from .bitstream.bitstream_ops import BitstreamReconstructor
@@ -178,6 +244,11 @@ def canonical_video_sha256(
         )
     else:
         frame_data = frame_verified_data
+    if digest_policy == DIGEST_V2:
+        return canonical_h264_digest(
+            parser.nal_units, frame_data, carrier_positions,
+            magnitude_pair=magnitude_pair, digest_policy=DIGEST_V2,
+        )
     if magnitude_pair == "even_down":
         return canonical_h264_digest(parser.nal_units, frame_data, carrier_positions)
     return canonical_h264_digest(
@@ -192,6 +263,7 @@ def canonical_h264_digest(
     carrier_positions: Sequence[CarrierPosition],
     *,
     magnitude_pair: MagnitudePair = "even_down",
+    digest_policy: str = DIGEST_V1,
 ) -> str:
     """Hash parsed NALs while replacing carrier-containing residual blocks.
 
@@ -200,8 +272,17 @@ def canonical_h264_digest(
     coefficient blocks as signed 64-bit values. Thus a different CAVLC
     codeword length for the normalized carrier does not shift or invalidate
     later syntax bits.
+
+    Under ``DIGEST_V1`` a carrier-bearing IDR NAL unit is hashed up to its
+    RBSP stop bit.  Under ``DIGEST_V2`` its complete RBSP is hashed, with its
+    byte length, so zero bits after the stop bit are bound too; the leading
+    bytes before the first start code are counted and NAL unit types the
+    parser does not model are refused.
     """
     from .bitstream.bitstream_ops import BitArray
+
+    require_digest_policy(digest_policy)
+    full_rbsp = digest_policy == DIGEST_V2
 
     positions = list(carrier_positions)
     if len(set(tuple(position) for position in positions)) != len(positions):
@@ -241,11 +322,20 @@ def canonical_h264_digest(
         domain = b"zkstego/canonical-h264-carrier-normalization/v1\x00"
     else:
         raise ValueError("unknown magnitude pair profile")
+    if full_rbsp:
+        domain = domain[:-1] + b"/full-rbsp-v2\x00"
     digest = hashlib.sha256(domain)
+    if full_rbsp:
+        leading = getattr(nal_units[0], "start_pos", None) if nal_units else 0
+        if isinstance(leading, bool) or not isinstance(leading, int) or leading < 0:
+            raise ValueError("first NAL unit has no valid start position")
+        digest.update(b"LEAD\x00" + struct.pack(">Q", leading))
     nal_index = 0
     idr_index = 0
     for nal in nal_units:
         nal_type = int(nal.nal_unit_type)
+        if full_rbsp and not 0 <= nal_type <= 31:
+            raise ValueError("NAL unit type is not modeled by the parser")
         digest.update(b"NAL\x00")
         digest.update(
             struct.pack(
@@ -285,8 +375,11 @@ def canonical_h264_digest(
             (mb, block): levels for mb, block, levels in normalization
         }
         affected_keys = sorted({(mb, block) for mb, block, _ in current_positions})
-        bitstream = BitArray(bytes(nal.rbsp_byte))
-        syntax_end = _rbsp_syntax_bit_length(bytes(nal.rbsp_byte))
+        rbsp = bytes(nal.rbsp_byte)
+        bitstream = BitArray(rbsp)
+        syntax_end = _rbsp_syntax_bit_length(rbsp)
+        if full_rbsp:
+            digest.update(b"RBSP\x00" + struct.pack(">Q", len(rbsp)))
         cursor = 0
         for key in sorted(affected_keys, key=lambda block_key: offsets.get(block_key, {}).get("start_bit", -1)):
             block_offset = offsets.get(key)
@@ -310,7 +403,7 @@ def canonical_h264_digest(
                     raise ValueError(f"carrier block contains a non-integer coefficient: {key}")
                 digest.update(struct.pack(">q", level))
             cursor = end
-        _update_raw_bit_segment(digest, bitstream, cursor, syntax_end)
+        _update_raw_bit_segment(digest, bitstream, cursor, 8 * len(rbsp) if full_rbsp else syntax_end)
 
     if idr_index != len(frame_offsets):
         raise ValueError("parsed IDR frame data does not match the NAL stream")

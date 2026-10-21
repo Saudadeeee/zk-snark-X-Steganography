@@ -58,6 +58,7 @@ LATTICE_ZK_PYTEST = (
     "test_latticezk_cli.py",
     "test_latticezk_ml_steganalysis.py",
     "test_latticezk_q2_sweep.py",
+    "test_hardening_d5_d7_d8.py",
 )
 # Modules the lattice-ZK pipeline changed or depends on directly: carrier
 # analysis (analysis_cache, stego, blind_sync), chunk framing, RBSP patching,

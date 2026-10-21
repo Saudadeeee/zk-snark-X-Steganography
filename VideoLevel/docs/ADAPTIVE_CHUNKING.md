@@ -154,8 +154,16 @@ equal the recomputed one. Tests reject each of the following:
 | transport capacities that disagree with the video, or extra ones | `test_capacity_reports_that_disagree_with_the_video_are_rejected` |
 | chunk claiming another segment, short chunk, other payload size | `test_extractor_rejects_chunks_that_deviate_from_the_plan` |
 
-## STC and GOP > 1
+## Codec policy v2, STC and GOP > 1
 
+* **Codec policy v2** (D5, `CarrierProfile.codec_policy`) composes with a plan.
+  The profile description carries both `"codec_policy"` and `"chunk_plan"`.
+  The transport receives `digest_policy`, which enforces the pinned
+  access-unit partition, applies the v2 carrier-normalised and raw-segment
+  digests, and switches the combined digest to the domain
+  `zkstego/canonical-h264-segmented-adaptive/v2`, which also binds
+  `SEGMENTATION_RULE_V2` (`test_plan_and_codec_policy_v2_are_bound_together`).
+  The CIF E2E below ran under v1.
 * **STC**: `segment_capacity_bits` accounts for the header code, and the
   per-segment embed and extract paths are those of `blind_sync`, unchanged.
   The fixture test runs on both magnitude and STC carriers.

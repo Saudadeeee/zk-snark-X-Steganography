@@ -1,0 +1,79 @@
+{
+  "blind_video_only_verification": true,
+  "carrier": "t1",
+  "carrier_contract": "t1-sign-video-only-v2",
+  "carrier_profile_id": "43b5da78210750ea77c58b88a27d704e59926403a7a81016c607076803fa0748",
+  "carriers_used": 65616,
+  "chunk_bytes": 8200,
+  "codec_policy": "h264-baseline-cavlc/canonical-h264-carrier-normalized-sha256-v2/full-rbsp/tagged-raw-segments/segmentation=annexb-access-unit-exact-partition-v1",
+  "codec_policy_id": "80b3ee07de79d617ddc9b6d59955063f324f42ee35bc6c1d0066590069067b43",
+  "command": "python -B -m benchmark.latticezk_video_e2e --video <200f cut> --parameter-set BDLOP_OPEN_128 --registered --carrier t1 --chunk-bytes 8200 --frames-per-segment 100 --codec-policy v2 --trailing-rbsp-check",
+  "commitment_bytes_in_video": 0,
+  "cover_cut": {
+    "frames": 200,
+    "rule": "scripts/repro.py cut_annexb",
+    "sha256": "a178c02806092b6503eacea85bdab4ca223d8a3f281a19d78d92376975ffa832",
+    "source": "data/encoded/container_cif_q22_g1.h264"
+  },
+  "credential_linkage": null,
+  "decoded_quality": {
+    "psnr_average_db": 46.938801,
+    "psnr_is_lossless": false,
+    "ssim_all": 0.997652
+  },
+  "envelope_bytes": 8165,
+  "environment": {
+    "ZKSTEGO_ANALYSIS_WORKERS": 2,
+    "observed_rss_mib_during_verify": 704
+  },
+  "expected_envelope_bytes": 8165,
+  "frame_quality": {
+    "frames": 200,
+    "frames_modified": 100,
+    "frames_modified_fraction": 0.5,
+    "luma_psnr_all_frames_db": 45.178,
+    "luma_psnr_modified_frames_db": 42.168,
+    "luma_psnr_worst_frame_db": 38.469
+  },
+  "frames_per_segment": 100,
+  "gop_policy": "all-intra",
+  "input_video": "container_cif_q22_g1_200f.h264",
+  "input_video_sha256": "a178c02806092b6503eacea85bdab4ca223d8a3f281a19d78d92376975ffa832",
+  "mode": "registered-commitment",
+  "output_video_sha256": "446d816ffc58c90083bd35d3a634715da8f0c95a09fdc71c40e59ed4ce52e135",
+  "p_slice_tamper_reason": null,
+  "p_slice_tamper_rejected": null,
+  "parameter_id": "c10dafa50278f29eafdddcdbffcb2c377b6a0dccf800db59a393332ac1724e02",
+  "parameter_set": "bdlop-open-128-v2",
+  "payload_absent_from_output": true,
+  "proof_bytes": 8096,
+  "protocol": "bdlop-open-v1 in-band H.264 CAVLC",
+  "replay_rejected": true,
+  "security_status": "research prototype; self-implemented published protocol; unaudited",
+  "segments_used": 1,
+  "slice_nal_comparison": {
+    "idr_slices": 200,
+    "idr_slices_changed": 100,
+    "nal_count_matches": true,
+    "nal_units": 601,
+    "non_idr_slices": 0,
+    "non_idr_slices_identical": 0,
+    "other_nal_units_changed": 0
+  },
+  "statement_id": "2c2dd162591b11466930e1ecb31e1e9755f9dd4d9ec5cb583256aa3cd80e3402",
+  "tamper_reason": "proof, statement binding, or session challenge rejected",
+  "tamper_rejected": true,
+  "timings_s": {
+    "embed_s": 306.708,
+    "verify_s": 250.802
+  },
+  "trailing_rbsp_zero_tamper": {
+    "carrier_frame": 99,
+    "carrier_frames": 100,
+    "inserted_at_byte": 2612609,
+    "max_carrier_macroblock": 39599,
+    "reason": "proof, statement binding, or session challenge rejected",
+    "rejected": true
+  },
+  "verify_reason": "ok"
+}

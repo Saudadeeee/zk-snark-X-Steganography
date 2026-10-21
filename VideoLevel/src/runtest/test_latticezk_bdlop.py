@@ -12,12 +12,21 @@ from src.lattice_zk import bdlop, codec, opening_proof, ring, sampling
 from src.lattice_zk.params import BDLOP_OPEN_128, BDLOP_OPEN_128_V1, BDLOP_OPEN_128_V2, TOY
 
 STATEMENT = b"canonical video statement"
+HEDGE = {"protocol": opening_proof.HEDGE_OPENING, "parameter_id": TOY.parameter_id}
 
 
 def _committed(payload: bytes = b"hidden payload", seed: bytes = b"r" * 32):
     message = codec.encode_payload(TOY, payload)
     randomness = bdlop.sample_randomness(TOY, seed)
     return message, randomness, bdlop.commit(TOY, message, randomness)
+
+
+def forged_commitment(t1: object, t2: object, params: object = TOY) -> bdlop.Commitment:
+    """A ``Commitment`` built around its validating constructor (defence in depth)."""
+    forged = object.__new__(bdlop.Commitment)
+    for name, value in (("t1", t1), ("t2", t2), ("params", params)):
+        object.__setattr__(forged, name, value)
+    return forged
 
 
 def _flip_bit(data: bytes, bit: int) -> bytes:
@@ -150,7 +159,7 @@ def test_proof_is_bound_to_statement_commitment_and_parameters() -> None:
     _, _, other = _committed(seed=b"o" * 32)
     assert not opening_proof.verify(TOY, STATEMENT, other, proof)
     # t2 never enters the verification equation; only the transcript binds it.
-    moved = bdlop.Commitment(commitment.t1, (commitment.t2 + 1) % TOY.modulus)
+    moved = bdlop.Commitment(commitment.t1, (commitment.t2 + 1) % TOY.modulus, params=TOY)
     assert not opening_proof.verify(TOY, STATEMENT, moved, proof)
     reseeded = dataclasses.replace(TOY, name="bdlop-open-toy-v2")
     assert not opening_proof.verify(reseeded, STATEMENT, commitment, proof)
@@ -189,19 +198,19 @@ def test_proof_for_another_commitment_does_not_transfer() -> None:
     proof = opening_proof.prove(TOY, STATEMENT, own, own_randomness)
     assert not opening_proof.verify(TOY, STATEMENT, target, proof)
     # Same t1, attacker-chosen t2: the transcript hash still pins t2.
-    moved = bdlop.Commitment(own.t1, target.t2)
+    moved = bdlop.Commitment(own.t1, target.t2, params=TOY)
     assert not opening_proof.verify(TOY, STATEMENT, moved, proof)
 
 
 def test_mask_stream_is_never_reused_across_statements_or_witnesses() -> None:
     randomness = bdlop.sample_randomness(TOY, b"r" * 32)
     keys = {
-        opening_proof.hedged_mask_key(b"e" * 32, b"s1", b"c", randomness),
-        opening_proof.hedged_mask_key(b"e" * 32, b"s2", b"c", randomness),
-        opening_proof.hedged_mask_key(b"e" * 32, b"s1", b"d", randomness),
-        opening_proof.hedged_mask_key(b"e" * 32, b"s1", b"c", -randomness),
-        opening_proof.hedged_mask_key(b"f" * 32, b"s1", b"c", randomness),
-        opening_proof.hedged_mask_key(b"e" * 32, b"s", b"1c", randomness),
+        opening_proof.hedged_mask_key(b"e" * 32, b"s1", b"c", randomness, **HEDGE),
+        opening_proof.hedged_mask_key(b"e" * 32, b"s2", b"c", randomness, **HEDGE),
+        opening_proof.hedged_mask_key(b"e" * 32, b"s1", b"d", randomness, **HEDGE),
+        opening_proof.hedged_mask_key(b"e" * 32, b"s1", b"c", -randomness, **HEDGE),
+        opening_proof.hedged_mask_key(b"f" * 32, b"s1", b"c", randomness, **HEDGE),
+        opening_proof.hedged_mask_key(b"e" * 32, b"s", b"1c", randomness, **HEDGE),
     }
     assert len(keys) == 6
 
@@ -471,21 +480,50 @@ def test_mask_seed_must_have_the_fixed_entropy_width() -> None:
             )
     # The entropy is hashed without a length prefix, so its width must be fixed.
     with pytest.raises(ValueError):
-        opening_proof.hedged_mask_key(b"e" * 31, STATEMENT, randomness)
+        opening_proof.hedged_mask_key(b"e" * 31, STATEMENT, randomness, **HEDGE)
+
+
+MALFORMED_COMMITMENT_PARTS = (
+    lambda t1, t2: (t1.reshape(-1), t2),  # used to raise inside verify
+    lambda t1, t2: (np.concatenate([t1, t1]), t2),  # broadcastable extra row
+    lambda t1, t2: (t1, t2[:-1]),
+    lambda t1, t2: (t1.astype(np.float64), t2),
+    lambda t1, t2: (t1, np.full_like(t2, TOY.modulus)),  # fits the bit width, not reduced
+    lambda t1, t2: (t1, t2 - TOY.modulus),  # congruent but negative
+    lambda t1, t2: (t1.tolist(), t2),
+)
 
 
 def _malformed_commitments(commitment: bdlop.Commitment) -> list[object]:
+    """Non-commitments and commitments forged around the validating constructor."""
     t1, t2 = commitment.t1, commitment.t2
-    return [
-        None, "commitment", (t1, t2),
-        bdlop.Commitment(t1.reshape(-1), t2),  # used to raise inside verify
-        bdlop.Commitment(np.concatenate([t1, t1]), t2),  # broadcastable extra row
-        bdlop.Commitment(t1, t2[:-1]),
-        bdlop.Commitment(t1.astype(np.float64), t2),
-        bdlop.Commitment(t1, np.full_like(t2, TOY.modulus)),  # fits the bit width, not reduced
-        bdlop.Commitment(t1, t2 - TOY.modulus),  # congruent but negative
-        bdlop.Commitment(t1.tolist(), t2),  # type: ignore[arg-type]
-    ]
+    forged = [forged_commitment(*parts(t1, t2)) for parts in MALFORMED_COMMITMENT_PARTS]
+    return [None, "commitment", (t1, t2), forged_commitment(t1, t2, params=None), *forged]
+
+
+def test_commitment_constructor_rejects_non_canonical_coefficients() -> None:
+    """D8: an unreduced or mis-shaped commitment cannot be constructed at all."""
+    _, _, commitment = _committed()
+    for parts in MALFORMED_COMMITMENT_PARTS:
+        with pytest.raises((TypeError, ValueError)):
+            bdlop.Commitment(*parts(commitment.t1, commitment.t2), params=TOY)
+    with pytest.raises(TypeError):
+        bdlop.Commitment(commitment.t1, commitment.t2)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        bdlop.Commitment(commitment.t1, commitment.t2, params="TOY")  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        dataclasses.replace(commitment, t2=np.full_like(commitment.t2, TOY.modulus))
+
+
+def test_commitment_coefficients_are_read_only_copies() -> None:
+    _, _, commitment = _committed()
+    source = commitment.t2.copy()
+    rebuilt = bdlop.Commitment(commitment.t1, source, params=TOY)
+    source[0] = TOY.modulus + 5  # mutating the input does not reach the commitment
+    assert int(rebuilt.t2[0]) < TOY.modulus
+    with pytest.raises(ValueError):
+        rebuilt.t2[0] = TOY.modulus
+    assert rebuilt.t1.dtype == np.int64 and rebuilt.is_canonical(TOY)
 
 
 def test_non_canonical_commitments_are_refused_everywhere() -> None:

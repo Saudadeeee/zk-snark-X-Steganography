@@ -85,7 +85,9 @@ The bound has the usual square-root loss of the general forking lemma: for
   `m̄ = t2 − f⁻¹⟨b2, r̄⟩` need not be in the payload encoder's image
   (`codec.py:49–60`). Is it accurate to call the property "knowledge
   soundness bound to the statement", given that the statement is only bound
-  to "some message" that a later disclosure must match?
+  to "some message" that a later disclosure must match? (Partly addressed
+  since: the optional payload range proof, Q16, shows that the extracted
+  message is `encode_payload(p)` for a public length `L`.)
 - Does the programmed-point case in Theorem `thm:se` (an adversary reusing
   `(x_i, t_i, w_i)` with a new `z`) also cover a mauled `z` with the same
   seed? The paper turns this case into an M-SIS solution of norm ≤ 2B.
@@ -217,17 +219,55 @@ fixed-width 274-byte string (`video_proof.py:89–98`).
   (`codec.py:36–60`). Is the "exact image" decoder enough for the
   disclosure claim `enc(p) = m̄`?
 
+### Q16. Binary and payload range proofs: Fiat–Shamir with aborts and the link to the payload (Theorems `thm:bin-ks`, `thm:pay`)
+
+The binary proof (`binary_proof.py`) and the payload range proof
+(`payload_range_proof.py`, `docs/PAYLOAD_RANGE_PROOF.md`) are four-round
+protocols turned non-interactive with chained seeds; only the last round
+repeats on abort. The payload range proof shows that an existing payload
+commitment hides `encode_payload(p)` for a public length `L ≤ 128`.
+
+- Theorem `thm:bin-ks` bounds a cheating prover by
+  `(Q+1)·ε_rbr + Σ_i sqrt((Q+1)·α_i) + β + Q²·2^-256`: AFK22's Σ-protocol
+  extractor forks only the challenge oracle, and each statistical round
+  (lift, check, combine) is bounded against the computationally bound
+  messages by a plurality argument plus a forking M-SIS finder. Is the
+  plurality step right, and does AFK22 cover a prefix the adversary chooses
+  through three other oracles?
+- The link `m = e_L + A β` is folded into the check functionals with a fresh
+  `ρ^L_t`, and the bit polynomials are committed in the auxiliary commitment
+  *before* the lift challenge, with the lifts added later under the same
+  randomness `r'`. Are both steps sound (one error vector, one uniform
+  functional; incremental BDLOP rows under one `r'`)?
+- Ours: correct as sketched; per-round error `2^-149.99`
+  (`k = k' = 5`); the M-SIS terms are non-tight as for the opening proof (Q4).
+- Code: `payload_range_proof.py` (`_prove`, `_recomputed_seed`,
+  `_check_challenges`), `binary_proof.py`.
+
 ---
 
 ## Tier 3: engineering and wording (no parameter change expected)
 
-### Q12. Production-strength enforcement only at pin resolution
+### Q12. Production-strength enforcement only at pin resolution (resolved)
 
 `require_production_strength()` (challenge space ≥ 2^256) runs in
 `pins_from_registry` (`video_pipeline.py:192–193`). It does not run in
 `verify_video_proof`, `verify_envelope` or `opening_proof.verify`. A caller
 that builds `VerifierPins` by hand with the `TOY` set would accept toy
 proofs. Should every verifier entry point refuse non-production parameters?
+
+- **Resolved.** `video_proof.require_verifier_parameters` now runs first in
+  every application-level verifier: `verify_video_proof` (inside the
+  configuration check, before the video is read), `verify_envelope`,
+  `verify_registered_envelope`, `verify_disclosure_proof`,
+  `verify_commitment_disclosure`, `linkage.verify_linkage` and
+  `pins_from_registry`. Each raises `ValueError` for a set below 2^256 unless
+  the caller passes `allow_toy_parameters=True` (tests and the TOY benchmark
+  only). The proof primitives (`opening_proof.verify`, `equality_proof.verify`,
+  `binary_proof.verify`) stay parameter-agnostic building blocks; nothing in
+  the video pipeline calls them except through the verifiers above.
+  Tests: `src/runtest/test_hardening_d5_d7_d8.py` (hand-built TOY pins are
+  refused).
 
 ### Q13. Session and replay semantics (Theorem `thm:replay`)
 
@@ -240,10 +280,28 @@ relaying. Is this the right split of claims? Is the
 
 ### Q14. Remaining self-review items
 
-- **D5** (open): scope of the canonical digest. Unbound items are RBSP bits
-  after the stop bit, raw-segment digests without a tag, and the segmenter
-  version. This is outside the cryptographic core. Does it weaken Theorem
-  `thm:integrity` beyond the stated limits?
+- **D5** (resolved by a new codec policy): scope of the canonical digest.
+  Unbound items were RBSP bits after the stop bit, raw-segment digests
+  without a tag, and the segmenter version. Codec policy v2
+  (`CODEC_POLICY_V2`, opt-in per carrier profile, new profile/policy/relation
+  identifiers) hashes the full RBSP of carrier IDR NAL units with its length,
+  tags raw-segment digests and types every segment digest, and pins the
+  segmentation: the segments must be exactly the access-unit partition of
+  the input, checked byte for byte, so the digest no longer depends on the
+  segmenter. The ffmpeg version is deliberately not hashed (it would bind the
+  verifier's installation, not the video). Codec policy v1 is unchanged byte
+  for byte for existing videos and still leaves zero bits after the stop bit
+  of a carrier NAL unit unbound: a zero byte appended there is accepted under
+  v1 and rejected under v2 through the real transport
+  (`test_zero_bits_after_the_stop_bit_are_accepted_by_v1_and_rejected_by_v2`).
+- **D7** (resolved): the hedged mask key is domain-separated by a tag, the
+  protocol label and the parameter id. `bdlop-open-128-v1` keeps the untagged
+  derivation, so `kat_v1.json` is unchanged; `kat_v2.json` and the binary
+  KAT were regenerated (commitments unchanged). Verification never recomputes
+  a mask; proofs from either derivation verify.
+- **D8** (resolved): `Commitment` carries its parameter set and rejects
+  non-canonical coefficients at construction, holding read-only copies;
+  verifiers still re-check objects built around the constructor.
 - **D10** (open): `verify_statement_binding` serves only `lazer-v1`
   (`zkp_registry.py:170–220`). The BDLOP path uses `pins_from_registry`.
   This is API hygiene.

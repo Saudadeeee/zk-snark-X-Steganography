@@ -98,6 +98,7 @@ def _one_run(arguments: argparse.Namespace, setup: dict[str, Any], run_dir: Path
                     output, params=setup["params"], pins=setup["pins"],
                     profile=setup["profile"], sync_key=sync_key, session_store=store,
                     credential=setup["pinned"],
+                    allow_toy_parameters=arguments.parameter_set == "TOY",
                 )
             if profiler is not None:
                 profiler.disable()

@@ -367,6 +367,28 @@ def test_extractor_rejects_chunks_that_deviate_from_the_plan(monkeypatch, tmp_pa
             pytest.fail(name)
 
 
+def test_plan_and_codec_policy_v2_are_bound_together(monkeypatch, tmp_path) -> None:
+    from src.video_canonicalization import DIGEST_V1, DIGEST_V2
+
+    v2 = pipeline.CarrierProfile(MAGNITUDE, codec_policy=pipeline.CODEC_POLICY_V2)
+    both = dataclasses.replace(v2, chunk_plan=PLAN)
+    ids = {profile.profile_id(TOY) for profile in (PROFILE, v2, both, pipeline.CarrierProfile(MAGNITUDE))}
+    assert len(ids) == 4
+    assert both.options()["digest_policy"] == DIGEST_V2
+    chunks, layout = ac.canonical_adaptive_chunks(PAYLOAD, CAPACITIES, PLAN)
+    video, _ = _stand_in_segments(monkeypatch, tmp_path, CAPACITIES, _by_segment(chunks, layout))
+    digests = {
+        policy: transport.extract_adaptive_video_payload(
+            video, b"key", MAGNITUDE, plan=PLAN, digest_policy=policy
+        ).canonical_video_sha256
+        for policy in (DIGEST_V1, DIGEST_V2)
+    }
+    assert digests[DIGEST_V1] != digests[DIGEST_V2]
+    with pytest.raises(ValueError):
+        transport.extract_adaptive_video_payload(video, b"key", MAGNITUDE, plan=PLAN,
+                                                 digest_policy="other")
+
+
 def test_gop_segments_offset_positions_by_coded_slices(monkeypatch, tmp_path) -> None:
     chunks, layout = ac.canonical_adaptive_chunks(PAYLOAD, CAPACITIES, PLAN)
     # GOP > 1 segments: 100 pictures but 120 coded slices (slot numbering).
@@ -469,6 +491,7 @@ def _embed(tmp_path, issuer, profile=PROFILE, session=b"\x07" * 32, channel=None
 
 def _verify(stego, pins, profile=PROFILE, channel=None, **options):
     options.setdefault("expected_session", b"\x07" * 32)
+    options.setdefault("allow_toy_parameters", True)
     return pipeline.verify_video_proof(
         stego, params=TOY, pins=pins, profile=profile, sync_key=SYNC_KEY,
         transport=channel or FakeAdaptiveTransport(), **options,

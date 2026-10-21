@@ -73,12 +73,28 @@ Input payload `p` with `|p| ≤ N·⌊(log₂q − 1)/8⌋ − 2` bytes. Encode
 encoding is injective and its image is checked on decode. Sample `r ← S_1^k`
 and output `t1 = B1·r`, `t2 = ⟨b2, r⟩ + m`.
 
+A `Commitment` object is canonical by construction (D8): it carries its
+parameter set, and its constructor refuses anything but integer arrays of
+shapes `(n, N)` and `(N,)` with every coefficient in `[0, q)`; it stores
+read-only `int64` copies. `from_bytes`, `commit` and `dataclasses.replace`
+all go through that constructor. Verifiers still re-check every commitment
+they receive (`require_commitment`, `is_canonical`), so an object built
+around the constructor is refused as well.
+
 ### 3.3 Prove (opening)
 
 Input statement bytes `x`, commitment `t = (t1, t2)`, witness `r`.
 
 1. Check `‖r‖∞ ≤ 1` and `B1·r = t1`; otherwise refuse.
-2. `K = SHA3-256(entropy ‖ len(x) ‖ x ‖ len(t) ‖ t ‖ len(r) ‖ r)` (hedged).
+2. `K = SHA3-256("zkstego/lattice-zk/hedged-mask-key/v2\0" ‖ len(P) ‖ P ‖
+   len(pid) ‖ pid ‖ entropy ‖ len(x) ‖ x ‖ len(t) ‖ t ‖ len(r) ‖ r)` (hedged,
+   domain-separated; D7), with protocol label `P = "bdlop-open"`
+   (`"bdlop-equal"` for 3.5, `"bdlop-binary"` for the binary proof) and
+   `pid = parameter_id`. Only `bdlop-open-128-v1` keeps the earlier untagged
+   `K = SHA3-256(entropy ‖ len(x) ‖ x ‖ …)` for its opening and equality
+   proofs, so `kat_v1.json` is unchanged; `kat_v2.json` and the binary KAT
+   were regenerated for the tagged key. `K` only seeds the prover's masks: the
+   verifier never recomputes it, so proofs from either derivation verify.
 3. For attempt `i = 1, 2, …` (at most 512):
    - `y ← [−γ+1, γ]^{kN}` from `H(mask-domain ‖ K ‖ i)`;
    - `w = B1·y`;
@@ -93,6 +109,14 @@ Nothing from a rejected attempt leaves the prover.
 Reject unless `|π|` is exact, every packed value lies in `[0, 2B]` and the
 padding bits are zero. Recompute `c` from `seed`, `w' = B1·z − c·t1`, and
 accept iff `seed = H(fs-domain ‖ parameter_id ‖ len(x) ‖ x ‖ t ‖ w')`.
+
+Production strength (Q12): every application-level verifier
+(`verify_video_proof`, `verify_envelope`, `verify_registered_envelope`,
+`verify_disclosure_proof`, `verify_commitment_disclosure`, `verify_linkage`,
+and `pins_from_registry`) raises `ValueError` for a parameter set whose
+challenge space is below `2^256` unless the caller passes
+`allow_toy_parameters=True`. The proof primitives of 3.4 and 3.5 stay
+parameter-agnostic building blocks.
 
 ### 3.5 Equality proof
 
@@ -133,6 +157,35 @@ the segment file. Because `D` normalizes exactly the positions that carry
 the envelope, the proof can bind the video without depending on its own bits.
 What `D` does not bind is listed in the paper's security section
 (`docs/paper/sections/security.tex`, integrity limits).
+
+**Codec policy v2 (D5).** The definition above is codec policy
+`h264-baseline-cavlc/canonical-h264-carrier-normalized-sha256-v1`; it is
+kept byte-identical (identifier, profile ids, `D`) for existing videos. A
+carrier profile can select
+`CODEC_POLICY_V2 = "…-sha256-v2/full-rbsp/tagged-raw-segments/segmentation=annexb-access-unit-exact-partition-v1"`;
+it is added to the profile description as `"codec_policy"`, so its profile
+id, policy hash, relation id and statement differ from v1. Under v2:
+
+- (a) a segment without carriers has
+  `d_i = SHA-256("zkstego/canonical-h264-raw-segment/v2\0" ‖ u64 len ‖ bytes)`,
+  and `D = SHA-256("zkstego/canonical-h264-segmented/v2\0" ‖ u16 len ‖ rule ‖
+  u32 F ‖ u32 L ‖ u32 C ‖ (u32 i ‖ u32 frames_i ‖ u8 kind_i ‖ d_i)_{i<L})`,
+  where the first `C` segments carry chunks (`kind = 1`) and the rest are raw
+  (`kind = 0`);
+- (b) a carrier-bearing IDR NAL unit is hashed over its complete RBSP,
+  preceded by its byte length, so the zero bits after the stop bit (and any
+  appended zero bytes) are bound; v1 stopped at the stop bit;
+- (c) the segmentation is pinned: the segments must be exactly the
+  access-unit partition of the input (segment `k` starts at the first byte of
+  the start code that opens access unit `k·F`, H.264 7.4.1.2.3), checked byte
+  for byte after ffmpeg has split the stream. `D` is then a function of the
+  input bytes alone; an ffmpeg build that cuts elsewhere fails closed instead
+  of silently changing the hashed scope. The ffmpeg version itself is not
+  hashed: it would make verification depend on the verifier's installation
+  without binding anything the partition check does not already bind;
+- in addition, a carrier segment's leading zero bytes before its first start
+  code are counted, its NAL units must be canonically escaped, and NAL unit
+  types the parser does not model are refused.
 
 The carrier profile also fixes a GOP policy (`src/gop_policy.py`), checked on
 every segment before analysis: `all-intra` (default; every coded slice is IDR)
@@ -374,11 +427,18 @@ with polynomial loss.
   rejection loops.
 - In-band mode does not authenticate the creator; the session challenge is
   not secret, so issue it over an authenticated channel if that matters.
-- Proving that each payload bit is 0 or 1 is not part of this version. An
-  optional, separate proof that a base commitment hides a 256-bit binary
-  string, over this same ring, is described in `docs/BINARY_PROOF_DESIGN.md`
-  (`src/lattice_zk/binary_proof.py`); it changes nothing specified here, and
-  the payload encoding of 3.2 is not binary.
+- The opening proof of this version says nothing about the message. Two
+  optional, separate proofs over this same ring change nothing specified
+  here: a proof that a base commitment hides a 256-bit binary string
+  (`docs/BINARY_PROOF_DESIGN.md`, `src/lattice_zk/binary_proof.py`), and a
+  payload range proof that a payload commitment of 3.2 hides
+  `encode(p)` for some `p` of a public length `L ≤ 128` bytes, i.e. every
+  coefficient is a 24-bit packing of payload bytes with the length field and
+  zero padding of 3.2 (`docs/PAYLOAD_RANGE_PROOF.md`,
+  `src/lattice_zk/payload_range_proof.py`, 44 558 bytes for `L ≤ 32`). The
+  latter applies to the commitment of an existing in-band envelope or
+  credential and can be sent out of band; it reveals `L`. A hidden-length or
+  full 24-bit (all 256 coefficients) range proof is not provided.
 
 ## 8. References
 
