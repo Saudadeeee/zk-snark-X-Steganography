@@ -1,0 +1,95 @@
+{
+  "adaptive_chunking": {
+    "checks": {
+      "other_plan": {
+        "fill_permille": 1000,
+        "max_chunk_bytes": 65535,
+        "min_chunk_bytes": 128,
+        "reserve_bits": 0,
+        "version": "zkbc-v2-greedy-fill-v1"
+      },
+      "other_plan_reason": "proof, statement binding, or session challenge rejected",
+      "other_plan_rejected": true,
+      "skipped_segment_tamper_reason": null,
+      "skipped_segment_tamper_rejected": null,
+      "skipped_segments": []
+    },
+    "chunk_layout": [
+      {
+        "bytes": 413,
+        "segment": 0
+      }
+    ],
+    "chunk_plan": {
+      "fill_permille": 1000,
+      "max_chunk_bytes": 65535,
+      "min_chunk_bytes": 256,
+      "reserve_bits": 0,
+      "version": "zkbc-v2-greedy-fill-v1"
+    },
+    "plan_id": "399551f14fa056cefd04f73c5dcf775d6f974c90252745f48201158329ba804f",
+    "segment_capacity_bits": [
+      29926
+    ],
+    "transport": "zkbc-v2 capacity-adaptive (src/blind_sync_adaptive.py)"
+  },
+  "blind_video_only_verification": true,
+  "carrier": "magnitude-geo",
+  "carrier_contract": "stable-carriers-sps-geometry-v1",
+  "carrier_profile_id": "16fcf43d8e32e9e13fd9d52704a9d20f82df424d1e7eac39506c894937ed60a7",
+  "carriers_used": 3584,
+  "chunk_bytes": null,
+  "codec_policy": "h264-baseline-cavlc/canonical-h264-carrier-normalized-sha256-v1",
+  "codec_policy_id": "5a9b4d07e349774ef1fa999e8ac0c06e1c59141511bb96928430d4bf7dc5b65b",
+  "commitment_bytes_in_video": 0,
+  "credential_linkage": null,
+  "decoded_quality": {
+    "psnr_average_db": 51.576415,
+    "psnr_is_lossless": false,
+    "ssim_all": 0.999819
+  },
+  "envelope_bytes": 413,
+  "expected_envelope_bytes": 413,
+  "frame_quality": {
+    "frames": 10,
+    "frames_modified": 5,
+    "frames_modified_fraction": 0.5,
+    "luma_psnr_all_frames_db": 49.812,
+    "luma_psnr_modified_frames_db": 46.802,
+    "luma_psnr_worst_frame_db": 42.946
+  },
+  "frames_per_segment": 5,
+  "gop_policy": "all-intra",
+  "input_video": "park_joy_720p_q22_10f.h264",
+  "input_video_sha256": "691e59d53a5d2f36bbe394fceaac632f387c00a860d9dab2b7566dc76db6029c",
+  "mode": "registered-commitment",
+  "output_video_sha256": "e27db2975cacd37e6e2640621b5e0a99742d7ef76f94619de1b3f604043452ae",
+  "p_slice_tamper_reason": null,
+  "p_slice_tamper_rejected": null,
+  "parameter_id": "32a3ea764b429b9fc73704f90d05d0dad9bd1944dc844353078333ec9b32f3f2",
+  "parameter_set": "bdlop-open-toy-v1",
+  "payload_absent_from_output": true,
+  "proof_bytes": 344,
+  "protocol": "bdlop-open-v1 in-band H.264 CAVLC",
+  "replay_rejected": true,
+  "security_status": "research prototype; self-implemented published protocol; unaudited",
+  "segments_used": 1,
+  "slice_nal_comparison": {
+    "idr_slices": 10,
+    "idr_slices_changed": 5,
+    "nal_count_matches": true,
+    "nal_units": 31,
+    "non_idr_slices": 0,
+    "non_idr_slices_identical": 0,
+    "other_nal_units_changed": 0
+  },
+  "statement_id": "4b7eda62ec1497d1023358f16cb1512cd9f4c08c415191c19ad3e62e6bf0638f",
+  "tamper_reason": "proof, statement binding, or session challenge rejected",
+  "tamper_rejected": true,
+  "timings_s": {
+    "embed_s": 61.437,
+    "verify_s": 52.314
+  },
+  "trailing_rbsp_zero_tamper": null,
+  "verify_reason": "ok"
+}

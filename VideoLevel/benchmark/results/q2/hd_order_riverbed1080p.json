@@ -1,0 +1,104 @@
+{
+  "video": "riverbed_1080p_q22_10f.h264",
+  "video_sha256": "6faf6f0cb45e7c53ddd3eb9c99306306d04389db868e568715bc622bfaadfc7f",
+  "frames_per_segment": 5,
+  "capacity": {
+    "width_mbs": 120,
+    "height_mbs": 68,
+    "slices_per_picture": 1,
+    "pictures": 10,
+    "carrier_bits_per_segment": [
+      832,
+      880
+    ],
+    "carrier_bits_per_picture": [
+      184,
+      157,
+      147,
+      160,
+      184,
+      159,
+      176,
+      176,
+      205,
+      164
+    ],
+    "carrier_bits_per_picture_mean": 171.2,
+    "carrier_bits_per_picture_min": 147,
+    "seconds": 102.7
+  },
+  "frames_needed_at_mean_capacity": {
+    "registered_envelope_bytes": {
+      "bdlop-open-128-v2": 8165,
+      "toy": 413
+    },
+    "bdlop-open-128-v2_pictures_by_frames_per_segment_and_fill": {
+      "fps10_fill1.0": 463,
+      "fps10_fill0.9": 526,
+      "fps10_fill0.5": 1168,
+      "fps25_fill1.0": 411,
+      "fps25_fill0.9": 461,
+      "fps25_fill0.5": 888
+    }
+  },
+  "runs": [
+    {
+      "carrier": "magnitude",
+      "contract_version": "stable-carriers-video-only-v1",
+      "chunk_bytes": 15,
+      "segments": 2,
+      "carriers_used": 832,
+      "embed_s": 116.5,
+      "frames": 10,
+      "frames_modified": 10,
+      "frames_modified_fraction": 1.0,
+      "luma_psnr_all_frames_db": 49.369,
+      "luma_psnr_modified_frames_db": 49.369,
+      "luma_psnr_worst_frame_db": 47.093,
+      "stego_sha256": "fbe6aaf1401da7d3202da71f06cd4fac0c0a38f22ba388eb33bdb244f6283199",
+      "peak_mb": 953.1,
+      "fill": 0.5,
+      "key_index": 0
+    },
+    {
+      "carrier": "magnitude-geo",
+      "contract_version": "stable-carriers-sps-geometry-v1",
+      "chunk_bytes": 15,
+      "segments": 2,
+      "carriers_used": 832,
+      "embed_s": 121.3,
+      "frames": 10,
+      "frames_modified": 10,
+      "frames_modified_fraction": 1.0,
+      "luma_psnr_all_frames_db": 51.746,
+      "luma_psnr_modified_frames_db": 51.746,
+      "luma_psnr_worst_frame_db": 49.438,
+      "stego_sha256": "6f81f701032a9cce46b7ec01378d4bea1ac0b9117661117a271ab9739de29cc5",
+      "peak_mb": 955.6,
+      "fill": 0.5,
+      "key_index": 0
+    }
+  ],
+  "summary": [
+    {
+      "fill": 0.5,
+      "carrier": "magnitude",
+      "keys": 1,
+      "psnr_modified_frames_db_mean": 49.369,
+      "psnr_worst_frame_db_mean": 47.093,
+      "psnr_worst_frame_db_min": 47.093,
+      "psnr_all_frames_db_mean": 49.369
+    },
+    {
+      "fill": 0.5,
+      "carrier": "magnitude-geo",
+      "keys": 1,
+      "psnr_modified_frames_db_mean": 51.746,
+      "psnr_worst_frame_db_mean": 49.438,
+      "psnr_worst_frame_db_min": 49.438,
+      "psnr_all_frames_db_mean": 51.746
+    }
+  ],
+  "complete": false,
+  "note": "interrupted by the RAM watchdog (system available RAM < 1200 MB while another job ran); rows recovered from the run log"
+}
