@@ -1,0 +1,134 @@
+{
+  "parameter_set": "bdlop-payload-range-128-v1",
+  "parameter_id": "40cb8489b024556d7b35bbdb09527373b1c762bf5332d0645d06d38b327f0122",
+  "base_parameter_set": "bdlop-open-128-v2",
+  "runs": 10,
+  "host": {
+    "machine": "AMD64",
+    "processor": "Intel64 Family 6 Model 154 Stepping 3, GenuineIntel",
+    "python": "3.12.10",
+    "system": "Windows-11-10.0.26100-SP0"
+  },
+  "repetitions": {
+    "lift": 5,
+    "check": 5
+  },
+  "max_payload_bytes": 128,
+  "statement": "commitment C hides codec.encode_payload(p) for some p of the public length L",
+  "soundness": {
+    "round_errors_log2": {
+      "lift": -150.0,
+      "check": -150.0,
+      "combine": -3840.0,
+      "challenge": -256.01
+    },
+    "soundness_bits": 150.0
+  },
+  "measured": [
+    {
+      "payload_bytes": 32,
+      "binary_polys": 1,
+      "aux_slots": 12,
+      "aux_width": 25,
+      "aux_mlwe_ring_samples": 18,
+      "proof_bytes": 44558,
+      "proof_parts": {
+        "aux_commitment_d0": 6720,
+        "aux_commitment_d1": 9600,
+        "masks_h": 4782,
+        "garbage_t_G": 960,
+        "challenge_seed": 32,
+        "responses_z_z_aux": 22464
+      },
+      "timings_ms": {
+        "prove": {
+          "median": 2048.84,
+          "mean": 6682.92,
+          "min": 518.87,
+          "p90": 27564.53,
+          "max": 27564.53
+        },
+        "verify": {
+          "median": 227.57,
+          "mean": 255.44,
+          "min": 196.88,
+          "p90": 350.48,
+          "max": 350.48
+        }
+      },
+      "attempts": {
+        "mean": 54.7,
+        "median": 14.0,
+        "max": 241,
+        "expected": 100.43,
+        "acceptance_probability": 0.00996,
+        "abort_cap": 131072,
+        "abort_probability_log2": -1892.3
+      }
+    },
+    {
+      "payload_bytes": 64,
+      "binary_polys": 2,
+      "aux_slots": 18,
+      "aux_width": 31,
+      "aux_mlwe_ring_samples": 24,
+      "proof_bytes": 53774,
+      "proof_parts": {
+        "aux_commitment_d0": 7680,
+        "aux_commitment_d1": 14400,
+        "masks_h": 4782,
+        "garbage_t_G": 960,
+        "challenge_seed": 32,
+        "responses_z_z_aux": 25920
+      },
+      "timings_ms": {
+        "prove": {
+          "median": 24120.03,
+          "mean": 32909.18,
+          "min": 2718.91,
+          "p90": 127352.44,
+          "max": 127352.44
+        },
+        "verify": {
+          "median": 513.64,
+          "mean": 525.68,
+          "min": 288.72,
+          "p90": 986.17,
+          "max": 986.17
+        }
+      },
+      "attempts": {
+        "mean": 153.5,
+        "median": 96.5,
+        "max": 580,
+        "expected": 204.1,
+        "acceptance_probability": 0.0049,
+        "abort_cap": 131072,
+        "abort_probability_log2": -928.8
+      }
+    }
+  ],
+  "computed_sizes_bytes": {
+    "32": 44558,
+    "64": 53774,
+    "96": 62990,
+    "128": 72206
+  },
+  "reference_sizes_bytes": {
+    "commitment": 6720,
+    "opening_proof": 8096,
+    "in_band_envelope_v1": 14885,
+    "alternative_b_binary_payload": {
+      "description": "binary proof on Com(encode_bits(p)), exactly 32-byte payloads per polynomial",
+      "commitment_plus_proof_per_32_bytes": 49742,
+      "binary_proof": 43022
+    },
+    "full_24_bit_range_all_coefficients_hypothetical": {
+      "binary_polys": 24,
+      "proof_bytes": 256526,
+      "acceptance_probability": 8.215177982186598e-10,
+      "expected_attempts": 1217259080.9
+    }
+  },
+  "note": "single-threaded Python + numpy reference implementation (float64 BLAS for exact negacyclic products); not constant time; machine shared with other jobs"
+}

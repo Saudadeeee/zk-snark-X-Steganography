@@ -85,7 +85,9 @@ The bound has the usual square-root loss of the general forking lemma: for
   `m̄ = t2 − f⁻¹⟨b2, r̄⟩` need not be in the payload encoder's image
   (`codec.py:49–60`). Is it accurate to call the property "knowledge
   soundness bound to the statement", given that the statement is only bound
-  to "some message" that a later disclosure must match?
+  to "some message" that a later disclosure must match? (Partly addressed
+  since: the optional payload range proof, Q16, shows that the extracted
+  message is `encode_payload(p)` for a public length `L`.)
 - Does the programmed-point case in Theorem `thm:se` (an adversary reusing
   `(x_i, t_i, w_i)` with a new `z`) also cover a mauled `z` with the same
   seed? The paper turns this case into an M-SIS solution of norm ≤ 2B.
@@ -216,6 +218,31 @@ fixed-width 274-byte string (`video_proof.py:89–98`).
 - The payload encoding has a 2-byte length and 3 bytes per coefficient
   (`codec.py:36–60`). Is the "exact image" decoder enough for the
   disclosure claim `enc(p) = m̄`?
+
+### Q16. Binary and payload range proofs: Fiat–Shamir with aborts and the link to the payload (Theorems `thm:bin-ks`, `thm:pay`)
+
+The binary proof (`binary_proof.py`) and the payload range proof
+(`payload_range_proof.py`, `docs/PAYLOAD_RANGE_PROOF.md`) are four-round
+protocols turned non-interactive with chained seeds; only the last round
+repeats on abort. The payload range proof shows that an existing payload
+commitment hides `encode_payload(p)` for a public length `L ≤ 128`.
+
+- Theorem `thm:bin-ks` bounds a cheating prover by
+  `(Q+1)·ε_rbr + Σ_i sqrt((Q+1)·α_i) + β + Q²·2^-256`: AFK22's Σ-protocol
+  extractor forks only the challenge oracle, and each statistical round
+  (lift, check, combine) is bounded against the computationally bound
+  messages by a plurality argument plus a forking M-SIS finder. Is the
+  plurality step right, and does AFK22 cover a prefix the adversary chooses
+  through three other oracles?
+- The link `m = e_L + A β` is folded into the check functionals with a fresh
+  `ρ^L_t`, and the bit polynomials are committed in the auxiliary commitment
+  *before* the lift challenge, with the lifts added later under the same
+  randomness `r'`. Are both steps sound (one error vector, one uniform
+  functional; incremental BDLOP rows under one `r'`)?
+- Ours: correct as sketched; per-round error `2^-149.99`
+  (`k = k' = 5`); the M-SIS terms are non-tight as for the opening proof (Q4).
+- Code: `payload_range_proof.py` (`_prove`, `_recomputed_seed`,
+  `_check_challenges`), `binary_proof.py`.
 
 ---
 
