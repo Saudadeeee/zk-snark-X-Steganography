@@ -1,74 +1,76 @@
-# Realtime Transport Contract
+# Hợp đồng transport realtime (legacy)
 
-The repository now has a bounded-latency H.264 Annex-B transport layer in
-`src.realtime`. It is a live-stream foundation, not a claim that the current
-Python CAVLC patcher can encode arbitrary video in realtime.
+> Tài liệu legacy mô tả subsystem tiền-lattice-ZK (đã đóng băng, vẫn được giữ và
+> có test). Đường dẫn module đã cũ sau đợt dọn dẹp 10/2026: `src.realtime` nay ở
+> `src.legacy.realtime`.
 
-## What runs now
+Repo có một lớp transport H.264 Annex-B độ trễ-có-giới-hạn trong `src.realtime`.
+Đây là một nền tảng live-stream, không phải tuyên bố rằng bộ vá CAVLC Python
+hiện tại có thể mã hóa video tùy ý theo thời gian thực.
 
-- Incremental Annex-B parsing across arbitrary pipe/network chunks.
-- AUD-delimited access-unit assembly (`NAL type 9` is mandatory).
-- A bounded queue that drops old non-IDR frames before a new IDR frame.
-- IDR-only scheduling of compact payload chunks.
-- Fail-open forwarding: if a live mutator fails, the original access unit is
-  forwarded unchanged and the failure is counted.
+## Cái chạy được bây giờ
 
-The contract tests run with:
+- Parse Annex-B tăng dần qua các chunk pipe/mạng tùy ý.
+- Lắp access-unit theo ranh giới AUD (`NAL type 9` bắt buộc).
+- Một hàng đợi có giới hạn, bỏ các khung non-IDR cũ trước một khung IDR mới.
+- Lập lịch chỉ-IDR cho các chunk payload nhỏ gọn.
+- Chuyển tiếp fail-open: nếu một live mutator lỗi, access unit gốc được chuyển
+  tiếp không đổi và lỗi được đếm.
+
+Test hợp đồng chạy bằng:
 
 ```powershell
 py -3.12 src/runtest/test_realtime_transport.py
 ```
 
-## Upstream encoder profile
+## Profile bộ mã hóa đầu nguồn
 
-The live sender must emit H.264 Baseline/CAVLC Annex-B with AUD NAL units. A
-representative FFmpeg encoder command is:
+Bên gửi live phải phát H.264 Baseline/CAVLC Annex-B với các NAL unit AUD. Một
+lệnh encoder FFmpeg tiêu biểu:
 
 ```bash
 ffmpeg -re -i INPUT -c:v libx264 -profile:v baseline -coder 0 \
   -x264-params "aud=1:keyint=30:min-keyint=30:scenecut=0" -f h264 pipe:1
 ```
 
-The keyframe cadence is a capacity/latency trade-off: payload may be scheduled
-only on a complete IDR access unit. The relay does not infer access-unit
-boundaries from partial slice headers.
+Nhịp keyframe là một đánh đổi dung-lượng/độ-trễ: payload chỉ có thể được lập lịch
+trên một access unit IDR hoàn chỉnh. Relay không suy ranh giới access-unit từ các
+slice header một phần.
 
-## Required production backend
+## Backend sản xuất bắt buộc
 
-`RealtimeAnnexBRelay` accepts an `AccessUnitMutator` callback. A production
-backend must be native (C/C++/Rust, built on FFmpeg/libavcodec or an equivalent
-encoder integration) and must, for every mutated IDR unit:
+`RealtimeAnnexBRelay` nhận một callback `AccessUnitMutator`. Một backend sản xuất
+phải là native (C/C++/Rust, build trên FFmpeg/libavcodec hoặc một tích hợp
+encoder tương đương) và phải, cho mỗi IDR unit bị sửa:
 
-1. retain CAVLC syntax validity and exact NAL framing;
-2. apply only candidates accepted by bit-length and forward-decode checks;
-3. finish within the configured frame deadline; otherwise return the original
-   access unit;
-4. emit applied-carrier telemetry so the receiver can distinguish a skipped
-   chunk from a valid embedding.
+1. giữ hợp lệ cú pháp CAVLC và NAL framing chính xác;
+2. chỉ áp các ứng viên được chấp nhận bởi kiểm tra bit-length và forward-decode;
+3. hoàn thành trong deadline khung đã cấu hình; nếu không, trả về access unit
+   gốc;
+4. phát telemetry carrier đã áp để receiver phân biệt một chunk bị bỏ với một
+   nhúng hợp lệ.
 
-The existing Python file-oriented reconstructor is deliberately not installed
-as that callback: its whole-file analysis and reconstruction latency makes it
-unsafe to market as realtime. The compact ML-DSA receipt/reference path is the
-appropriate payload source for the live scheduler; Groth16 proving belongs to
-an asynchronous control plane, not the per-frame hot path.
+Bộ tái dựng Python định-hướng-file hiện có cố ý không được cài làm callback đó:
+độ trễ phân tích và tái dựng toàn-file khiến nó không an toàn để quảng bá là
+realtime. Đường biên nhận/reference ML-DSA nhỏ gọn là nguồn payload phù hợp cho
+scheduler live; proving Groth16 thuộc về một control plane bất đồng bộ, không
+phải hot path mỗi khung.
 
-## Native C direct-video path
+## Đường native C trực tiếp lên video
 
-`native/` now includes a C17 direct CAVLC coefficient carrier. It changes the
-magnitude parity of one high-frequency, already-nonzero AC coefficient by at
-most one. The rule preserves nonzero support and permits deterministic
-extraction from the decoded coefficient stream.
+`native/` nay gồm một carrier hệ số CAVLC trực tiếp C17. Nó đổi parity độ lớn của
+một hệ số AC tần-số-cao, đã-khác-không, nhiều nhất một đơn vị. Quy tắc giữ support
+khác-không và cho phép trích xác định từ luồng hệ số đã giải mã.
 
-The generic Annex-B relay remains transport-only. It may expose an SEI
-diagnostic path, but SEI is explicitly excluded from the direct-video stego
-pipeline. Direct CAVLC mutation is safe only in an encoder fork after
-quantization and before inverse transform/reconstruction; otherwise reference
-frames can drift. The native x264 adapter selects Baseline/CAVLC specifically
-for that fork integration.
+Relay Annex-B tổng quát vẫn chỉ-transport. Nó có thể phơi một đường chẩn đoán
+SEI, nhưng SEI bị loại trừ tường minh khỏi pipeline stego trực-tiếp-lên-video.
+Sửa CAVLC trực tiếp chỉ an toàn trong một encoder fork sau lượng tử hóa và trước
+inverse transform/tái dựng; nếu không các khung tham chiếu có thể trôi. Bộ
+adapter x264 native chọn Baseline/CAVLC riêng cho tích hợp fork đó.
 
-## Next implementation decision
+## Quyết định cài đặt tiếp theo
 
-The native backend depends on the deployment target and transport: x86/Linux
-or Raspberry Pi, plus RTSP/SRT/WebRTC. Those choices set the decoder API,
-hardware acceleration path, and a measurable latency target; they cannot be
-chosen interchangeably after the wire protocol is fixed.
+Backend native phụ thuộc mục tiêu triển khai và transport: x86/Linux hay
+Raspberry Pi, cộng RTSP/SRT/WebRTC. Các lựa chọn đó định ra API decoder, đường
+tăng tốc phần cứng, và một mục tiêu độ trễ đo được; không thể chọn thay thế lẫn
+nhau sau khi giao thức trên dây đã cố định.

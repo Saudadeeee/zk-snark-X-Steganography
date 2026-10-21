@@ -41,11 +41,11 @@ cập nhật: 2026-10-22
   mức độ), `CHECKLIST.md`.
 - Tái lập: `ARTIFACT.md`; driver `scripts/repro.py`; tham số/KAT
   `research/bdlop_params/` (+ `CROSSCHECK.md`).
-- Thiết kế bổ trợ: `docs/ADAPTIVE_CARRIERS.md`, `docs/ADAPTIVE_CHUNKING.md`,
-  `docs/GOP_HD_SUPPORT.md`, `docs/BINARY_PROOF_DESIGN.md`,
-  `docs/PAYLOAD_RANGE_PROOF.md`, `docs/CNN_STEGANALYSIS.md`,
-  `docs/LATTICE_BACKEND_SURVEY.md`.
-- Bản đồ di dời/xóa file (dọn dẹp 10/2026): `docs/CLEANUP_INVENTORY.md`.
+- Thiết kế bổ trợ: `docs/CARRIERS_VA_CHUNKING.md`,
+  `docs/GOP_HD_SUPPORT.md`, `docs/PROOF_NHI_PHAN_VA_KHOANG.md`,
+  `docs/CNN_STEGANALYSIS.md`, `docs/LATTICE_BACKEND_SURVEY.md`.
+- Bản đồ di dời/xóa file (dọn dẹp 10/2026): git history; phần dọn dẹp còn lại:
+  `docs/handoff/08_don_dep_con_lai.md`.
 - Kế hoạch/trạng thái (tiếng Việt): `docs/LATTICE_ZK_BDLOP_PLAN.md`,
   `docs/ROADMAP.md`.
 

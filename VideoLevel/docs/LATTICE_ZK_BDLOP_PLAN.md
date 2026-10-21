@@ -85,7 +85,7 @@ quan hệ tuyến tính của BDLOP, kích thước bằng hai opening proof.
 | M-SIS binding (ℓ∞, biên 2^25.9) | 140 bit cổ điển / 127 bit lượng tử (core-SVP; lượng tử hơi dưới 128) |
 | M-LWE hiding | 164 / 150 bit (dual hybrid, lattice-estimator; primal 169 / 153) |
 | Payload tối đa | 766 byte |
-| Prove / verify (Python, i7-12700H) | ~0.11 s / ~0.02 s (đo với v1; v2 measurement pending) |
+| Prove / verify (Python, i7-12700H) | ~0.11 s / ~0.02 s (đo với v1; chưa đo lại dưới v2) |
 
 Ước lượng: `research/bdlop_params/estimate.py`, mô hình
 `pq-crystals/security-estimates@75c2694` (bộ script của Dilithium/Kyber).
@@ -293,7 +293,7 @@ Giới hạn của kết quả này:
 - χ² PoV của stego giảm nhẹ so với cover (khoảng 1%), đúng hướng mà nhúng LSB
   gây ra; ở tỉ lệ nhúng cao hơn tín hiệu này có thể đủ để phát hiện.
 
-### Benchmark mật mã (`bdlop-open-128-v1`; v2 measurement pending)
+### Benchmark mật mã (`bdlop-open-128-v1`; chưa đo lại dưới v2)
 
 `benchmark/results/latticezk_crypto_bench_20261012.json`, 50 lượt, máy rảnh,
 i7-12700H, Python thuần một luồng:
@@ -535,4 +535,4 @@ Theo mục D2, D3, D4, D6 trong phụ lục đối chiếu spec–code của bà
   registered / in-band 8 165 B / 14 885 B, binary proof 43 022 B
   (`bdlop-binary-128-v2`). Xác suất chấp nhận 0.191 (trung bình 5.23 lần thử).
 - KAT: `kat_v2.json`; `kat_v1.json` giữ cho v1. Các số đo (thời gian, PSNR,
-  steganalysis, E2E) đang được chạy lại (v2 measurement pending).
+  steganalysis, E2E) đang được chạy lại (chưa đo lại dưới v2).

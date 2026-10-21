@@ -68,11 +68,11 @@ claim↔code↔test, câu hỏi mở cho reviewer). Phần dưới chỉ tóm t�
 Hai bằng chứng tùy chọn trên cùng vành, **không** đổi gì trong đặc tả opening;
 hiện gửi **ngoài băng (out-of-band)**:
 
-- **Binary proof** (`binary_proof.py`, `docs/BINARY_PROOF_DESIGN.md`): chứng minh
+- **Binary proof** (`binary_proof.py`, `docs/PROOF_NHI_PHAN_VA_KHOANG.md` Phần I): chứng minh
   một cam kết nền giấu một chuỗi nhị phân 256-bit. Đo (v1 base): **41 870 byte**,
   verify ~**72 ms**, soundness **150 bit** (`binary_proof_bench.json`, 20 lượt).
 - **Payload range proof** (`payload_range_proof.py`,
-  `docs/PAYLOAD_RANGE_PROOF.md`): chứng minh một cam kết payload (của §3.2) giấu
+  `docs/PROOF_NHI_PHAN_VA_KHOANG.md` Phần II): chứng minh một cam kết payload (của §3.2) giấu
   `encode_payload(p)` cho **độ dài công khai `L ≤ 128` byte** (lộ `L`). Đo
   (v2 base): **44 558 B (L≤32)**, 53 774 B (L=64), 62 990 B (L=96),
   72 206 B (L=128); verify ~228 ms (L=32); soundness 150 bit
@@ -102,7 +102,7 @@ hiện gửi **ngoài băng (out-of-band)**:
   xáo trộn theo khóa đồng bộ. Soundness và zero-knowledge **không** phụ thuộc
   khóa này; khóa chỉ quyết định tính không phát hiện được.
 - **STC** (syndrome-trellis codes, carrier `adaptive-stc-magnitude-video-only-v1`,
-  `src/core/adaptive_carriers.py`, `docs/ADAPTIVE_CARRIERS.md`) giảm số thay đổi
+  `src/core/adaptive_carriers.py`, `docs/CARRIERS_VA_CHUNKING.md`) giảm số thay đổi
   trên mỗi bit nhúng (giảm méo) để khó bị steganalysis học máy hơn.
 
 ## 9. Mô hình bảo mật (mức cao)

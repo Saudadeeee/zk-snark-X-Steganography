@@ -50,7 +50,7 @@ gộp trên nhánh.
   (envelope 7 589 B, v2 lớn hơn ~8 %) và phải ghi rõ như vậy. Cách làm lại:
   chạy sweep không có biến đó (chỉ bước ML chạy, E2E đã có sẽ bỏ qua), rồi
   `ml_steganalysis evaluate`, `embedding_sim`, `adaptive_sim`, các lệnh CNN
-  trong `docs/CNN_STEGANALYSIS.md` và `docs/ADAPTIVE_CARRIERS.md`.
+  trong `docs/CNN_STEGANALYSIS.md` và `docs/CARRIERS_VA_CHUNKING.md`.
 - **Sweep HD** (`benchmark/latticezk_hd_cases.json`). Thứ tự nhúng theo hình
   học SPS đã có (C4: hợp đồng `magnitude-geo` / `t1-geo` / `adaptive-geo`, hợp
   đồng cũ giữ nguyên từng byte); các case HD dùng `magnitude-geo` và chunk

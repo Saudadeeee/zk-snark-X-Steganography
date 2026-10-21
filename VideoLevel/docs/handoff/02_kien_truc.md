@@ -95,8 +95,8 @@ nằm trong `src/lattice_zk/video_pipeline.py`.
   dữ liệu (ví dụ `dataclasses.asdict` của hợp đồng carrier serialize giá trị
   trường, không serialize vị trí lớp). Do đó đợt dọn dẹp 10/2026 (đưa module vào
   `src/transport/`, `src/registry/`, `src/legacy/`) **không** đổi bất kỳ id,
-  hash, hay KAT nào; các test byte-identity vẫn xanh (xem
-  `docs/CLEANUP_INVENTORY.md`).
+  hash, hay KAT nào; các test byte-identity vẫn xanh (bản đồ di dời/xóa đầy đủ
+  trong git history của đợt dọn dẹp 10/2026).
 
 ## 5. Khung chunk, GOP, digest, registry (tham chiếu nhanh)
 
