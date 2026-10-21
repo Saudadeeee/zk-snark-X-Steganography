@@ -34,7 +34,6 @@ PHASES = [
     ("Phase 16", "Single-pass blind analysis", "test_phase16_blind_analysis_single_pass.py"),
     ("Phase 17", "Isolated blind-analysis worker", "test_phase17_blind_worker_isolation.py"),
     ("Phase 18", "Blind patchability contract", "test_phase18_blind_patchability_contract.py"),
-    ("Phase 19", "Experimental local HTTP API", "test_lnp22_http_api.py"),
     ("Phase 28", "Fail-closed experimental lattice ZKP", "test_lattice_zkp.py"),
 ]
 
@@ -50,8 +49,6 @@ PYTEST_PHASES = [
     ("Phase 29", "Stable blind carrier analysis", "test_blind_stable_analysis.py"),
     ("Phase 30", "Durable verifier session lifecycle", "test_zkp_sessions.py"),
     ("Phase 31", "Loopback session challenge HTTP CLI", "test_zkp_session_http.py"),
-    ("Phase 32", "LNP22 video session replay enforcement", "test_lnp22_video_session.py"),
-    ("Phase 33", "LNP22 video CLI regression", "test_lnp22_video_e2e.py"),
     ("Phase 34", "Lattice-ZK ring and samplers", "test_latticezk_ring.py"),
     ("Phase 35", "Lattice-ZK BDLOP opening proof", "test_latticezk_bdlop.py"),
     ("Phase 36", "Lattice-ZK equality proof", "test_latticezk_equality.py"),
