@@ -1,0 +1,23 @@
+[
+  {
+    "video": "crew_4cif_q22_g1.h264",
+    "carrier": "magnitude",
+    "frames": 600,
+    "segments_total": 6,
+    "segments_scanned": 6,
+    "carrier_bits_per_segment": [
+      11093,
+      11762,
+      16852,
+      9642,
+      5613,
+      8794
+    ],
+    "min_chunk_bytes_supported": 664,
+    "scan_seconds": 222.6,
+    "registered_segments_needed_at_min_chunk": 12,
+    "registered_fits_estimate": false,
+    "in_band_segments_needed_at_min_chunk": 22,
+    "in_band_fits_estimate": false
+  }
+]

@@ -333,10 +333,13 @@ def density_table(results: Path) -> str:
     ]
     report = results / "density_report.json"
     if report.exists():
+        # density_report.json maps the density ("1", "0.5", ...) to the measured level.
         measured = load(report)
-        for level in sorted(measured.get("levels", []), key=lambda item: -item.get("density", 0)):
-            body.append(f"Measured 4CIF, {level['density'] * 100:.0f}\\,\\% & "
-                        f"{level.get('p_e_mean', TODO)} & {level.get('auc_mean', TODO)}")
+        for density, level in sorted(measured.items(), key=lambda item: -float(item[0])):
+            learned = level.get("learned") or {}
+            p_e, auc = learned.get("coefficient_fld"), learned.get("coefficient_fld_auc")
+            body.append(f"Measured 4CIF E2E, {float(density) * 100:.0f}\\,\\% & "
+                        f"{'--' if p_e is None else f'{p_e:.3f}'} & {'--' if auc is None else f'{auc:.3f}'}")
     else:
         for level in (100, 50, 25):
             body.append(f"Measured 4CIF E2E, {level}\\,\\% & {TODO} & {TODO}")
@@ -346,7 +349,8 @@ def density_table(results: Path) -> str:
         caption=("Detectability versus embedding rule and density: leave-one-clip-out, coefficient "
                  "features, FLD ensemble, five CIF clips. The upper rows are simulated on the real carrier "
                  "positions without the patchability filter (hence more detectable than the real runs, "
-                 "$P_E=0.40$); they are for relative comparison only."),
+                 "$P_E=0.40$); they are for relative comparison only. The lower rows are real registered "
+                 "E2E runs on City and Harbour 4CIF (leave-one-clip-out over these two clips)."),
         label="tab:density",
     )
 

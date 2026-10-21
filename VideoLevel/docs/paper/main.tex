@@ -689,8 +689,13 @@ those in which many carriers fall in smooth regions, where intra prediction
 spreads a $\pm1$ change to neighbouring blocks. Embedding takes 6--63 minutes
 (90 minutes for the concurrently run 3\,000-frame in-band case) and
 verification 2--33 minutes per clip in pure Python; the proof itself
-takes about 0.1\,s. Pending runs are marked in the table:
-\todo{City 4CIF at QP 18 and 28}.
+takes about 0.1\,s. QP governs capacity strongly: City 4CIF carries
+301\,kbit in its first 100 frames at QP~18, so the registered envelope fits
+one segment (47.7\,dB on modified frames, worst 42.8\,dB), but only 16\,kbit
+in 600 frames at QP~28, where neither envelope fits. Crew 4CIF has enough
+carriers in total at QP~22 but too unevenly spread over segments for
+uniform chunks; at QP~18 it verifies over four segments (48.8\,dB, worst
+36.6\,dB).
 
 \input{tables/paper_e2e}
 
@@ -779,8 +784,12 @@ than replacement ($P_E=0.27$ vs.\ $0.32$), so replacement is kept. Using 50,
 envelope can be spread by lowering the chunk size, at the cost of touching
 more frames. The simulation ignores the patchability filter and is therefore
 more detectable than the real runs; it supports relative comparisons only.
-Measured density results on the 4CIF clips are
-\todo{measured 4CIF density curve at 100/50/25\,\%}.
+Real registered runs on City and Harbour 4CIF confirm the trend (lower rows
+of Table~\ref{tab:density}): at 100, 50 and 25\,\% of the carriers, the
+leave-one-clip-out $P_E$ with coefficient features is 0.40, 0.44 and 0.46,
+the PSNR of modified frames 43.2, 45.7 and 50.0\,dB and the worst frame
+32.9, 35.0 and 38.2\,dB, while the number of modified frames grows from 150
+to 500 per clip. All six runs verify from the video alone.
 
 \input{tables/paper_density}
 

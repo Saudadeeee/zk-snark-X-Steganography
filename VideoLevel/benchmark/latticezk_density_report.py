@@ -62,6 +62,8 @@ def summarise(groups: dict[float, list[str]]) -> dict[str, Any]:
                 "coefficient_fld": loco["coefficient/fld_ensemble"]["p_e_mean"],
                 "pixel_fld": loco["pixel/fld_ensemble"]["p_e_mean"],
                 "combined_fld": loco["combined/fld_ensemble"]["p_e_mean"],
+                "coefficient_fld_auc": loco["coefficient/fld_ensemble"]["auc_mean"],
+                "clips": len(present),
             }
         levels[f"{density:g}"] = level
     return levels

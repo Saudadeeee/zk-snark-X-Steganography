@@ -1,0 +1,19 @@
+[
+  {
+    "video": "soccer_4cif_q22_g1.h264",
+    "carrier": "magnitude",
+    "frames": 600,
+    "segments_total": 6,
+    "segments_scanned": 2,
+    "carrier_bits_per_segment": [
+      38552,
+      47977
+    ],
+    "min_chunk_bytes_supported": 4782,
+    "scan_seconds": 130.5,
+    "registered_segments_needed_at_min_chunk": 2,
+    "registered_fits_estimate": true,
+    "in_band_segments_needed_at_min_chunk": 3,
+    "in_band_fits_estimate": true
+  }
+]

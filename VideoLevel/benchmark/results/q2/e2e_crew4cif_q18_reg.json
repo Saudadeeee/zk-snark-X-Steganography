@@ -1,0 +1,58 @@
+{
+  "blind_video_only_verification": true,
+  "carrier": "magnitude",
+  "carrier_contract": "stable-carriers-video-only-v1",
+  "carrier_profile_id": "c747104f6c2887690039b3296423bd63ac07ba374ececa484aca23194a0d0c4b",
+  "carriers_used": 61896,
+  "chunk_bytes": 2340,
+  "commitment_bytes_in_video": 0,
+  "credential_linkage": null,
+  "decoded_quality": {
+    "psnr_average_db": 52.334444,
+    "psnr_is_lossless": false,
+    "ssim_all": 0.999902
+  },
+  "envelope_bytes": 7589,
+  "expected_envelope_bytes": 7589,
+  "frame_quality": {
+    "frames": 600,
+    "frames_modified": 400,
+    "frames_modified_fraction": 0.6667,
+    "luma_psnr_all_frames_db": 50.573,
+    "luma_psnr_modified_frames_db": 48.812,
+    "luma_psnr_worst_frame_db": 36.648
+  },
+  "frames_per_segment": 100,
+  "gop_policy": "all-intra",
+  "input_video": "crew_4cif_q18_g1.h264",
+  "input_video_sha256": "df8bd0a829203c6c8b0bed8f87471690e5931eba394d748c88cfc3ccbbd47c6f",
+  "mode": "registered-commitment",
+  "output_video_sha256": "b13607c2c50fc5c6a7453360d6aca384ecc24f95d7b20c51e13f8da97d12280d",
+  "p_slice_tamper_reason": null,
+  "p_slice_tamper_rejected": null,
+  "parameter_id": "c33f36970d896c7c47b8ba319ae8625e33eb9e7be11e45b7dbf6b318d2a0a26b",
+  "parameter_set": "bdlop-open-128-v1",
+  "payload_absent_from_output": true,
+  "proof_bytes": 7520,
+  "protocol": "bdlop-open-v1 in-band H.264 CAVLC",
+  "replay_rejected": null,
+  "security_status": "research prototype; self-implemented published protocol; unaudited",
+  "segments_used": 4,
+  "slice_nal_comparison": {
+    "idr_slices": 600,
+    "idr_slices_changed": 400,
+    "nal_count_matches": true,
+    "nal_units": 1801,
+    "non_idr_slices": 0,
+    "non_idr_slices_identical": 0,
+    "other_nal_units_changed": 0
+  },
+  "statement_id": "54e6eefaf1568ff9f0094aa398274717ae594461d35e735c87778d0c10359df6",
+  "tamper_reason": "not run (--skip-security-checks)",
+  "tamper_rejected": null,
+  "timings_s": {
+    "embed_s": 478.068,
+    "verify_s": 216.166
+  },
+  "verify_reason": "ok"
+}

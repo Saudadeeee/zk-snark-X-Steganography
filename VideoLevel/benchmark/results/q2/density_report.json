@@ -1,0 +1,56 @@
+{
+  "1": {
+    "cases": [
+      "city4cif_q22_reg",
+      "harbour4cif_q22_reg"
+    ],
+    "all_verified": true,
+    "mean_frames_modified": 150.0,
+    "mean_psnr_modified": 43.243,
+    "min_psnr_worst": 32.905,
+    "learned": {
+      "frame_pairs": 300,
+      "coefficient_fld": 0.4025,
+      "pixel_fld": 0.4762,
+      "combined_fld": 0.4163,
+      "coefficient_fld_auc": 0.5967,
+      "clips": 2
+    }
+  },
+  "0.5": {
+    "cases": [
+      "city4cif_q22_reg_d50",
+      "harbour4cif_q22_reg_d50"
+    ],
+    "all_verified": true,
+    "mean_frames_modified": 250.0,
+    "mean_psnr_modified": 45.655,
+    "min_psnr_worst": 34.984,
+    "learned": {
+      "frame_pairs": 500,
+      "coefficient_fld": 0.4421,
+      "pixel_fld": 0.4738,
+      "combined_fld": 0.4429,
+      "coefficient_fld_auc": 0.5662,
+      "clips": 2
+    }
+  },
+  "0.25": {
+    "cases": [
+      "city4cif_q22_reg_d25",
+      "harbour4cif_q22_reg_d25"
+    ],
+    "all_verified": true,
+    "mean_frames_modified": 497.5,
+    "mean_psnr_modified": 50.031,
+    "min_psnr_worst": 38.17,
+    "learned": {
+      "frame_pairs": 1000,
+      "coefficient_fld": 0.4572,
+      "pixel_fld": 0.4891,
+      "combined_fld": 0.471,
+      "coefficient_fld_auc": 0.5455,
+      "clips": 2
+    }
+  }
+}

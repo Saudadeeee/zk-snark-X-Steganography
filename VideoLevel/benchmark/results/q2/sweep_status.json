@@ -1,22 +1,52 @@
 [
   {
-    "name": "crew4cif_q22_reg",
-    "failed": "capacity"
-  },
-  {
-    "name": "harbour4cif_q22_reg",
+    "name": "city4cif_q22_reg_d50",
     "e2e": true,
     "steg": true,
     "mlfeat": true
   },
   {
-    "name": "soccer4cif_q22_reg",
+    "name": "city4cif_q22_reg_d25",
+    "e2e": true,
+    "steg": true,
+    "mlfeat": true
+  },
+  {
+    "name": "crew4cif_q22_reg_d50",
     "failed": "capacity"
   },
   {
-    "name": "harbour4cif_q22_inband",
+    "name": "crew4cif_q22_reg_d25",
+    "failed": "capacity"
+  },
+  {
+    "name": "harbour4cif_q22_reg_d50",
     "e2e": true,
     "steg": true,
-    "mlfeat": false
+    "mlfeat": true
+  },
+  {
+    "name": "harbour4cif_q22_reg_d25",
+    "e2e": true,
+    "steg": true,
+    "mlfeat": true
+  },
+  {
+    "name": "soccer4cif_q22_reg_d50",
+    "failed": "capacity"
+  },
+  {
+    "name": "soccer4cif_q22_reg_d25",
+    "failed": "capacity"
+  },
+  {
+    "name": "soccer4cif_q22_reg_s2",
+    "e2e": true,
+    "steg": true,
+    "mlfeat": true
+  },
+  {
+    "name": "crew4cif_q22_reg_s6",
+    "failed": "capacity"
   }
 ]
