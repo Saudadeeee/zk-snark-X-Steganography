@@ -58,3 +58,9 @@ gộp trên nhánh.
   (~8 h). Bắt đầu song song phần code của B1 (carrier thích nghi), B2 (proof
   nhị phân), B4 (gói review + đối chiếu lattice-estimator); B3 chờ A0 xong vì
   cần RAM cho E2E.
+- 2026-10-21 (sáng): B4 merge (lattice-estimator thật: M-SIS 140/127 và
+  M-LWE primal 138/125 khớp; dual hybrid 135/123 → bài nhận mức thấp hơn).
+  B2 merge (proof chuỗi nhị phân, 41,9 KB, verify 72 ms; chưa nối với mã hóa
+  payload 24 bit; phụ lục bài). B1 merge (STC trên carrier magnitude: ít hơn
+  26–47 % thay đổi, +1,4–2,4 dB, P_E LOCO tệ nhất 0,41 → 0,43; mục mới trong
+  bài). Còn: A0 (sweep 4CIF), B3.

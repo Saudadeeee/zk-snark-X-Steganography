@@ -781,6 +781,38 @@ Measured density results on the 4CIF clips are
 
 \input{tables/paper_density}
 
+\subsection{Syndrome-trellis coded carriers}
+\label{sec:stc}
+Because the carrier positions and their number are fixed before the proof
+exists, the envelope of a segment can be written as the \emph{syndrome} of
+all stable carriers of that segment instead of into a prefix of them. The
+contract \texttt{adaptive-stc-magnitude-video-only-v1} codes each segment
+with a syndrome-trellis code~\cite{ref:stc} of constraint height 10; the
+embedder's Viterbi search chooses the cheapest set of LSB changes, and the
+blind extractor reads every carrier and recomputes the syndrome, needing only
+the carrier count (unchanged by embedding) and the message length from a
+14-byte header coded on the first 112 carriers. The carrier set, its keyed
+order and the statement are unchanged apart from the contract identifier,
+which the profile identifier binds. Content-based costs computed from
+carrier-invariant data added 5--35\,\% more changes than plain change
+minimization in simulation, so the default cost is uniform.
+
+On 200-frame cuts of three CIF clips with the registered envelope
+(Table~\ref{tab:adaptive-e2e}), STC needs 26--47\,\% fewer changes
+(0.27--0.37 instead of 0.50 per envelope bit), gains 1.4--2.4\,dB luma PSNR on
+modified frames, and every run verifies from the video alone at the same
+cost. Learned detectors do worse against it in every fold and feature set
+(Table~\ref{tab:adaptive-steg}): the worst-case $P_E$ rises from 0.41 to 0.43
+leave-one-clip-out and from 0.32 to 0.39 on the paired split, while the CNN
+stays near chance for both (0.457 vs.\ 0.471). With three clips and a fold
+standard error of about 0.03, the evidence is the consistency of the gain,
+not its size. The price is fragility: every carrier of a segment enters the
+code, so one corrupted carrier anywhere invalidates that segment, which the
+verifier already treats as rejection.
+
+\input{tables/adaptive_e2e}
+\input{tables/adaptive_steg}
+
 \subsection{Comparison with alternative proof systems}
 Table~\ref{tab:baselines} compares schemes that could carry the claim.
 Groth16 is about fifty times smaller but not post-quantum and needs a
@@ -838,8 +870,9 @@ per-frame error of 0.40 means that each modified frame leaks a little; a
 video carries 100--1\,200 modified frames, and pooling their scores would
 likely detect the embedding with high confidence. We have not quantified a
 pooled detector. Spreading the envelope over more frames lowers per-frame
-density but increases the number of frames that leak, so cost-aware carrier
-selection is the more promising direction.
+density but increases the number of frames that leak; reducing the number
+of changes, as the syndrome-trellis coding of Section~\ref{sec:stc} does,
+lowers the leakage of every frame and is the more promising direction.
 
 \paragraph{Capacity and codec scope} Only all-intra Baseline streams are
 supported, which is a real deployment restriction. A registered envelope

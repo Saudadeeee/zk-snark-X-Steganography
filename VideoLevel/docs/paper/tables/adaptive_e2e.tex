@@ -1,0 +1,21 @@
+\begin{table}[t]
+\centering
+\caption{Direct vs.\ syndrome-trellis coded magnitude carriers (registered envelope, 200-frame CIF QP\,22 cuts); every run verifies from the video alone.}
+\label{tab:adaptive-e2e}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lllllllll}
+\toprule
+Clip & Coding & Carriers & Changes & Changes/bit & PSNR mod. (dB) & Worst (dB) & Embed (s) & Verify (s) \\
+\midrule
+coastguard & direct & 61304 & 30673 & 0.505 & 40.09 & 32.65 & 227 & 104 \\
+coastguard & STC uniform & 71303 & 22618 & 0.372 & 41.45 & 33.93 & 226 & 104 \\
+coastguard & STC texture & 71303 & 23777 & 0.392 & 41.16 & 33.31 & 232 & 104 \\
+container & direct & 61304 & 30491 & 0.502 & 42.27 & 34.35 & 179 & 80 \\
+container & STC uniform & 101439 & 16167 & 0.266 & 44.07 & 36.51 & 179 & 83 \\
+container & STC texture & 101439 & 19125 & 0.315 & 44.09 & 35.65 & 187 & 80 \\
+deadline & direct & 61304 & 30531 & 0.503 & 37.67 & 28.74 & 184 & 84 \\
+deadline & STC uniform & 95332 & 16750 & 0.276 & 40.06 & 32.48 & 231 & 101 \\
+deadline & STC texture & 95332 & 19304 & 0.318 & 38.58 & 29.41 & 204 & 83 \\
+\bottomrule
+\end{tabular}}
+\end{table}

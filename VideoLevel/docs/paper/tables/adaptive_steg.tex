@@ -1,0 +1,26 @@
+\begin{table}[t]
+\centering
+\caption{Learned steganalysis $P_E$ for direct and syndrome-trellis coded carriers (600 frame pairs per mode).}
+\label{tab:adaptive-steg}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lllll}
+\toprule
+Protocol & Features / detector & direct & STC uniform & STC texture \\
+\midrule
+leave-one-clip-out & coefficient/logistic & 0.451 & 0.460 & 0.451 \\
+leave-one-clip-out & coefficient/fld\_ensemble & 0.406 & 0.431 & 0.404 \\
+leave-one-clip-out & pixel/logistic & 0.443 & 0.461 & 0.461 \\
+leave-one-clip-out & pixel/fld\_ensemble & 0.412 & 0.450 & 0.443 \\
+leave-one-clip-out & combined/logistic & 0.435 & 0.466 & 0.453 \\
+leave-one-clip-out & combined/fld\_ensemble & 0.407 & 0.438 & 0.427 \\
+paired split & coefficient/logistic & 0.388 & 0.418 & 0.425 \\
+paired split & coefficient/fld\_ensemble & 0.352 & 0.392 & 0.393 \\
+paired split & pixel/logistic & 0.392 & 0.422 & 0.420 \\
+paired split & pixel/fld\_ensemble & 0.368 & 0.412 & 0.403 \\
+paired split & combined/logistic & 0.350 & 0.395 & 0.377 \\
+paired split & combined/fld\_ensemble & 0.323 & 0.388 & 0.353 \\
+leave-one-clip-out & worst case & 0.406 & 0.431 & 0.404 \\
+paired split & worst case & 0.323 & 0.388 & 0.353 \\
+\bottomrule
+\end{tabular}}
+\end{table}

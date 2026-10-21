@@ -109,6 +109,42 @@ def cnn_rows() -> list[dict[str, Any]]:
     return rows
 
 
+ADAPTIVE_MODE_NAMES = {"magnitude": "direct", "adaptive": "STC uniform", "adaptive-texture": "STC texture"}
+
+
+def adaptive_rows() -> dict[str, Any] | None:
+    """Rows of the B1 comparison (``adaptive_e2e.json``), direct mode first."""
+    path = RESULTS / "adaptive_e2e.json"
+    if not path.exists():
+        return None
+    report = json.loads(path.read_text(encoding="utf-8"))
+    tags = sorted(report["modes"], key=lambda tag: list(ADAPTIVE_MODE_NAMES).index(report["modes"][tag]))
+    names = [ADAPTIVE_MODE_NAMES[report["modes"][tag]] for tag in tags]
+    runs = []
+    for case, run in sorted(report["cases"].items()):
+        tag = case.rsplit("_", 1)[-1]
+        quality, timings = run["frame_quality"], run["timings_s"]
+        runs.append({
+            "clip": case.split("_")[0], "order": tags.index(tag), "mode": ADAPTIVE_MODE_NAMES[run["carrier"]],
+            "carriers": run["carriers_used"], "changes": run["changes"]["coefficients"],
+            "per_bit": run["changes_per_envelope_bit"], "psnr_mod": quality["luma_psnr_modified_frames_db"],
+            "psnr_worst": quality["luma_psnr_worst_frame_db"],
+            "embed_s": timings["embed_s"], "verify_s": timings["verify_s"],
+        })
+    runs.sort(key=lambda row: (row["clip"], row["order"]))
+    protocols = {"leave_one_clip_out": "leave-one-clip-out", "paired_half_split": "paired split"}
+    detection: dict[tuple[str, str], list[float]] = {}
+    for key, label in protocols.items():
+        for name in report["detection"][tags[0]]["protocols"][key]:
+            detection[(label, name)] = [report["detection"][tag]["protocols"][key][name]["p_e_mean"]
+                                        for tag in tags]
+    for label in protocols.values():
+        rows = [values for (protocol, _), values in detection.items() if protocol == label]
+        detection[(label, "worst case")] = [min(column) for column in zip(*rows)]
+    return {"runs": runs, "modes": names, "detection": detection,
+            "frame_pairs": report["detection"][tags[0]]["frame_pairs"]}
+
+
 def _markdown(headers: list[str], rows: list[list[str]]) -> str:
     lines = ["| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
     lines += ["| " + " | ".join(row) + " |" for row in rows]
@@ -191,6 +227,25 @@ def build() -> str:
             "CNN steganalysis (SRM front end, Yedroudj-style); P\\_E = 0.5 is chance. Ranges are over "
             "seeds; amplified rows scale the real change to give a detection margin.",
             "tab:steg-cnn")
+
+    adaptive = adaptive_rows()
+    if adaptive:
+        headers = ["Clip", "Coding", "Carriers", "Changes", "Changes/bit", "PSNR mod. (dB)", "Worst (dB)",
+                   "Embed (s)", "Verify (s)"]
+        rows = [[r["clip"], r["mode"], _fmt(r["carriers"]), _fmt(r["changes"]), _fmt(r["per_bit"], 3),
+                 _fmt(r["psnr_mod"]), _fmt(r["psnr_worst"]), _fmt(r["embed_s"], 0), _fmt(r["verify_s"], 0)]
+                for r in adaptive["runs"]]
+        sections += ["## Syndrome-trellis coded carriers\n", _markdown(headers, rows)]
+        tables["adaptive_e2e"] = _latex(
+            headers, rows, "Direct vs.\\ syndrome-trellis coded magnitude carriers (registered envelope, "
+            "200-frame CIF QP\\,22 cuts); every run verifies from the video alone.", "tab:adaptive-e2e")
+        headers = ["Protocol", "Features / detector"] + adaptive["modes"]
+        rows = [[protocol, name] + [_fmt(value, 3) for value in values]
+                for (protocol, name), values in adaptive["detection"].items()]
+        sections += ["## Learned steganalysis, direct vs. STC\n", _markdown(headers, rows)]
+        tables["adaptive_steg"] = _latex(
+            headers, rows, "Learned steganalysis $P_E$ for direct and syndrome-trellis coded carriers "
+            "(" + str(adaptive["frame_pairs"]) + " frame pairs per mode).", "tab:adaptive-steg")
 
     baselines = sorted(RESULTS.glob("baselines*.json"))
     if baselines:
