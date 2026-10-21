@@ -731,8 +731,11 @@ $P_E=0.466$ leave-one-clip-out on 1\,700 frame pairs and $0.46$--$0.47$ on a
 random paired split (two seeds), and $0.41$ when its scores are pooled over
 each 100-frame segment (Table~\ref{tab:steg-cnn}). The margin is small:
 trained and tested on twice the real change, the same network reaches
-$P_E=0.18$. The learned evaluation over all clips including 4CIF is
-\todo{final ML evaluation including 4CIF clips}.
+$P_E=0.18$. Adding the Harbour and Soccer 4CIF runs (seven clips, 1\,700
+frame pairs) leaves the picture unchanged: leave-one-clip-out $P_E=0.39$ with
+coefficient features and $0.46$ with pixel features, and $0.38$ with combined
+features on the paired split
+(\texttt{benchmark/results/q2/ml\_eval\_cif\_4cif.json}).
 
 \input{tables/paper_steg_ml}
 \input{tables/steg_cnn}
