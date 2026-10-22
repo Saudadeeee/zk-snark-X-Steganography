@@ -9,6 +9,7 @@
 % source still compiles there, but pdfLaTeX+T5 is the supported/tested build.
 \usepackage{iftex}
 \ifPDFTeX
+  \usepackage{cmap} % ToUnicode CMap so the T5 PDF is searchable/copy-pasteable
   \usepackage[utf8]{inputenc}
   \usepackage[T5]{fontenc}
 \else
