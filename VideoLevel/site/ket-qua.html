@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kết quả & hạn chế · ZK-Video</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Lora:ital,wght@0,500;0,600;1,500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a><button class="menu-btn" data-menu-btn aria-label="Menu">☰</button></div>
+<div class="shell">
+<aside class="sidebar">
+  <a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a>
+  <p class="tagline">Bằng chứng không tiết lộ, giấu trong video — giải thích cho mọi người</p>
+  <div class="nav-group">Bắt đầu</div>
+  <nav><a href="index.html">Tổng quan</a><a href="khai-niem.html">Khái niệm nền (từ số 0)</a></nav>
+  <div class="nav-group">Hệ thống hoạt động</div>
+  <nav><a href="kien-truc.html">Kiến trúc & luồng</a><a href="thanh-phan.html">Các thành phần</a><a href="che-do-vi-du.html">Chế độ & ví dụ thật</a></nav>
+  <div class="nav-group">Bảo mật & kết quả</div>
+  <nav><a href="bao-mat.html">An toàn & chống tấn công</a><a href="ket-qua.html">Kết quả & hạn chế</a></nav>
+  <div class="nav-group">Tra cứu</div>
+  <nav><a href="thuat-ngu.html">Thuật ngữ</a></nav>
+  <div class="tools"><button class="tbtn" data-theme-btn>☾ Tối</button></div>
+</aside>
+<main class="content"><div class="content-inner">
+
+  <p class="crumbs">Bảo mật & kết quả › Kết quả & hạn chế</p>
+  <h1>Kết quả thật và những gì chưa làm được</h1>
+  <p class="lead">Số đo từ bộ kiểm tra toàn hệ thống chạy ngày 26/10/2026 với bộ sản xuất hiện tại <code>bdlop-open-128-v3</code> và codec policy v2 mặc định. Và một danh sách hạn chế thẳng thắn — đây là nguyên mẫu nghiên cứu.</p>
+
+  <h2>Tám chế độ, đều đạt</h2>
+  <p>Mỗi chế độ: nhúng → kiểm tra mù từ video (đạt) → thử phát lại và sửa 1 bit (đều bị từ chối). PSNR là độ giống hình so với gốc ở khung bị sửa (trên ~40 dB là mắt thường gần như không thấy khác). Thời gian đo khi máy đang chạy song song nhiều việc khác, nên chỉ mang tính tham khảo.</p>
+  <div class="scroll-x"><table>
+    <tr><th>Chế độ</th><th>Mô tả</th><th class="mono">Phong bì</th><th class="mono">PSNR (khung sửa)</th><th class="mono">Tệ nhất</th><th>Kiểm tra thêm</th><th>Kết quả</th></tr>
+    <tr><td>registered · magnitude</td><td>mặc định (codec v2)</td><td class="mono">8.741 B</td><td class="mono">41,0 dB</td><td class="mono">32,1</td><td>thêm byte sau stop-bit → từ chối</td><td style="color:var(--good)">đạt</td></tr>
+    <tr><td>in-band · magnitude</td><td>cam kết payload</td><td class="mono">16.421 B</td><td class="mono">39,4 dB</td><td class="mono">31,7</td><td>linkage + disclosure đạt</td><td style="color:var(--good)">đạt</td></tr>
+    <tr><td>registered · T1</td><td>carrier lật dấu</td><td class="mono">8.741 B</td><td class="mono">42,1 dB</td><td class="mono">38,9</td><td>1 đoạn 100 khung</td><td style="color:var(--good)">đạt</td></tr>
+    <tr><td>registered · STC</td><td>ít thay đổi hơn</td><td class="mono">8.741 B</td><td class="mono">42,6 dB</td><td class="mono">31,2</td><td>—</td><td style="color:var(--good)">đạt</td></tr>
+    <tr><td>registered · chunk thích nghi</td><td>dung lượng lệch (coastguard)</td><td class="mono">8.741 B</td><td class="mono">39,6 dB</td><td class="mono">32,3</td><td>plan khác → từ chối</td><td style="color:var(--good)">đạt</td></tr>
+    <tr><td>registered · codec v1</td><td>tương thích ngược</td><td class="mono">8.741 B</td><td class="mono">40,9 dB</td><td class="mono">31,5</td><td>—</td><td style="color:var(--good)">đạt</td></tr>
+    <tr><td>registered · GOP 8</td><td>3.000 khung có khung P</td><td class="mono">8.741 B</td><td class="mono">39,8 dB</td><td class="mono">33,1</td><td>lật bit lát P → từ chối</td><td style="color:var(--good)">đạt</td></tr>
+    <tr><td>in-band + range proof</td><td>đính kèm L = 32, coastguard 3.000 khung, chunk thích nghi</td><td class="mono">63.094 B</td><td class="mono">39,6 dB</td><td class="mono">30,4</td><td>15 đoạn; linkage + disclosure đạt; plan khác → từ chối</td><td style="color:var(--good)">đạt</td></tr>
+  </table></div>
+  <p class="note">So với bộ v2 (đo 21/10): PSNR khung sửa thấp hơn 0,4–0,8 dB vì phong bì lớn hơn 7 % (vd. registered · magnitude 41,7 → 41,0 dB; in-band 40,0 → 39,4 dB). SSIM toàn video ≥ 0,995 ở mọi chế độ.</p>
+
+  <h2>Kích thước các mảnh</h2>
+  <div class="grid g3">
+    <div class="stat"><div class="big tnum">7.680 B</div><div class="lab">commitment</div></div>
+    <div class="stat"><div class="big tnum">8.672 B</div><div class="lab">opening proof</div></div>
+    <div class="stat"><div class="big tnum">17.312 B</div><div class="lab">equality proof (linkage)</div></div>
+  </div>
+  <p class="muted">Payload in-band tối đa 766 byte/một đa thức thông điệp. Đính kèm range proof (tuỳ chọn): 46.670 B cho L ≤ 32, 74.318 B cho L = 128. Proof tuy vài KB nhưng video all-intra có hàng nghìn carrier mỗi khung nên vẫn đủ chỗ (rải qua vài đoạn 100 khung nếu cần).</p>
+
+  <h2>Hạn chế — thẳng thắn</h2>
+  <div class="grid g2">
+    <div class="callout warn"><div class="h">Nén lại: hai chế độ, hai cái giá</div><p style="margin:0">Chế độ chính cố ý “mong manh”: transcode là con dấu mất, đổi lại bắt được <i>mọi</i> thay đổi. Chế độ <b>bền</b> mới (semi-fragile) sống qua x264 CRF 18/23 và x265 CRF 23, bắt được sửa ≥ 48×48 điểm ảnh có định vị — nhưng PSNR chỉ 35–37 dB, không che giấu, không bền với resize/crop.</p></div>
+    <div class="callout warn"><div class="h">CABAC: có, nhưng còn giới hạn</div><p style="margin:0">Main/High (CABAC) nay được hỗ trợ cho khung I/IDR (parser + mã hoá lại chuẩn tắc viết thuần Python, 56 test). Chưa hỗ trợ interlace/MBAFF, 4:2:2/4:4:4, 10-bit; khung P/B chỉ bị khoá, không mang dữ liệu; chậm (~0,1 s/lát CIF).</p></div>
+    <div class="callout bad"><div class="h">Chống phát lại offline chỉ theo từng người kiểm tra</div><p style="margin:0">Chế độ offline (thử thách theo epoch do issuer ký) chặn phát lại tới <i>cùng một</i> người kiểm tra; đưa cùng video cho người kiểm tra khác trong cửa sổ epoch vẫn được chấp nhận. Cần chống tuyệt đối thì dùng phiên tương tác.</p></div>
+    <div class="callout bad"><div class="h">Khó che trước AI dò</div><p style="margin:0">Bộ dò học máy đạt lỗi ~0,40 mỗi khung; gộp cả video có thể phát hiện. (Số này còn là của phiên trước, đang chờ đo lại.)</p></div>
+    <div class="callout bad"><div class="h">Soundness cần review ngoài</div><p style="margin:0">Phần ghép Fiat–Shamir nhiều vòng chưa viết đầy đủ; cần chuyên gia lattice thẩm định (gói ở <code>docs/review/</code>).</p></div>
+    <div class="callout bad"><div class="h">Giao thức có tính tương tác</div><p style="margin:0">Cần thử thách phiên dùng-một-lần trước khi nhúng để chống replay; kiểm offline không có lớp này.</p></div>
+  </div>
+
+  <div class="callout info"><div class="h">Tài liệu đầy đủ của dự án</div><p style="margin:0">Spec kỹ thuật và bài báo (tiếng Việt) ở <code>docs/</code> và <code>docs/paper/main.pdf</code>; tài liệu bàn giao ở <code>docs/handoff/</code>; gói review ở <code>docs/review/</code>; bản chạy thật ở <code>webdemo/</code>.</p></div>
+
+  <div class="next"><a href="bao-mat.html">← An toàn & chống tấn công</a><a href="thuat-ngu.html">Tiếp: Thuật ngữ →</a></div>
+
+</div></main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

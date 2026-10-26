@@ -24,7 +24,7 @@ from src.transport.blind_sync import BLIND_ENVELOPE_HEADER_BYTES, AdaptiveOperat
 from src.transport.gop_policy import SegmentStructure
 from src.registry.lattice_pq import LatticeSigner
 from src.lattice_zk import video_pipeline as pipeline
-from src.lattice_zk.params import BDLOP_OPEN_128, BDLOP_OPEN_128_V1, TOY
+from src.lattice_zk.params import BDLOP_OPEN_128, BDLOP_OPEN_128_V1, BDLOP_OPEN_128_V2, TOY
 from src.lattice_zk.video_proof import envelope_size
 from src.registry.zkp_registry import SignedZkpRelationRegistry
 from src.registry.zkp_sessions import SessionChallengeStore
@@ -104,9 +104,9 @@ def test_crew_fits_adaptively_where_no_uniform_chunk_does_and_reports_true_short
     assert not _uniform_fits(v1_envelope, CREW_4CIF_Q22)
     layout = ac.plan_layout(v1_envelope, CREW_4CIF_Q22, ac.AdaptiveChunkPlan())
     assert [slot.segment_index for slot in layout] == list(range(6))
-    # The production envelope (8 165 B) exceeds crew's whole Q22 capacity
+    # The production envelope (8 741 B) exceeds crew's whole Q22 capacity
     # (7 757 B usable in 600 frames): no chunking can fit it; say so.
-    with pytest.raises(ValueError, match="408 of 8165 payload bytes"):
+    with pytest.raises(ValueError, match="984 of 8741 payload bytes"):
         ac.plan_layout(envelope_size(BDLOP_OPEN_128, registered=True), CREW_4CIF_Q22,
                        ac.AdaptiveChunkPlan())
 
@@ -239,9 +239,11 @@ def test_existing_profiles_and_v1_framing_are_byte_identical() -> None:
             for chunk in (1250, 4200, 65535):
                 for policy in (gop_policy.ALL_INTRA, gop_policy.IDR_CARRIERS_INTER_RAW):
                     profile = pipeline.CarrierProfile(
-                        contract, chunk_bytes=chunk, registered=registered, gop_policy=policy
+                        contract, chunk_bytes=chunk, registered=registered, gop_policy=policy,
+                        codec_policy=pipeline.CODEC_POLICY_V1,  # recorded under v1
                     )
-                    for params in (BDLOP_OPEN_128, TOY):
+                    # Pinned to the v2 set: the table was recorded under it.
+                    for params in (BDLOP_OPEN_128_V2, TOY):
                         table[f"{name}/{registered}/{chunk}/{policy}/{params.name}"] = [
                             profile.profile_id(params).hex(), pipeline.policy_hash(params, profile),
                             pipeline.public_sync_key(params, profile).hex(),
@@ -374,11 +376,16 @@ def test_extractor_rejects_chunks_that_deviate_from_the_plan(monkeypatch, tmp_pa
 def test_plan_and_codec_policy_v2_are_bound_together(monkeypatch, tmp_path) -> None:
     from src.transport.video_canonicalization import DIGEST_V1, DIGEST_V2
 
-    v2 = pipeline.CarrierProfile(MAGNITUDE, codec_policy=pipeline.CODEC_POLICY_V2)
-    both = dataclasses.replace(v2, chunk_plan=PLAN)
-    ids = {profile.profile_id(TOY) for profile in (PROFILE, v2, both, pipeline.CarrierProfile(MAGNITUDE))}
+    # codec policy v2 is the default: PROFILE is already plan + v2.
+    v1_plain = pipeline.CarrierProfile(MAGNITUDE, codec_policy=pipeline.CODEC_POLICY_V1)
+    v1_plan = dataclasses.replace(PROFILE, codec_policy=pipeline.CODEC_POLICY_V1)
+    v2_plain = pipeline.CarrierProfile(MAGNITUDE)
+    both = dataclasses.replace(v2_plain, chunk_plan=PLAN)
+    assert both == PROFILE
+    ids = {profile.profile_id(TOY) for profile in (PROFILE, v1_plain, v1_plan, v2_plain)}
     assert len(ids) == 4
     assert both.options()["digest_policy"] == DIGEST_V2
+    assert "digest_policy" not in v1_plan.options()
     chunks, layout = ac.canonical_adaptive_chunks(PAYLOAD, CAPACITIES, PLAN)
     video, _ = _stand_in_segments(monkeypatch, tmp_path, CAPACITIES, _by_segment(chunks, layout))
     digests = {

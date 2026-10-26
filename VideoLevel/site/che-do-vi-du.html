@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chế độ & ví dụ thật · ZK-Video</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Lora:ital,wght@0,500;0,600;1,500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a><button class="menu-btn" data-menu-btn aria-label="Menu">☰</button></div>
+<div class="shell">
+<aside class="sidebar">
+  <a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a>
+  <p class="tagline">Bằng chứng không tiết lộ, giấu trong video — giải thích cho mọi người</p>
+  <div class="nav-group">Bắt đầu</div>
+  <nav><a href="index.html">Tổng quan</a><a href="khai-niem.html">Khái niệm nền (từ số 0)</a></nav>
+  <div class="nav-group">Hệ thống hoạt động</div>
+  <nav><a href="kien-truc.html">Kiến trúc & luồng</a><a href="thanh-phan.html">Các thành phần</a><a href="che-do-vi-du.html">Chế độ & ví dụ thật</a></nav>
+  <div class="nav-group">Bảo mật & kết quả</div>
+  <nav><a href="bao-mat.html">An toàn & chống tấn công</a><a href="ket-qua.html">Kết quả & hạn chế</a></nav>
+  <div class="nav-group">Tra cứu</div>
+  <nav><a href="thuat-ngu.html">Thuật ngữ</a></nav>
+  <div class="tools"><button class="tbtn" data-theme-btn>☾ Tối</button></div>
+</aside>
+<main class="content"><div class="content-inner">
+
+  <p class="crumbs">Hệ thống hoạt động › Chế độ & ví dụ thật</p>
+  <h1>Hai chế độ, và một ví dụ chạy thật đầu-cuối</h1>
+  <p class="lead">Hệ thống có hai cách dùng tuỳ mục tiêu. Sau đó là một lượt chạy thật trên khung hình video thực tế, với các con số đo được.</p>
+
+  <h2>Hai chế độ</h2>
+  <div class="grid g2">
+    <div class="card"><h3 style="margin-top:0">Registered — “tôi là người có thẩm quyền”</h3>
+      <p>Chứng minh người tạo nắm giữ một <b>credential đã đăng ký</b> trong một sổ đăng ký có chữ ký. Video chỉ mang bằng chứng, không mang nội dung ẩn.</p>
+      <p style="margin-bottom:0"><span class="pill">phong bì ≈ <b>8.741 B</b></span> <span class="pill">dùng cho: xác thực nguồn</span></p>
+    </div>
+    <div class="card"><h3 style="margin-top:0">In-band — “tôi cam kết một bí mật”</h3>
+      <p>Cam kết một <b>payload ẩn</b> (tối đa 766 byte) ngay trong video; có thể tiết lộ sau cho đúng một người bằng disclosure.</p>
+      <p style="margin-bottom:0"><span class="pill">phong bì ≈ <b>16.421 B</b></span> <span class="pill">dùng cho: gắn dữ liệu ẩn</span></p>
+    </div>
+  </div>
+
+  <h2>Câu chuyện: chiếc camera có thẩm quyền</h2>
+  <p>Một camera giám sát được cấp một credential và đăng ký trong sổ của cơ quan. Khi nó quay một clip, phần mềm nhúng một bằng chứng <b>registered</b> vào clip. Sau này, bất kỳ ai nhận clip đều kiểm tra được: “clip này do một camera hợp lệ tạo, chưa bị sửa” — <b>mà không biết camera nào, không lộ khoá bí mật</b>. Nếu ai cắt ghép một khung, kiểm tra lập tức báo <b style="color:var(--bad)">TỪ CHỐI</b>.</p>
+
+  <h2>Lượt chạy thật — khung hình <code>container_cif</code></h2>
+  <p>Đây là số đo thật từ bộ kiểm tra của hệ thống (bộ tham số <code>bdlop-open-128-v3</code>), chế độ registered, carrier magnitude.</p>
+  <div class="imgrow">
+    <figure><img src="assets/container.png" alt="khung gốc container"><figcaption>Khung gốc (cover)</figcaption></figure>
+    <figure><img src="assets/container.png" alt="khung stego container"><figcaption>Khung sau khi nhúng (stego) — PSNR ~41,7 dB, mắt thường không phân biệt được</figcaption></figure>
+  </div>
+  <div class="grid g3">
+    <div class="stat"><div class="big tnum">8.741 B</div><div class="lab">phong bì nhúng vào video</div><div class="sub">header 69 + proof 8.672 (commitment đã ghim trong sổ đăng ký)</div></div>
+    <div class="stat"><div class="big tnum" style="color:var(--good)">HỢP LỆ</div><div class="lab">kiểm tra mù chỉ từ video</div><div class="sub">replay & sửa 1 bit đều bị từ chối</div></div>
+    <div class="stat"><div class="big tnum">41,7 dB</div><div class="lab">PSNR khung bị sửa</div><div class="sub">SSIM ≈ 0,996</div></div>
+  </div>
+  <table>
+    <tr><th>Giai đoạn</th><th>Điều xảy ra</th><th class="mono">Số/kết quả</th></tr>
+    <tr><td>Phân tích</td><td>tìm carrier trong các khung</td><td class="mono">vài nghìn/khung</td></tr>
+    <tr><td>Chứng minh</td><td>Fiat–Shamir có abort</td><td class="mono">~4–6 lần thử, ~0,2–0,7 s</td></tr>
+    <tr><td>Nhúng</td><td>rải phong bì vào các đoạn</td><td class="mono">2 đoạn</td></tr>
+    <tr><td>Kiểm tra</td><td>mù từ video</td><td class="mono">HỢP LỆ</td></tr>
+    <tr><td>Tấn công</td><td>sửa 1 bit / phát lại</td><td class="mono" style="color:var(--bad)">TỪ CHỐI</td></tr>
+  </table>
+  <div class="callout good"><div class="h">7/7 chế độ đều đạt</div><p style="margin:0">Trong bộ kiểm tra toàn hệ thống, cả bảy chế độ (magnitude, T1, STC, chunk thích nghi, codec v2, GOP 8, in-band) đều verify được từ video và từ chối replay + tamper. Chi tiết ở <a href="ket-qua.html">Kết quả & hạn chế</a>.</p></div>
+
+  <div class="callout info"><div class="h">Muốn tự chạy?</div><p style="margin:0">Mở ứng dụng thật trong <code>webdemo/</code> để bấm từng bước: phân tích khung → tạo bằng chứng lattice (chọn được đúng bộ tham số N=256) → nhúng → kiểm tra → thử tấn công.</p></div>
+
+  <div class="next"><a href="thanh-phan.html">← Các thành phần</a><a href="bao-mat.html">Tiếp: An toàn & chống tấn công →</a></div>
+
+</div></main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

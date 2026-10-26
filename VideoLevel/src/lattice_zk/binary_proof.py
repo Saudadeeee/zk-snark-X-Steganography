@@ -4,7 +4,7 @@ Design and soundness analysis: ``docs/PROOF_NHI_PHAN_VA_KHOANG.md``; theorem
 statements: ``docs/paper/sections/binary_proof.tex``.
 
 The statement commitment ``C = (t1, t2)`` is an ordinary commitment of
-``bdlop.commit`` under the base parameter set (``bdlop-open-128-v2`` in
+``bdlop.commit`` under the base parameter set (``bdlop-open-128-v3`` in
 production), so it also works with the opening, equality and disclosure
 proofs.  Each proof creates a fresh auxiliary BDLOP commitment ``D`` under its
 own key, with randomness ``r'`` that is never reused, and proves a quadratic
@@ -52,7 +52,9 @@ from .bdlop import Commitment, ternary_randomness
 from .opening_proof import (
     HEDGE_BINARY, ProofResult, hedged_mask_key, prover_entropy, require_commitment,
 )
-from .params import BDLOP_OPEN_128, CHALLENGE_SEED_BYTES, MAX_NAME_BYTES, TOY, BdlopParams
+from .params import (
+    BDLOP_OPEN_128_V2, BDLOP_OPEN_128_V3, CHALLENGE_SEED_BYTES, MAX_NAME_BYTES, TOY, BdlopParams,
+)
 
 _DOMAIN = b"zkstego/lattice-zk/bdlop-binary/v1/"
 _PARAMETER_DOMAIN = _DOMAIN + b"parameters\0"
@@ -66,9 +68,9 @@ _AUX_DOMAIN = _DOMAIN + b"aux-witness\0"
 _MASK_DOMAIN = _DOMAIN + b"mask\0"
 MAX_REPETITIONS = 64
 MIN_SOUNDNESS_BITS = 128
-# The acceptance probability of the production set is about 0.0142 per
-# attempt; 16384 attempts all abort with probability about 2^-338.  The cap
-# leaks nothing: acceptance does not depend on the witness.
+# The acceptance probability of the production set (bdlop-binary-128-v3) is
+# about 0.00885 per attempt; 16384 attempts all abort with probability about
+# 2^-210.  The cap leaks nothing: acceptance does not depend on the witness.
 MAX_ATTEMPTS = 16384
 
 LiftOverride = Callable[[np.ndarray, np.ndarray], np.ndarray]
@@ -182,7 +184,8 @@ class BinaryParams:
 
     @property
     def soundness_bits(self) -> float:
-        return -max(self.round_soundness_log2.values())
+        """-log2 of the per-round soundness error, summed over the four rounds."""
+        return -math.log2(sum(2.0 ** value for value in self.round_soundness_log2.values()))
 
     @cached_property
     def parameter_id(self) -> bytes:
@@ -203,13 +206,25 @@ def _setup_seed(label: str) -> bytes:
     return hashlib.sha3_256(_PARAMETER_DOMAIN + b"setup-seed\0" + label.encode("ascii")).digest()
 
 
-BINARY_128 = BinaryParams(
+# Over bdlop-open-128-v2; kept so earlier proofs and estimates stay reproducible.
+BINARY_128_V2 = BinaryParams(
     name="bdlop-binary-128-v2",
-    base=BDLOP_OPEN_128,
+    base=BDLOP_OPEN_128_V2,
     lift_repetitions=5,
     check_repetitions=5,
     setup_seed=_setup_seed("bdlop-binary-128-v2"),
 )
+
+# Current production set, over bdlop-open-128-v3.
+BINARY_128_V3 = BinaryParams(
+    name="bdlop-binary-128-v3",
+    base=BDLOP_OPEN_128_V3,
+    lift_repetitions=5,
+    check_repetitions=5,
+    setup_seed=_setup_seed("bdlop-binary-128-v3"),
+)
+
+BINARY_128 = BINARY_128_V3
 
 # Fast, insecure set for unit tests only.
 BINARY_TOY = BinaryParams(
@@ -672,6 +687,8 @@ def verify(params: BinaryParams, statement: bytes, commitment: Commitment, proof
 
 __all__ = [
     "BINARY_128",
+    "BINARY_128_V2",
+    "BINARY_128_V3",
     "BINARY_TOY",
     "MAX_ATTEMPTS",
     "AuxKey",

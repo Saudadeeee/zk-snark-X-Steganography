@@ -3,8 +3,9 @@
 % Input by main.tex after the security appendix when present. Requires amsmath,
 % amssymb, amsthm and the theorem environments of main.tex, and the macros
 % below (all \providecommand, so they coexist with sections/security.tex).
-% Code: src/lattice_zk/binary_proof.py (parameter set bdlop-binary-128-v2) and
-% src/lattice_zk/payload_range_proof.py (bdlop-payload-range-128-v1);
+% Code: src/lattice_zk/binary_proof.py (production set bdlop-binary-128-v3) and
+% src/lattice_zk/payload_range_proof.py (bdlop-payload-range-128-v2), both over
+% the base set bdlop-open-128-v3;
 % design notes: docs/PROOF_NHI_PHAN_VA_KHOANG.md.
 
 \providecommand{\Rq}{\mathcal{R}_q}
@@ -108,8 +109,10 @@ $c^2P(s)+c(\Gamma_1-\Gamma_1)+a_\psi a_m+a_G=v$. Phiên bản không tương tá
 xuất bốn thách thức từ các hạt giống SHAKE-256 được xâu chuỗi, tách miền, trên
 $(\pid,x,C)$, $D$, $(h_t)_t$ và $(t_G,w,w',v)$ theo thứ tự này; khi loại bỏ chỉ
 các bước 6--7 được lặp lại. Chứng minh là
-$(D,(h_t)_t,t_G,\mathit{seed},z,z')$; đối với \texttt{bdlop-binary-128-v2} nó
-là 43\,022 byte.
+$(D,(h_t)_t,t_G,\mathit{seed},z,z')$; đối với bộ sản xuất
+\texttt{bdlop-binary-128-v3} (trên \texttt{bdlop-open-128-v3}: $n=7$,
+$\lambda=7$, $k=15$, cam kết $7\,680$ byte, chứng minh mở $8\,672$ byte) nó là
+$45\,134$ byte ($43\,022$ byte cho bộ cũ \texttt{bdlop-binary-128-v2}).
 
 \subsection{An toàn}
 
@@ -118,9 +121,11 @@ là 43\,022 byte.
 Nếu $C=\Com(m;r)$ với $m\in\{0,1\}^N$ và $r\in S_1^k$, một lần thử được chấp
 nhận với xác suất đúng bằng
 $p_{\mathrm{acc}}=((2B+1)/2\gamma)^{(k+k_{\mathrm{aux}})N}$
-($0.0112$ cho \texttt{bdlop-binary-128-v2}), mọi bản ghi được chấp nhận đều
+($0.00885$ cho \texttt{bdlop-binary-128-v3}, trung bình $113$ lần thử;
+$0.0112$ cho \texttt{bdlop-binary-128-v2}), mọi bản ghi được chấp nhận đều
 kiểm chứng được, và bên chứng minh không xuất ra được một chứng minh trong
-$\Amax=16\,384$ lần thử với xác suất $(1-p_{\mathrm{acc}})^{\Amax}<2^{-266}$.
+$\Amax=16\,384$ lần thử với xác suất $(1-p_{\mathrm{acc}})^{\Amax}\le2^{-210.05}$
+($2^{-266.4}$ cho v2).
 \end{theorem}
 \begin{proof}
 $\ct(E_t)=0$ theo Bổ đề~\ref{lem:bin-lin}(iii) với $u_i=\sigma(\gamma_i\circ m)$
@@ -159,67 +164,104 @@ $P(\bar s)$. Trừ nó tại $c,c'$ và $c',c''$ rồi dùng tính khả nghịc
 $c-c'$, $c'-c''$ và $c-c''$ cho $P(\bar s)=0$.
 \end{proof}
 
-\begin{theorem}[Tính đúng đắn theo từng vòng]
+\begin{theorem}[Chuỗi tất định và sai số theo vòng cho thông điệp cố định]
 \label{thm:bin-rbr}
-Gọi $C$ là một cam kết mà thông điệp phần-mở-nới-lỏng $\bar m$ (duy nhất theo
-Định lý~\ref{thm:binding}) không phải nhị phân. Với mọi bên chứng minh của giao
-thức tương tác, xác suất để bên kiểm chứng chấp nhận mà không tìm được nghiệm
-\MSIS{} cho $B_1$ hay $B_1'$ có chuẩn $\le8\kappa B$ là tối đa
-\[
-\erbr=q^{-k}+q^{-k'}+q^{-N/2}+2/|\Cset| ,
-\]
-và mỗi vòng trong bốn vòng thách thức đóng góp riêng rẽ tối đa số hạng tương
-ứng. Đối với \texttt{bdlop-binary-128-v2},
-$\erbr\le2^{-149.99}$.
+Cố định một vector thông điệp $\bar s$ \emph{tùy ý} cho các hàng của $C$ và $D$
+(không cần là thông điệp của một phần mở nào), với $\bar m$ là thông điệp của
+hàng $t_2$, $\bar v=\bar m\circ(\bar m-J)$, và các đại lượng
+$e,\delta_t,\varphi_t,\bar P_t$ như trong chứng minh. Gọi thách thức của một
+vòng là \emph{xấu} đối với $\bar s$ nếu:
+mọi $\langle\gamma_i,\bar v\rangle=0$ trong khi $\bar v\ne0$ (lift);
+$\delta_t+\varphi_t(e)=0$ cho mọi $t$ trong khi $e\ne0$ (kiểm tra);
+$\sum_t\alpha_t\bar P_t=0$ trong khi một $\bar P_t\ne0$ nào đó (kết hợp).
+\begin{enumerate}
+\item[(a)] (Tất định.) Nếu $\bar m\notin\{0,1\}^N$ và không thách thức nào trong
+  ba vòng lift, kiểm tra, kết hợp là xấu đối với $\bar s$, thì $P(\bar s)\ne0$.
+\item[(b)] (Theo vòng.) Nếu các thông điệp của các hàng được gửi trước thách
+  thức vòng $i$ được cố định trước khi thách thức đó được rút đều, thì thách
+  thức vòng $i$ là xấu với xác suất tối đa $\varepsilon_1=q^{-k}$,
+  $\varepsilon_2=q^{-k'}$, tương ứng $\varepsilon_3=q^{-N/2}$.
+\item[(c)] (Vòng thách thức.) Với các thông điệp của các bước 1--6 cố định, từ
+  ba thách thức đôi một phân biệt được chấp nhận,
+  Bổ đề~\ref{lem:bin-consistent} tính ra hoặc một nghiệm \MSIS{} chuẩn
+  $\le8\kappa B$ cho $B_1$ hay $B_1'$, hoặc các phần mở nới lỏng có thông
+  điệp $\bar s$ với $P(\bar s)=0$; tức vòng cuối là một $\Sigma$-protocol
+  $3$-đúng-đắn-đặc-biệt với sai số $\varepsilon_4=2/|\Cset|$.
+\end{enumerate}
+Đặt $\erbr=\varepsilon_1+\varepsilon_2+\varepsilon_3+\varepsilon_4$. Đối với
+\texttt{bdlop-binary-128-v3} (cũng như v2), $\erbr\approx2^{-149.0}$; số hạng
+lớn nhất là $q^{-5}\approx2^{-149.99}$.
 \end{theorem}
+\noindent
+Định lý này cố ý \emph{không} khẳng định một cận xác suất chấp nhận đối với một
+bên chứng minh tùy ý. Thông điệp nới lỏng chỉ bị ràng buộc một cách tính toán
+(Định lý~\ref{thm:binding}) và chỉ được trích xuất \emph{sau} các thách thức,
+nên giả thiết của (b) không tự động thỏa mãn cho các thông điệp trích xuất được.
+Cận đối với bên chứng minh gian lận là Định lý~\ref{thm:bin-ks}, nơi điều kiện
+này được thay bằng một lập luận plurality với các số hạng \MSIS{}.
 \begin{proof}[Phác thảo chứng minh]
-Cố định các thông điệp trích xuất được; chúng được xác định bởi $C$ và $D$ sai
-khác \MSIS{} (tính ràng buộc đối với các phần mở nới lỏng, cho cả hai khóa).
-\emph{Vòng lift.} Đặt $\Delta_i=\bar u_i-\sigma(\gamma_i\circ\bar m)$,
+\emph{(a), vòng lift.} Đặt $\Delta_i=\bar u_i-\sigma(\gamma_i\circ\bar m)$,
 $Q_i=\ct(\bar u_i(\bar m-J))$ và $e=(\Delta_i,Q_i)_i$. Nếu $e=0$ thì
-$Q_i=\langle\gamma_i,\bar m\circ(\bar m-J)\rangle=0$ cho mọi $i$ theo
-Bổ đề~\ref{lem:bin-lin}(iii); vì $\bar m$ được cố định trước $\gamma$ và
-$\bar m\circ(\bar m-J)\neq0$, điều này có xác suất $q^{-k}$, bất kể $D$ nào bên
-chứng minh gửi sau đó. \emph{Vòng kiểm tra.} Theo Bổ đề~\ref{lem:bin-lin},
+$Q_i=\langle\gamma_i,\bar v\rangle=0$ cho mọi $i$ theo
+Bổ đề~\ref{lem:bin-lin}(iii), tức thách thức lift là xấu. Vậy nếu $\bar m$
+không nhị phân và thách thức lift không xấu thì $e\ne0$.
+\emph{(a), vòng kiểm tra.} Theo Bổ đề~\ref{lem:bin-lin},
 $\ct(\bar g_t+E_t(\bar s))=\delta_t+\varphi_t(e)$ với
 $\delta_t=\ct(\bar g_t)$ và
-$\varphi_t(e)=\sum_i\langle\rho_{t,i},\Delta_i\rangle+\mu_{t,i}Q_i$. Cả $e\neq0$
-và $\delta_t$ đều được $D$ cố định trước khi $(\rho,\mu)$ được rút, và
-$\varphi_t(e)$ đều trên $\mathbb Z_q$ cho mỗi $t$, một cách độc lập; do đó
-$\delta_t+\varphi_t(e)=0$ cho mọi $t$ với xác suất $q^{-k'}$. Ngược lại một
-$t$ nào đó có $\ct(\bar g_t+E_t)\ne0=\ct(h_t)$, tức $\bar P_t=\bar g_t+E_t-h_t\neq0$.
-\emph{Vòng kết hợp.} Các $\bar P_t$ được cố định trước $\alpha$. Trong một slot
-CRT $\mathbb F_{q^{N/2}}$ mà một $\bar P_{t_0}\neq0$ nào đó, $\sum_t\alpha_t\bar P_t$
-đều, nên nó triệt tiêu với xác suất $q^{-N/2}$. \emph{Vòng thách thức.}
-Nếu $P(\bar s)\ne0$, chọn một slot $\phi$ mà tại đó nó khác không. Đa thức
-$c^2P(\bar s)+cX+Y-v$ khác không và bậc hai theo modulo $\phi$, nên nó có tối
-đa hai nghiệm trong trường $\Rq/\phi$; vì $c-c'$ khả nghịch với các thách thức
-phân biệt, $c\mapsto c\bmod\phi$ là đơn ánh trên $\Cset$, và tối đa hai
-thách thức là nghiệm. Theo Bổ đề~\ref{lem:bin-consistent} một bản ghi được chấp
-nhận cần một nghiệm.
+$\varphi_t(e)=\sum_i\langle\rho_{t,i},\Delta_i\rangle+\mu_{t,i}Q_i$. Nếu
+$e\ne0$ và thách thức kiểm tra không xấu, một $t$ nào đó có
+$\ct(\bar g_t+E_t)\ne0=\ct(h_t)$, tức $\bar P_t=\bar g_t+E_t-h_t\ne0$.
+\emph{(a), vòng kết hợp.} Nếu thêm vào đó thách thức kết hợp không xấu thì
+$P(\bar s)=\sum_t\alpha_t\bar P_t\ne0$.
+\emph{(b).} Vòng lift: $\bar v\ne0$ được cố định trước $\gamma$, và mỗi
+$\langle\gamma_i,\bar v\rangle$ đều trên $\mathbb Z_q$, độc lập theo $i$.
+Vòng kiểm tra: $e$ và $\delta_t$ chỉ phụ thuộc vào $\bar s$ trên các hàng của
+$C$ và $D$ và vào $\gamma$, nên được cố định trước $(\rho,\mu)$; với $e\ne0$,
+$\varphi_t(e)$ đều trên $\mathbb Z_q$ cho mỗi $t$, một cách độc lập. Vòng kết
+hợp: các $\bar P_t$ được cố định trước $\alpha$; trong một slot CRT
+$\mathbb F_{q^{N/2}}$ mà một $\bar P_{t_0}\ne0$ nào đó,
+$\sum_t\alpha_t\bar P_t$ đều.
+\emph{(c).} Bổ đề~\ref{lem:bin-consistent} cho trực tiếp sự lựa chọn. Để đọc
+nó như một sai số: nếu $P(\bar s)\ne0$, chọn một slot $\phi$ mà tại đó nó khác
+không; đa thức $c^2P(\bar s)+cX+Y-v$ khác không và bậc hai theo modulo $\phi$,
+nên có tối đa hai nghiệm trong trường $\Rq/\phi$; vì $c-c'$ khả nghịch với các
+thách thức phân biệt, $c\mapsto c\bmod\phi$ là đơn ánh trên $\Cset$, và tối đa
+hai thách thức là nghiệm.
 \end{proof}
 
 \paragraph{Chứng minh không tương tác.}
 Viết $H_1,\dots,H_4$ cho bốn oracle tách miền (lift, kiểm tra, kết hợp, thách
 thức), được mô hình hóa như các oracle ngẫu nhiên độc lập, và
 $\varepsilon_1=q^{-k}$, $\varepsilon_2=q^{-k'}$, $\varepsilon_3=q^{-N/2}$,
-$\varepsilon_4=2/|\Cset|$ cho bốn số hạng của Định lý~\ref{thm:bin-rbr}
-(chúng tôi mô hình hóa $c=\mathsf{SampleInBall}(H_4(\cdot))$ như đều trên
-$\Cset$). Các hạt giống được xâu chuỗi: đầu vào của $H_{i+1}$ chứa đầu ra $s_i$
-của $H_i$. Đối với một phần mở nới lỏng với các thông điệp $\bar s$ của các hàng
-được băm vào một truy vấn $H_i$, gọi câu trả lời của truy vấn đó là \emph{xấu}
-nếu nó là sự kiện xấu của vòng $i$ trong chứng minh Định lý~\ref{thm:bin-rbr}:
+$\varepsilon_4=2/|\Cset|$ cho bốn số hạng của Định lý~\ref{thm:bin-rbr}.
+Mỗi $H_i$ xuất một hạt giống 256 bit $s_i$. Các thách thức
+$\gamma$, $(\rho,\mu)$ (và $\rho^L$ cho $\Pi_{\mathsf{pay}}$), $\alpha$ là
+$\mathsf{Expand}(s_i)$, một XOF với thẻ miền \texttt{expand} chung cho ba vòng,
+và $c=G(s_4)$ với $G$ là oracle mở rộng thách thức (\textsf{SampleInBall}) của
+Mục~\ref{sec:sec-notation}. Theo quy ước ở đó, $G$ và $\mathsf{Expand}$ là các
+oracle ngẫu nhiên độc lập, đều chính xác trên một đầu vào \emph{mới}; đầu vào
+không mới (đối thủ đã truy vấn $\mathsf{Expand}$ hay $G$ tại hạt giống đó) xảy ra
+với xác suất tối đa $Q\cdot2^{-256}$ cho mỗi câu trả lời, và được tính trong số
+hạng va chạm $\delta_{\mathsf{coll}}$ của Định lý~\ref{thm:bin-ks}. Hệ quả là
+sai số thực tế của vòng kết hợp là khoảng $2^{-256}$, không phải $q^{-N/2}$.
+Các hạt giống được xâu chuỗi: đầu vào của $H_{i+1}$ chứa đầu ra $s_i$
+của $H_i$. Đối với một vector thông điệp $\bar s$ của các hàng
+được băm vào một truy vấn $H_i$ (trực tiếp hoặc qua hạt giống xâu chuỗi), gọi câu
+trả lời của truy vấn đó là \emph{xấu} nếu thách thức vòng $i$ là xấu theo
+Định lý~\ref{thm:bin-rbr}:
 mọi $\langle\gamma_i,\bar v\rangle=0$ trong khi $\bar v=\bar m\circ(\bar m-J)\ne0$
 ($i=1$); $\delta_t+\varphi_t(e)=0$ cho mọi $t$ trong khi $e\ne0$ ($i=2$);
 $\sum_t\alpha_t\bar P_t=0$ trong khi một $\bar P_t\ne0$ nào đó ($i=3$). Mỗi điều
 này chỉ phụ thuộc vào đầu vào của truy vấn (nó chứa $C$, các hàng của $D$ đã gửi
 cho tới nay, $(h_t)_t$ và, thông qua hạt giống xâu chuỗi, các thách thức trước
-đó) và vào câu trả lời, và với mỗi $\bar s$ cố định, nó có xác suất tối đa
-$\varepsilon_i$ trên câu trả lời.
+đó) và vào câu trả lời, và với mỗi $\bar s$ cố định và một hạt giống mới đối với
+$\mathsf{Expand}$, nó có xác suất tối đa $\varepsilon_i$ trên câu trả lời
+(Định lý~\ref{thm:bin-rbr}(b)).
 
 \begin{theorem}[Tính đúng đắn tri thức của chứng minh không tương tác]
 \label{thm:bin-ks}
-Giả sử $\mathcal A$ thực hiện tổng cộng tối đa $Q$ truy vấn tới $H_1,\dots,H_4$
+Giả sử $\mathcal A$ thực hiện tổng cộng tối đa $Q$ truy vấn tới các oracle ngẫu
+nhiên $H_1,\dots,H_4$, $\mathsf{Expand}$ và $G$,
 và xuất ra $(x,C,\pi)$ mà bên kiểm chứng chấp nhận với xác suất $\varepsilon$.
 Tồn tại một bộ trích xuất $\mathcal E$ chạy $\mathcal A$ với số lần kỳ vọng tối
 đa $3+2Q$, và với $i=1,2,3$ một thuật toán $\mathcal F_i$ chạy $\mathcal E$ hai
@@ -227,14 +269,14 @@ lần, sao cho $\mathcal E$ xuất ra một phần mở nới lỏng của $C$ m
 nó là nhị phân với xác suất ít nhất
 \[
 \varepsilon-(Q+1)\sum_{i=1}^{4}\varepsilon_i-\sum_{i=1}^{3}\sqrt{(Q+1)\,\alpha_i}
--\beta-\frac{Q^2}{2^{256}},
+-\beta-\delta_{\mathsf{coll}},\qquad
+\delta_{\mathsf{coll}}=13\,(Q+4)^2\,2^{-256},
 \]
 trong đó $\beta$ (tương ứng $\alpha_i$) là xác suất $\mathcal E$
 (tương ứng $\mathcal F_i$) xuất ra một nghiệm \MSIS{} có chuẩn $\ell_\infty$ tối
-đa $8\kappa B$ cho $B_1$ hoặc $B_1'$. Cụ thể, nếu $C$ không có phần mở nới lỏng
-nào với một thông điệp nhị phân, thì
-$\varepsilon\le(Q+1)\erbr+\sum_i\sqrt{(Q+1)\alpha_i}+\beta+Q^22^{-256}$ với
-$\erbr\le2^{-149.99}$ cho \texttt{bdlop-binary-128-v2}.
+đa $8\kappa B$ cho $B_1$ hoặc $B_1'$. Với
+\texttt{bdlop-binary-128-v3}, $(Q+1)\sum_i\varepsilon_i=(Q+1)\erbr$ với
+$\erbr\approx2^{-149.0}$, và với $Q=2^{64}$, $\delta_{\mathsf{coll}}\approx2^{-124.3}$.
 \end{theorem}
 \begin{proof}[Phác thảo chứng minh]
 \emph{Loại bỏ.} Bên chứng minh chỉ lặp lại các bước~6--7 sau một lần loại bỏ;
@@ -248,11 +290,25 @@ $D$ và $h$ được mô phỏng của nó, và chỉ vòng cuối có loại b�
 cách lập trình $H_4$, đúng như với chứng minh mở trong
 Bổ đề~\ref{lem:sim}, theo~\cite{ref:barbosa,ref:devevey}.)
 
-\emph{Thứ tự truy vấn.} Không mất tính tổng quát, $\mathcal A$ truy vấn bốn
-đầu vào oracle của đầu ra của nó (thêm mỗi cái một truy vấn). Bởi vì đầu vào
-của $H_{i+1}$ chứa đầu ra 256 bit của $H_i$, ngoại trừ với xác suất
-$Q^2/2^{256}$, bốn truy vấn này xảy ra theo thứ tự $H_1,H_2,H_3,H_4$ và truy
-vấn $H_4$ là truy vấn cuối cùng trong số đó.
+\emph{Thứ tự truy vấn và va chạm.} Không mất tính tổng quát, $\mathcal A$ truy
+vấn bốn đầu vào oracle của đầu ra của nó (thêm mỗi cái một truy vấn, tổng cộng
+tối đa $Q+4$ truy vấn mỗi lần chạy). Gọi $\mathsf{Coll}$ là hợp của các sự kiện
+sau, mỗi sự kiện liên quan tới một giá trị 256 bit được đoán trước hoặc trùng:
+(1) trong lần chạy đầu, một truy vấn $H_{i+1}$ chứa một $s_i$ trước khi $H_i$
+xuất ra nó, hoặc hai đầu ra của cùng một $H_i$ trùng nhau: tối đa
+$(Q+4)^2\,2^{-256}$; (2) trong lần chạy đầu, một câu trả lời của $H_1,\dots,H_4$
+là một hạt giống mà $\mathsf{Expand}$ hay $G$ đã được truy vấn tại đó: tối đa
+$4(Q+4)^2\,2^{-256}$; (3) trong một lần chạy tua lại bất kỳ của $\mathcal E$
+(kỳ vọng $3+2Q$ lần), một truy vấn mới tới $H_1$, $H_2$ hay $H_3$ có đầu ra bằng
+$s_1$, $s_2$ hay $s_3$ của chuỗi then chốt với một đầu vào khác, hoặc câu trả lời
+được lập trình lại $s_4'$ là một hạt giống mà $G$ đã được truy vấn tại đó: tối đa
+$4(Q+4)\,2^{-256}$ mỗi lần chạy, tức $4(3+2Q)(Q+4)\,2^{-256}\le8(Q+4)^2\,2^{-256}$.
+Vậy $\Pr[\mathsf{Coll}]\le\delta_{\mathsf{coll}}$. Ngoài $\mathsf{Coll}$, bốn
+truy vấn của đầu ra xảy ra theo thứ tự $H_1,H_2,H_3,H_4$; truy vấn $H_4$ là
+truy vấn cuối cùng trong số đó; và \emph{$s_3$ xác định duy nhất tiền tố
+$(x,C,D,(h_t)_t)$ trên mọi lần chạy của $\mathcal E$}, nên mọi bản ghi được chấp
+nhận có cùng đầu vào $H_4$ đều có cùng tiền tố. Phần còn lại của chứng minh làm
+việc trên phần bù của $\mathsf{Coll}$.
 
 \emph{Vòng cuối.} Cố định các đồng xu của $\mathcal A$ và các câu trả lời cho
 mọi truy vấn trước truy vấn $H_4$ then chốt. Đầu vào của nó cố định tiền tố
@@ -265,9 +321,13 @@ hoặc một nghiệm \MSIS{} có chuẩn $\le8\kappa B$''. Bộ trích xuất F
 của Attema, Fehr và Klo{\ss}~\cite{ref:afk22} cho các
 $\Sigma$-protocol $k$-đúng-đắn-đặc-biệt ($k=3$; nó chỉ tua lại truy vấn then
 chốt của oracle thách thức và coi phát biểu cùng mọi oracle khác như một phần
-của $\mathcal A$) chạy $\mathcal A$ với số lần kỳ vọng $k+Q(k-1)=3+2Q$ và
+của $\mathcal A$, lấy mẫu lười và nhất quán qua các lần tua lại) chạy
+$\mathcal A$ với số lần kỳ vọng $k+Q(k-1)=3+2Q$ và
 thành công với xác suất ít nhất
 $(\varepsilon-(Q+1)\varepsilon_4)/(1-\varepsilon_4)\ge\varepsilon-(Q+1)\varepsilon_4$.
+Hai điều kiện của định lý đó được thỏa ngoài $\mathsf{Coll}$: phát biểu
+$\mathit{pre}$ được xác định bởi đầu vào $H_4$ (qua $s_3$), và thách thức
+$c=G(s_4)$ đều trên $\Cset$ với mỗi hạt giống mới.
 
 \emph{Các vòng thống kê.} Nếu $\mathcal E$ xuất ra các phần mở với các thông
 điệp $\bar s$ và không vòng nào trong ba vòng thách thức của đầu ra là xấu đối
@@ -281,27 +341,76 @@ phần mở nới lỏng). Cố định $j\le Q$ và mọi thứ trước truy v
 $\mathcal E$, bao gồm câu trả lời $\gamma^{(j)}$ cho truy vấn đó. Với mỗi
 vector thông điệp $m$ của các hàng được băm vào truy vấn, đặt
 $p_m=\Pr_\xi[\mathcal E \text{ xuất ra các phần mở, đầu ra dùng truy vấn }j,
-\bar s|_{\mathrm{rows}}=m]$, $P=\sum_mp_m$, và gọi $m^\star$ là giá trị làm
-cực đại $p_m$; $m^\star$ chỉ phụ thuộc vào tiền tố, do đó độc lập với
-$\gamma^{(j)}$. Khi đó
+\bar s|_{\mathrm{rows}}=m,\ \neg\mathsf{Coll}]$, $P=\sum_mp_m$, và gọi $m^\star$
+là giá trị làm cực đại $p_m$; $m^\star$ chỉ phụ thuộc vào tiền tố, do đó độc
+lập với $\gamma^{(j)}$. Khi đó
 \[
-\Pr_\xi[\mathsf{Bad}_i\wedge\text{truy vấn }j]
+\Pr_\xi[\mathsf{Bad}_i\wedge\text{truy vấn }j\wedge\neg\mathsf{Coll}]
 \le\Pr[\gamma^{(j)}\text{ xấu đối với }m^\star]+\Pr_\xi[\bar s|_{\mathrm{rows}}\ne m^\star]
-\le\varepsilon_i+(P-p_{m^\star}).
+\le\varepsilon_i+(P-p_{m^\star}),
 \]
+trong đó số hạng đầu dùng Định lý~\ref{thm:bin-rbr}(b) cho một hạt giống mới
+đối với $\mathsf{Expand}$ (trường hợp không mới nằm trong $\mathsf{Coll}$).
 $\mathcal F_i$ chạy $\mathcal E$, và nếu đầu ra dùng truy vấn $H_i$ thứ $j$ thì
 nó chạy lại $\mathcal E$ từ truy vấn đó với $\xi'$ mới; nó thành công nếu cả
 hai lần chạy dùng truy vấn $j$ và các thông điệp của chúng trên các hàng được
-băm khác nhau. Hai phần mở nới lỏng $(\bar r,\bar f)$, $(\bar r',\bar f')$ của
-cùng $t_1$ (hoặc $t_1'$) với các thông điệp khác nhau cho nghiệm \MSIS{}
+băm khác nhau. Khi cả hai lần chạy nằm ngoài $\mathsf{Coll}$, hai đầu ra có cùng
+$C$ và $D$ của tiền tố, nên ta có hai phần mở nới lỏng $(\bar r,\bar f)$,
+$(\bar r',\bar f')$ của
+cùng $t_1$ (hoặc $t_1'$) với các thông điệp khác nhau; chúng cho nghiệm \MSIS{}
 $\bar f'\bar r-\bar f\bar r'\ne0$ có chuẩn $\le8\kappa B$, như trong
-Định lý~\ref{thm:binding}. Với tiền tố cho trước, xác suất thành công là
-$P^2-\sum_mp_m^2\ge P(P-p_{m^\star})\ge(P-p_{m^\star})^2$. Lấy tổng theo $j$,
-với bất đẳng thức Jensen và Cauchy--Schwarz,
+Định lý~\ref{thm:binding}. $\mathcal F_i$ không cần kiểm tra $\neg\mathsf{Coll}$;
+nó chỉ xuất ra vector đó. Với tiền tố cho trước, xác suất thành công vì vậy ít
+nhất là $P^2-\sum_mp_m^2\ge P(P-p_{m^\star})\ge(P-p_{m^\star})^2$. Lấy tổng
+theo $j$ (các sự kiện ``lần chạy đầu dùng truy vấn $j$'' rời nhau), với bất
+đẳng thức Jensen và Cauchy--Schwarz,
 $\sum_j\mathbb E[P-p_{m^\star}]\le\sqrt{(Q+1)\alpha_i}$, nên
-$\Pr[\mathsf{Bad}_i]\le(Q+1)\varepsilon_i+\sqrt{(Q+1)\alpha_i}$.
-Thu thập các số hạng cho ta cận.
+$\Pr[\mathsf{Bad}_i\wedge\neg\mathsf{Coll}]\le(Q+1)\varepsilon_i+\sqrt{(Q+1)\alpha_i}$.
+Thu thập các số hạng, với $\Pr[\mathsf{Coll}]$ được tính một lần, cho ta cận.
+
+\emph{Các phép rút gọn \MSIS{}.} Để biến $\alpha_i$ và $\beta$ thành các lợi thế
+\MSIS{}, phép rút gọn cấy ma trận thách thức vào \emph{một} trong các khóa
+$B_1$ hoặc $B_1'$ bằng cách lập trình điểm mở rộng khóa tương ứng trước khi
+$\mathcal A$ bắt đầu (quy ước của Phụ lục~\ref{app:security-proofs}), nên
+$\alpha_i\le2\Adv^{\MSIS}$ sau một lần đoán khóa, với $\Adv^{\MSIS}$ lấy trên
+cả hai thể hiện ($n\times k$ và $n\times k_{\mathrm{aux}}$). Đối với
+$\Pi_{\mathsf{pay}}$ có tới $\ell_{\max}=4$ khóa phụ trợ (một khóa cho mỗi
+$\ell$), nên thừa số đoán là tối đa $1+\ell_{\max}=5$, hoặc phép rút gọn dùng
+$L$ do đối thủ chọn khi nó đã cố định. $\mathcal F_i$ chạy $\mathcal A$ với số
+lần kỳ vọng khoảng $2(3+2Q)$; một ước lượng cụ thể phải tính đến thời gian này
+cùng với tổn thất căn bậc hai.
 \end{proof}
+
+\begin{corollary}[Tính đúng đắn tính toán]
+\label{cor:bin-sound}
+Giả sử $C=\Com(m;r)$ được bên thách thức sinh ra với $r\leftarrow S_1^k$ và một
+$m\notin\{0,1\}^N$ do $\mathcal A$ chọn trước. Khi đó xác suất để $\mathcal A$,
+với $Q$ truy vấn, xuất ra $(x,\pi)$ mà bên kiểm chứng chấp nhận cho $C$ là tối đa
+\[
+(Q+1)\erbr+\sum_{i=1}^3\sqrt{(Q+1)\alpha_i}+\beta+\delta_{\mathsf{coll}}
++\Adv^{\MSIS}.
+\]
+Điều tương tự đúng nếu thay vì vậy $\mathcal A$ tự xuất kèm một phần mở nới lỏng
+của $C$ với một thông điệp không nhị phân, với số hạng \MSIS{} cuối có chuẩn
+$8\kappa B$.
+\end{corollary}
+\begin{proof}
+Theo Định lý~\ref{thm:bin-ks}, $\mathcal E$ xuất ra một phần mở nới lỏng của $C$
+có thông điệp nhị phân. Cùng với phần mở trung thực $(r,1)$ của $m$, vốn được
+phép rút gọn biết vì nó sinh ra $C$ (hoặc với phần mở nới lỏng do $\mathcal A$
+xuất), Định lý~\ref{thm:binding} cho một nghiệm \MSIS{} chuẩn
+$\le2\kappa+2B$ (tương ứng $\le8\kappa B$).
+\end{proof}
+\noindent
+Không có phát biểu tương ứng cho ``một $C$ không có phần mở nới lỏng nào với
+thông điệp nhị phân'': về mặt thông tin, hầu như mọi $C$ đều có phần mở nới lỏng
+tới \emph{mọi} thông điệp. Với \texttt{bdlop-open-128-v3}, các
+$\bar r\in[-2B,2B]^{kN}$ mang $15\cdot256\cdot\log_2(4B+1)\approx72\,960$ bit,
+trong khi các ràng buộc $B_1\bar r=ft_1$ và $\langle b_2,\bar r\rangle=f(t_2-m)$
+chỉ có $8\cdot256\cdot30=61\,440$ bit. Thông điệp của một phần mở nới lỏng chỉ
+duy nhất \emph{trừ khi tìm được một nghiệm \MSIS{}} (Định lý~\ref{thm:binding}),
+nên mọi khẳng định tính đúng đắn có nội dung phải đi qua tính ràng buộc như
+trong Hệ quả~\ref{cor:bin-sound}.
 
 \noindent\emph{Trạng thái và các lỗ hổng còn lại.} Điều này khép lại phép hợp
 thành mà các bản thảo trước đã để ngỏ: việc loại bỏ chỉ chạm tới vòng cuối, các
@@ -312,30 +421,46 @@ thất căn bậc hai (rẽ nhánh) như chứng minh mở
 (Bổ đề~\ref{lem:fork}) và làm cho phép rút gọn không chặt;
 (ii) việc dùng cận $\Sigma$-protocol của Attema--Fehr--Klo{\ss} với một phát
 biểu (tiền tố) được $\mathcal A$ chọn một cách thích nghi thông qua các oracle
-khác, điều mà chúng tôi tin là được bao phủ bởi cách phát biểu thích nghi của họ
-nhưng chưa kiểm tra từng dòng; (iii) việc mô hình hóa
-$\mathsf{SampleInBall}\circ H_4$ như một thách thức đều (hạt giống có 256 bit và
-$|\Cset|=2^{257}$); và (iv) chỉ là một lập luận trong ROM cổ điển, như với mọi
-định lý ở đây. Chứng minh là một phác thảo và chưa được kiểm tra một cách độc
-lập.
+khác: bước còn thiếu trước đây, rằng đầu vào $H_4$ (chỉ chứa $s_3$) xác định
+tiền tố trên mọi lần chạy, nay được viết ra ngoài $\mathsf{Coll}$, nhưng việc
+đối chiếu từng dòng với định nghĩa thích nghi của họ vẫn chưa làm;
+(iii) việc mô hình hóa thách thức: nay được quy về quy ước $G$ và
+$\mathsf{Expand}$ là oracle ngẫu nhiên đều trên đầu vào mới
+(Mục~\ref{sec:sec-notation}), với trường hợp không mới nằm trong
+$\delta_{\mathsf{coll}}$; và (iv) chỉ là một lập luận trong ROM cổ điển, như
+với mọi định lý ở đây. Định lý chỉ nói về một chứng minh độc lập; khi đối thủ
+thấy các chứng minh trung thực, xem Định lý~\ref{thm:pay-se}. Chứng minh là một
+phác thảo và chưa được kiểm tra một cách độc lập.
 
 \begin{theorem}[Không tiết lộ tri thức với bên kiểm chứng trung thực]
 \label{thm:bin-zk}
 Tồn tại một bộ mô phỏng mà, chỉ với $(x,C)$ và lập trình oracle ngẫu nhiên tại
-bốn điểm, xuất ra các chứng minh có phân phối khác với các chứng minh trung thực
-tối đa $\Adv^{\MLWE}_{\mathsf{aux}}$ (tính che giấu của thể hiện phụ trợ: bí mật
-hạng $\lambda$, $n+k+k'+1$ mẫu vành, bí mật và sai số bậc ba) cộng với các số
-hạng va-chạm-lập-trình của Bổ đề~\ref{lem:sim}, cho bất kỳ số chứng minh nào
-trên cùng $C$.
+\emph{một} điểm của $H_4$ cho mỗi chứng minh ($H_1,H_2,H_3$, $\mathsf{Expand}$
+và $G$ chỉ được truy vấn bình thường), xuất ra $Q_P$ chứng minh có phân phối
+khác với $Q_P$ chứng minh trung thực
+tối đa $Q_P\cdot\Adv^{\MLWE}_{\mathsf{aux}}+\epszk(Q_P,Q_H)$, trong đó
+$\Adv^{\MLWE}_{\mathsf{aux}}$ là lợi thế đối với thể hiện phụ trợ (bí mật
+hạng $\lambda$, $n+k+k'+1$ mẫu vành, bí mật và sai số bậc ba; mỗi chứng minh
+có một $r'$ mới nên các bước lai đi qua từng chứng minh), và $\epszk$ là cận
+của Bổ đề~\ref{lem:sim} với $\Amax=16\,384$ (tương ứng $2^{17}$ cho
+$\Pi_{\mathsf{pay}}$), $\eta$ lấy qua $w$, và gồm cả các bước lai khóa hedged
+$G_1,G_2$ của bổ đề đó. Điều này đúng cho bất kỳ số chứng minh nào trên cùng $C$.
 \end{theorem}
 \begin{proof}[Phác thảo chứng minh]
+(0) Như trong $G_1,G_2$ của Bổ đề~\ref{lem:sim}, khóa mặt nạ hedged, $r'$,
+$g_t$ và các mặt nạ của mọi lần thử được thay bằng các giá trị đều mới, và như
+trong $G_3,G_4$ các truy vấn $H_4$ ẩn của các lần thử bị loại được bỏ đi; mọi
+điểm như vậy chứa $w$ có min-entropy $\eta$.
 (1) $(z,z')$ được chấp nhận đều trên $[-B,B]^{(k+k_{\mathrm{aux}})N}$ và
-độc lập với $(r,r')$ (Bổ đề~\ref{lem:hvzk}); lấy mẫu chúng trực tiếp và
-lập trình các oracle, với thông báo có min-entropy thông qua $w$ và $w'$.
+độc lập với $(r,r')$ (Bổ đề~\ref{lem:hvzk}); lấy mẫu chúng trực tiếp cùng
+một hạt giống $s_4$, đặt $c=G(s_4)$ và lập trình $H_4$ tại điểm duy nhất
+$(s_3,t_G,w,w',v)$, với thông báo có min-entropy thông qua $w$ và $w'$. Bộ mô
+phỏng lấy $\gamma,\rho,\mu,\alpha$ bằng các truy vấn thường.
 (2) Thông điệp $\Gamma_1$ của $t_G$ là một hàm của $z'$, $c$, các hàng công
 khai của $D$ và nhân chứng (vì $a_j=\langle b'_j,z'\rangle-c(t'_j-s_j)$), nên
 một phép rút gọn biết $m$ nhưng không biết $r'$ có thể tạo ra $D$ và $t_G$ từ
-một thách thức \MLWE{} cho $\mathsf{ck}'$; thay chúng bằng các giá trị đều.
+một thách thức \MLWE{} cho $\mathsf{ck}'$; thay chúng bằng các giá trị đều,
+lần lượt cho từng chứng minh (thừa số $Q_P$).
 (3) Khi đó $g_t$ chỉ xuất hiện trong $h_t$, vốn đều trên $\{\ct=0\}$; bộ
 mô phỏng lấy mẫu $h_t$ ở đó. Các phương trình kiểm chứng xác định
 $w,w',v$. Tính ngẫu nhiên cơ sở $r$ chỉ được dùng xuyên các chứng minh thông
@@ -349,7 +474,8 @@ bước lai hợp thành qua nhiều chứng minh.
 $\Pibin$ áp dụng cho một cam kết của một chuỗi 256 bit, trong khi các cam kết
 tải trọng của Mục~\ref{sec:sec-notation} mã hóa $\mathrm{len}(p)\,\|\,p$
 với ba byte mỗi hệ số. Một biến thể $\Pi_{\mathsf{pay}}$
-(\texttt{payload\_range\_proof.py}, bộ \texttt{bdlop-payload-range-128-v1})
+(\texttt{payload\_range\_proof.py}, bộ sản xuất
+\texttt{bdlop-payload-range-128-v2} trên \texttt{bdlop-open-128-v3})
 chứng minh một phát biểu về chính cam kết tải trọng.
 
 \paragraph{Phát biểu.} Đầu vào công khai $(x,L,C)$ với $C$ là một cam kết cơ sở
@@ -383,9 +509,12 @@ như trước.
 \begin{theorem}[Chứng minh khoảng tải trọng]
 \label{thm:pay}
 Tính đầy đủ đúng như trong Định lý~\ref{thm:bin-complete} với
-$k_{\mathrm{aux}}=n+\ell(k+1)+k'+1+\lambda$ (sự chấp nhận $0.0100$ cho
-$\ell=1$, $0.0012$ cho $\ell=4$; ngưỡng $2^{17}$ lần thử). Các Định lý
-\ref{thm:bin-rbr} và \ref{thm:bin-ks} đúng cho $\Pi_{\mathsf{pay}}$ với cùng
+$k_{\mathrm{aux}}=n+\ell(k+1)+k'+1+\lambda$ (với
+\texttt{bdlop-payload-range-128-v2}, sự chấp nhận $0.0079$ cho $\ell=1$ và
+$0.00094$ cho $\ell=4$; ngưỡng $2^{17}$ lần thử, xác suất toàn-abort
+$2^{-1492}$ đến $2^{-177}$). Định lý~\ref{thm:bin-rbr},
+Định lý~\ref{thm:bin-ks} và Hệ quả~\ref{cor:bin-sound} đúng cho
+$\Pi_{\mathsf{pay}}$ với cùng
 bốn sai số vòng và với ``thông điệp nhị phân'' được thay bằng ``thông điệp
 $\mathrm{Enc}(p)$ cho một $p\in\{0,1\}^{8L}$ nào đó''. Tính không tiết lộ tri
 thức đúng như trong Định lý~\ref{thm:bin-zk}; bộ mô phỏng được cho $(x,L,C)$.
@@ -406,31 +535,101 @@ $\mathrm{Enc}(p)$ cho $p$ mà các bit của nó là $8L$ mục đầu tiên
 của $\bar\beta$.
 \end{proof}
 
-Đối với \texttt{bdlop-payload-range-128-v1}, chứng minh có $44\,558$ byte cho
+Trong hệ thống, $\Pi_{\mathsf{pay}}$ được mang in-band bên cạnh chứng minh mở,
+trên cùng cam kết $C$ và với phát biểu $x_{\mathsf{pay}}=\text{tag}\,\|\,x$
+(\texttt{video\_proof.py}, \texttt{\_range\_statement}). Đối thủ của thí
+nghiệm $\mathsf{SE}$ (Định nghĩa~\ref{def:se}) vì vậy thấy các chứng minh khoảng
+trung thực qua $\mathcal O_{\mathsf{Emb}}$, và Định lý~\ref{thm:bin-ks}, vốn chỉ
+nói về một chứng minh độc lập, là không đủ.
+
+\begin{theorem}[Tính trích xuất được qua mô phỏng của chứng minh khoảng in-band]
+\label{thm:pay-se}
+Trong thí nghiệm $\mathsf{SE}$ với các envelope in-band mang một chứng minh mở
+và một $\Pi_{\mathsf{pay}}$ cho độ dài đã ghim $L$, giả sử $\mathcal A$ thực
+hiện tối đa $Q$ truy vấn oracle ngẫu nhiên, nhận tối đa $Q_P$ envelope trung
+thực, và với xác suất $\varepsilon$ xuất ra một video mà bên kiểm chứng chấp
+nhận, với $(x^*_{\mathsf{pay}},C^*,\pi^*_{\mathsf{pay}})$ không thuộc danh sách
+các chứng minh khoảng trung thực. Đặt $Q'=Q+7Q_P$. Tồn tại $\mathcal E$ xuất ra
+$x^*$ và một phần mở nới lỏng của $C^*$ mà thông điệp của nó là
+$\mathrm{Enc}(p)$ cho một $p\in\{0,1\}^{8L}$ với xác suất ít nhất
+\[
+\varepsilon-Q_P\Adv^{\MLWE}_{\mathsf{aux}}-\epszk(Q_P,Q)-\Adv^{\MSIS}_{2B}
+-(Q'+1)\erbr-\sum_{i=1}^3\sqrt{(Q'+1)\alpha_i}-\beta-\delta_{\mathsf{coll}}(Q'),
+\]
+trong đó $\epszk$ gồm cận của Bổ đề~\ref{lem:sim} cho các chứng minh mở,
+$\Adv^{\MSIS}_{2B}$ là lợi thế tìm nghiệm \MSIS{} chuẩn $\le2B$ cho $B_1$ hoặc
+$B_1'$, và $\alpha_i,\beta,\delta_{\mathsf{coll}}$ như trong
+Định lý~\ref{thm:bin-ks} với $Q$ thay bằng $Q'$.
+\end{theorem}
+\begin{proof}[Phác thảo chứng minh]
+\emph{Mô phỏng.} $G_0$ là $\mathsf{SE}$. Trong $G_1$, mọi chứng minh mở trung
+thực được thay bằng bộ mô phỏng của Bổ đề~\ref{lem:sim}, và mọi
+$\Pi_{\mathsf{pay}}$ trung thực bằng bộ mô phỏng của Định lý~\ref{thm:bin-zk}.
+Cả hai không dùng $r$; tính ngẫu nhiên chung $r$ của hai chứng minh chỉ xuất hiện
+qua các đáp ứng được lấy mẫu loại bỏ. Cái giá là
+$Q_P\Adv^{\MLWE}_{\mathsf{aux}}+\epszk$. Mỗi $\Pi_{\mathsf{pay}}$ mô phỏng truy
+vấn $H_1,H_2,H_3$ và ba lần $\mathsf{Expand}$ một cách bình thường, gọi $G$ một
+lần, và lập trình $H_4$ tại đúng một điểm; do đó thuật toán $\mathcal B$ chạy
+$G_1$ (gồm cả bộ mô phỏng) thực hiện tối đa $Q'=Q+7Q_P$ truy vấn.
+
+\emph{Điểm đã lập trình được dùng lại.} Giả sử đầu vào $H_4$ của bên kiểm chứng
+cho $\pi^*_{\mathsf{pay}}$ là điểm đã lập trình của một chứng minh trung thực
+$i$. Khi đó $s_4^*=s_{4,i}$, nên $c^*=c_i$; $s_3^*=s_{3,i}$, nên ngoài
+$\mathsf{Coll}$ thì $(x^*_{\mathsf{pay}},L,C^*,D^*,h^*)=(x_i,L,C_i,D_i,h_i)$;
+và $t_G^*=t_{G,i}$, $w^*=w_i$, $w'^*=w'_i$. Vì chứng minh khác chứng minh thứ
+$i$ mà mọi trường khác đã trùng, $(z^*,z'^*)\ne(z_i,z'_i)$, và
+$B_1(z^*-z_i)=0$, $B_1'(z'^*-z'_i)=0$ với chuẩn $\le2B$, trong đó ít nhất một
+hiệu khác không: một nghiệm \MSIS{} chuẩn $\le2B$ cho $B_1$ hoặc $B_1'$. Phép
+rút gọn cấy ma trận thách thức vào khóa tương ứng bằng cách lập trình điểm mở
+rộng khóa; nó không cần $r'$ vì trong $G_1$ các $D_i$ là đều.
+
+\emph{Điểm mới.} Ngược lại, điểm $H_4$ của bên kiểm chứng được xác định bởi một
+truy vấn mới (không được lập trình), và Định lý~\ref{thm:bin-ks} áp dụng cho
+$\mathcal B$ với $Q'$ truy vấn. AFK22 chỉ tua lại truy vấn mới đó; các điểm đã
+lập trình nằm trong đồng xu của $\mathcal B$ và giống hệt nhau qua các lần tua
+lại. Trong lập luận plurality, chỉ số $j$ chạy trên mọi truy vấn $H_i$ của
+$\mathcal B$, \emph{gồm cả các truy vấn của bộ mô phỏng}: nếu tiền tố của
+$\pi^*_{\mathsf{pay}}$ là tiền tố của một chứng minh trung thực, các thách thức
+$\gamma,\rho,\alpha$ là câu trả lời cho các truy vấn của bộ mô phỏng, vẫn đều và
+được rút sau khi các hàng tương ứng được cố định, nên bất đẳng thức plurality
+giữ nguyên với $Q+1$ thay bằng $Q'+1$. Trường hợp $D_i$ là đều (sau bước lai
+\MLWE{}) không ảnh hưởng: thông điệp của mọi phần mở nới lỏng của $t_{1,i}'$ vẫn
+duy nhất trừ khi tìm được một nghiệm \MSIS{} cho $B_1'$, và
+$\mathcal F_i$ tua lại $\mathcal B$ (cùng bộ mô phỏng của nó) như trước.
+Vì $x^*$ nằm trong chuỗi $H_1$, phần mở được ràng buộc với phát biểu của bên
+kiểm chứng như trong Định lý~\ref{thm:se}.
+\end{proof}
+
+Đối với \texttt{bdlop-payload-range-128-v2}, chứng minh có $46\,670$ byte cho
 $L\le32$ ($\ell=1$) và tăng thêm $9\,216$ byte cho mỗi 32 byte tải trọng thêm
-vào (72\,206 byte tại $L=128$). Các thể hiện \MSIS{} phụ trợ ($n\times25$ đến
-$n\times43$) và \MLWE{} (18 đến 36 mẫu) cho cùng các ước lượng đã ghim
-như bộ cơ sở
-(\texttt{research/bdlop\_params/bdlop\_payload\_range\_128\_l\{1,4\}.estimate.json}).
+vào ($74\,318$ byte tại $L=128$; bộ cũ v1: $44\,558$ đến $72\,206$ byte). Các
+thể hiện \MSIS{} phụ trợ ($7\times26$ đến $7\times44$) và \MLWE{} (19 đến 37
+mẫu) cho cùng các ước lượng đã ghim như bộ cơ sở \texttt{bdlop-open-128-v3}
+(\MSIS{} $\beta=589$, 172/156 bit; \MLWE{} nguyên thủy $\beta=580$, 169/153 bit)
+(\texttt{research/bdlop\_params/bdlop\_payload\_range\_128\_v2\_l\{1,4\}.estimate.json}).
 Hai phương án thay thế thì tệ hơn. Mã hóa tải trọng ở dạng nhị phân ngay từ đầu
 (một bit mỗi hệ số) cho phép $\Pibin$ áp dụng trực tiếp, với
-$6\,720+43\,022$ byte cho mỗi 32 byte tải trọng, nhưng cần một định dạng
+$7\,680+45\,134$ byte cho mỗi 32 byte tải trọng, nhưng cần một định dạng
 envelope và mã hóa tiết lộ mới. Một chứng minh khoảng cho toàn bộ $256$ hệ số
-tải trọng ($\ell=24$ mặt phẳng bit) sẽ cần $177$ đa thức đáp ứng,
-$256\,526$ byte và một xác suất chấp nhận $8\cdot10^{-10}$ mỗi lần thử
+tải trọng ($\ell=24$ mặt phẳng bit) sẽ cần $179$ đa thức đáp ứng,
+$258\,638$ byte và một xác suất chấp nhận $6.5\cdot10^{-10}$ mỗi lần thử
 với cận mặt nạ cố định $\gamma=2^{17}$, nên nó không thực tế nếu không có một
 cận mặt nạ phụ trợ lớn hơn và một ước lượng \MSIS{} mới.
 
 \begin{remark}[Các giới hạn]
 Các định lý là các phát biểu trong ROM cổ điển; không có khẳng định QROM nào.
-Các thể hiện \MSIS{} ($n\times24$ thay vì $n\times14$) và \MLWE{}
-($17$ thay vì $7$ mẫu) của khóa phụ trợ cho cùng các mức như bộ cơ sở
-dưới bộ ước lượng đã ghim (\MSIS{} $\beta=480$, 140/127 bit; \MLWE{} nguyên thủy
+Đối với \texttt{bdlop-binary-128-v3}, các thể hiện \MSIS{} ($7\times25$ thay vì
+$7\times15$) và \MLWE{}
+($18$ thay vì $8$ mẫu) của khóa phụ trợ cho cùng các mức như bộ cơ sở
+\texttt{bdlop-open-128-v3}
+dưới bộ ước lượng đã ghim (\MSIS{} $\beta=589$, 172/156 bit; \MLWE{} nguyên thủy
 $\beta=580$, 169/153 bit; đối ngẫu $\beta=578$), vì chiều con \MSIS{}
-tối ưu ($\approx3\,022$) nằm dưới cả hai độ rộng
-(\texttt{research/bdlop\_params/bdlop\_binary\_128\_v2.estimate.json}); lưu ý
+tối ưu ($\approx3\,512$) nằm dưới cả hai độ rộng ($3\,840$ và $6\,400$)
+(\texttt{research/bdlop\_params/bdlop\_binary\_128\_v3.estimate.json}; bộ cũ v2:
+$6\times24$, 17 mẫu, \MSIS{} $\beta=480$, 140/127 bit); lưu ý
 về lai đối ngẫu của Mục~\ref{sec:proof} áp dụng y như vậy. Sai số đúng đắn
-$2^{-150}$ mỗi vòng nằm dưới $2^{-256}$ của chứng minh mở; $k=k'=9$ sẽ khớp
+theo vòng $\erbr\approx2^{-149.0}$ (số hạng lớn nhất $2^{-149.99}$) nằm dưới
+$2^{-256}$ của chứng minh mở; $k=k'=9$ sẽ khớp
 với nó với thêm khoảng 12\,KB. $\Pi_{\mathsf{pay}}$ làm cho độ dài $L$ công khai
 và bao phủ các tải trọng tối đa 128 byte; một độ dài ẩn sẽ cần một chứng minh
 rằng các byte sau một độ dài chưa biết đều bằng không, và các phát biểu về

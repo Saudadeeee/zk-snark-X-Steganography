@@ -116,10 +116,10 @@ def frames_needed(bits_per_picture: float, frames_per_segment: int,
 def envelope_needs(bits_per_picture: float) -> dict[str, Any]:
     return {
         "registered_envelope_bytes": {
-            "bdlop-open-128-v2": video_proof.envelope_size(BDLOP_OPEN_128, registered=True),
+            BDLOP_OPEN_128.name: video_proof.envelope_size(BDLOP_OPEN_128, registered=True),
             "toy": video_proof.envelope_size(TOY, registered=True),
         },
-        "bdlop-open-128-v2_pictures_by_frames_per_segment_and_fill": {
+        f"{BDLOP_OPEN_128.name}_pictures_by_frames_per_segment_and_fill": {
             f"fps{fps}_fill{fill}": frames_needed(bits_per_picture, fps, fill)
             for fps in (10, 25) for fill in (1.0, 0.9, 0.5)
         },

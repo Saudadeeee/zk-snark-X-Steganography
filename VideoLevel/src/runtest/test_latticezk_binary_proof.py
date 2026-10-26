@@ -128,18 +128,21 @@ def test_check_polynomial_constant_term_is_the_random_functional_of_the_error() 
 
 def test_parameter_sets_are_consistent() -> None:
     production = bp.BINARY_128
-    assert production.base is BDLOP_OPEN_128
-    assert production.aux_slots == 11 and production.aux_width == 24
-    assert production.proof_bytes == 43_022
-    assert production.soundness_bits > 149
+    assert production is bp.BINARY_128_V3 and production.base is BDLOP_OPEN_128
+    assert production.aux_slots == 11 and production.aux_width == 25
+    assert production.proof_bytes == 45_134
+    assert (bp.BINARY_128_V2.aux_width, bp.BINARY_128_V2.proof_bytes) == (24, 43_022)
+    assert 148.9 < production.soundness_bits < 149.1  # 2^-150 + 2^-150 + ...
     production.require_production_strength()
     with pytest.raises(ValueError):
         P.require_production_strength()
     assert set(production.round_soundness_log2) == {"lift", "check", "combine", "challenge"}
-    assert bp.abort_probability_log2(production) < -256
+    # Completeness error of the honest prover after MAX_ATTEMPTS: below 2^-128
+    # (2^-210 for the v3 set, which is wider than v2's 2^-256).
+    assert bp.abort_probability_log2(production) < -200
     assert bp.abort_probability_log2(P, 1) < 0
     assert production.parameter_id != P.parameter_id
-    assert production.mlwe_samples == 17
+    assert production.mlwe_samples == 18 and bp.BINARY_128_V2.mlwe_samples == 17
     assert len(production.parameter_id) == 32
 
 
@@ -262,10 +265,16 @@ KAT = {
         "990498570a7b8d575fcf295ac0fa75cc63fe185467df83faf74b898aa62cac8d",
         102,
     ),
+    "bdlop-binary-128-v3": (
+        "975e1c9bd72008e5124f25149f9b2858b1dd639c381d67df2e0b34fb7f08cf47",
+        "cec9b8e0171cd46ccc1f1742505726b9805762aa414d2758204dfd972850fb18",
+        "aad42de9498203ee67006ce3e670549ba033366a2bdb29316775c03c4af3e5e8",
+        27,
+    ),
 }
 
 
-@functools.lru_cache(maxsize=2)
+@functools.lru_cache(maxsize=3)
 def _kat(params: bp.BinaryParams):
     message, randomness, commitment = _setup(params, seed=_seed("randomness/" + params.name))
     result = bp.prove_with_stats(
@@ -274,7 +283,9 @@ def _kat(params: bp.BinaryParams):
     return commitment, result
 
 
-@pytest.mark.parametrize("params", [bp.BINARY_TOY, bp.BINARY_128], ids=lambda p: p.name)
+@pytest.mark.parametrize(
+    "params", [bp.BINARY_TOY, bp.BINARY_128_V2, bp.BINARY_128], ids=lambda p: p.name
+)
 def test_known_answer_vector(params: bp.BinaryParams) -> None:
     """Production-sized completeness plus a pinned, platform-independent proof."""
     parameter_id, commitment_digest, proof_digest, attempts = KAT[params.name]

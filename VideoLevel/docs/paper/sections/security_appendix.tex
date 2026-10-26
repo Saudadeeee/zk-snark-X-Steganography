@@ -395,11 +395,13 @@ Một lần thử được chấp nhận thỏa $B_1z-ct_1=B_1y+cB_1r-cB_1r=w$, 
 minh đẳng thức $\langle b_2,z_a-z_b\rangle-c(t_{2,a}-t_{2,b})=\langle b_2,y_a-y_b\rangle$
 bởi vì $t_{2,a}-t_{2,b}=\langle b_2,r_a-r_b\rangle$ với các thông điệp bằng
 nhau. Theo Bổ đề~\ref{lem:hvzk}, số lần thử là hình học với tham số
-$p_{\mathrm{acc}}$ (trung bình $5.23$) cho chứng minh mở và $p_{\mathrm{acc}}^2$
-(trung bình $27.4$) cho chứng minh đẳng thức. Với các ngưỡng $\Amax=512$
+$p_{\mathrm{acc}}$ (trung bình $5.89$ với \texttt{bdlop-open-128-v3}) cho chứng
+minh mở và $p_{\mathrm{acc}}^2$
+(trung bình $34.7$) cho chứng minh đẳng thức. Với các ngưỡng $\Amax=512$
 (\texttt{opening\_proof.py:33}) và $\Amax=4\,096$
 (\texttt{equality\_proof.py:50}), bên chứng minh thất bại với xác suất lần lượt
-là $2^{-156.7}$ và $2^{-220.0}$. Dưới ngưỡng chung 512 mà mã được rà soát đã
+là $2^{-137.5}$ và $2^{-173.0}$ (với \texttt{bdlop-open-128-v2}: trung bình
+$5.23$ và $27.4$, $2^{-156.7}$ và $2^{-220.0}$). Dưới ngưỡng chung 512 mà mã được rà soát đã
 dùng, chứng minh đẳng thức thất bại với xác suất $2^{-35.0}$ cho
 \texttt{bdlop-open-128-v1} (trung bình $4.65$ và $21.6$); đây là mục~D4.
 

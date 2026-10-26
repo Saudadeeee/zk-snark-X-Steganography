@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tổng quan · ZK-Video</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Lora:ital,wght@0,500;0,600;1,500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a><button class="menu-btn" data-menu-btn aria-label="Menu">☰</button></div>
+<div class="shell">
+<aside class="sidebar">
+  <a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a>
+  <p class="tagline">Bằng chứng không tiết lộ, giấu trong video — giải thích cho mọi người</p>
+  <div class="nav-group">Bắt đầu</div>
+  <nav>
+    <a href="index.html">Tổng quan</a>
+    <a href="khai-niem.html">Khái niệm nền (từ số 0)</a>
+  </nav>
+  <div class="nav-group">Hệ thống hoạt động</div>
+  <nav>
+    <a href="kien-truc.html">Kiến trúc & luồng</a>
+    <a href="thanh-phan.html">Các thành phần</a>
+    <a href="che-do-vi-du.html">Chế độ & ví dụ thật</a>
+  </nav>
+  <div class="nav-group">Bảo mật & kết quả</div>
+  <nav>
+    <a href="bao-mat.html">An toàn & chống tấn công</a>
+    <a href="ket-qua.html">Kết quả & hạn chế</a>
+  </nav>
+  <div class="nav-group">Tra cứu</div>
+  <nav>
+    <a href="thuat-ngu.html">Thuật ngữ</a>
+  </nav>
+  <div class="tools"><button class="tbtn" data-theme-btn>☾ Tối</button></div>
+</aside>
+<main class="content"><div class="content-inner">
+
+  <p class="eyebrow">Giải thích cho người không rành kỹ thuật</p>
+  <h1>Chứng minh một video là thật — mà không tiết lộ bí mật nào</h1>
+  <p class="lead">Hệ thống này giấu một “con dấu toán học” vào bên trong một đoạn video. Bất kỳ ai cũng kiểm tra được con dấu đó <b>chỉ từ file video</b>, để biết video chưa bị sửa và do đúng người tạo ra — nhưng người kiểm tra <b>không hề nhìn thấy</b> bí mật bên trong. Và con dấu đó an toàn cả trước máy tính lượng tử tương lai.</p>
+
+  <div class="card">
+    <h3 style="margin-top:0">Hãy bắt đầu bằng một câu chuyện</h3>
+    <p>Một phóng viên quay được một clip quan trọng. Khi đưa ra toà, có ba câu hỏi:</p>
+    <ul>
+      <li><b>Thật hay giả?</b> Video có bị cắt ghép, chèn, sửa một khung hình nào không?</li>
+      <li><b>Ai làm ra nó?</b> Có đúng là từ chiếc máy/người có thẩm quyền không?</li>
+      <li><b>Giữ được bí mật chứ?</b> Phóng viên muốn chứng minh hai điều trên, nhưng <i>không</i> muốn lộ danh tính hay thông tin nhạy cảm cho tất cả mọi người.</li>
+    </ul>
+    <p style="margin-bottom:0">Hệ thống này trả lời được cả ba cùng lúc. Đó là điều mà chữ ký số thông thường không làm trọn được.</p>
+  </div>
+
+  <div class="analogy">
+    <div class="h">Ví von: con dấu niêm phong tàng hình</div>
+    <p style="margin:0">Hãy tưởng tượng bạn đóng một con dấu đặc biệt lên tờ giấy. Con dấu này: (1) <b>tàng hình</b> — người thường không thấy; (2) <b>vỡ ngay nếu ai sửa chữ trên giấy</b>; (3) <b>chứng minh bạn là người có con dấu</b> mà không in tên bạn ra; (4) <b>không thể làm giả</b> kể cả bằng siêu máy tính lượng tử. “Tờ giấy” ở đây là đoạn video; “con dấu” là một bằng chứng toán học giấu trong các con số của khung hình.</p>
+  </div>
+
+  <h2>Hệ thống làm gì, nói thật gọn</h2>
+  <div class="grid g3">
+    <div class="stat"><div class="big">1</div><div class="lab">Phân tích video, tìm những “chỗ trống” an toàn trong khung hình để giấu dữ liệu</div></div>
+    <div class="stat"><div class="big">2</div><div class="lab">Tạo một bằng chứng “không tiết lộ” rồi giấu nó vào những chỗ đó</div></div>
+    <div class="stat"><div class="big">3</div><div class="lab">Ai cũng kiểm tra được con dấu chỉ từ video — sửa một chút là lộ ngay</div></div>
+  </div>
+
+  <h2>Ba từ khoá, giải thích trong một dòng</h2>
+  <table>
+    <tr><th>Từ nghe có vẻ khó</th><th>Nghĩa đời thường</th></tr>
+    <tr><td><b>Steganography</b><br>(giấu tin)</td><td>Giấu thông tin <i>bên trong</i> một thứ khác (ở đây: trong các con số của khung hình video), thay vì để lộ ra ngoài.</td></tr>
+    <tr><td><b>Zero-knowledge</b><br>(không tiết lộ)</td><td>Chứng minh “tôi biết/tôi có” một bí mật mà <i>không</i> để người kiểm tra biết bí mật đó là gì.</td></tr>
+    <tr><td><b>Lattice / hậu lượng tử</b></td><td>Dựa trên một bài toán “lưới điểm” mà ngay cả máy tính lượng tử cũng chưa giải nhanh được → an toàn lâu dài.</td></tr>
+  </table>
+  <p class="muted">Cả ba sẽ được giải thích kỹ, có ví dụ bấm thử, ở trang <a href="khai-niem.html">Khái niệm nền</a>.</p>
+
+  <h2>Trang này dành cho ai</h2>
+  <div class="grid g2">
+    <div class="card"><h3 style="margin-top:0">Người không rành kỹ thuật</h3><p style="margin-bottom:0">Đọc phần chữ thường và các hộp “ví von”. Bỏ qua các khối “Chi tiết kỹ thuật” màu xám cũng vẫn hiểu trọn ý.</p></div>
+    <div class="card"><h3 style="margin-top:0">Người muốn đi sâu</h3><p style="margin-bottom:0">Mở các khối <b>▸ Chi tiết kỹ thuật</b> để thấy công thức, tham số thật, tên module mã nguồn và số đo.</p></div>
+  </div>
+
+  <div class="callout info">
+    <div class="h">Có bản chạy thật để nghịch</div>
+    <p style="margin:0">Ngoài website giải thích này, dự án có một ứng dụng chạy thật trong trình duyệt (phân tích khung, tạo bằng chứng lattice, nhúng, kiểm tra, thử tấn công) ở thư mục <code>webdemo/</code>. Website bạn đang đọc tập trung vào <b>hiểu</b>; ứng dụng kia để <b>nghịch</b>.</p>
+  </div>
+
+  <h2>Lộ trình đọc gợi ý</h2>
+  <div class="steps">
+    <div class="step"><span class="n"></span><div><h4>Khái niệm nền</h4><p style="margin:0">Bốn viên gạch: giấu tin, niêm phong (commitment), không tiết lộ (ZKP), lattice. <a href="khai-niem.html">Mở →</a></p></div></div>
+    <div class="step"><span class="n"></span><div><h4>Kiến trúc & luồng</h4><p style="margin:0">Đường đi từ video gốc → video có con dấu, và đường kiểm tra ngược lại. <a href="kien-truc.html">Mở →</a></p></div></div>
+    <div class="step"><span class="n"></span><div><h4>Các thành phần & ví dụ</h4><p style="margin:0">Từng bộ phận làm gì, và một ví dụ thật đầu-cuối. <a href="thanh-phan.html">Mở →</a></p></div></div>
+    <div class="step"><span class="n"></span><div><h4>An toàn, kết quả, hạn chế</h4><p style="margin:0">Vì sao khó phá, số đo thật, và những gì hệ thống chưa làm được. <a href="bao-mat.html">Mở →</a></p></div></div>
+  </div>
+
+  <div class="next"><span></span><a href="khai-niem.html">Tiếp: Khái niệm nền →</a></div>
+  <p class="foot">ZK-Video — website giải thích hệ thống steganography H.264 + bằng chứng zero-knowledge trên lattice (BDLOP). Các ví von được đơn giản hoá có chủ đích; chi tiết hình thức nằm trong các khối “Chi tiết kỹ thuật”, tài liệu <code>docs/</code> và bài báo của dự án.</p>
+
+</div></main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

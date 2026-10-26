@@ -146,23 +146,26 @@ def test_check_polynomial_constant_term_is_the_random_functional_of_the_error() 
 
 def test_parameter_sets_are_consistent() -> None:
     production = pr.PAYLOAD_RANGE_128
-    assert production.base is BDLOP_OPEN_128
+    assert production is pr.PAYLOAD_RANGE_128_V2 and production.base is BDLOP_OPEN_128
     assert production.max_payload_bytes == 128 and P.max_payload_bytes == 32
     layout = production.layout(32)
-    assert (layout.binary_polys, layout.slots, layout.aux_width) == (1, 12, 25)
-    assert production.proof_bytes(32) == 44_558
-    assert production.proof_bytes(0) == production.proof_bytes(1) == 44_558
+    assert (layout.binary_polys, layout.slots, layout.aux_width) == (1, 12, 26)
+    assert production.proof_bytes(32) == 46_670
+    assert production.proof_bytes(0) == production.proof_bytes(1) == 46_670
+    assert pr.PAYLOAD_RANGE_128_V1.proof_bytes(32) == 44_558
     assert production.layout(33).binary_polys == 2 and production.layout(128).binary_polys == 4
     assert production.proof_bytes(128) > production.proof_bytes(64) > production.proof_bytes(32)
-    assert production.mlwe_samples(32) == 18
-    assert production.soundness_bits > 149
+    assert production.mlwe_samples(32) == 19
+    assert 148.9 < production.soundness_bits < 149.1
     production.require_production_strength()
     with pytest.raises(ValueError):
         P.require_production_strength()
     assert set(production.round_soundness_log2) == {"lift", "check", "combine", "challenge"}
+    # Completeness error after MAX_ATTEMPTS stays below 2^-128 at every length
+    # (2^-177 at 128 bytes for the v3-based set).
     for length in (0, 32, 64, 96, 128):
-        assert pr.abort_probability_log2(production, length) < -200
-    assert 0.009 < production.acceptance_probability(32) < 0.011
+        assert pr.abort_probability_log2(production, length) < -170
+    assert 0.0075 < production.acceptance_probability(32) < 0.0085
     assert pr.abort_probability_log2(P, 3, 1) < 0
     assert len({production.parameter_id, P.parameter_id, binary_proof.BINARY_128.parameter_id}) == 3
 
@@ -241,11 +244,11 @@ def test_toy_completeness(length: int) -> None:
 def test_production_completeness_with_two_bit_polynomials() -> None:
     production = pr.PAYLOAD_RANGE_128
     payload, randomness, commitment = _setup(production, _payload(40), _seed("randomness/" + production.name))
-    result = pr.prove_with_stats(  # deterministic: this seed needs 285 attempts
+    result = pr.prove_with_stats(  # deterministic: this seed needs 892 attempts
         production, b"kat statement", commitment, payload, randomness,
         mask_seed=_seed(f"mask/{production.name}/40/2"),
     )
-    assert result.attempts == 285 and len(result.proof) == production.proof_bytes(40)
+    assert result.attempts == 892 and len(result.proof) == production.proof_bytes(40)
     assert pr.verify(production, b"kat statement", commitment, 40, result.proof)
     assert not pr.verify(production, b"kat statement", commitment, 41, result.proof)
 
@@ -301,10 +304,17 @@ KAT = {
         "bcbcdc6606965a867af72d108f5379f5f842c36ba9df7b2d5216974a34f5530d",
         41,
     ),
+    "bdlop-payload-range-128-v2": (
+        32,
+        "be31fc9fa76f52ea1434dce2b7929da343693e5611fab03f7934bc957230cdb6",
+        "8f1f355f7530770bcb30b0546304e5998c4cd1044190ca205094c0dca04c04c4",
+        "20a551594a0b6d54813a77f1be35782a8986c5117fe4fc01d96487730703de66",
+        204,
+    ),
 }
 
 
-@functools.lru_cache(maxsize=2)
+@functools.lru_cache(maxsize=3)
 def _kat(params: pr.PayloadRangeParams):
     length = KAT[params.name][0]
     payload, randomness, commitment = _setup(params, _payload(length), _seed("randomness/" + params.name))
@@ -315,7 +325,10 @@ def _kat(params: pr.PayloadRangeParams):
     return length, commitment, result
 
 
-@pytest.mark.parametrize("params", [pr.PAYLOAD_RANGE_TOY, pr.PAYLOAD_RANGE_128], ids=lambda p: p.name)
+@pytest.mark.parametrize(
+    "params", [pr.PAYLOAD_RANGE_TOY, pr.PAYLOAD_RANGE_128_V1, pr.PAYLOAD_RANGE_128],
+    ids=lambda p: p.name,
+)
 def test_known_answer_vector(params: pr.PayloadRangeParams) -> None:
     """Production-sized completeness plus a pinned, platform-independent proof."""
     _, parameter_id, commitment_digest, proof_digest, attempts = KAT[params.name]

@@ -83,3 +83,36 @@ gộp trên nhánh.
 - 2026-10-21 (trưa): chuyển sang `bdlop-open-128-v2` (λ = 7; hiding 164/150,
   binding 140/127); KAT v2; bắt đầu chạy lại toàn bộ đánh giá lúc 12:24,
   khởi động lại 12:51.
+- 2026-10-26: hoàn thiện phần mật mã và phạm vi. (1) Bộ sản xuất
+  `bdlop-open-128-v3` (n = 7): binding 172 / 156, hiding 164 / 150 bit, đối
+  chiếu lattice-estimator khớp; KAT v3; proof nhị phân/khoảng chuyển sang nền
+  v3 (`bdlop-binary-128-v3`, `bdlop-payload-range-128-v2`), bản cũ giữ nguyên
+  id. (2) Codec policy v2 là mặc định cho profile mới (v1 còn chọn được). (3)
+  Payload range proof đính kèm được vào envelope in-band (phiên bản envelope
+  2, `--payload-range-bytes`). (4) Chế độ phiên offline theo epoch beacon ký
+  ML-DSA-65 (`epoch-issue`, `--epoch-beacon`, sổ chống phát lại theo
+  verifier). (5) Review soundness đối kháng nội bộ
+  (`docs/review/INTERNAL_REVIEW_SOUNDNESS.md`): không có lỗi Critical/High;
+  các sửa về phát biểu định lý và số liệu đã áp vào bài/tài liệu;
+  `soundness_bits` tính theo tổng lỗi các vòng (≈ 149,0 bit). (6) **CABAC
+  (Main/High)**: parser/encoder CABAC thuần Python cho lát I/IDR
+  (`src/bitstream/cabac/`), transport `src/transport/cabac_sync.py`, codec
+  policy `CODEC_POLICY_CABAC_V1` (digest = re-encode chuẩn tắc của cú pháp đã
+  chuẩn hoá carrier + mọi NAL khác từng byte); 56 test; sản xuất 300 khung
+  High: registered 1 đoạn, PSNR-Y 45,8 dB; in-band 2 đoạn, 47,8 dB
+  (`docs/CABAC_SUPPORT.md`). (7) **Chế độ bền với nén lại** (semi-fragile,
+  `src/robust/`): QIM trên DCT 16×16 luma + mã chập K=7/Viterbi mềm + CRC-32,
+  vân tay nội dung (luma 64×64 mọi khung + chroma 128×128 mỗi 6 khung, blob
+  v2) gắn vào statement; decode có ngân sách bộ nhớ/timeout, ffmpeg chỉ
+  protocol file, verify fail-closed; sống qua x264 CRF 18/23 và x265
+  CRF 23 (31/36 lượt), 30/30 sửa đổi bị bắt kèm định vị (gồm đổi màu); PSNR 35–37 dB, không
+  che giấu (`docs/ROBUST_MODE.md`, `benchmark/results/robust/`). (8) E2E toàn hệ
+  dưới v3: **8/8 kịch bản đạt** (`benchmark/results/q2/system_e2e_check_20261026.json`,
+  gồm `inband_range32` 63 094 B trên 3 000 khung và `reg_codec_v1`); full test
+  suite 1 196 pass. Còn chờ: đo lại steganalysis học máy, sweep HD.
+- 2026-10-26 (tiếp): CABAC nay gọi được từ CLI sản xuất (`--codec-policy cabac`,
+  `--gop-policy`), đã kiểm end-to-end registered trên clip 300 khung High
+  (envelope 8 741 B, verify mù đạt, replay chặn); test wiring
+  `test_latticezk_cli_codec_wiring.py`. Robust mode được cấp CLI riêng
+  (`src/robust/cli.py`). Còn chờ: đo lại steganalysis học máy, sweep HD, review
+  lattice ngoài, các `\todo` bảng sweep v1/v2 trong bài.

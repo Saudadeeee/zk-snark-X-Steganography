@@ -232,3 +232,26 @@ Findings:
 **Conclusion (v2):** using the minimum over all attacks in core-SVP, v2 claims
 **M-LWE hiding 164 / 150 bits** (classical / quantum; dual-hybrid, β = 564 / 567)
 and **M-SIS binding 140 / 127 bits** (β = 480, ℓ∞).
+
+
+## bdlop-open-128-v3 (2026-10-26)
+
+Bộ sản xuất hiện tại: `n = 7`, `λ = 7`, `k = 15`; M-LWE phẳng hóa `n = 1792,
+m = 2048`; M-SIS `n = 1792, m = 3840`, chặn `ℓ∞ = 62 885 280 ≈ 2^25.9`
+(`lattice_estimator_crosscheck_instance_v3.json`). Cùng container
+passagemath-standard 10.8.13 và estimator commit `e4333d9`
+(`lattice_estimator_crosscheck_v3.json`, lượt chạy ≈ 6 phút):
+
+| Problem / attack | `estimate.py` (CRYSTALS) | lattice-estimator, core-SVP | lattice-estimator, MATZOV |
+|---|---|---|---|
+| M-SIS `ℓ∞`, lattice (binding) | 172 / 156, β = 589 | 171.99 / 156.09, β = 589 | 199.2, β = 593 |
+| M-LWE primal uSVP (hiding) | 169 / 153, β = 580 | 169.36 / 153.70, β = 580 | 194.4 |
+| M-LWE primal BDD | — | — | 192.6, β = 572 |
+| M-LWE dual hybrid | — | 164.85 / 150.31, β = 564 / 567 | 189.8, β = 559 |
+
+Kết luận: binding **172 / 156** bit, hiding **164 / 150** bit (dual hybrid, như
+v2: thêm một mẫu M-LWE không đổi mức dual hybrid đáng kể). Mốc 128 bit lượng tử
+nay được vượt ở cả hai bài toán. Các bộ phụ trợ của proof nhị phân/khoảng trên
+nền v3 (`bdlop_binary_128_v3.estimate.json`,
+`bdlop_payload_range_128_v2_l{1,4}.estimate.json`) cho cùng mức 172 / 156 và
+169 / 153 (CRYSTALS), vì sub-dimension M-SIS tối ưu vẫn dưới mọi chiều rộng.

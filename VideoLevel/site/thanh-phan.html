@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Các thành phần · ZK-Video</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Lora:ital,wght@0,500;0,600;1,500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a><button class="menu-btn" data-menu-btn aria-label="Menu">☰</button></div>
+<div class="shell">
+<aside class="sidebar">
+  <a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a>
+  <p class="tagline">Bằng chứng không tiết lộ, giấu trong video — giải thích cho mọi người</p>
+  <div class="nav-group">Bắt đầu</div>
+  <nav><a href="index.html">Tổng quan</a><a href="khai-niem.html">Khái niệm nền (từ số 0)</a></nav>
+  <div class="nav-group">Hệ thống hoạt động</div>
+  <nav><a href="kien-truc.html">Kiến trúc & luồng</a><a href="thanh-phan.html">Các thành phần</a><a href="che-do-vi-du.html">Chế độ & ví dụ thật</a></nav>
+  <div class="nav-group">Bảo mật & kết quả</div>
+  <nav><a href="bao-mat.html">An toàn & chống tấn công</a><a href="ket-qua.html">Kết quả & hạn chế</a></nav>
+  <div class="nav-group">Tra cứu</div>
+  <nav><a href="thuat-ngu.html">Thuật ngữ</a></nav>
+  <div class="tools"><button class="tbtn" data-theme-btn>☾ Tối</button></div>
+</aside>
+<main class="content"><div class="content-inner">
+
+  <p class="crumbs">Hệ thống hoạt động › Các thành phần</p>
+  <h1>Từng bộ phận làm gì</h1>
+  <p class="lead">Mỗi phần có một câu giải thích đời thường và một khối “chi tiết kỹ thuật” để mở khi bạn muốn sâu hơn. Đọc lướt các tiêu đề + câu đầu là đã nắm được toàn cảnh.</p>
+
+  <h2>1. Carrier — “chỗ trống” an toàn trong khung hình</h2>
+  <p>Không phải con số nào trong khung cũng giấu được bit: đổi nhầm chỗ sẽ làm hỏng hình hoặc hỏng cú pháp file. <b>Carrier</b> là những hệ số đã được lọc để: (a) đổi bit cuối gần như không ảnh hưởng hình, (b) phía kiểm tra tính lại được <b>đúng y hệt</b> mà không cần bản gốc.</p>
+  <div class="analogy"><div class="h">Ví von</div><p style="margin:0">Như chỉ viết ghi chú lên những ô trống đã đánh dấu sẵn của một biểu mẫu — người nhận biết chính xác ô nào để đọc lại, không cần bản gốc.</p></div>
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">magnitude / T1 / STC</span></summary><div>
+    <ul>
+      <li><b>magnitude</b> (mặc định): hệ số AC có <code>|giá trị| ≥ ngưỡng</code>; giấu vào bit cuối của độ lớn.</li>
+      <li><b>T1 (trailing-one sign)</b>: lật dấu của các hệ số ±1 ở cuối khối.</li>
+      <li><b>STC (syndrome-trellis coding)</b>: mã hoá để đổi <i>ít</i> hệ số hơn cho cùng lượng tin → chất lượng cao hơn, khó bị dò hơn. Xem <code>docs/CARRIERS_VA_CHUNKING.md</code>.</li>
+    </ul>
+    <p>Mấu chốt an toàn: tập carrier là hàm của dữ liệu “bất biến dưới phép nhúng”, nên bên trích suy ra đúng tập — kiểm tra “mù” được.</p>
+  </div></details>
+
+  <h2>2. Commitment BDLOP — phong bì niêm phong</h2>
+  <p>Niêm phong bí mật (credential hoặc payload) thành một giá trị công khai mà không lộ bí mật và không tráo được. Đây là cái mà bằng chứng sẽ chứng minh “biết cách mở”.</p>
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">R_q, t₁, t₂</span></summary><div>
+    <p>Trên vành <code>R_q = Z_q[X]/(X^N+1)</code> với <code>N=256</code>, <code>q=2³⁰−35</code>. Randomness <code>r</code> ngắn; <code>t₁ = B₁·r</code>, <code>t₂ = ⟨b₂,r⟩ + enc(payload)</code>. Kích thước commitment ≈ <b>7.680 B</b>.</p>
+  </div></details>
+
+  <h2>3. Opening proof — trái tim zero-knowledge</h2>
+  <p>Chứng minh “tôi biết randomness ngắn mở được commitment” mà không tiết lộ nó. Phi tương tác nhờ Fiat–Shamir; có bước “thử lại” (abort) để không rò rỉ bí mật.</p>
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">prove / verify / rejection</span></summary><div>
+    <p>mask <code>y</code> → <code>w=B₁·y</code>; thử thách <code>c = H(khoá, t₁, w, D)</code> (SampleInBall, trọng số κ=60); phản hồi <code>z=y+c·r</code>; nhận nếu <code>‖z‖∞ ≤ γ−β</code>, không thì thử lại. Verify: <code>w'=B₁·z−c·t₁</code>, băm lại ra <code>c'</code>, nhận nếu <code>c'=c</code> và <code>z</code> ngắn. Proof ≈ <b>8.672 B</b>; trung bình ~5 lần thử.</p>
+  </div></details>
+
+  <h2>4. Statement — khoá bằng chứng vào đúng video & phiên</h2>
+  <p>“Đề bài” là một mã tóm tắt của video (đã chuẩn hoá carrier) cộng thử thách phiên. Nó được đưa vào hàm băm thử thách, nên nếu video bị sửa → đề bài đổi → bằng chứng trượt. Thử thách phiên dùng-một-lần để chống phát lại.</p>
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">digest chuẩn hoá carrier</span></summary><div>
+    <p>Digest băm trên hệ số đã <b>chuẩn hoá carrier</b> (xoá bit cuối ở vị trí carrier), nên việc nhúng (chỉ đổi bit cuối) không làm đổi digest, nhưng mọi thay đổi khác thì có. Mỗi khung mang carrier được băm trọn RBSP (codec policy v2). Xem <code>docs/LATTICE_ZK_BDLOP_SPEC.md</code>.</p>
+  </div></details>
+
+  <h2>5. Transport & chunk (ZKBC) — chia nhỏ để rải vào video</h2>
+  <p>Phong bì vài KB không nhét hết vào một đoạn, nên được cắt thành các mẩu có header + mã kiểm, rải qua các đoạn 100 khung hình. Bên kiểm tra ráp lại và đòi khớp cách cắt chuẩn.</p>
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">ZKBC v1/v2, chunk thích nghi</span></summary><div>
+    <p>Định dạng chunk ZKBC có header không trường tự do (đã vá lỗ hổng D1: verifier đòi cách chia đúng chuẩn, so từng byte). Bản <b>v2 thích nghi dung lượng</b>: cỡ chunk theo sức chứa từng đoạn, bỏ qua đoạn quá ít carrier → nhận được cả video có dung lượng lệch (vd. Soccer 4CIF). Xem <code>docs/CARRIERS_VA_CHUNKING.md</code>.</p>
+  </div></details>
+
+  <h2>6. GOP &gt; 1 — video có khung P (liên khung)</h2>
+  <p>Video thực tế thường xen kẽ khung “độc lập” (IDR) và khung “liên khung” (P). Hệ chỉ giấu vào khung IDR, còn mọi khung P được khoá nguyên vẹn từng byte — sửa một bit trong khung P là bị từ chối.</p>
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">idr-carriers-inter-raw-v1</span></summary><div>
+    <p>Chính sách GOP riêng (bound vào profile id). Dung lượng mỗi khung giảm theo độ dài GOP (chỉ IDR mang carrier); envelope 128-bit cần ~1.000 khung Container ở GOP 8. Xem <code>docs/GOP_HD_SUPPORT.md</code>.</p>
+  </div></details>
+
+  <h2>7. Codec policy v2 — siết chặt “đề bài”</h2>
+  <p>Một phiên bản ràng buộc digest chặt hơn: băm trọn phần dữ liệu khung mang carrier (kể cả các bit sau “bit dừng”), gắn nhãn các đoạn không carrier, ghim cách cắt đoạn. Nhờ vậy những mánh sửa tinh vi mà bản cũ bỏ sót giờ cũng bị bắt.</p>
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">đóng lỗ hổng D5</span></summary><div>
+    <p>v2 là tuỳ chọn, có id riêng; video cũ vẫn verify dưới policy của chúng. Thêm byte 0 sau stop bit của NAL carrier → v1 bỏ qua, v2 từ chối (đã kiểm E2E).</p>
+  </div></details>
+
+  <h2>8. Linkage & disclosure — liên kết và tiết lộ có kiểm soát</h2>
+  <p>Chủ nhân có thể sau này <b>chứng minh hai video cùng một bí mật</b> (linkage) hoặc <b>tiết lộ payload cho đúng một người</b> (disclosure) — mà không lộ randomness, không để người nhận mạo danh.</p>
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">equality proof, zero-randomness</span></summary><div>
+    <p>Linkage = chứng minh đẳng thức giữa hai commitment (equality proof ≈ 17.312 B). Disclosure = tiết lộ payload kèm chứng minh đẳng thức với commitment tất định (randomness = 0), ràng buộc theo ngữ cảnh người nhận. Không lộ <code>r</code>.</p>
+  </div></details>
+
+  <h2>9. Proof nhị phân & proof khoảng giá trị — nói về payload</h2>
+  <p>Các bằng chứng bổ sung cho biết payload “đúng định dạng” (mỗi hệ số là một gói bit hợp lệ, trong khoảng cho phép) mà vẫn không lộ nội dung — hiện gửi ngoài kênh.</p>
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">bdlop-binary / payload-range</span></summary><div>
+    <p>Proof nhị phân (chuỗi {0,1}) ≈ 43 KB; proof khoảng giá trị ≈ 44,6 KB cho payload ≤ 32 B, gắn đúng cách mã hoá 24-bit mỗi hệ số. Phần ghép Fiat–Shamir nhiều vòng còn là chỗ cần chuyên gia đọc lại. Xem <code>docs/PROOF_NHI_PHAN_VA_KHOANG.md</code>.</p>
+  </div></details>
+
+  <h2>10. Đính kèm range proof — nói thêm về payload ngay trong video</h2>
+  <p>Ở chế độ in-band, người tạo có thể ghim trước một <b>độ dài payload</b> (ví dụ 32 byte) và nhúng kèm một bằng chứng nữa: “payload trong niêm phong đúng là một chuỗi 32 byte hợp lệ” — vẫn không lộ nội dung. Độ dài thật được giấu bằng cách đệm tới mốc đó.</p>
+  <div class="analogy"><div class="h">Ví von</div><p style="margin:0">Phong bì dán kín có thêm dòng chữ công chứng: “bên trong là đúng một tờ A4” — người kiểm tra tin điều đó mà không được mở phong bì.</p></div>
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">envelope phiên bản 2</span></summary><div>
+    <p>Envelope <code>"ZKLB" ‖ 0x02 ‖ … ‖ t ‖ π ‖ 0x01 ‖ u16 L ‖ π_range</code>. <code>π_range</code> là payload range proof (<code>bdlop-payload-range-128-v2</code>) cho chính statement video, nên không chuyển sang video/phiên khác được; <code>L</code> nằm trong id của carrier profile. Kích thước 46.670 B (L ≤ 32) đến 74.318 B (L = 128) — cần clip dài (≈ 1.300 khung CIF). CLI: <code>--payload-range-bytes L</code>; đệm <code>p ‖ 0x80 ‖ 0x00…</code>.</p>
+  </div></details>
+
+  <h2>11. Phiên offline theo epoch — kiểm tra mà không cần liên lạc</h2>
+  <p>Bình thường người kiểm tra phải cấp một thử thách dùng-một-lần trước khi nhúng (tương tác). Chế độ offline thay bằng một <b>“tín hiệu giờ”</b> do bên phát hành ký mỗi khung thời gian (ví dụ mỗi giờ): người tạo gắn video vào tín hiệu hiện hành; bất kỳ ai tin bên phát hành đều kiểm tra được ngay, không cần liên lạc. Mỗi người kiểm tra tự ghi sổ các video đã nhận để chặn phát lại tới chính mình.</p>
+  <div class="callout warn"><div class="h">Giới hạn cần biết</div><p style="margin:0">Chống phát lại chỉ theo <i>từng</i> người kiểm tra và trong cửa sổ cho phép (mặc định 24 giờ). Cần chặn phát lại tuyệt đối giữa nhiều người kiểm tra thì dùng phiên tương tác.</p></div>
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">epoch beacon, ML-DSA-65</span></summary><div>
+    <p>Beacon = (epoch_index = ⌊t/W⌋, W, nonce 32 B, signer_id) ký ML-DSA-65; challenge = SHA-256(domain ‖ các trường đã ký), tính lại chứ không đọc từ video. Verifier kiểm chữ ký, đòi beacon hiện hành (≤ max_age_epochs), verify như <code>expected_session</code>, rồi ghi <code>(challenge, statement_id)</code> vào sổ SQLite riêng (<code>OfflineReplayLedger</code>). CLI: <code>epoch-issue</code>, <code>--epoch-beacon</code>. Mã: <code>src/registry/epoch_challenges.py</code>.</p>
+  </div></details>
+
+  <h2>12. CABAC (Main/High) — mở rộng ra video thực tế hơn</h2>
+  <p>Phần lớn video thật dùng CABAC (mã hoá số học) thay cho CAVLC. Hệ nay có bộ đọc/ghi CABAC riêng: giải mã lát I/IDR ra cú pháp, đổi bit cuối ở hệ số đủ lớn, rồi <b>mã hoá lại chuẩn tắc</b>. Người kiểm tra cũng mã hoá lại và đòi khớp từng byte, nên không có byte nào “tự do”.</p>
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">canonical re-encode, CODEC_POLICY_CABAC_V1</span></summary><div>
+    <p>Carrier: mỗi khối dư không-DC lấy hệ số chỉ số quét cao nhất có |level| ≥ 2 (~950/khung CIF). Digest = re-encode chuẩn tắc của cú pháp đã xoá LSB carrier + mọi NAL khác nguyên byte; lát P/B chỉ bị khoá. libx264 kết thúc mã số học khác chuẩn 9.3.4 ở byte cuối → stego luôn chuẩn tắc, bên kiểm tra từ chối lát không chuẩn tắc. Sản xuất 300 khung High: registered 1 đoạn PSNR-Y 45,8 dB, in-band 2 đoạn 47,8 dB. Mã: <code>src/bitstream/cabac/</code>, <code>src/transport/cabac_sync.py</code>; tài liệu <code>docs/CABAC_SUPPORT.md</code>.</p>
+  </div></details>
+
+  <h2>13. Chế độ bền (semi-fragile) — sống qua nén lại</h2>
+  <p>Khi video chắc chắn sẽ bị nén lại (đăng mạng), chế độ bền ghi bằng chứng bằng <b>thuỷ vân lượng tử hoá</b> trên các khối 16×16 kèm mã sửa lỗi, và gắn vào statement một <b>vân tay nội dung</b> thô (trung bình độ sáng từng ô 64×64 mọi khung, cộng trung bình màu từng ô 128×128 mỗi 6 khung). Nén lại không đổi vân tay; cắt ghép hay đổi màu thì đổi — và chỉ ra đúng khung/ô bị sửa.</p>
+  <div class="callout warn"><div class="h">Đổi gì để được bền</div><p style="margin:0">Chất lượng thấp hơn (PSNR 35–37 dB), <i>không</i> che giấu (dấu nhìn được bằng bộ dò), và chỉ bắt sửa đổi “đủ lớn” (≥ 48×48 điểm ảnh). Không bền với resize/crop.</p></div>
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">QIM · Viterbi · vân tay 64×64</span></summary><div>
+    <p>QIM Δ = 64/80 trên 10 hệ số DCT bậc thấp của khối 16×16 luma, bit giữ cố định theo nhóm 3 khung; mã chập K=7 tốc độ 1/3 (hoặc 1/2) + Viterbi mềm + CRC-32; vân tay v2: luma trung bình ô 64×64 lượng tử bước 4 mọi khung + chroma U/V ô 64×64 (mẫu chroma) bước 8 mỗi 6 khung; ngưỡng ghim trong profile id (luma: hard 3, drift 2, ≤ 0,2 % ô; chroma: hard 2, drift 1, ≤ 25 %). Giới hạn tài nguyên: ≤ 2160p×3000 khung, ffmpeg timeout 600 s, chỉ protocol <code>file</code>. Kết quả (vân tay v2, 26/10): 31/36 lượt nén lại được chấp nhận (x264 CRF 18/23, x265 CRF 23, Main-CABAC CRF 23 trừ 1 ca; CRF 28 chỉ Foreman), 30/30 sửa đổi bị bắt kèm định vị (gồm dán mảng 48×48, bỏ khung, tráo khung, đổi màu U+16, thu nửa độ phân giải), 6/6 replay bị chặn. Mã: <code>src/robust/</code>; tài liệu <code>docs/ROBUST_MODE.md</code>.</p>
+  </div></details>
+
+  <div class="callout info"><div class="h">Bản đồ nhanh ↔ mã nguồn</div><p style="margin:0">Mật mã: <code>src/lattice_zk/</code>. Vận chuyển/giấu tin: <code>src/transport/</code>. CABAC: <code>src/bitstream/cabac/</code>. Chế độ bền: <code>src/robust/</code>. Sổ đăng ký & phiên: <code>src/registry/</code>. Phân tích/khối: <code>src/core/</code>, <code>src/bitstream/</code>. Tài liệu đầy đủ: <code>docs/</code>.</p></div>
+
+  <div class="next"><a href="kien-truc.html">← Kiến trúc & luồng</a><a href="che-do-vi-du.html">Tiếp: Chế độ & ví dụ thật →</a></div>
+
+</div></main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

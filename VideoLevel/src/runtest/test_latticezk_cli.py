@@ -17,7 +17,8 @@ from src.runtest.test_latticezk_video_pipeline import FakeTransport
 @pytest.fixture(autouse=True)
 def _environment(monkeypatch) -> None:
     monkeypatch.setenv(cli.SYNC_KEY_ENV, "ab" * 32)
-    monkeypatch.setattr(pipeline, "_default_transport", FakeTransport)
+    # The pipeline selects the transport per profile; the stand-in ignores it.
+    monkeypatch.setattr(pipeline, "_default_transport", lambda profile=None: FakeTransport())
 
 
 def _run(capsys, *argv: object) -> tuple[int, dict]:
@@ -54,7 +55,7 @@ def test_in_band_flow_across_roles(tmp_path, capsys) -> None:
     code, embedded = _run(capsys, "embed", "--video", _cover(tmp_path), "--output", stego,
                           "--session", grant["challenge"], "--payload-file", payload,
                           "--opening-out", opening, *verifier)
-    assert code == 0 and embedded["envelope_bytes"] == 14_885
+    assert code == 0 and embedded["envelope_bytes"] == 16_421
     assert b"hidden record" not in stego.read_bytes()
     assert json.loads(opening.read_text())["payload"] == b"hidden record".hex()
 
@@ -86,7 +87,7 @@ def test_registered_flow_authenticates_only_the_registered_holder(tmp_path, caps
     code, embedded = _run(capsys, "embed", "--video", _cover(tmp_path), "--output", stego,
                           "--session", grant["challenge"],
                           "--credential-private", credentials[0][1], *base)
-    assert code == 0 and embedded["envelope_bytes"] == 8_165
+    assert code == 0 and embedded["envelope_bytes"] == 8_741
 
     # An unregistered credential cannot even resolve pins against this registry.
     code, _ = _run(capsys, "embed", "--video", _cover(tmp_path), "--output", tmp_path / "x.h264",

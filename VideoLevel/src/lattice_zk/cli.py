@@ -9,7 +9,11 @@ Each command touches only the files its role owns:
 The verifier needs the stego video, the signed registry, the issuer public
 key, its own session database and the shared sync key (hex, in the
 ``ZKSTEGO_LATTICEZK_SYNC_KEY_HEX`` environment variable); it never reads a
-sidecar, the cover video or any holder secret.  ``--holder-id`` binds a
+sidecar, the cover video or any holder secret.  Two session modes exist:
+interactive (``session-issue`` → ``--session``) and offline (``epoch-issue``
+by the issuer → ``--epoch-beacon`` on both sides; the verifier database then
+holds its replay ledger).  ``--payload-range-bytes L`` (in-band) pins a payload
+length, pads the payload to it and attaches a range proof to the envelope.  ``--holder-id`` binds a
 registered credential to a holder identity in the signed registry; the same
 value must then be given wherever pins are resolved.  ``disclose`` reveals a
 payload to one recipient with a zero-knowledge proof (the opening's randomness
@@ -31,10 +35,14 @@ from typing import Any
 
 import numpy as np
 
-from ..transport.blind_sync import BlindOperatingContract
+from ..registry.epoch_challenges import EpochChallenge, OfflineReplayLedger
 from ..registry.lattice_pq import LatticeSigner
 from ..registry.zkp_registry import SignedZkpRelationRegistry
 from ..registry.zkp_sessions import SessionChallengeStore
+from ..transport import gop_policy as gop_policies
+from ..transport.adaptive_chunks import AdaptiveChunkPlan
+from ..transport.blind_sync import BlindOperatingContract
+from ..transport.cabac_sync import DEFAULT_CABAC_CONTRACT
 from . import bdlop, codec, video_proof
 from . import video_pipeline as pipeline
 from .params import BDLOP_OPEN_128, BdlopParams
@@ -49,6 +57,18 @@ CONTRACT = BlindOperatingContract(
     stable_carriers_only=True,
 )
 _HEX_32 = re.compile(r"[0-9a-fA-F]{64}")
+# CAVLC Baseline policies use ``CONTRACT``; the CABAC policy needs the CABAC
+# carrier contract instead (Main/High I/IDR slices, docs/CABAC_SUPPORT.md).
+CODEC_POLICIES = {
+    "v1": pipeline.CODEC_POLICY_V1,
+    "v2": pipeline.CODEC_POLICY_V2,
+    "cabac": pipeline.CODEC_POLICY_CABAC_V1,
+}
+
+
+def _contract_for(codec_policy: str):
+    """The carrier contract a codec policy requires."""
+    return DEFAULT_CABAC_CONTRACT if codec_policy == pipeline.CODEC_POLICY_CABAC_V1 else CONTRACT
 
 
 def _write_new(path: Path, data: bytes, *, private: bool = False) -> None:
@@ -103,10 +123,46 @@ def _challenge(value: str) -> bytes:
 
 
 def _profile(arguments: argparse.Namespace, *, registered: bool) -> pipeline.CarrierProfile:
+    length = getattr(arguments, "payload_range_bytes", None)
+    if length is not None and registered:
+        raise ValueError("--payload-range-bytes applies to in-band mode only")
+    adaptive = getattr(arguments, "adaptive_chunks", False)
+    if adaptive and arguments.chunk_bytes != pipeline.DEFAULT_CHUNK_BYTES:
+        raise ValueError("--adaptive-chunks replaces --chunk-bytes")
+    codec_policy = CODEC_POLICIES[arguments.codec_policy]
+    gop_policy = getattr(arguments, "gop_policy", None) or gop_policies.ALL_INTRA
     return pipeline.CarrierProfile(
-        CONTRACT, frames_per_segment=arguments.frames_per_segment,
+        _contract_for(codec_policy), frames_per_segment=arguments.frames_per_segment,
         chunk_bytes=arguments.chunk_bytes, registered=registered,
+        codec_policy=codec_policy, gop_policy=gop_policy,
+        chunk_plan=AdaptiveChunkPlan() if adaptive else None,
+        payload_range_length=length,
     )
+
+
+def _epoch_beacon(arguments: argparse.Namespace) -> EpochChallenge | None:
+    """The issuer-signed epoch challenge named by ``--epoch-beacon``, verified."""
+    path = getattr(arguments, "epoch_beacon", None)
+    if path is None:
+        return None
+    beacon = EpochChallenge.from_dict(_read_json(path))
+    if not beacon.verify(arguments.issuer_public.read_bytes()):
+        raise ValueError("epoch beacon signature did not verify against the issuer key")
+    if not beacon.is_current(max_age_epochs=arguments.max_age_epochs):
+        raise ValueError("epoch beacon is expired or not yet valid")
+    return beacon
+
+
+def _session_for_embed(arguments: argparse.Namespace) -> bytes:
+    beacon = _epoch_beacon(arguments)
+    if (beacon is None) == (arguments.session is None):
+        raise ValueError("supply exactly one of --session or --epoch-beacon")
+    return _challenge(arguments.session) if beacon is None else beacon.challenge
+
+
+def _attachment(arguments: argparse.Namespace) -> video_proof.PayloadRangeAttachment | None:
+    length = getattr(arguments, "payload_range_bytes", None)
+    return None if length is None else video_proof.payload_range_attachment(PARAMS, length)
 
 
 def _public_credential(path: Path | None) -> bdlop.Commitment | None:
@@ -153,7 +209,20 @@ def _registry_sign(arguments: argparse.Namespace) -> dict[str, Any]:
     _write_json(arguments.out, registry.to_dict())
     return {"registry": str(arguments.out), "epoch": registry.epoch, "root": registry.root(),
             "mode": "registered" if credential is not None else "in-band",
-            "holder_id": arguments.holder_id}
+            "holder_id": arguments.holder_id, "codec_policy": arguments.codec_policy,
+            "payload_range_bytes": getattr(arguments, "payload_range_bytes", None)}
+
+
+def _epoch_issue(arguments: argparse.Namespace) -> dict[str, Any]:
+    """Publish one signed challenge for the current time window (offline mode)."""
+    _require_absent(arguments.out)
+    beacon = EpochChallenge.issue_now(
+        arguments.issuer_private.read_bytes(), window_seconds=arguments.window_seconds,
+        signer_id=arguments.signer_id,
+    )
+    _write_json(arguments.out, beacon.to_dict())
+    return {"epoch_beacon": str(arguments.out), "epoch_index": beacon.epoch_index,
+            "window_seconds": beacon.window_seconds, "challenge": beacon.challenge.hex()}
 
 
 # -- holder --------------------------------------------------------------- #
@@ -212,19 +281,26 @@ def _embed(arguments: argparse.Namespace) -> dict[str, Any]:
         holder_id=arguments.holder_id,
     )
     payload = None if credential is not None else arguments.payload_file.read_bytes()
+    padded = False
+    if payload is not None and profile.payload_range_length is not None:
+        # The pinned length is public; the true length hides inside the padding.
+        payload = video_proof.pad_payload(payload, profile.payload_range_length)
+        padded = True
     result = pipeline.embed_video_proof(
         arguments.video, arguments.output, payload, params=PARAMS, pins=pins, profile=profile,
-        session_challenge=_challenge(arguments.session), sync_key=_sync_key(arguments, profile),
+        session_challenge=_session_for_embed(arguments), sync_key=_sync_key(arguments, profile),
         credential=credential,
     )
     if result.opening is not None:
         _write_json(arguments.opening_out, {
             "payload": result.opening.payload.hex(),
             "randomness": result.opening.randomness.astype(np.int8).tobytes().hex(),
+            "padded": padded,
         }, private=True)
     return {"output": str(arguments.output), "statement_id": result.statement_id.hex(),
             "envelope_bytes": result.envelope_bytes, "carriers_used": result.carriers_used,
-            "segments_used": result.segments_used}
+            "segments_used": result.segments_used, "payload_padded": padded,
+            "session_mode": "offline-epoch" if arguments.epoch_beacon is not None else "interactive"}
 
 
 def _disclose(arguments: argparse.Namespace) -> dict[str, Any]:
@@ -260,17 +336,30 @@ def _verify(arguments: argparse.Namespace) -> dict[str, Any]:
     pins, profile, credential = _verifier_pins(arguments)
     if arguments.envelope_out is not None and credential is not None:
         raise ValueError("--envelope-out applies to in-band mode only")
-    store = SessionChallengeStore(arguments.database, ttl_seconds=arguments.ttl_seconds)
-    result = pipeline.verify_video_proof(
-        arguments.video, params=PARAMS, pins=pins, profile=profile, sync_key=_sync_key(arguments, profile),
-        session_store=store, credential=credential, holder_id=arguments.holder_id,
-    )
+    common = {
+        "params": PARAMS, "pins": pins, "profile": profile, "sync_key": _sync_key(arguments, profile),
+        "credential": credential, "holder_id": arguments.holder_id,
+    }
+    beacon = _epoch_beacon(arguments)
+    if beacon is None:
+        store = SessionChallengeStore(arguments.database, ttl_seconds=arguments.ttl_seconds)
+        result = pipeline.verify_video_proof(arguments.video, session_store=store, **common)
+    else:
+        ledger = OfflineReplayLedger(
+            arguments.database, window_seconds=beacon.window_seconds,
+            max_age_epochs=arguments.max_age_epochs,
+        )
+        result = pipeline.verify_video_proof_offline(
+            arguments.video, beacon=beacon, issuer_public_key=arguments.issuer_public.read_bytes(),
+            ledger=ledger, **common,
+        )
     if result.valid and arguments.envelope_out is not None:
         _write_new(arguments.envelope_out, result.envelope)
     return {"valid": result.valid, "reason": result.reason, "carriers_used": result.carriers_used,
             "statement_id": None if result.statement_id is None else result.statement_id.hex(),
             "mode": "registered" if credential is not None else "in-band",
-            "holder_id": arguments.holder_id}
+            "holder_id": arguments.holder_id,
+            "session_mode": "offline-epoch" if beacon is not None else "interactive"}
 
 
 def _disclosure_verify(arguments: argparse.Namespace) -> dict[str, Any]:
@@ -278,7 +367,9 @@ def _disclosure_verify(arguments: argparse.Namespace) -> dict[str, Any]:
     if (arguments.envelope is None) == (arguments.credential is None):
         raise ValueError("supply exactly one of --envelope or --credential")
     if arguments.envelope is not None:
-        commitment = video_proof.decode_envelope(PARAMS, arguments.envelope.read_bytes()).commitment
+        commitment = video_proof.decode_envelope(
+            PARAMS, arguments.envelope.read_bytes(), _attachment(arguments)
+        ).commitment
     else:
         commitment = _public_credential(arguments.credential)
     data = arguments.disclosure.read_bytes()
@@ -288,7 +379,15 @@ def _disclosure_verify(arguments: argparse.Namespace) -> dict[str, Any]:
         nonce=_hex_32(arguments.nonce, "disclosure nonce"),
     )
     payload = video_proof.decode_disclosure(PARAMS, data).payload if valid else None
-    return {"valid": valid, "payload_hex": None if payload is None else payload.hex()}
+    report: dict[str, Any] = {"valid": valid, "payload_hex": None if payload is None else payload.hex()}
+    if payload is not None and arguments.payload_range_bytes is not None:
+        # The holder padded to the pinned length (embed --payload-range-bytes);
+        # a disclosed payload without that padding is reported as-is.
+        try:
+            report["payload_unpadded_hex"] = video_proof.unpad_payload(payload).hex()
+        except ValueError:
+            report["payload_unpadded_hex"] = None
+    return report
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -303,6 +402,38 @@ def _build_parser() -> argparse.ArgumentParser:
     def carrier_options(command: argparse.ArgumentParser) -> None:
         command.add_argument("--frames-per-segment", type=int, default=pipeline.DEFAULT_FRAMES_PER_SEGMENT)
         command.add_argument("--chunk-bytes", type=int, default=pipeline.DEFAULT_CHUNK_BYTES)
+        command.add_argument(
+            "--codec-policy", choices=sorted(CODEC_POLICIES), default="v2",
+            help="v2 (default): full-RBSP canonical digest with tagged raw segments; "
+                 "v1: the original digest, for videos and registries made under it; "
+                 "cabac: H.264 Main/High (CABAC) streams, carriers in I/IDR slices "
+                 "(docs/CABAC_SUPPORT.md)",
+        )
+        command.add_argument(
+            "--gop-policy", choices=sorted(gop_policies.POLICIES), default=gop_policies.ALL_INTRA,
+            help="all-intra (default): GOP=1 streams; idr-carriers-inter-raw-v1: GOP>1 streams, "
+                 "carriers in IDR slices only, P/B slices bound byte-exactly",
+        )
+        command.add_argument(
+            "--adaptive-chunks", action="store_true",
+            help="capacity-adaptive ZKBC v2 transport (replaces --chunk-bytes)",
+        )
+        command.add_argument(
+            "--payload-range-bytes", type=int,
+            help="in-band mode: pin this payload length, pad the payload to it and attach a "
+                 "payload range proof to the envelope (the length is public)",
+        )
+
+    def epoch_options(command: argparse.ArgumentParser) -> None:
+        command.add_argument(
+            "--epoch-beacon", type=Path,
+            help="offline mode: issuer-signed epoch challenge (epoch-issue output) instead of a "
+                 "verifier session",
+        )
+        command.add_argument(
+            "--max-age-epochs", type=int, default=24,
+            help="offline mode: accept beacons up to this many windows old",
+        )
 
     def registry_options(command: argparse.ArgumentParser) -> None:
         command.add_argument("--registry", type=Path, required=True)
@@ -332,6 +463,12 @@ def _build_parser() -> argparse.ArgumentParser:
     command.add_argument("--out", type=Path, required=True)
     carrier_options(command)
 
+    command = add("epoch-issue", _epoch_issue, "Publish a signed epoch challenge (offline mode).")
+    command.add_argument("--issuer-private", type=Path, required=True)
+    command.add_argument("--window-seconds", type=int, default=3600)
+    command.add_argument("--signer-id", default="issuer")
+    command.add_argument("--out", type=Path, required=True)
+
     command = add("credential-new", _credential_new, "Commit to a credential payload.")
     command.add_argument("--payload-file", type=Path, required=True)
     command.add_argument("--public", type=Path, required=True)
@@ -340,11 +477,12 @@ def _build_parser() -> argparse.ArgumentParser:
     command = add("embed", _embed, "Prove and embed the envelope into an H.264 video.")
     command.add_argument("--video", type=Path, required=True)
     command.add_argument("--output", type=Path, required=True)
-    command.add_argument("--session", required=True, help="verifier-issued challenge (hex)")
+    command.add_argument("--session", help="verifier-issued challenge (hex); or use --epoch-beacon")
     command.add_argument("--payload-file", type=Path, help="in-band mode: payload to commit to")
     command.add_argument("--opening-out", type=Path, help="in-band mode: where to keep the opening")
     command.add_argument("--credential-private", type=Path, help="registered mode: credential secret")
     registry_options(command)
+    epoch_options(command)
 
     command = add("disclose", _disclose, "Reveal a committed payload to one recipient, in zero knowledge.")
     command.add_argument("--opening", type=Path, required=True,
@@ -367,6 +505,7 @@ def _build_parser() -> argparse.ArgumentParser:
             command.add_argument("--video", type=Path, required=True)
             command.add_argument("--envelope-out", type=Path,
                                  help="in-band mode: keep the verified envelope for disclosure-verify")
+            epoch_options(command)
 
     command = add("disclosure-verify", _disclosure_verify, "Check a payload disclosure.")
     command.add_argument("--envelope", type=Path, help="envelope saved by verify --envelope-out")
@@ -374,6 +513,8 @@ def _build_parser() -> argparse.ArgumentParser:
     command.add_argument("--statement-id", required=True, help="hex statement id the holder used")
     command.add_argument("--nonce", required=True, help="the nonce this recipient chose (hex)")
     command.add_argument("--disclosure", type=Path, required=True)
+    command.add_argument("--payload-range-bytes", type=int,
+                         help="the pinned payload length the envelope was made with, if any")
     return parser
 
 

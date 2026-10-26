@@ -353,25 +353,27 @@ def test_hand_built_toy_pins_are_refused_by_verify_video_proof(tmp_path) -> None
 # =========================================================================== #
 
 def test_v1_codec_policy_identifiers_are_byte_identical() -> None:
-    assert pipeline.codec_policy_id().hex() == V1_CODEC_POLICY_ID
     assert pipeline.codec_policy_id(pipeline.CODEC_POLICY_V1).hex() == V1_CODEC_POLICY_ID
-    assert pipeline.CODEC_POLICY == pipeline.CODEC_POLICY_V1
+    # v2 is the default for new profiles; v1 stays selectable with its old identifiers.
+    assert pipeline.CODEC_POLICY == pipeline.CODEC_POLICY_V2
+    assert pipeline.codec_policy_id() == pipeline.codec_policy_id(pipeline.CODEC_POLICY_V2)
+    assert pipeline.CarrierProfile(CONTRACT).codec_policy == pipeline.CODEC_POLICY_V2
     for (name, registered), (profile_id, policy) in V1_IDENTIFIERS.items():
         params = PARAMETER_SETS[name]
-        for profile in (
-            pipeline.CarrierProfile(CONTRACT, registered=registered),
-            pipeline.CarrierProfile(CONTRACT, registered=registered, codec_policy=pipeline.CODEC_POLICY_V1),
-        ):
-            assert profile.profile_id(params).hex() == profile_id
-            assert pipeline.policy_hash(params, profile) == policy
-            assert profile.options() == {"frames_per_segment": 100}
+        profile = pipeline.CarrierProfile(
+            CONTRACT, registered=registered, codec_policy=pipeline.CODEC_POLICY_V1
+        )
+        assert profile.profile_id(params).hex() == profile_id
+        assert pipeline.policy_hash(params, profile) == policy
+        assert profile.options() == {"frames_per_segment": 100}
 
 
 def test_v2_codec_policy_gives_new_identifiers_everywhere() -> None:
     _, commitment = _committed()
-    old = pipeline.CarrierProfile(CONTRACT, registered=True)
+    old = pipeline.CarrierProfile(CONTRACT, registered=True, codec_policy=pipeline.CODEC_POLICY_V1)
     new = pipeline.CarrierProfile(CONTRACT, registered=True, codec_policy=pipeline.CODEC_POLICY_V2)
-    assert pipeline.codec_policy_id(pipeline.CODEC_POLICY_V2) != pipeline.codec_policy_id()
+    assert new == pipeline.CarrierProfile(CONTRACT, registered=True)  # the default
+    assert pipeline.codec_policy_id(pipeline.CODEC_POLICY_V2) != pipeline.codec_policy_id(pipeline.CODEC_POLICY_V1)
     assert new.profile_id(TOY) != old.profile_id(TOY)
     assert pipeline.policy_hash(TOY, new) != pipeline.policy_hash(TOY, old)
     assert pipeline.relation_id(TOY, new, commitment) != pipeline.relation_id(TOY, old, commitment)
@@ -388,7 +390,8 @@ def test_pins_with_another_codec_policy_are_refused(tmp_path) -> None:
     new = pipeline.CarrierProfile(CONTRACT, registered=True, codec_policy=pipeline.CODEC_POLICY_V2)
     pins = video_proof.VerifierPins(
         relation_id=pipeline.relation_id(TOY, new, commitment), registry_root=b"G" * 32,
-        registry_epoch=1, codec_policy_id=pipeline.codec_policy_id(),  # v1 id with a v2 profile
+        registry_epoch=1,
+        codec_policy_id=pipeline.codec_policy_id(pipeline.CODEC_POLICY_V1),  # v1 id, v2 profile
         carrier_profile_id=new.profile_id(TOY),
     )
     with pytest.raises(ValueError, match="codec policy"):

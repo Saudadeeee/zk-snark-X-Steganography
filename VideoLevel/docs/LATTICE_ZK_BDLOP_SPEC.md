@@ -4,8 +4,8 @@ Phiên bản 1 (`bdlop-open-v1`), cài đặt trong `src/lattice_zk/`. Tài li�
 đặc tả chính xác các thuật toán mà mã chạy và lập luận từng tính chất bảo mật
 dựa trên các kết quả đã công bố. Nó được viết để giao thức có thể được cài đặt
 lại và đối chiếu với các vector known-answer trong
-`research/bdlop_params/kat_v2.json` (bộ sản xuất `bdlop-open-128-v2`;
-`kat_v1.json` ghim bộ cũ hơn `bdlop-open-128-v1`).
+`research/bdlop_params/kat_v3.json` (bộ sản xuất `bdlop-open-128-v3`;
+`kat_v2.json` và `kat_v1.json` ghim các bộ cũ hơn `-v2`, `-v1`).
 
 Cấu trúc là cam kết và chứng minh opening của Baum, Damgård, Lyubashevsky,
 Oechsner và Peikert (SCN 2018, ePrint 2016/997), với ba khác biệt có chủ đích
@@ -26,16 +26,20 @@ liệt kê ở Mục 6. Phần cài đặt chưa được audit và không phả
 
 ## 2. Tham số
 
-| | `bdlop-open-128-v2` |
-|---|---|
-| `N`, `q` | 256, `2^30 − 35` |
-| `n`, `λ`, `k` | 6, 7, 14 |
-| `κ`, `γ`, `B` | 60, `2^17`, `2^17 − 61` |
-| `|C|` | `2^257` |
-| Cam kết | `(n+1)·N·30` bit = 6 720 byte |
-| Chứng minh opening | `32 + k·N·18` bit = 8 096 byte |
-| Equality proof | `32 + 2·k·N·18` bit = 16 160 byte |
-| Xác suất chấp nhận mỗi lần thử | `((2B+1)/(2γ))^{kN} ≈ 0.191` |
+| | `bdlop-open-128-v3` (sản xuất) | `bdlop-open-128-v2` (cũ) |
+|---|---|---|
+| `N`, `q` | 256, `2^30 − 35` | như v3 |
+| `n`, `λ`, `k` | 7, 7, 15 | 6, 7, 14 |
+| `κ`, `γ`, `B` | 60, `2^17`, `2^17 − 61` | như v3 |
+| `|C|` | `2^257` | `2^257` |
+| Cam kết | `(n+1)·N·30` bit = 7 680 byte | 6 720 byte |
+| Chứng minh opening | `32 + k·N·18` bit = 8 672 byte | 8 096 byte |
+| Equality proof | `32 + 2·k·N·18` bit = 17 312 byte | 16 160 byte |
+| Xác suất chấp nhận mỗi lần thử | `((2B+1)/(2γ))^{kN} ≈ 0.170` | ≈ 0.191 |
+
+Bộ v3 (2026-10-26) chỉ nâng hạng M-SIS `n` từ 6 lên 7 so với v2, để binding
+vượt 128 bit lượng tử; mọi thứ khác giữ nguyên. Video, registry và statement
+tạo dưới v2 vẫn verify dưới v2 (`parameter_id` khác nhau); mã giữ cả ba bộ.
 
 `parameter_id = SHA3-256("zkstego/lattice-zk/bdlop-open/v1/parameters\0" ‖
 len(name) ‖ name ‖ N ‖ q ‖ n ‖ λ ‖ κ ‖ γ ‖ setup_seed)` ghim mọi giá trị.
@@ -43,18 +47,20 @@ len(name) ‖ name ‖ N ‖ q ‖ n ‖ λ ‖ κ ‖ γ ‖ setup_seed)` ghim 
 Bảo mật cụ thể, từ `research/bdlop_params/estimate.py` với mô hình
 security-estimates của CRYSTALS (commit `75c26949`), chi phí core-SVP:
 
-| Bài toán | Instance | Block size | Cổ điển | Lượng tử |
+| Bài toán (v3) | Instance | Block size | Cổ điển | Lượng tử |
 |---|---|---|---|---|
-| M-SIS (binding) | `B1 ∈ R_q^{n×k}`, chặn `ℓ∞` `8κB ≈ 2^25.9` | 480 | 140 | 127 |
-| M-LWE (hiding) | hạng `λ`, `n+1` mẫu, secret và error tam phân | 580 | 169 | 153 |
+| M-SIS (binding) | `B1 ∈ R_q^{n×k}`, chặn `ℓ∞` `8κB ≈ 2^25.9` | 589 | **172** | **156** |
+| M-LWE (hiding), primal | hạng `λ`, `n+1 = 8` mẫu, secret và error tam phân | 580 | 169 | 153 |
 | M-LWE, dual hybrid (lattice-estimator `e4333d9`) | như trên | 564 / 567 | **164** | **150** |
 
 Các mất mát trong reduction bị bỏ qua, giống như với ML-DSA. Mức hiding được
-tuyên bố là con số dual-hybrid thấp hơn; phần đối chiếu cũng tái lập các dòng
-M-SIS và primal M-LWE (`research/bdlop_params/CROSSCHECK.md`). Con số M-SIS
-lượng tử, 127 bit, hơi dưới 128. Bộ cũ hơn `bdlop-open-128-v1` (λ = 6,
-k = 13) có cùng ước lượng M-SIS nhưng chỉ 135 / 123 bit cho M-LWE (dual
-hybrid, β = 463); đây là lý do bộ sản xuất nâng λ lên 7.
+tuyên bố là con số dual-hybrid thấp hơn. Đối chiếu độc lập bằng
+lattice-estimator (`research/bdlop_params/lattice_estimator_crosscheck_v3.json`,
+`CROSSCHECK.md`): M-SIS 171,99 / 156,09, M-LWE primal 169,4 / 153,7, dual
+hybrid 164,9 / 150,3 bit — khớp với CRYSTALS; dưới mô hình MATZOV mọi tấn công
+đều trên 189 bit. Bộ `-v2` (n = 6) có binding 140 / 127 bit — 127 hơi dưới
+128, lý do ra đời v3; bộ `-v1` (λ = 6) chỉ 135 / 123 bit cho M-LWE dual hybrid,
+lý do v2 nâng λ lên 7.
 
 ## 3. Thuật toán
 
@@ -204,9 +210,25 @@ lượng và kích thước chunk theo từng segment. Xem `docs/CARRIERS_VA_CHU
 ### 3.7 Envelope
 
 ```text
-in-band     "ZKLB" ‖ 0x01 ‖ parameter_id ‖ session_challenge ‖ t ‖ π
-registered  "ZKLR" ‖ 0x01 ‖ parameter_id ‖ session_challenge ‖ π
+in-band             "ZKLB" ‖ 0x01 ‖ parameter_id ‖ session_challenge ‖ t ‖ π
+registered          "ZKLR" ‖ 0x01 ‖ parameter_id ‖ session_challenge ‖ π
+in-band + đính kèm  "ZKLB" ‖ 0x02 ‖ parameter_id ‖ session_challenge ‖ t ‖ π ‖ 0x01 ‖ u16 L ‖ π_range
 ```
+
+**Đính kèm range proof (phiên bản 2).** Một carrier profile in-band có thể
+ghim một độ dài payload `L` (`CarrierProfile.payload_range_length`; CLI
+`--payload-range-bytes L`). Khi đó envelope mang thêm payload range proof
+`π_range` (`src/lattice_zk/payload_range_proof.py`, bộ
+`bdlop-payload-range-128-v2` trên nền v3) cho statement
+`"zkstego/lattice-zk/envelope-attachment/payload-range/v1\0" ‖ x` — chính
+statement video `x`, nên không chuyển được sang video hay phiên khác. Verifier
+biết `L` từ profile (nó nằm trong `carrier_profile_id`), từ chối mọi envelope
+có phiên bản, loại đính kèm hay `L` khác, và chỉ chấp nhận khi cả `π` lẫn
+`π_range` verify. `L` công khai; holder giấu độ dài thật bằng cách đệm tới một
+lớp độ dài (`pad_payload`: `p ‖ 0x80 ‖ 0x00…`, CLI đệm tự động). Kích thước
+`π_range` (bộ sản xuất): 46 670 byte cho `L ≤ 32`, 74 318 byte cho `L = 128`;
+envelope in-band đính kèm `L = 32`: 63 094 byte. Chứng minh `L = 32` mất
+≈ 6 s, `L = 128` ≈ 3 phút (766 lần thử); verify ≈ 0,3 s.
 
 Các vị trí carrier được sắp bằng một keyed shuffle. Với một khóa stego bí mật
 chia sẻ với verifier, kênh vẫn không phát hiện được với bất kỳ ai không có
@@ -220,6 +242,26 @@ phụ thuộc khóa này.
 vào relation descriptor do issuer ký (ML-DSA-65) vào registry. Session
 challenge là một giá trị 32 byte do verifier phát và tiêu thụ một lần, nguyên
 tử, sau khi verification thành công.
+
+**Phiên offline theo epoch** (`src/registry/epoch_challenges.py`). Thay cho
+phiên tương tác, issuer phát mỗi cửa sổ thời gian `W` giây một *epoch beacon*
+ký ML-DSA-65: `(epoch_index = ⌊t/W⌋, W, nonce 32 byte, signer_id)`; challenge
+là `SHA-256("zkstego/video-zk/epoch-challenge/v1\0" ‖ "challenge\0" ‖ u64
+epoch_index ‖ u64 W ‖ nonce ‖ u16 |signer_id| ‖ signer_id)`, tính lại từ các
+trường đã ký chứ không đọc từ video. Holder gắn statement vào challenge đó
+(CLI `embed --epoch-beacon`); verifier (`verify_video_proof_offline`, CLI
+`verify --epoch-beacon`) kiểm chữ ký issuer, đòi beacon không ở tương lai và
+không cũ quá `max_age_epochs` cửa sổ (mặc định 24 × 3600 s), verify như
+`expected_session`, rồi ghi `(challenge, statement_id)` vào một sổ SQLite
+riêng (`OfflineReplayLedger`): cùng statement xuất hiện lần hai ở cùng
+verifier là phát lại và bị từ chối. Mỗi dòng sổ giữ tới khi beacon của nó hết
+hạn (`(epoch_index + max_age_epochs + 1)·W`) rồi mới bị xoá; sổ ghi cấu hình
+`(W, max_age_epochs)` và từ chối mở với cấu hình khác, nên việc dọn sổ không
+bao giờ chạy trước hạn beacon. Lệch giờ: beacon của cửa sổ kế tiếp được chấp
+nhận sớm một cửa sổ (`skew_epochs = 1`). Sổ không chia sẻ giữa các verifier, nên
+chế độ này cho *tươi mới* (không phát lại được video cũ quá cửa sổ) và *chống
+phát lại theo từng verifier*; cần chống phát lại toàn cục thì dùng phiên tương
+tác.
 
 **Danh tính holder.** Issuer có thể gắn credential với một định danh holder
 `h` (một chuỗi UTF-8 chuẩn hóa NFC, không rỗng, tối đa 256 byte; CLI
@@ -416,18 +458,19 @@ soundness của các giao thức như vậy trước đối thủ lượng tử 
   phụ thuộc dữ liệu.
 - Chế độ in-band không xác thực người tạo; session challenge không bí mật, nên
   hãy phát nó qua một kênh đã xác thực nếu điều đó quan trọng.
-- Chứng minh opening của phiên bản này không nói gì về message. Hai chứng minh
-  tùy chọn, riêng biệt trên cùng vành này không đổi gì được đặc tả ở đây: một
-  chứng minh rằng một cam kết nền giấu một chuỗi nhị phân 256-bit
-  (`docs/PROOF_NHI_PHAN_VA_KHOANG.md`, `src/lattice_zk/binary_proof.py`), và
-  một payload range proof rằng một cam kết payload của 3.2 giấu
-  `encode(p)` cho một `p` nào đó có độ dài công khai `L ≤ 128` byte, tức mỗi hệ
-  số là một đóng gói 24-bit của các byte payload với trường độ dài và zero
-  padding của 3.2 (`docs/PROOF_NHI_PHAN_VA_KHOANG.md`,
-  `src/lattice_zk/payload_range_proof.py`, 44 558 byte cho `L ≤ 32`). Cái sau áp
-  dụng cho cam kết của một envelope in-band hoặc credential đã có và có thể gửi
-  ngoài băng; nó lộ `L`. Không cung cấp một range proof độ-dài-ẩn hay 24-bit đầy
-  đủ (toàn bộ 256 hệ số).
+- Chứng minh opening không nói gì về message. Hai chứng minh tùy chọn trên
+  cùng vành bổ sung điều đó: chứng minh một cam kết nền giấu một chuỗi nhị phân
+  256-bit (`docs/PROOF_NHI_PHAN_VA_KHOANG.md`, `src/lattice_zk/binary_proof.py`,
+  45 134 byte, gửi ngoài băng), và payload range proof rằng một cam kết payload
+  của 3.2 giấu `encode(p)` cho một `p` có độ dài công khai `L ≤ 128` byte
+  (`src/lattice_zk/payload_range_proof.py`, 46 670 byte cho `L ≤ 32`). Cái sau
+  nay **đính kèm được vào envelope in-band** (3.7, phiên bản 2) khi profile ghim
+  `L`; nó vẫn lộ `L` (giấu độ dài thật bằng đệm tới lớp độ dài) và tốn 46–74 KB
+  carrier. Không cung cấp range proof độ-dài-ẩn hay 24-bit đầy đủ (toàn bộ 256
+  hệ số).
+- Chế độ offline theo epoch (3.7) chỉ chống phát lại theo từng verifier và
+  trong cửa sổ `max_age_epochs`; issuer phải phát beacon đều đặn và holder cần
+  beacon hiện hành trước khi nhúng.
 
 ## 8. Tài liệu tham khảo
 

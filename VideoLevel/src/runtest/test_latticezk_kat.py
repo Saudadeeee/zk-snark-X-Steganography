@@ -13,6 +13,7 @@ KAT_DIR = ROOT / "research" / "bdlop_params"
 KAT_SETS = (
     ("kat_v1.json", "BDLOP_OPEN_128_V1", "bdlop-open-128-v1"),
     ("kat_v2.json", "BDLOP_OPEN_128_V2", "bdlop-open-128-v2"),
+    ("kat_v3.json", "BDLOP_OPEN_128_V3", "bdlop-open-128-v3"),
 )
 
 

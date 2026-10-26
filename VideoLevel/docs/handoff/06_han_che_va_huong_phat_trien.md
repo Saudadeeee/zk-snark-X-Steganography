@@ -10,7 +10,7 @@ Theo dõi chính: `docs/ROADMAP.md` (giai đoạn A → Q2, giai đoạn B → Q
 
 | Giới hạn | Mô tả | Theo dõi ở |
 |---|---|---|
-| **M-SIS quantum 127 < 128** | Binding quantum core-SVP là 127 bit, ngay dưới 128. Classical 140 bit ổn. | QUESTIONS Q2, Q15; cân nhắc nâng rank M-SIS (xem §3) |
+| ~~M-SIS quantum 127 < 128~~ (đã giải quyết 2026-10-26) | Bộ v3 nâng rank M-SIS lên 7: binding 172 / 156 bit; giá: envelope +7 %. | `CROSSCHECK.md` (v3) |
 | **Soundness là "relaxed"** | Extractor chỉ cho relaxed opening (`‖r̄‖∞ ≤ 2B`), binding theo relaxed opening với chặn ℓ∞ lớn `8κB` (`β/q ≈ 1/17`); view ℓ2 vô nghĩa. | SPEC §4.3–4.4; QUESTIONS Q2, Q4 |
 | **FS-with-aborts chưa chứng minh đầy đủ** | Mô phỏng prover-aborting trong classical ROM dựa trên lập luận min-entropy; cần reviewer xác nhận không vướng lỗi mà Barbosa et al. (2023) chỉ ra. Không có định lý QROM ("plausibly post-quantum"). | SPEC §4.2, §5; QUESTIONS Q1, Q10 |
 | **Một khóa cam kết toàn cục** | `ck` nở từ `parameter_id`, dùng chung mọi user/registry; một lần rút gọn lattice ~2^140 phá binding cho mọi cam kết. | QUESTIONS Q9 (D9, mở) |
@@ -38,9 +38,24 @@ Theo dõi chính: `docs/ROADMAP.md` (giai đoạn A → Q2, giai đoạn B → Q
 
 ## 3. Giới hạn kỹ thuật / chất lượng mã
 
-- **Mặc định v1 vs v2**: một số đường/tài liệu cũ vẫn mặc định
-  `bdlop-open-128-v1`; sản xuất là `bdlop-open-128-v2`. Cần thống nhất mặc định
-  v2 ở mọi nơi và đo lại các số v1.
+- **Phiên bản tham số**: sản xuất là `bdlop-open-128-v3` (2026-10-26); các số
+  đo trong `SUMMARY.md` và bảng E2E là v1/v2 và cần đo lại dưới v3
+  (`scripts/ops/system_e2e_v3.sh`). Codec policy v2 đã là mặc định.
+- **Chế độ offline theo epoch**: chỉ chống phát lại theo từng verifier và
+  trong cửa sổ `max_age_epochs`; không thay thế phiên tương tác khi cần chống
+  phát lại toàn cục (SPEC §3.7).
+- **Đính kèm range proof**: tốn 46–74 KB carrier (cần clip ≥ ~1 300 khung CIF)
+  và vẫn lộ độ dài lớp `L` (giấu độ dài thật bằng đệm).
+- **CABAC (Main/High)** (`docs/CABAC_SUPPORT.md`): chỉ lát I/IDR mang
+  carrier, lát P/B khoá từng byte; chưa MBAFF/interlace, 4:2:2/4:4:4, >8 bit,
+  lossless; lát IDR stego luôn khác libx264 ở byte cuối (flush chuẩn tắc) —
+  dấu vết cấu trúc mà bộ dò có thể học; Python thuần chậm (~0,1 s/lát CIF).
+- **Chế độ bền (semi-fragile)** (`docs/ROBUST_MODE.md`): xác thực bán-mong
+  manh, không phải toàn vẹn chính xác — sửa giữ mọi trung bình luma ô 64×64
+  trong ~8 mức và trung bình màu ô 128×128 (mẫu mỗi 6 khung) trong ~16 mức sẽ
+  lọt; không bền với resize/crop; CRF 28 trên nội dung tĩnh hỏng ở
+  300 khung CIF; QIM Δ 64–80 không che giấu; khoá đồng bộ công khai cho phép
+  xoá (không giả) dấu.
 - **Python không constant-time**: số nguyên lớn Python + vòng lặp rejection phụ
   thuộc dữ liệu → có kênh thời gian. Không dùng cho môi trường cần chống kênh
   phụ. (SPEC §7)

@@ -50,12 +50,13 @@ không có = in-band). Kiểm tra bảo mật (phát lại + sửa 1 bit) **ch�
 tắt bằng `--skip-security-checks`.
 
 ```bash
-# REGISTERED (video chỉ mang bằng chứng 8165 B) — dùng carrier t1 cho CIF 100 khung
+# REGISTERED (video chỉ mang bằng chứng 8741 B, v3) — dùng carrier t1 cho CIF 100 khung
 python -m benchmark.latticezk_video_e2e \
   --video <cif_cut>.h264 --output tmp/reg.h264 --report tmp/reg.json \
   --parameter-set BDLOP_OPEN_128 --registered --carrier t1 --chunk-bytes 8200
 
-# IN-BAND (video mang cam kết + bằng chứng 14885 B) — carrier magnitude mặc định
+# IN-BAND (video mang cam kết + bằng chứng 16421 B, v3) — carrier magnitude mặc định
+# (thêm --payload-range-bytes 32 để đính kèm range proof: +46 673 B, cần clip dài)
 python -m benchmark.latticezk_video_e2e \
   --video <cif_cut>.h264 --output tmp/inband.h264 --report tmp/inband.json \
   --chunk-bytes 5000
@@ -88,8 +89,8 @@ session → embed → verify → disclose) có trong `docs/LATTICE_ZK_BDLOP_PLAN
 > và đường dẫn **cây chính** `.../zk-snark-X-Steganography/VideoLevel` (không phải
 > worktree). Chạy chúng từ cây chính.
 
-- `scripts/ops/rerun_v2_eval.sh` — **chạy lại toàn bộ đánh giá dưới
-  `bdlop-open-128-v2`**. Đặt `ZKSTEGO_SKIP_LEARNED=1` (hoãn steganalysis học máy:
+- `scripts/ops/rerun_v2_eval.sh` — **chạy lại toàn bộ đánh giá** (viết cho
+  `bdlop-open-128-v2`; với v3 dùng `scripts/ops/system_e2e_v3.sh` cho E2E). Đặt `ZKSTEGO_SKIP_LEARNED=1` (hoãn steganalysis học máy:
   trích đặc trưng ML, đánh giá FLD, mô phỏng nhúng, CNN) và
   `ZKSTEGO_ANALYSIS_WORKERS=2`. Mỗi bước log vào `tmp/rerun_v2/<step>.log`; bước
   lỗi không dừng cả run. Các bước: `repro.py all --skip-prepare --workers 1`,
@@ -148,3 +149,28 @@ FLD), `cnn_*` (CNN), `adaptive_*` (carrier/chunk thích nghi), `gop_*` (GOP>1),
 Trường then chốt trong báo cáo E2E/system: `verified_from_video_alone`,
 `replay_rejected`, `tamper_rejected`, `payload_absent_from_output`,
 `envelope_bytes`, `psnr_modified_db`, `psnr_worst_db`.
+
+### Chế độ offline theo epoch và đính kèm range proof (CLI, 2026-10-26)
+
+```bash
+# ISSUER: phát một thử thách cho cửa sổ giờ hiện tại (ký ML-DSA-65)
+python -m src.lattice_zk.cli epoch-issue --issuer-private issuer.key --out epoch.json --window-seconds 3600
+
+# HOLDER: nhúng không cần phiên tương tác
+python -m src.lattice_zk.cli embed --video cover.h264 --output stego.h264 --epoch-beacon epoch.json   --payload-file payload.bin --opening-out opening.json   --registry registry.json --issuer-public issuer.pub --minimum-epoch 1
+
+# VERIFIER: --database giữ sổ chống phát lại của riêng verifier này
+python -m src.lattice_zk.cli verify --video stego.h264 --database ledger.sqlite --epoch-beacon epoch.json   --registry registry.json --issuer-public issuer.pub --minimum-epoch 1
+
+# IN-BAND + range proof: ghim độ dài 32 byte ở mọi phía (registry-sign, embed, verify,
+# disclosure-verify); payload ngắn hơn được đệm tự động (0x80 rồi 0x00).
+python -m src.lattice_zk.cli registry-sign --issuer-private issuer.key --epoch 1 --out registry.json --payload-range-bytes 32
+```
+
+Mặc định codec policy nay là `v2`; video/registry cũ dùng `--codec-policy v1`;
+video H.264 Main/High (CABAC) dùng `--codec-policy cabac` (carrier ở lát I/IDR,
+hợp đồng CABAC tự chọn; `docs/CABAC_SUPPORT.md` §6). `--gop-policy
+idr-carriers-inter-raw-v1` cho luồng GOP>1 (CAVLC hoặc CABAC).
+`--adaptive-chunks` bật ZKBC v2 thích nghi dung lượng (thay `--chunk-bytes`).
+E2E toàn hệ dưới v3: `bash scripts/ops/system_e2e_v3.sh` (báo cáo
+`tmp/system_e2e_v3/*.json`, gồm kịch bản `inband_range32` và `reg_codec_v1`).

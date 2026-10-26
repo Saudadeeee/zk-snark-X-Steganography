@@ -41,7 +41,7 @@ với phần hiện thực nằm trong Phụ lục~\ref{app:code-check}.
 Đặt $\mathcal R=\mathbb Z[X]/(X^N+1)$ và $\Rq=\mathcal R/q\mathcal R$, với
 $N=256$ và số nguyên tố $q=2^{30}-35\equiv5\pmod 8$. Khóa cam kết là
 $\mathsf{ck}=(B_1,b_2)$ với $B_1=[I_n\,|\,B_1']\in\Rq^{n\times k}$,
-$b_2=[0^n\,|\,1\,|\,b_2']\in\Rq^{1\times k}$, $k=n+\lambda+1$, $n=6$, $\lambda=7$ (nên $k=14$).
+$b_2=[0^n\,|\,1\,|\,b_2']\in\Rq^{1\times k}$, $k=n+\lambda+1$, $n=7$, $\lambda=7$ (nên $k=15$).
 $S_1$ là tập các đa thức có hệ số trong $\{-1,0,1\}$. Với một thông điệp
 $m\in\Rq$ và $r\in S_1^k$,
 $\Com(m;r)=(t_1,t_2)=(B_1r,\ \langle b_2,r\rangle+m)$. Tập thách thức là
@@ -55,7 +55,7 @@ dùng trong các cận được tập hợp trong Bảng~\ref{tab:sec-numbers}.
 
 \begin{table}[t]
 \centering
-\caption{Các đại lượng cụ thể cho \texttt{bdlop-open-128-v2}}
+\caption{Các đại lượng cụ thể cho \texttt{bdlop-open-128-v3}}
 \label{tab:sec-numbers}
 \footnotesize
 \begin{tabular}{@{}lr@{}}
@@ -64,17 +64,18 @@ Quantity & Value \\
 \midrule
 $|\Cset|$ & $2^{257.01}$\\
 Fiat--Shamir seed length & 256 bits\\
-$p_{\mathrm{acc}}=((2B+1)/2\gamma)^{kN}$ (opening) & $0.1912$\\
-$p_{\mathrm{acc}}^2$ (equality proof) & $0.0365$\\
+$p_{\mathrm{acc}}=((2B+1)/2\gamma)^{kN}$ (opening, $kN=3\,840$) & $0.1698$\\
+$p_{\mathrm{acc}}^2$ (equality proof) & $0.0288$\\
 Attempt cap $\Amax$ (opening; equality) & $512$; $4\,096$\\
-$(1-p_{\mathrm{acc}})^{512}$; $(1-p_{\mathrm{acc}}^2)^{4096}$ & $2^{-156.7}$; $2^{-220.0}$\\
-$\eta=nN\log_2(2B+1)$ (min-entropy of $w$) & $27\,646.98$ bits\\
+$(1-p_{\mathrm{acc}})^{512}$; $(1-p_{\mathrm{acc}}^2)^{4096}$ & $2^{-137.5}$; $2^{-173.0}$\\
+$\eta=nN\log_2(2B+1)$ (min-entropy of $w$) & $32\,254.81$ bits\\
 $\beta=8\kappa B$ (M-SIS bound) & $62\,885\,280\approx2^{25.91}$\\
 $2\kappa+2B$ (one honest, one relaxed opening) & $262\,142\approx2^{18.0}$\\
 $\sqrt{q/2}$ (invertibility threshold) & $23\,170.5$\\
-$3^{kN}q^{-(n+1)N}$ & $\approx2^{-48\,079}$\\
+$3^{kN}q^{-(n+1)N}$ & $\approx2^{-55\,354}$\\
 Statement $x$ & 274 bytes\\
-Envelope, in-band / registered & 14\,885 / 8\,165 bytes\\
+Commitment / opening proof & 7\,680 / 8\,672 bytes\\
+Envelope, in-band / registered & 16\,421 / 8\,741 bytes\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -107,9 +108,12 @@ $\Adv^{\MSIS}$ là lợi thế của việc tìm $x\in\mathcal R^k$ với
 $B_1x\equiv0\pmod q$, $0<\norm{x}_\infty\le\beta=8\kappa B$, cho $B_1'$ đều.
 $\Adv^{\MLWE}$ là lợi thế của việc phân biệt $(A,As+e)$ với đều, cho
 $A\in\Rq^{(n+1)\times\lambda}$ đều và $s\in S_1^\lambda$, $e\in S_1^{n+1}$.
-Đây là hai thể hiện được ước lượng ở 140/127 và 164/150 bit (core-SVP cổ
-điển/lượng tử, Bảng~\ref{tab:params}); ước lượng M-SIS lượng tử chỉ vừa dưới
-128 bit. Mọi nghiệm M-SIS trong mục này đều có chuẩn tối đa $\beta$, nên không
+Đây là hai thể hiện được ước lượng ở 172/156 và 164/150 bit (core-SVP cổ
+điển/lượng tử; M-SIS $\beta=589$, M-LWE lai đối ngẫu $\beta=564/567$, primal
+169/153; \texttt{research/bdlop\_params/CROSSCHECK.md}, mục
+\texttt{bdlop-open-128-v3}); cả hai đều trên 128 bit lượng tử. (Với bộ cũ
+\texttt{bdlop-open-128-v2}, $n=6$, M-SIS là 140/127 bit, chỉ vừa dưới 128 bit
+lượng tử.) Mọi nghiệm M-SIS trong mục này đều có chuẩn tối đa $\beta$, nên không
 cần thêm giả thiết lưới nào nữa.
 $\Adv^{\mathsf{cr}}_{\mathsf{SHA2}}$ và $\Adv^{\mathsf{cr}}_{\mathsf{SHA3}}$ là
 các lợi thế tìm va chạm đối với SHA-256 và SHA3-256, và
@@ -121,7 +125,17 @@ Chúng tôi mô hình hóa như các oracle ngẫu nhiên độc lập các th�
 được dùng cho hạt giống thách thức Fiat--Shamir $\Hfs$ (và $H_{\mathsf{eq}}$ cho
 chứng minh đẳng thức), phép mở rộng thách thức $G:\{0,1\}^{256}\to\Cset$
 (\textsf{SampleInBall}), luồng mặt nạ, phép mở rộng khóa, và hàm băm phòng hộ
-(hedging) SHA3-256. Các thẻ miền của chúng là không-tiền-tố đôi một
+(hedging) SHA3-256. Với chứng minh nhị phân và chứng minh khoảng tải trọng
+(Mục~\ref{sec:binary-proof}) còn có bốn oracle hạt giống $H_1,\dots,H_4$ (thẻ
+\texttt{lift-challenge}, \texttt{check-challenge}, \texttt{combine-challenge},
+\texttt{fiat-shamir} dưới tiền tố \texttt{bdlop-binary/v1/} hoặc
+\texttt{bdlop-payload-range/v1/}) và phép mở rộng thách thức
+$\mathsf{Expand}$, từ một hạt giống 256 bit tới một dãy phần tử đều của
+$\mathbb Z_q$ (thẻ \texttt{expand} dưới cùng
+các tiền tố, chung cho ba vòng $\gamma$, $(\rho,\mu,\rho^L)$, $\alpha$), cùng
+các luồng nhân chứng phụ trợ và mặt nạ của chúng; thách thức cuối của các chứng
+minh đó cũng là $c=G(s_4)$. $\mathsf{Expand}$, như $G$, đều chính xác trên một
+đầu vào mới (lấy mẫu loại bỏ chính xác trên $\mathbb Z_q$). Các thẻ miền của chúng là không-tiền-tố đôi một
 (Phụ lục~\ref{app:code-check}), nên một oracle SHAKE-256 tách thành các oracle
 độc lập. $G$ đều chính xác trên $\Cset$ với một đầu vào mới: các dấu và các chỉ
 số Fisher--Yates được rút bằng lấy mẫu loại bỏ chính xác. Phép mở rộng khóa

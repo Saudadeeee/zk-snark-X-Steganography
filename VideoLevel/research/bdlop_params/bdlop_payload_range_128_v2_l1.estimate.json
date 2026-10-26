@@ -1,0 +1,25 @@
+{
+  "parameter_set": "bdlop-payload-range-128-v2/aux/l=1",
+  "parameter_id": "be31fc9fa76f52ea1434dce2b7929da343693e5611fab03f7934bc957230cdb6",
+  "estimator": "pq-crystals/security-estimates@75c26949a902ca297b181375bfb7cfaf22cce784",
+  "sizes_bytes": {
+    "commitment": 17280,
+    "proof": 46670
+  },
+  "challenge_space_bits": 257.0,
+  "acceptance_probability": 0.008,
+  "msis_binding": {
+    "norm": "linf",
+    "bound_log2": 25.91,
+    "block_size": 589,
+    "classical_bits": 172,
+    "quantum_bits": 156
+  },
+  "mlwe_hiding": {
+    "primal_block_size": 580,
+    "primal_classical_bits": 169,
+    "primal_quantum_bits": 153,
+    "dual_block_size": 578,
+    "dual_classical_bits": 169
+  }
+}

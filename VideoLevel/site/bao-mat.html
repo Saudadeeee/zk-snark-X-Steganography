@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>An toàn & chống tấn công · ZK-Video</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Lora:ital,wght@0,500;0,600;1,500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a><button class="menu-btn" data-menu-btn aria-label="Menu">☰</button></div>
+<div class="shell">
+<aside class="sidebar">
+  <a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a>
+  <p class="tagline">Bằng chứng không tiết lộ, giấu trong video — giải thích cho mọi người</p>
+  <div class="nav-group">Bắt đầu</div>
+  <nav><a href="index.html">Tổng quan</a><a href="khai-niem.html">Khái niệm nền (từ số 0)</a></nav>
+  <div class="nav-group">Hệ thống hoạt động</div>
+  <nav><a href="kien-truc.html">Kiến trúc & luồng</a><a href="thanh-phan.html">Các thành phần</a><a href="che-do-vi-du.html">Chế độ & ví dụ thật</a></nav>
+  <div class="nav-group">Bảo mật & kết quả</div>
+  <nav><a href="bao-mat.html">An toàn & chống tấn công</a><a href="ket-qua.html">Kết quả & hạn chế</a></nav>
+  <div class="nav-group">Tra cứu</div>
+  <nav><a href="thuat-ngu.html">Thuật ngữ</a></nav>
+  <div class="tools"><button class="tbtn" data-theme-btn>☾ Tối</button></div>
+</aside>
+<main class="content"><div class="content-inner">
+
+  <p class="crumbs">Bảo mật & kết quả › An toàn & chống tấn công</p>
+  <h1>Vì sao khó phá, và chặn tấn công thế nào</h1>
+  <p class="lead">Phần này nói rõ: hệ bảo vệ điều gì (và không bảo vệ điều gì), vì sao kẻ xấu không giả được, và ba kiểu tấn công thường gặp bị chặn ra sao — bằng ngôn ngữ dễ hiểu, kèm chi tiết cho ai muốn sâu.</p>
+
+  <h2>Hệ bảo đảm gì</h2>
+  <div class="grid g2">
+    <div class="callout good"><div class="h">Có bảo đảm</div><ul style="margin:.3em 0 0">
+      <li><b>Toàn vẹn:</b> sửa vùng được bảo vệ là bị phát hiện.</li>
+      <li><b>Không giả được bằng chứng:</b> không biết bí mật thì không tạo được con dấu hợp lệ.</li>
+      <li><b>Không tiết lộ:</b> kiểm tra xong vẫn không biết bí mật.</li>
+      <li><b>Chống phát lại:</b> thử thách phiên dùng một lần (tương tác), hoặc tín hiệu epoch do issuer ký + sổ theo từng người kiểm tra (offline).</li>
+      <li><b>Hậu lượng tử:</b> dựa trên bài toán lattice.</li>
+    </ul></div>
+    <div class="callout warn"><div class="h">Không bảo đảm (trung thực)</div><ul style="margin:.3em 0 0">
+      <li><b>Không sống qua nén lại:</b> đăng lên mạng xã hội (bị transcode) là con dấu mất.</li>
+      <li><b>Không nói ai quay thật:</b> chỉ nói “người có bí mật đã tạo”, không phải “camera X quay cảnh thật”.</li>
+      <li><b>Không giấu được trước mọi bộ dò:</b> bộ dò học máy mạnh vẫn có thể nghi ngờ.</li>
+    </ul></div>
+  </div>
+
+  <h2>Vì sao kẻ xấu không giả được</h2>
+  <p>Toàn bộ sức mạnh nằm ở hai bài toán lattice mà không ai (kể cả máy lượng tử) biết cách giải nhanh:</p>
+  <div class="grid g2">
+    <div class="card"><h3 style="margin-top:0">M-SIS → “không tráo được”</h3><p style="margin-bottom:0">Đảm bảo không thể tìm một bí mật ngắn <i>khác</i> cho cùng một niêm phong. Đây là nền của tính <b>binding</b> và chống giả bằng chứng.</p></div>
+    <div class="card"><h3 style="margin-top:0">M-LWE → “không nhìn ra bí mật”</h3><p style="margin-bottom:0">Đảm bảo nhìn vào niêm phong và bằng chứng không suy ra được bí mật. Đây là nền của tính <b>hiding</b> và zero-knowledge.</p></div>
+  </div>
+  <div class="analogy"><div class="h">Ví von</div><p style="margin:0">Như một ổ khoá mà ai cũng <i>kiểm tra</i> được là đã khoá đúng, nhưng không ai <i>mở</i> hay <i>làm chìa giả</i> được — kể cả với siêu máy tính.</p></div>
+
+  <h2>Tham số & mức an toàn (bộ v2)</h2>
+  <div class="scroll-x"><table>
+    <tr><th>Ký hiệu</th><th class="mono">Giá trị</th><th>Nghĩa</th></tr>
+    <tr><td class="mono">N</td><td class="mono">256</td><td>số chiều của vành (càng nhiều càng khó)</td></tr>
+    <tr><td class="mono">q</td><td class="mono">2³⁰−35</td><td>modulo</td></tr>
+    <tr><td class="mono">n</td><td class="mono">7</td><td>hạng M-SIS (binding)</td></tr>
+    <tr><td class="mono">λ</td><td class="mono">7</td><td>hạng M-LWE (hiding)</td></tr>
+    <tr><td class="mono">κ</td><td class="mono">60</td><td>trọng số thử thách</td></tr>
+  </table></div>
+  <div class="grid g2">
+    <div class="stat"><div class="big tnum">172 / 156</div><div class="lab">binding — bit an toàn (cổ điển / lượng tử)</div></div>
+    <div class="stat"><div class="big tnum">164 / 150</div><div class="lab">hiding — bit an toàn (cổ điển / lượng tử)</div></div>
+  </div>
+  <div class="callout good"><div class="h">Đã vượt mốc 128 bit lượng tử</div><p style="margin:0">Bộ v2 trước đây có binding lượng tử <b>127</b> bit — thiếu đúng 1 bit so với mốc 128. Bộ sản xuất hiện tại <code>bdlop-open-128-v3</code> nâng hạng M-SIS từ 6 lên 7: binding <b>172 / 156</b> bit (cổ điển / lượng tử), đối chiếu độc lập bằng lattice-estimator (172,0 / 156,1). Giá phải trả: phong bì lớn hơn ~7 % (8.741 B thay vì 8.165 B).</p></div>
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">core-SVP, dual-hybrid, cross-check</span></summary><div>
+    <p>Ước lượng bằng mô hình core-SVP (CRYSTALS scripts) và đối chiếu độc lập bằng <b>lattice-estimator</b>. Hiding lấy con số thấp hơn của tấn công dual-hybrid (164/150). Cận binding dùng chuẩn ℓ∞ (<code>8κB</code>); cận ℓ2 vượt <code>q</code> nên không ràng buộc. Soundness là loại “relaxed”, và phần ghép Fiat–Shamir nhiều vòng còn chỗ hở — <b>cần một chuyên gia lattice ngoài nhóm đọc lại</b> (gói tài liệu ở <code>docs/review/</code>).</p>
+  </div></details>
+
+  <h2>Ba kiểu tấn công & cách chặn</h2>
+  <div class="steps">
+    <div class="step"><span class="n"></span><div><h4>Sửa nội dung khung hình</h4><p style="margin:0">Digest video đổi → “đề bài” đổi → thử thách tính lại khác → bằng chứng không khớp → <b style="color:var(--bad)">TỪ CHỐI</b>.</p></div></div>
+    <div class="step"><span class="n"></span><div><h4>Lật bit của con dấu</h4><p style="margin:0">Byte phong bì hỏng → phản hồi <code>z</code> sai → phép verify thất bại → <b style="color:var(--bad)">TỪ CHỐI</b>.</p></div></div>
+    <div class="step"><span class="n"></span><div><h4>Phát lại video hợp lệ cũ (replay)</h4><p style="margin:0">Phiên tương tác: thử thách đã bị tiêu thụ → chặn trước cả khi xét toán. Chế độ offline: cùng statement đã có trong sổ của người kiểm tra, hoặc tín hiệu epoch đã hết hạn → <b style="color:var(--bad)">TỪ CHỐI</b>.</p></div></div>
+  </div>
+
+  <div class="next"><a href="che-do-vi-du.html">← Chế độ & ví dụ</a><a href="ket-qua.html">Tiếp: Kết quả & hạn chế →</a></div>
+
+</div></main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

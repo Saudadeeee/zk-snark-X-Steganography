@@ -118,17 +118,21 @@ def _decoded_quality(cover: Path, stego: Path) -> dict[str, float | None]:
     }
 
 
-def _link_to_credential(params, embedded, verified, allow_toy: bool = False) -> dict[str, Any] | None:
+def _link_to_credential(
+    params, embedded, verified, allow_toy: bool = False, *, attachment=None,
+) -> dict[str, Any] | None:
     """Link the commitment extracted from the video to a credential commitment.
 
     Only meaningful for in-band envelopes: shows, from the bytes the verifier
-    extracted, that the hidden payload equals a separately committed record.
+    extracted, that the hidden payload equals a separately committed record
+    (the committed payload, padded when a range attachment is pinned).
     """
     if embedded.opening is None or verified.envelope is None:
         return None
+    committed = embedded.opening.payload
     randomness = bdlop.sample_randomness(params)
-    credential = bdlop.commit(params, codec.encode_payload(params, DEMO_PAYLOAD), randomness)
-    in_video = linkage.envelope_commitment(params, verified.envelope)
+    credential = bdlop.commit(params, codec.encode_payload(params, committed), randomness)
+    in_video = linkage.envelope_commitment(params, verified.envelope, attachment)
     context = (verified.statement_id, credential.to_bytes(params))
     started = time.perf_counter()
     proof = linkage.prove_linkage(
@@ -136,14 +140,15 @@ def _link_to_credential(params, embedded, verified, allow_toy: bool = False) -> 
     )
     prove_s = time.perf_counter() - started
     stranger = bdlop.commit(
-        params, codec.encode_payload(params, DEMO_PAYLOAD), bdlop.sample_randomness(params)
+        params, codec.encode_payload(params, committed), bdlop.sample_randomness(params)
     )
     # Zero-knowledge disclosure: the payload plus an equality proof bound to a
     # recipient nonce; the opening randomness is never handed over.
     nonce = os.urandom(video_proof.DISCLOSURE_NONCE_BYTES)
     started = time.perf_counter()
     disclosure = video_proof.create_disclosure(
-        params, verified.envelope, embedded.opening, statement_id=verified.statement_id, nonce=nonce
+        params, verified.envelope, embedded.opening, statement_id=verified.statement_id, nonce=nonce,
+        attachment=attachment,
     )
     disclose_s = time.perf_counter() - started
     return {
@@ -159,7 +164,7 @@ def _link_to_credential(params, embedded, verified, allow_toy: bool = False) -> 
         "disclose_s": round(disclose_s, 3),
         "disclosure_verifies": video_proof.verify_disclosure_proof(
             params, verified.envelope, disclosure, statement_id=verified.statement_id, nonce=nonce,
-            allow_toy_parameters=allow_toy,
+            allow_toy_parameters=allow_toy, attachment=attachment,
         ),
     }
 
@@ -338,8 +343,16 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
         CARRIER_CONTRACTS[arguments.carrier], frames_per_segment=arguments.frames_per_segment,
         chunk_bytes=arguments.chunk_bytes, registered=arguments.registered,
         gop_policy=arguments.gop_policy, codec_policy=CODEC_POLICIES[arguments.codec_policy],
-        chunk_plan=_chunk_plan(arguments),
+        chunk_plan=_chunk_plan(arguments), payload_range_length=arguments.payload_range_bytes,
     )
+    payload = None
+    if not arguments.registered:
+        payload = DEMO_PAYLOAD
+        if arguments.payload_range_bytes is not None:
+            # The demo payload is padded to the pinned length class (one byte for the marker).
+            payload = video_proof.pad_payload(
+                DEMO_PAYLOAD[: arguments.payload_range_bytes - 1], arguments.payload_range_bytes
+            )
     credential = None
     if arguments.registered:
         randomness = bdlop.sample_randomness(params)
@@ -364,7 +377,7 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
 
         started = time.perf_counter()
         embedded = pipeline.embed_video_proof(
-            cover, output, None if arguments.registered else DEMO_PAYLOAD,
+            cover, output, payload,
             params=params, pins=pins, profile=profile, credential=credential,
             session_challenge=grant.challenge, sync_key=sync_key, progress_callback=_log_progress,
         )
@@ -379,7 +392,8 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
         timings["verify_s"] = time.perf_counter() - started
         logger.info("verified=%s", verified.valid)
         linkage_report = _link_to_credential(
-            params, embedded, verified, allow_toy=arguments.parameter_set == "TOY"
+            params, embedded, verified, allow_toy=arguments.parameter_set == "TOY",
+            attachment=profile.attachment(params),
         )
         logger.info("credential_linkage %s", json.dumps(linkage_report, sort_keys=True))
         replay_rejected = tamper_rejected = None
@@ -418,7 +432,10 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
         "envelope_bytes": embedded.envelope_bytes,
         "commitment_bytes_in_video": 0 if arguments.registered else params.commitment_bytes,
         "proof_bytes": params.proof_bytes,
-        "expected_envelope_bytes": video_proof.envelope_size(params, registered=arguments.registered),
+        "expected_envelope_bytes": video_proof.envelope_size(
+            params, registered=arguments.registered, attachment=profile.attachment(params)
+        ),
+        "payload_range_bytes": arguments.payload_range_bytes,
         "carriers_used": embedded.carriers_used,
         "segments_used": embedded.segments_used,
         "frames_per_segment": profile.frames_per_segment,
@@ -437,7 +454,7 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
         "p_slice_tamper_reason": None if p_slice_tamper is None else p_slice_tamper[1],
         "trailing_rbsp_zero_tamper": trailing_rbsp_tamper,
         "slice_nal_comparison": _slice_nal_comparison(cover, output),
-        "payload_absent_from_output": DEMO_PAYLOAD not in output.read_bytes(),
+        "payload_absent_from_output": (DEMO_PAYLOAD if payload is None else payload) not in output.read_bytes(),
         "decoded_quality": _decoded_quality(cover, output),
         "frame_quality": frame_quality(cover, output),
         "credential_linkage": linkage_report,
@@ -497,9 +514,14 @@ def main() -> int:
     parser.add_argument("--max-chunk-bytes", type=int, default=defaults.max_chunk_bytes,
                         help="adaptive plan: largest chunk per segment")
     parser.add_argument(
-        "--codec-policy", choices=sorted(CODEC_POLICIES), default="v1",
-        help="v1: original canonical digest (default, unchanged identifiers); v2: full RBSP of "
-        "carrier NAL units, tagged raw segments, pinned access-unit segmentation (D5)",
+        "--codec-policy", choices=sorted(CODEC_POLICIES), default="v2",
+        help="v2 (default): full RBSP of carrier NAL units, tagged raw segments, pinned "
+        "access-unit segmentation (D5); v1: the original canonical digest and its identifiers",
+    )
+    parser.add_argument(
+        "--payload-range-bytes", type=int,
+        help="in-band only: pin this payload length and attach a payload range proof to the "
+        "envelope (the demo payload is padded to it)",
     )
     parser.add_argument(
         "--trailing-rbsp-check", action="store_true",

@@ -229,8 +229,12 @@ bốn vòng (four-round) được biến thành non-interactive bằng các seed
 một payload commitment đang tồn tại che giấu (hides) `encode_payload(p)` cho
 một độ dài công khai `L ≤ 128`.
 
-- Định lý `thm:bin-ks` chặn một cheating prover bởi
-  `(Q+1)·ε_rbr + Σ_i sqrt((Q+1)·α_i) + β + Q²·2^-256`: extractor Σ-protocol
+- Định lý `thm:bin-ks` (knowledge soundness) cho extractor xác suất thành công ít
+  nhất `ε − (Q+1)·ε_rbr − Σ_i sqrt((Q+1)·α_i) − β − δ_coll`, với
+  `δ_coll = 13·(Q+4)²·2^-256` (thứ tự seed, seed không mới đối với `Expand`/`G`,
+  và việc `s3` xác định tiền tố trên mọi lần chạy tua lại); soundness có nghĩa đi
+  qua binding (Hệ quả `cor:bin-sound`), vì hầu như mọi `C` có relaxed opening tới
+  mọi message: extractor Σ-protocol
   của AFK22 chỉ fork challenge oracle, và mỗi vòng thống kê (statistical round)
   (lift, check, combine) được chặn so với các message bị ràng buộc về mặt tính
   toán (computationally bound) bằng một lập luận đa số (plurality) cộng với một
@@ -241,9 +245,18 @@ một độ dài công khai `L ≤ 128`.
   *trước* lift challenge, với các lift được thêm vào sau dưới cùng randomness
   `r'`. Cả hai bước có sound không (một error vector, một functional đều; các
   hàng (row) BDLOP tăng dần (incremental) dưới một `r'`)?
-- Quan điểm của chúng tôi: đúng như đã phác thảo; sai số mỗi vòng `2^-149.99`
-  (`k = k' = 5`); các số hạng M-SIS là non-tight giống như với opening proof
-  (Q4).
+- Range proof được mang in-band, nên đối thủ của trò chơi SE thấy các range proof
+  trung thực. Định lý `thm:pay-se` (simulation-extractability) thay chúng bằng bộ
+  mô phỏng (`Q_P·Adv^MLWE_aux + ε_zk`), biến một điểm `H_4` đã lập trình bị dùng
+  lại thành một nghiệm M-SIS chuẩn `≤ 2B` cho `B1` hoặc `B1'`, và áp dụng
+  `thm:bin-ks` với `Q' = Q + 7Q_P`, đếm cả các truy vấn `H_1..H_3` của bộ mô
+  phỏng trong lập luận plurality. Phác thảo đó có đúng không, đặc biệt khi tiền tố
+  `(x, C, D, h)` của proof giả mạo là của một proof trung thực (với `D` đều sau
+  bước lai M-LWE)?
+- Quan điểm của chúng tôi: đúng như đã phác thảo; sai số theo vòng là tổng
+  `ε_rbr ≈ 2^-149.0` (số hạng lớn nhất `2^-149.99`, `k = k' = 5`); các số hạng
+  M-SIS là non-tight giống như với opening proof (Q4). Đánh giá nội bộ:
+  `docs/review/INTERNAL_REVIEW_SOUNDNESS.md`.
 - Mã: `payload_range_proof.py` (`_prove`, `_recomputed_seed`,
   `_check_challenges`), `binary_proof.py`.
 

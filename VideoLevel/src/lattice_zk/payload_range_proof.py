@@ -43,6 +43,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import math
+import numbers
 import struct
 from dataclasses import dataclass
 from functools import cached_property, lru_cache
@@ -57,7 +58,7 @@ from .opening_proof import (
     HEDGE_PAYLOAD_RANGE, ProofResult, hedged_mask_key, prover_entropy, require_commitment,
 )
 from .params import (
-    BDLOP_OPEN_128, CHALLENGE_SEED_BYTES, MAX_NAME_BYTES, PAYLOAD_LENGTH_BYTES, TOY, BdlopParams,
+    BDLOP_OPEN_128_V2, BDLOP_OPEN_128_V3, CHALLENGE_SEED_BYTES, MAX_NAME_BYTES, PAYLOAD_LENGTH_BYTES, TOY, BdlopParams,
 )
 
 _DOMAIN = b"zkstego/lattice-zk/bdlop-payload-range/v1/"
@@ -73,9 +74,10 @@ _MASK_DOMAIN = _DOMAIN + b"mask\0"
 MAX_REPETITIONS = 64
 MAX_BINARY_POLYS = 16
 MIN_SOUNDNESS_BITS = 128
-# Acceptance per attempt is about 0.0100 for l = 1 and 0.0012 for l = 4 (the
-# production maximum); 2^17 attempts all abort with probability below 2^-225.
-# The cap leaks nothing: acceptance does not depend on the witness.
+# Acceptance per attempt of the production set (bdlop-payload-range-128-v2) is
+# about 0.0079 for l = 1 and 0.00094 for l = 4 (the production maximum); 2^17
+# attempts all abort with probability below 2^-177.  The cap leaks nothing:
+# acceptance does not depend on the witness.
 MAX_ATTEMPTS = 1 << 17
 
 LiftOverride = Callable[[np.ndarray, np.ndarray], np.ndarray]
@@ -171,7 +173,11 @@ class PayloadRangeParams:
         return min(self.max_binary_polys * self.degree // 8, self.base.max_payload_bytes)
 
     def layout(self, length: int) -> Layout:
-        if not isinstance(length, int) or isinstance(length, bool) or not 0 <= length <= self.max_payload_bytes:
+        # Any integral type (e.g. a numpy integer) names a length; bools do not.
+        if isinstance(length, bool) or not isinstance(length, numbers.Integral):
+            raise ValueError("payload length must be an integer")
+        length = int(length)
+        if not 0 <= length <= self.max_payload_bytes:
             raise ValueError(f"payload length must be an integer in [0, {self.max_payload_bytes}]")
         polys = max(1, -(-8 * length // self.degree))
         return Layout(length, polys, self.lift_repetitions * polys, self.check_repetitions,
@@ -214,7 +220,8 @@ class PayloadRangeParams:
 
     @property
     def soundness_bits(self) -> float:
-        return -max(self.round_soundness_log2.values())
+        """-log2 of the per-round soundness error, summed over the four rounds."""
+        return -math.log2(sum(2.0 ** value for value in self.round_soundness_log2.values()))
 
     @cached_property
     def parameter_id(self) -> bytes:
@@ -236,14 +243,27 @@ def _setup_seed(label: str) -> bytes:
     return hashlib.sha3_256(_PARAMETER_DOMAIN + b"setup-seed\0" + label.encode("ascii")).digest()
 
 
-PAYLOAD_RANGE_128 = PayloadRangeParams(
+# Over bdlop-open-128-v2; kept so earlier proofs and estimates stay reproducible.
+PAYLOAD_RANGE_128_V1 = PayloadRangeParams(
     name="bdlop-payload-range-128-v1",
-    base=BDLOP_OPEN_128,
+    base=BDLOP_OPEN_128_V2,
     lift_repetitions=5,
     check_repetitions=5,
     max_binary_polys=4,
     setup_seed=_setup_seed("bdlop-payload-range-128-v1"),
 )
+
+# Current production set, over bdlop-open-128-v3.
+PAYLOAD_RANGE_128_V2 = PayloadRangeParams(
+    name="bdlop-payload-range-128-v2",
+    base=BDLOP_OPEN_128_V3,
+    lift_repetitions=5,
+    check_repetitions=5,
+    max_binary_polys=4,
+    setup_seed=_setup_seed("bdlop-payload-range-128-v2"),
+)
+
+PAYLOAD_RANGE_128 = PAYLOAD_RANGE_128_V2
 
 # Fast, insecure set for unit tests only.
 PAYLOAD_RANGE_TOY = PayloadRangeParams(
@@ -728,6 +748,8 @@ def verify(
 __all__ = [
     "MAX_ATTEMPTS",
     "PAYLOAD_RANGE_128",
+    "PAYLOAD_RANGE_128_V1",
+    "PAYLOAD_RANGE_128_V2",
     "PAYLOAD_RANGE_TOY",
     "AuxKey",
     "Layout",

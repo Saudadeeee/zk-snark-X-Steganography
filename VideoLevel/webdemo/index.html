@@ -1,0 +1,138 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>ZK-Video Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Lora:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="css/styles.css">
+
+<header class="bar">
+  <div class="wrap">
+    <span class="brand">ZK-Video <b>Studio</b></span>
+    <span class="note" style="white-space:nowrap">chạy thật trong trình duyệt</span>
+    <span class="sp"></span>
+    <label class="note" for="paramSel">Bộ tham số:</label>
+    <select id="paramSel" class="sel"></select>
+    <button class="theme-btn" id="themeBtn" title="Sáng/tối" aria-label="Sáng/tối">◐</button>
+  </div>
+</header>
+
+<div class="intro"><div class="wrap">
+  <p>Đây là hệ thống chạy thật: phân tích khung hình → tạo <b>commitment</b> và <b>chứng minh zero-knowledge trên lattice</b> (Fiat–Shamir có abort, verify thật) → nhúng vào carrier → kiểm tra mù từ video và thử tấn công. Toán lattice chạy đúng; phần biến đổi khung dùng DCT 8×8 thay cho biến đổi nội khung H.264 (cùng vai trò). Chọn bộ <b>Sản xuất (N=256)</b> để chạy đúng tham số thật của hệ thống.</p>
+  <div class="runall">
+    <button class="btn" id="runAll">▶ Chạy toàn bộ (bước 1→4)</button>
+    <span class="note" id="runAllNote"></span>
+  </div>
+</div></div>
+
+<main class="wrap"><div class="stages">
+
+  <!-- STAGE 1 -->
+  <section class="stage" id="st1">
+    <div class="head"><span class="idx">1</span><div class="htxt"><h2>Phân tích video → hệ số & carrier</h2><p>Chọn khung hình thật (trích từ video của hệ thống) hoặc khung tổng hợp; DCT 8×8 + lượng tử hoá; tìm vị trí carrier.</p></div></div>
+    <div class="body">
+      <div class="ctl">
+        <span class="seg" id="srcSel">
+          <button data-src="container" class="on">container</button>
+          <button data-src="akiyo">akiyo</button>
+          <button data-src="foreman">foreman</button>
+          <button data-src="synth">tổng hợp</button>
+        </span>
+        <label class="note" for="qpRange">lượng tử (QP):</label>
+        <input type="range" id="qpRange" min="6" max="40" value="16" style="width:140px">
+        <span class="mono" id="qpVal">16</span>
+        <button class="btn" id="s1run">Phân tích</button>
+      </div>
+      <div class="row c2">
+        <div class="canv-wrap">
+          <figure><canvas class="view" id="coverCanvas" width="256" height="256"></canvas><figcaption>khung hình (cover)</figcaption></figure>
+          <figure><canvas class="view" id="heatCanvas" width="256" height="256"></canvas><figcaption>mật độ carrier theo khối</figcaption></figure>
+        </div>
+        <div class="row c3" id="s1stats"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STAGE 2 -->
+  <section class="stage locked" id="st2">
+    <div class="head"><span class="idx">2</span><div class="htxt"><h2>Khoá công khai, bí mật & commitment</h2><p>Sinh khoá BDLOP, lấy randomness ngắn r, tạo cam kết t₁ = B₁·r (và t₂ cho payload ẩn).</p></div></div>
+    <div class="body">
+      <div class="ctl">
+        <span class="seg" id="modeSel">
+          <button data-mode="registered" class="on">registered (chứng minh credential)</button>
+          <button data-mode="in-band">in-band (cam kết payload)</button>
+        </span>
+        <button class="btn" id="s2run" disabled>Tạo khoá & commitment</button>
+      </div>
+      <div id="payloadWrap" style="display:none;margin-bottom:12px">
+        <label class="fld" for="payloadIn">Payload ẩn (sẽ được cam kết, không lộ khi kiểm tra):</label>
+        <input type="text" id="payloadIn" value="nguoi-ky: camera#42 · 2026-10-22" autocomplete="off">
+      </div>
+      <div class="row c2"><div class="kv" id="s2kv"></div><div class="hex" id="s2hex">—</div></div>
+    </div>
+  </section>
+
+  <!-- STAGE 3 -->
+  <section class="stage locked" id="st3">
+    <div class="head"><span class="idx">3</span><div class="htxt"><h2>Chứng minh zero-knowledge</h2><p>Dựng statement ràng buộc video + phiên, rồi chạy Fiat–Shamir có abort (rejection sampling thật). Mỗi ô là một lần thử.</p></div></div>
+    <div class="body">
+      <div class="ctl"><button class="btn" id="s3run" disabled>Chạy chứng minh</button><span class="note" id="s3status"></span></div>
+      <div class="attempts" id="s3attempts"></div>
+      <div class="row c2" style="margin-top:12px"><div class="kv" id="s3kv"></div>
+        <div><div class="note" style="margin-bottom:4px">proof (serialize, xem trước):</div><div class="hex" id="proofHex">—</div></div></div>
+    </div>
+  </section>
+
+  <!-- STAGE 4 -->
+  <section class="stage locked" id="st4">
+    <div class="head"><span class="idx">4</span><div class="htxt"><h2>Nhúng vào video → stego</h2><p>Ghi proof vào bit cuối của carrier; dựng lại ảnh; đo PSNR/SSIM. Nếu một khung không đủ, rải qua nhiều khung (như các đoạn 100 khung của hệ thật).</p></div></div>
+    <div class="body">
+      <div class="ctl"><button class="btn" id="s4run" disabled>Nhúng</button></div>
+      <div class="row c2">
+        <div class="canv-wrap">
+          <figure><canvas class="view" id="stegoCanvas" width="256" height="256"></canvas><figcaption>video stego</figcaption></figure>
+          <figure><canvas class="view" id="diffCanvas" width="256" height="256"></canvas><figcaption>sai khác (khuếch đại ×12)</figcaption></figure>
+        </div>
+        <div class="row c3" id="s4stats"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STAGE 5 -->
+  <section class="stage locked" id="st5">
+    <div class="head"><span class="idx">5</span><div class="htxt"><h2>Kiểm tra mù & tấn công</h2><p>Người kiểm tra chỉ có video stego: tự tính lại carrier, rút proof, dựng lại statement, verify. Thử sửa/phát lại để thấy bị từ chối.</p></div></div>
+    <div class="body">
+      <div class="ctl">
+        <button class="btn" id="vHonest" disabled>Kiểm tra (trung thực)</button>
+        <button class="btn ghost warn" id="vTamperPic" disabled>Sửa nội dung khung</button>
+        <button class="btn ghost warn" id="vTamperCar" disabled>Lật 1 bit carrier</button>
+        <button class="btn ghost warn" id="vReplay" disabled>Phát lại phiên</button>
+      </div>
+      <div class="verdict" id="verdict"><span class="ic">•</span><span>Chưa kiểm tra.</span></div>
+      <div class="kv" id="vkv"></div>
+    </div>
+  </section>
+
+  <section class="stage" id="stlog">
+    <div class="head"><span class="idx">≡</span><div class="htxt"><h2>Nhật ký</h2><p>Mọi bước, số liệu và thời gian chạy thật.</p></div></div>
+    <div class="body"><div class="log" id="log"></div></div>
+  </section>
+
+</div></main>
+
+<div class="wrap"><p class="foot">ZK-Video Studio — bản dựng lại trung thực trong trình duyệt của hệ thống steganography H.264 + chứng minh zero-knowledge trên lattice (BDLOP). Vành lattice, commitment, Fiat–Shamir-with-aborts và verify chạy đúng thuật toán, có thể chọn đúng bộ tham số sản xuất <span class="mono">bdlop-open-128-v2</span>. Biến đổi khung dùng DCT 8×8 thay cho biến đổi nội khung H.264 thật. Khung hình trích từ các video <span class="mono">container/akiyo/foreman</span> mà hệ thống dùng. Nên mở qua http(s), không mở bằng file://.</p></div>
+
+<script src="js/sha256.js"></script>
+<script src="js/rng.js"></script>
+<script src="js/ring.js"></script>
+<script src="js/params.js"></script>
+<script src="js/bdlop.js"></script>
+<script src="js/opening_proof.js"></script>
+<script src="js/dct.js"></script>
+<script src="js/carriers.js"></script>
+<script src="js/statement.js"></script>
+<script src="js/embed.js"></script>
+<script src="js/metrics.js"></script>
+<script src="js/pipeline.js"></script>
+<script src="js/ui.js"></script>

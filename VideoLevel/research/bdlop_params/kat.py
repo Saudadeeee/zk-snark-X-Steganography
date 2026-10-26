@@ -9,10 +9,12 @@ key, so ``kat_v1.json`` is unchanged.  Every other set uses the tagged
 derivation of ``opening_proof.hedged_mask_key``; ``kat_v2.json`` was
 regenerated deliberately for it (commitments and keys are unchanged, proof
 digests and attempt counts changed).  Verification never recomputes a mask,
-so proofs made with either derivation verify.
+so proofs made with either derivation verify.  ``kat_v3.json`` pins
+``bdlop-open-128-v3`` (tagged derivation).
 
     python research/bdlop_params/kat.py --parameter-set BDLOP_OPEN_128_V1 --output research/bdlop_params/kat_v1.json
     python research/bdlop_params/kat.py --parameter-set BDLOP_OPEN_128_V2 --output research/bdlop_params/kat_v2.json
+    python research/bdlop_params/kat.py --parameter-set BDLOP_OPEN_128_V3 --output research/bdlop_params/kat_v3.json
 """
 
 from __future__ import annotations

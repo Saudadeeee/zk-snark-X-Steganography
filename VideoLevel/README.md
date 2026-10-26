@@ -1,82 +1,101 @@
-# Post-Quantum Lattice-Attested Video Steganography
+# Post-Quantum Lattice Zero-Knowledge Video Steganography
 
-Hide a fixed commitment to an ML-DSA-65 authenticated lattice sidecar inside H.264 Baseline/CAVLC video by modifying coefficients directly. The signature remains in a sidecar; neither uses SEI.
+Embed a **lattice zero-knowledge proof** directly inside an H.264 video and
+verify it **from the stego video alone** — no sidecar, no SEI box, no access to
+the cover. The proof is a BDLOP commitment with a Fiat–Shamir-with-aborts proof
+of knowledge of its opening, bound to the carrier-normalized stream, a one-use
+verifier session challenge and an ML-DSA-65-signed relation registry. It is
+post-quantum (lattice M-SIS/M-LWE) and self-implemented from the published
+protocol (Baum et al., SCN 2018); **unaudited**, a research prototype.
 
-**Status:** Research prototype. The supported path is direct H.264 Baseline/CAVLC embedding with a signed lattice-attestation sidecar-assisted near-blind verification. The experimental in-tree lattice-ZKP prototype is disabled because it is not a reviewed, meaningful proof of the intended witness relation.
-**Validated Runtime:** `py -3.12`
-**Current hardening checks:** quick suite `23/23`, hardening `6/6`, and FFmpeg codec fixture `1/1` passed. Full local-asset E2E and benchmarks require revalidation after the circuit/sidecar update.
-**Benchmark Sections:** SEC1-SEC10 (Quality, Capacity, Methods, Security, Performance, Tradeoff, Real-time, Motion/GOP, Statistical, Audit)
-**Handoff (Vietnamese):** [`docs/handoff/`](docs/handoff/README.md) - maintainer onboarding set (overview, architecture, theory, operations, results, limitations, checklist)
+**Status (2026-10-26):** production parameter set `bdlop-open-128-v3`
+(binding 172/156, hiding 164/150 bit core-SVP). Unit suite **1217 passed /
+123 skipped**; full-system end-to-end check **8/8 modes** verify from the video
+and reject replay + tamper. The paper (`docs/paper/main.pdf`, 28 pp.) builds
+clean. Code: `src/lattice_zk/`, `src/transport/`, `src/registry/`.
 
----
+**Runtime:** Python 3.12, `ffmpeg` 8.x, packages in `requirements.lock`.
 
-## Overview
+> A large **pre-lattice-ZK** subsystem (ML-DSA sidecar attestation, the
+> SEC1–SEC10 benchmark suite, Groth16 circuits, near-blind manifest API) is kept
+> under `src/legacy/`, `benchmark/legacy/`, `legacy/` and documented from
+> "Historic Benchmark Snapshot" onward in this file **for traceability only**.
+> It is not the current system; read the map below first.
 
-The active lattice path embeds a commitment/reference to a signed receipt, not a zero-knowledge proof. It:
+## What to read to understand the system
 
-1. Generates an ML-DSA-65 signed receipt for the payload hash.
-2. Stores it as `.lattice.json`.
-3. Packs `[LQ1][4B message_length][message][32B sidecar commitment]` into the video.
-4. Optionally applies chaos transforms:
-   - Arnold Cat Map on payload bits
-   - Logistic Map on embedding-position order
-5. Locates CAVLC-safe candidate positions in IDR frames.
-6. Applies length-preserving coefficient/sign modifications.
-7. Reconstructs a valid H.264 bitstream.
-8. Extracts the reference, loads the receipt sidecar, and verifies the ML-DSA signature.
+In order, shortest path first:
 
-### New Features (IEEE-ready)
+1. [`docs/handoff/`](docs/handoff/README.md) — maintainer onboarding (Vietnamese):
+   overview → architecture → theory → operations → results → limitations.
+   Start here.
+2. [`docs/LATTICE_ZK_BDLOP_SPEC.md`](docs/LATTICE_ZK_BDLOP_SPEC.md) — the
+   authoritative protocol spec and security argument (parameters, envelope,
+   statement, offline epochs).
+3. Feature docs, as needed:
+   [`docs/CARRIERS_VA_CHUNKING.md`](docs/CARRIERS_VA_CHUNKING.md) (carrier
+   selection + ZKBC transport), [`docs/GOP_HD_SUPPORT.md`](docs/GOP_HD_SUPPORT.md)
+   (GOP>1 / HD), [`docs/CABAC_SUPPORT.md`](docs/CABAC_SUPPORT.md) (H.264
+   Main/High), [`docs/ROBUST_MODE.md`](docs/ROBUST_MODE.md) (semi-fragile
+   survive-transcode mode), [`docs/PROOF_NHI_PHAN_VA_KHOANG.md`](docs/PROOF_NHI_PHAN_VA_KHOANG.md)
+   (binary / payload-range proofs).
+4. [`docs/paper/main.pdf`](docs/paper/main.tex) — the write-up; the external
+   cryptographer review package is [`docs/review/`](docs/review/README.md).
+5. Decision records (optional):
+   [`docs/LATTICE_ZK_BDLOP_PLAN.md`](docs/LATTICE_ZK_BDLOP_PLAN.md),
+   [`docs/LATTICE_BACKEND_SURVEY.md`](docs/LATTICE_BACKEND_SURVEY.md),
+   [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
-- **Authenticated Manifest Schema** (v2.0.0): Ed25519-signed sidecars bound to the stego asset and positions file
-- **Near-Blind Verification**: Reduced cover dependency via sidecar-driven extraction
-- **Statistical Benchmarking**: Multi-run error bars for IEEE TIP/TIFS validity (3+ runs)
-- **Audit Logging**: SEC1 quality guard tracking with reason logs
-- **Modern Detectors**: WS and SPAM steganalysis features
-- **Optimized Extraction**: Parallel IDR parsing with vectorization
-- **GOP Sweep Analysis**: Quality/capacity tradeoff across GOP=1,4,8,16
+Two browser aids: [`site/`](site/README.md) is a multi-page explainer for
+non-technical readers; [`webdemo/`](webdemo/README.md) runs the real lattice
+math in the browser.
 
-### Lattice attestation and payload format
+## Quick start (current CLI)
 
-The in-video payload is always `3 + 4 + message_length + 32` bytes. The 32-byte value is SHA3-256 over the exact lattice sidecar, so substituting a receipt or its ML-DSA signature fails verification.
-
-ML-DSA-65 authenticates the payload hash and the manifest binds the final stego hash and positions hash. This is post-quantum authentication, not a zero-knowledge proof. Codec correctness remains covered by the direct-CAVLC implementation, hashes, signatures, FFmpeg fixtures, and integration tests.
-
-The source tree retains an experimental Fiat-Shamir lattice preimage prototype for research-only testing. Public `embed()` and `verify()` reject `proof_backend="lattice_zkp"`; a reviewed lattice-ZK library/protocol with a verifier-known, non-trivial statement and an audited parameter set is required before enabling any lattice-ZKP path.
-
-The pinned Linux-only LaZer research adapter is in [`legacy/lazer/`](legacy/lazer/README.md); it needs AVX-512 and is not part of the active video pipeline.
-
-### Lattice zero-knowledge backend (research)
-
-`src/lattice_zk/` carries a lattice zero-knowledge proof inside the video
-itself: a BDLOP commitment with a Fiat-Shamir-with-aborts proof of knowledge
-of its opening, bound to the carrier-normalized H.264 stream, a one-use
-verifier session challenge and an ML-DSA-signed relation registry, and
-verified from the stego video alone. The envelope is 8 165 bytes (registered
-credential) or 14 885 bytes (in-band commitment). It is self-implemented from
-the published protocol and unaudited.
-
-- [`docs/LATTICE_ZK_BDLOP_PLAN.md`](docs/LATTICE_ZK_BDLOP_PLAN.md) - plan, status, measurements, CLI usage (Vietnamese)
-- [`docs/LATTICE_ZK_BDLOP_SPEC.md`](docs/LATTICE_ZK_BDLOP_SPEC.md) - protocol specification and security argument
-- [`docs/LATTICE_BACKEND_SURVEY.md`](docs/LATTICE_BACKEND_SURVEY.md) - why existing lattice proof systems were not adopted
-
-### Reproducing the lattice-ZK evaluation
-
-[`ARTIFACT.md`](ARTIFACT.md) covers the data (Xiph URLs and SHA-256 values),
-the exact encoder settings, the scripts and their run times, and which result
-file each paper table comes from. Each script below has a `.sh` and a `.ps1`
-version:
+The production interface is `python -m src.lattice_zk.cli` (role-separated:
+issuer / holder / verifier). The verifier works from the stego video, the signed
+registry, the issuer key, its session database and a shared hex sync key in
+`ZKSTEGO_LATTICEZK_SYNC_KEY_HEX`.
 
 ```bash
-sh scripts/run_unit_tests.sh      # lattice-ZK + touched-module tests, no data needed (~90 s)
-sh scripts/prepare_data.sh        # verify/download Y4M sources, encode and verify covers
+python -m src.lattice_zk.cli --help                 # all subcommands
+python -m src.lattice_zk.cli issuer-keygen  --public i.pub --private i.key
+python -m src.lattice_zk.cli credential-new --payload-file dev.bin --public c.pub.json --private c.key.json
+python -m src.lattice_zk.cli registry-sign  --issuer-private i.key --epoch 1 --credential c.pub.json --out r.json
+# session-issue -> embed -> verify; see docs/handoff/04_van_hanh.md for the full flow.
+```
+
+`--codec-policy {v1,v2,cabac}` selects the digest/codec scope (`v2` default;
+`cabac` for H.264 Main/High), `--gop-policy` handles GOP>1 streams,
+`--adaptive-chunks` the capacity-adaptive transport, `--payload-range-bytes`
+attaches a payload range proof, `--epoch-beacon` enables offline verification.
+The semi-fragile robust mode has its own CLI, `python -m src.robust.cli`.
+
+### Reproducing the evaluation
+
+[`ARTIFACT.md`](ARTIFACT.md) lists the data (Xiph URLs + SHA-256), encoder
+settings, scripts, run times and which result file each paper table comes from.
+Each script has a `.sh` and a `.ps1` version:
+
+```bash
+sh scripts/run_unit_tests.sh      # lattice-ZK + touched-module tests, no data (~90 s)
+sh scripts/prepare_data.sh        # verify/download Y4M sources, encode covers
 sh scripts/reproduce_small.sh     # one registered E2E on a 100-frame cut (~10-15 min)
 sh scripts/reproduce_all.sh       # full sweep and report generation (tens of hours)
 ```
 
-CI (`.github/workflows/videolevel-latticezk.yml` at the repository root) runs
-the unit-test script on Ubuntu with Python 3.12.
+CI (`.github/workflows/videolevel-latticezk.yml`) runs the unit-test script on
+Ubuntu with Python 3.12.
 
 ---
+
+# Historical (pre-lattice-ZK subsystem) — kept for traceability
+
+Everything from here down describes the earlier ML-DSA-sidecar system and its
+SEC1–SEC10 benchmark suite, before the lattice-ZK video proof above became the
+system. The commands reference `src/legacy/` and `benchmark/legacy/`, and many
+figures predate the current parameter set. Do not read this to understand the
+current system; use the map above.
 
 ## Historic Benchmark Snapshot (not revalidated for this revision)
 

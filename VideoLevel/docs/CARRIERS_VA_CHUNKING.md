@@ -280,7 +280,8 @@ sync key, chunk byte v1 và segmented digest v1 của chúng giống như ở co
 ### Vấn đề
 
 Transport cố định tách envelope (8 165 B registered hoặc 14 885 B in-band với
-`bdlop-open-128-v2`) thành các chunk một kích thước đã ghim duy nhất,
+`bdlop-open-128-v2`; 8 741 / 16 421 B với bộ sản xuất hiện tại
+`bdlop-open-128-v3`) thành các chunk một kích thước đã ghim duy nhất,
 `profile.chunk_bytes`. Chunk *i* vào segment 100-khung *i*, nên segment nhỏ nhất
 phải mang một chunk sẽ cap kích thước mọi chunk. Một segment dung lượng thấp
 không thể bỏ qua. Verifier re-chunk envelope dưới kích thước đã ghim và đòi byte

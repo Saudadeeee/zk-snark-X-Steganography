@@ -43,12 +43,13 @@ Xác minh (verify) — chỉ từ video stego:
 
 - **Registered (đăng ký)**: chứng minh biết opening của một **cam kết credential
   đã được ghim trong registry** do issuer ký (ML-DSA-65). Video chỉ mang
-  **bằng chứng** (envelope registered, 8165 B). Chỉ người giữ credential mới tạo
+  **bằng chứng** (envelope registered, 8741 B với `bdlop-open-128-v3`). Chỉ người giữ credential mới tạo
   được bằng chứng. Có thể gắn thêm **holder id** để chữ ký issuer phủ luôn
   "cam kết này thuộc về người `h`".
 - **In-band (trong luồng)**: cam kết một **payload ẩn** (tối đa **766 byte**)
   và chứng minh biết opening của nó. Video mang **cả cam kết lẫn bằng chứng**
-  (envelope in-band, 14885 B). Payload vẫn ẩn, và có thể **tiết lộ
+  (envelope in-band, 16421 B; cộng 46 673 B nếu đính kèm payload range proof
+  `--payload-range-bytes`). Payload vẫn ẩn, và có thể **tiết lộ
   (disclosure)** về sau cho một bên nhất định mà không lộ randomness.
 
 Hai chế độ dùng chung lõi BDLOP; khác nhau ở chỗ cam kết được ghim bên ngoài
@@ -107,8 +108,11 @@ so khớp; nó không đọc giá trị statement nào từ phần do người t
 - ở chế độ in-band, **không** xác thực danh tính người tạo (chỉ ràng buộc một
   cam kết, không ràng buộc một con người).
 
-> Lưu ý quan trọng về phiên bản: mặc định trong một số đường chạy/tài liệu cũ là
-> `bdlop-open-128-v1`; parameter set **sản xuất hiện tại là
-> `bdlop-open-128-v2`** (`BDLOP_OPEN_128 = BDLOP_OPEN_128_V2` trong
-> `src/lattice_zk/params.py`). Nhiều số học máy và một số bảng kết quả vẫn là của
-> v1 — xem `05_ket_qua.md`.
+> Lưu ý quan trọng về phiên bản: parameter set **sản xuất hiện tại là
+> `bdlop-open-128-v3`** (`BDLOP_OPEN_128 = BDLOP_OPEN_128_V3` trong
+> `src/lattice_zk/params.py`, từ 2026-10-26; n = 7 để binding lượng tử 156 bit).
+> `-v2` và `-v1` vẫn được định nghĩa (video/registry cũ verify dưới bộ của
+> chúng). Codec policy **v2 là mặc định** cho profile mới. Nhiều số học máy và
+> một số bảng kết quả vẫn là của v1/v2 — xem `05_ket_qua.md`. Hai tính năng mới:
+> đính kèm payload range proof vào envelope in-band và phiên offline theo epoch
+> beacon (SPEC §3.7).

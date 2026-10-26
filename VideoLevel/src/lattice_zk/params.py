@@ -164,11 +164,12 @@ BDLOP_OPEN_128_V1 = BdlopParams(
     setup_seed=_setup_seed("bdlop-open-128-v1"),
 )
 
-# Current production set: M-LWE rank 7 restores a quantum margin for hiding;
-# M-SIS rank, modulus, challenges and masks are those of v1.  Claimed core-SVP
-# levels (minimum over attacks, lattice-estimator e4333d9 and the pinned
-# CRYSTALS scripts): M-SIS binding 140 / 127 bits, M-LWE hiding 164 / 150 bits
-# (dual hybrid; primal 169 / 153).  research/bdlop_params/CROSSCHECK.md.
+# Second set: M-LWE rank 7 restores a quantum margin for hiding; M-SIS rank,
+# modulus, challenges and masks are those of v1.  Claimed core-SVP levels
+# (minimum over attacks, lattice-estimator e4333d9 and the pinned CRYSTALS
+# scripts): M-SIS binding 140 / 127 bits, M-LWE hiding 164 / 150 bits (dual
+# hybrid; primal 169 / 153).  Binding is one bit short of 128 quantum bits.
+# research/bdlop_params/CROSSCHECK.md.
 BDLOP_OPEN_128_V2 = BdlopParams(
     name="bdlop-open-128-v2",
     degree=256,
@@ -180,7 +181,23 @@ BDLOP_OPEN_128_V2 = BdlopParams(
     setup_seed=_setup_seed("bdlop-open-128-v2"),
 )
 
-BDLOP_OPEN_128 = BDLOP_OPEN_128_V2
+# Current production set: M-SIS rank 7 lifts binding above 128 quantum bits;
+# everything else is v2.  Pinned CRYSTALS scripts: M-SIS binding 172 / 156
+# bits in the infinity norm, M-LWE hiding primal 169 / 153 (8 ring samples
+# instead of 7); the lattice-estimator cross-check of every attack is in
+# research/bdlop_params/CROSSCHECK.md.  Commitment 7 680 B, proof 8 672 B.
+BDLOP_OPEN_128_V3 = BdlopParams(
+    name="bdlop-open-128-v3",
+    degree=256,
+    modulus=(1 << 30) - 35,
+    msis_rank=7,
+    mlwe_rank=7,
+    challenge_weight=60,
+    mask_bound=1 << 17,
+    setup_seed=_setup_seed("bdlop-open-128-v3"),
+)
+
+BDLOP_OPEN_128 = BDLOP_OPEN_128_V3
 
 # Fast, insecure set for unit tests only.
 TOY = BdlopParams(

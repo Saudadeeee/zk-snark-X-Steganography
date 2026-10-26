@@ -12,8 +12,9 @@ không đổi gì trong các bộ tham số nền, các chứng minh opening/equ
 
 ## Phần I — Chứng minh message nhị phân (roadmap B2)
 
-Trạng thái: cài đặt là `src/lattice_zk/binary_proof.py` (bộ tham số
-`bdlop-binary-128-v2` và `bdlop-binary-toy-v1`), test trong
+Trạng thái: cài đặt là `src/lattice_zk/binary_proof.py` (bộ sản xuất
+`bdlop-binary-128-v3` trên `bdlop-open-128-v3`; `bdlop-binary-128-v2` giữ lại để
+tái lập; `bdlop-binary-toy-v1` cho test), test trong
 `src/runtest/test_latticezk_binary_proof.py`, bản nháp định lý trong
 `docs/paper/sections/binary_proof.tex` (chưa nối vào `main.tex`).
 Mã nghiên cứu chưa audit; không constant time.
@@ -21,7 +22,7 @@ Mã nghiên cứu chưa audit; không constant time.
 ### 1. Cái gì được chứng minh
 
 Statement: bytes `x` và một cam kết `C = (t1, t2) = Com(m; r)` tạo bởi
-`bdlop.commit` dưới bộ nền không đổi `bdlop-open-128-v2`. Chứng minh cho thấy
+`bdlop.commit` dưới bộ nền không đổi (`bdlop-open-128-v3` trong sản xuất). Chứng minh cho thấy
 tri thức về một relaxed opening của `C` mà message `m̄` của nó có mọi hệ số
 trong `{0, 1}`, tức `C` giấu một chuỗi 256-bit (`encode_bits` / `decode_bits`,
 32 byte, bit quan trọng nhất trước).
@@ -29,7 +30,7 @@ trong `{0, 1}`, tức `C` giấu một chuỗi 256-bit (`encode_bits` / `decode_
 `C` là một cam kết nền thường, nên các chứng minh opening, equality và disclosure
 áp dụng cho nó không đổi (test
 `test_binary_commitment_stays_compatible_with_the_base_proofs`). Không gì trong
-`bdlop-open-128-v2`, khóa của nó, các chứng minh của nó hay các định dạng
+bộ nền (`bdlop-open-128-v3`; trước đó v2), khóa của nó, các chứng minh của nó hay các định dạng
 envelope thay đổi.
 
 ### 2. Quyết định thiết kế
@@ -116,24 +117,36 @@ cũng không bao giờ tái dùng `r'` dưới hai khóa phụ trợ.
 
 ### 4. Soundness
 
-Các lỗi theo-từng-vòng của giao thức tương tác, cho một statement mà message
-(relaxed-opening) đã cam kết không nhị phân, giả sử không tìm được nghiệm M-SIS
-cho khóa nền hay khóa phụ trợ:
+Sai số theo vòng cho một vector thông điệp **cố định** `s̄` của các hàng của `C`
+và `D` (Định lý `thm:bin-rbr`, nay là một bổ đề chuỗi tất định cộng với các cận
+theo vòng). Nếu `m̄` không nhị phân và không vòng nào trong ba vòng đầu là xấu
+đối với `s̄`, thì `P(s̄) ≠ 0`. Mỗi sự kiện xấu có xác suất tối đa như trong
+bảng *khi các hàng liên quan được cố định trước thách thức*. Điều kiện đó không
+tự động đúng cho các thông điệp trích xuất được, vốn chỉ bị ràng buộc tính toán
+và được trích sau các thách thức; cận đối với một prover gian lận là
+`thm:bin-ks` (dưới).
 
-| Vòng | Sự kiện xấu | Lỗi |
+| Vòng | Sự kiện xấu (đối với `s̄`) | Lỗi |
 |---|---|---|
 | lift (`γ`) | mọi `<γ_i, m̄ ∘ (m̄ − 1)> = 0` | `q^-k = 2^-150` |
 | check (`ρ, μ`) | `φ_t(e) = −ct(ḡ_t)` cho mọi `t`, lỗi `e ≠ 0` cố định trước `ρ` | `q^-k' = 2^-150` |
-| combine (`α`) | `Σ α_t P̄_t = 0` với một `P̄_t ≠ 0` nào đó | `q^-N/2 = 2^-3840` |
+| combine (`α`) | `Σ α_t P̄_t = 0` với một `P̄_t ≠ 0` nào đó | `q^-N/2 = 2^-3840` (thực tế `≈ 2^-256`, xem dưới) |
 | challenge (`c`) | `c` là một nghiệm của `c^2 P̄ + c X + Y` với `P̄ ≠ 0` | `2/|C| = 2^-256` |
 
+Tổng `ε_rbr = q^-k + q^-k' + q^-N/2 + 2/|C| ≈ 2^-149.0` (số hạng lớn nhất là
+`2^-149.99`). Các thách thức `γ, ρ, μ, α` là `Expand(seed)` của các seed 256 bit
+và `c = G(seed)`; mô hình hóa `Expand` và `G` như random oracle đều trên đầu vào
+mới (quy ước của `security.tex`), với trường hợp không mới tính vào số hạng va
+chạm `δ_coll`, nên sai số thực tế của vòng combine là khoảng `2^-256`.
+
 Các mặt nạ `g_t` phải được cam kết trước `ρ`, và `D` sau `γ`; `h` trước `α`;
-`t_G, w, w', v` trước `c` — phần cài đặt băm đúng thứ tự này. Round-by-round
-soundness `ε_rbr = 2^-149.99` cho Fiat–Shamir soundness `≤ (Q_H + 1)·ε_rbr`
-trước `Q_H` truy vấn băm (Canetti et al., STOC 2019; Attema–Fehr–Klooß,
-TCC 2022): một kẻ tấn công làm `Q_H` truy vấn giả mạo một tuyên bố nhị phân với
-xác suất nhiều nhất `(Q_H + 1)·2^-150`, khoảng 150 bit theo thước đo
-work-over-advantage (chứng minh opening nền có 256). Tri thức về relaxed opening
+`t_G, w, w', v` trước `c` — phần cài đặt băm đúng thứ tự này. Cận đối với một
+prover gian lận **không** suy ra được từ định lý round-by-round của Canetti et
+al. (STOC 2019): định lý đó cần các trạng thái "doomed" được định nghĩa thông
+tin-lý thuyết, còn ở đây thông điệp chỉ bị ràng buộc tính toán. Cận đúng là
+`thm:bin-ks` (đoạn dưới). Phần thống kê `(Q + 1)·ε_rbr` cho khoảng 149 bit theo
+thước đo work-over-advantage (chứng minh opening nền có 256), cộng với các số
+hạng M-SIS. Tri thức về relaxed opening
 được trích bằng forking vòng cuối đúng như đặc tả §4.3 (ba transcript được chấp
 nhận với các hiệu challenge khả nghịch theo cặp ghim `P̄ = 0`, như trong equality
 proof).
@@ -144,10 +157,27 @@ truy vấn `H_4` bị bỏ; extractor chỉ fork `H_4` (trường hợp Σ-proto
 kỳ vọng `3 + 2Q` lượt chạy, lỗi `(Q + 1)·2/|C|`); và ba vòng thống kê được chặn
 đối với các message bị ràng buộc *tính toán* bằng một lập luận
 plurality/forking, cho `(Q + 1)·ε_i + sqrt((Q + 1)·α_i)` mỗi vòng với `α_i` là
-xác suất thành công của một finder M-SIS tường minh. Tổng:
-`ε ≤ (Q + 1)·ε_rbr + Σ_i sqrt((Q + 1)·α_i) + β + Q²·2^-256`. Các khoảng trống
-còn lại được liệt kê sau định lý (các số hạng M-SIS không chặt, prefix adaptive
-trong AFK22, `SampleInBall` mô hình hóa là đều, chỉ ROM cổ điển).
+xác suất thành công của một finder M-SIS tường minh. Kết luận là một khẳng
+định **knowledge soundness**: extractor xuất ra một relaxed opening nhị phân của
+`C` với xác suất ít nhất
+`ε − (Q + 1)·ε_rbr − Σ_i sqrt((Q + 1)·α_i) − β − δ_coll`, với
+`δ_coll = 13·(Q + 4)²·2^-256` (thứ tự seed và va chạm trong lần chạy đầu, seed
+không mới đối với `Expand`/`G`, và việc `s3` xác định duy nhất tiền tố
+`(x, C, D, h)` trên mọi lần chạy tua lại; `Q` đếm mọi truy vấn tới `H_1..H_4`,
+`Expand`, `G`). Với `Q = 2^64`, `δ_coll ≈ 2^-124.3`.
+
+Không có khẳng định "statement sai" kiểu "`C` không có relaxed opening nào với
+message nhị phân": về thông tin, hầu như mọi `C` có relaxed opening tới *mọi*
+message (với v3, `15·256·log2(4B+1) ≈ 72 960` bit tự do so với
+`8·256·30 = 61 440` bit ràng buộc). Message của relaxed opening chỉ duy nhất trừ
+khi tìm được nghiệm M-SIS. Soundness có nghĩa là Hệ quả `cor:bin-sound`: nếu
+`C = Com(m; r)` do bên thách thức sinh ra với `m` không nhị phân, xác suất chấp
+nhận tối đa là cận trên cộng `Adv^MSIS` (qua `thm:binding`, chuẩn `2κ + 2B`).
+Các khoảng trống còn lại được liệt kê sau định lý: các số hạng M-SIS không chặt;
+đối chiếu từng dòng với AFK22 cho prefix adaptive (bước "s3 xác định tiền tố" nay
+đã viết ra); chỉ ROM cổ điển. Việc mô hình hóa `SampleInBall` nay được quy về
+quy ước `G`. Khi đối thủ thấy các chứng minh trung thực (envelope in-band), xem
+Định lý `thm:pay-se` (Phần II §4).
 
 Tính nhất quán của masked opening: từ hai transcript `y* = z − c r̄/f̄` là như
 nhau cho mọi `c` được chấp nhận trừ khi `f̄(z − z'') − (c − c'')r̄` là một nghiệm
@@ -159,32 +189,38 @@ cho test (`require_production_strength` từ chối nó).
 ### 5. Zero knowledge (phác thảo)
 
 Các `(z, z')` được chấp nhận đều trên `[−B, B]` độc lập với `(r, r')` (lập luận
-uniform-masking của đặc tả §4.2 trên `kN + k_aux N` hệ số). Các hybrid: (1) lấy
-mẫu `z, z'` đều và lập trình bốn điểm random-oracle (message đầu có min-entropy
+uniform-masking của đặc tả §4.2 trên `kN + k_aux N` hệ số). Các hybrid: (0) các
+hybrid khóa hedged và lần thử bị loại của `lem:sim`; (1) lấy
+mẫu `z, z'` đều và lập trình một điểm `H_4` mỗi chứng minh (`H_1..H_3` được truy
+vấn bình thường; message đầu có min-entropy
 qua `w`, `w'`); (2) thay mọi hàng của `D` và `t_G` bằng đều dưới M-LWE cho khóa
 phụ trợ với secret/error `r'` — message `G` của `t_G` là một hàm chỉ của các giá
-trị công khai và witness (lập luận ALS20), nên reduction tính được nó; (3) khi đó
+trị công khai và witness (lập luận ALS20), nên reduction tính được nó; bước này
+đi qua từng chứng minh vì `r'` mới mỗi lần, nên cận là
+`Q_P·Adv^MLWE_aux + ε_zk` (`thm:bin-zk`); (3) khi đó
 `g_t` chỉ xuất hiện trong `h_t`, vốn đều trên `{ct = 0}`. `w, w', v` được xác
 định bởi các phương trình verification. `C` được giấu như trước (đặc tả §4.5).
 `r` chỉ được tái dùng qua các chứng minh thông qua `z` đã rejection-sample, như
 với chứng minh opening; `r'` là mới cho mỗi chứng minh.
 
-### 6. Kích thước và thời gian (sản xuất, `bdlop-binary-128-v2`)
+### 6. Kích thước và thời gian (sản xuất, `bdlop-binary-128-v3`)
 
-| Phần | Byte |
-|---|---|
-| Cam kết statement `C` (nền không đổi) | 6 720 |
-| Cam kết phụ trợ `t1'`, `t_u`, `t_g` (16 poly × 960) | 15 360 |
-| Mặt nạ `h` (5 × 255 hệ số × 30 bit) | 4 782 |
-| Rác `t_G` | 960 |
-| Seed challenge | 32 |
-| Đáp ứng `z, z'` (38 poly × 256 × 18 bit) | 21 888 |
-| **Tổng proof** | **43 022** |
+| Phần | Byte (v3) | Byte (v2 cũ) |
+|---|---|---|
+| Cam kết statement `C` (nền không đổi) | 7 680 | 6 720 |
+| Cam kết phụ trợ `t1'`, `t_u`, `t_g` (v3: 17 poly × 960) | 16 320 | 15 360 |
+| Mặt nạ `h` (5 × 255 hệ số × 30 bit) | 4 782 | 4 782 |
+| Rác `t_G` | 960 | 960 |
+| Seed challenge | 32 | 32 |
+| Đáp ứng `z, z'` (v3: 40 poly × 256 × 18 bit) | 23 040 | 21 888 |
+| **Tổng proof** | **45 134** | **43 022** |
 
-Chấp nhận mỗi lần thử `((2B+1)/2γ)^{38·256} = 0.0112` (trung bình 89 lần thử;
-cap 16 384, xác suất toàn-abort `2^-266`). Thời gian đo (trung vị của 20 lượt,
+Chấp nhận mỗi lần thử `((2B+1)/2γ)^{40·256} = 0.00885` (trung bình 113 lần thử;
+cap 16 384, xác suất toàn-abort `2^-210.05`); với v2 là `0.0112`, 89 lần thử,
+`2^-266.4`. Bộ nền `bdlop-open-128-v3`: cam kết 7 680 B, chứng minh opening
+8 672 B. Thời gian đo (trung vị của 20 lượt,
 máy chung): xem `benchmark/results/q2/binary_proof_bench.json` và Mục 9 (đo với
-`bdlop-binary-128-v1`; chưa đo lại dưới v2).
+`bdlop-binary-128-v1`; chưa đo lại dưới v2 hay v3).
 
 Số học dùng `fast_ring.py`: tích negacyclic chính xác qua các tích ma trận
 float64 trên limb 15-bit (mọi tổng riêng là số nguyên dưới `2^53`, nên kết quả
@@ -192,18 +228,21 @@ BLAS chính xác và độc lập thứ tự), kiểm với `ring.poly_mul` tron
 
 ### 7. Bảo mật cụ thể của khóa phụ trợ
 
-Cùng `q, N, n = 6, λ = 7, κ, γ` và cùng chặn M-SIS `8κB ≈ 2^25.9` như nền; ma
-trận M-SIS phụ trợ là `n × 24` (nền: `n × 14`) và instance M-LWE phụ trợ có
-`n + 11 = 17` mẫu vành (nền: 7). Ước lượng CRYSTALS đã ghim
-(`research/bdlop_params/bdlop_binary_128_v2.estimate.json`) cho cùng mức như bộ
-nền: M-SIS β = 480 (140 / 127 bit), primal M-LWE β = 580 (169 / 153 bit), dual
-β = 578. Các lý do:
+Bộ sản xuất `bdlop-binary-128-v3`: cùng `q, N, n = 7, λ = 7, κ, γ` và cùng chặn
+M-SIS `8κB ≈ 2^25.9` như nền `bdlop-open-128-v3`; ma trận M-SIS phụ trợ là
+`7 × 25` (nền: `7 × 15`) và instance M-LWE phụ trợ có `n + 11 = 18` mẫu vành
+(nền: 8). Ước lượng CRYSTALS đã ghim
+(`research/bdlop_params/bdlop_binary_128_v3.estimate.json`) cho cùng mức như bộ
+nền: M-SIS β = 589 (172 / 156 bit), primal M-LWE β = 580 (169 / 153 bit), dual
+β = 578. (Bộ cũ v2: `6 × 24`, 17 mẫu, M-SIS β = 480, 140 / 127 bit,
+`bdlop_binary_128_v2.estimate.json`.) Các lý do:
 
-- M-LWE: các mẫu thêm không giúp vượt tối ưu, nên 7 và 17 mẫu vành có sẵn cho
+- M-LWE: các mẫu thêm không giúp vượt tối ưu, nên 8 và 18 mẫu vành có sẵn cho
   cùng block size. (Với `bdlop-binary-128-v1` một script ADPS16 riêng cho 473 so
   với ước lượng nền đã ghim 474.)
-- M-SIS: chiều tấn công tối ưu `sqrt(nN ln q / ln δ_480) ≈ 3 022` dưới cả hai độ
-  rộng (3 584 và 6 144), nên các cột thêm không hạ block size 480.
+- M-SIS: chiều tấn công tối ưu `sqrt(nN ln q / ln δ_589) ≈ 3 512` dưới cả hai độ
+  rộng (3 840 và 6 400), nên các cột thêm không hạ block size 589 (v2:
+  `≈ 3 022` dưới 3 584 và 6 144, block size 480).
 
 `python research/bdlop_params/estimate.py --estimator <security-estimates>
 --parameter-set BINARY_128` chạy mô hình đã ghim trên instance phụ trợ và sinh ra
@@ -211,13 +250,14 @@ file đó.
 
 ### 8. Tương thích với envelope
 
-- Tương thích: cam kết statement là một cam kết `bdlop-open-128-v2`; các chứng
+- Tương thích: cam kết statement là một cam kết của bộ nền (`bdlop-open-128-v3`); các chứng
   minh hiện có, disclosure và registry descriptor làm việc trên nó không đổi.
 - Không tự động: các cam kết payload hôm nay mã hóa `len ‖ payload` với ba byte
   mỗi hệ số (`codec.encode_payload`), vốn *không* nhị phân; chứng minh nhị phân
   áp dụng cho các cam kết của `encode_bits(chuỗi 32-byte)` (ví dụ một digest hoặc
   một credential secret 256-bit).
-- Một proof 43.0 KB khoảng 2.9× envelope in-band (14 885 byte); mang nó in-band
+- Một proof 45.1 KB khoảng 2.7× envelope in-band của v3 (16 421 byte; với v2:
+  43.0 KB, 2.9× của 14 885 byte); mang nó in-band
   cần một phiên bản envelope mới và dung lượng carrier đo bởi sweep Q2. Ngoài băng
   (chế độ registered, hoặc kèm một disclosure) không cần đổi định dạng. Người
   tích hợp quyết định.
@@ -225,13 +265,15 @@ file đó.
   kết payload có sẵn giấu `encode_payload(p)` cho một độ dài công khai `L ≤ 128`,
   bằng cách cam kết các bit payload trong cam kết phụ trợ và thêm liên kết
   Z_q-tuyến tính `m = e_L + A β` như một số hạng nữa của các check functional
-  (44 558 B cho `L ≤ 32`). Một range proof của cả 256 hệ số bằng 24 bit-plane sẽ
-  tốn `24·(1 + k)` đa thức phụ trợ (256 526 B, chấp nhận `8·10^-10`) và vẫn bất
-  khả thi.
+  (46 670 B cho `L ≤ 32` với v2 trên nền v3; 44 558 B với v1). Một range proof
+  của cả 256 hệ số bằng 24 bit-plane sẽ tốn `24·(1 + k)` đa thức phụ trợ
+  (258 638 B, chấp nhận `6.5·10^-10` trên nền v3) và vẫn bất khả thi.
 
 ### 9. Kết quả đo
 
-Đo với `bdlop-binary-128-v1` (chưa đo lại dưới v2).
+Đo với `bdlop-binary-128-v1` (chưa đo lại dưới v2 hay bộ sản xuất v3; với v3 số
+lần thử kỳ vọng là 113 và mỗi lần thử lớn hơn một chút, nên thời gian prover dự
+kiến tăng tương ứng).
 `benchmark/results/q2/binary_proof_bench.json`: 20 lượt, message, randomness và
 entropy mới mỗi lượt, laptop Intel Family 6 Model 154 chạy một benchmark khác
 cùng lúc, Python 3.12, một luồng.
@@ -256,7 +298,7 @@ xuất), độ phủ dòng 100 % của `binary_proof.py` và của `fast_ring.py
    định; extraction fork chỉ băm cuối; các vòng thống kê bằng một lập luận
    plurality với một số hạng M-SIS căn bậc hai).
 3. Xác nhận các ước lượng M-SIS/M-LWE phụ trợ với estimator đã ghim.
-4. `k = k' = 5` cho `2^-150` mỗi vòng. Khớp không gian challenge `2^-256` sẽ cần
+4. `k = k' = 5` cho `2^-150` mỗi vòng (tổng `ε_rbr ≈ 2^-149.0`). Khớp không gian challenge `2^-256` sẽ cần
    `k = k' = 9` (khoảng +12 KB).
 5. Liệu có một cấu trúc nhỏ hơn trên một vành hai-slot (một đa thức lift mỗi lần
    lặp có vẻ cần thiết theo lập luận Toeplitz của 2.2, nhưng các mặt nạ `g_t` và
@@ -266,9 +308,10 @@ xuất), độ phủ dòng 100 % của `binary_proof.py` và của `fast_ring.py
 
 ## Phần II — Chứng minh khoảng payload: gắn chứng minh nhị phân vào payload (stream C3)
 
-Trạng thái: cài đặt là `src/lattice_zk/payload_range_proof.py` (bộ tham số
-`bdlop-payload-range-128-v1` trên `bdlop-open-128-v2`, và
-`bdlop-payload-range-toy-v1` cho test), test trong
+Trạng thái: cài đặt là `src/lattice_zk/payload_range_proof.py` (bộ sản xuất
+`bdlop-payload-range-128-v2` trên `bdlop-open-128-v3`; `bdlop-payload-range-128-v1`
+trên `bdlop-open-128-v2` giữ lại để tái lập; `bdlop-payload-range-toy-v1` cho
+test), test trong
 `src/runtest/test_latticezk_payload_range_proof.py`, định lý trong
 `docs/paper/sections/binary_proof.tex` (`sec:payload-range`, `thm:pay`), benchmark
 `benchmark/latticezk_payload_range_proof_bench.py` →
@@ -280,7 +323,7 @@ equality và nhị phân, hay các định dạng envelope thay đổi.
 
 Đầu vào công khai: bytes statement `x`, một độ dài payload **công khai** `L`
 (`0 ≤ L ≤ 128`), và một cam kết `C = (t1, t2)` tạo bởi `bdlop.commit` dưới
-`bdlop-open-128-v2`, ví dụ cam kết của một envelope in-band
+bộ nền (`bdlop-open-128-v3` trong sản xuất), ví dụ cam kết của một envelope in-band
 (`linkage.envelope_commitment`) hoặc của một credential registered.
 
 Chứng minh cho thấy tri thức (relaxed, xem dưới) về một opening của `C` mà
@@ -302,7 +345,10 @@ Tương đương:
 Chứng minh lộ `L` và không gì khác về `p` (zero knowledge như chứng minh nhị
 phân). Vì cam kết nền là binding theo relaxed opening, một disclosure sau
 (`video_proof.create_commitment_disclosure`, một equality proof đối với
-`Com(encode(p'); 0)`) chỉ có thể lộ `p' = p`.
+`Com(encode(p'); 0)`) chỉ có thể lộ `p' = p`, trừ khi tìm được một nghiệm M-SIS.
+Vì range proof được mang in-band và đối thủ thấy các range proof trung thực, khẳng
+định này dựa vào phiên bản simulation-extractable `thm:pay-se` (§4), không chỉ
+`thm:bin-ks`.
 
 Chính xác (Định lý `thm:pay` với `thm:bin-ks`): một extractor rewind chỉ truy vấn
 oracle cuối xuất ra một relaxed opening `(r̄, f̄)` của `C`, `f̄ ∈ C̄`,
@@ -316,22 +362,23 @@ byte. Xem Mục 7.
 
 ### 2. Các lựa chọn đã cân nhắc
 
-Chứng minh nhị phân (`bdlop-binary-128-v2`, 43 022 B) cho thấy một cam kết giấu
+Chứng minh nhị phân (`bdlop-binary-128-v3`, 45 134 B; v2: 43 022 B) cho thấy một cam kết giấu
 một chuỗi 256-bit, nhưng các cam kết payload in-band dùng mã hóa 24-bit của
 `codec.encode_payload`, nên nó không nói gì về payload.
 
 | Lựa chọn | Statement | Kích thước (sản xuất) | Chấp nhận / lần thử | Phán quyết |
 |---|---|---|---|---|
-| (a-full) phân rã bit-plane `m = Σ_{j<24} 2^j b_j` của cả 256 hệ số, mọi `b_j` nhị phân | mọi hệ số trong `[0, 2^24)` (không phải ảnh encoder đầy đủ: độ dài và zero padding không kiểm) | 256 526 B (ℓ = 24, 177 response poly) | 8.2·10⁻¹⁰ (≈1.2·10⁹ lần thử) | bất khả thi ở chặn mặt nạ đã ghim `γ = 2^17`; cần chặn mặt nạ phụ trợ lớn hơn và một ước lượng M-SIS mới |
-| (a-full, chứng minh độc lập) 24 cam kết nhị phân + 24 chứng minh nhị phân + một chứng minh tuyến tính trên 25 cam kết | như trên | ≈1.4 MB | riêng chứng minh tuyến tính chấp nhận với `0.191^25 ≈ 10⁻¹⁸` | bất khả thi |
-| **(a′) đã chọn**: chỉ các bit của payload (công khai `L`), liên kết `m = e_L + A β` gấp vào vòng check của chứng minh nhị phân | `m = encode_payload(p)`, `|p| = L` (ảnh encoder đầy đủ) | 44 558 B cho `L ≤ 32`, +9 216 B mỗi 32 B nữa (72 206 B ở 128) | 0.0100 (ℓ = 1) … 0.0012 (ℓ = 4) | **đã cài đặt** |
-| (b) envelope nhị phân từ đầu: `Com(encode_bits(p))`, chứng minh nhị phân hiện có mỗi 32 B | `C` giấu một chuỗi 32-byte | 6 720 + 43 022 = 49 742 B mỗi 32 B | 0.0112 | hoạt động không cần chứng minh mới, nhưng cần một phiên bản envelope mới và một mã hóa disclosure mới; ℓ chứng minh độc lập cho payload dài hơn |
+| (a-full) phân rã bit-plane `m = Σ_{j<24} 2^j b_j` của cả 256 hệ số, mọi `b_j` nhị phân | mọi hệ số trong `[0, 2^24)` (không phải ảnh encoder đầy đủ: độ dài và zero padding không kiểm) | 258 638 B (ℓ = 24, 179 response poly; v1: 256 526 B, 177 poly) | 6.5·10⁻¹⁰ (≈1.5·10⁹ lần thử; v1: 8.2·10⁻¹⁰) | bất khả thi ở chặn mặt nạ đã ghim `γ = 2^17`; cần chặn mặt nạ phụ trợ lớn hơn và một ước lượng M-SIS mới |
+| (a-full, chứng minh độc lập) 24 cam kết nhị phân + 24 chứng minh nhị phân + một chứng minh tuyến tính trên 25 cam kết | như trên | ≈1.4 MB | riêng chứng minh tuyến tính chấp nhận với `0.170^25 ≈ 6·10⁻²⁰` (nền v3; v2: `0.191^25 ≈ 10⁻¹⁸`) | bất khả thi |
+| **(a′) đã chọn**: chỉ các bit của payload (công khai `L`), liên kết `m = e_L + A β` gấp vào vòng check của chứng minh nhị phân | `m = encode_payload(p)`, `|p| = L` (ảnh encoder đầy đủ) | 46 670 B cho `L ≤ 32`, +9 216 B mỗi 32 B nữa (74 318 B ở 128); v1: 44 558 … 72 206 B | 0.0079 (ℓ = 1) … 0.00094 (ℓ = 4); v1: 0.0100 … 0.0012 | **đã cài đặt** |
+| (b) envelope nhị phân từ đầu: `Com(encode_bits(p))`, chứng minh nhị phân hiện có mỗi 32 B | `C` giấu một chuỗi 32-byte | 7 680 + 45 134 = 52 814 B mỗi 32 B (v2: 6 720 + 43 022 = 49 742 B) | 0.00885 (v2: 0.0112) | hoạt động không cần chứng minh mới, nhưng cần một phiên bản envelope mới và một mã hóa disclosure mới; ℓ chứng minh độc lập cho payload dài hơn |
 
 Lựa chọn (a′) tốn 1 536 B nhiều hơn chứng minh nhị phân và, khác (b), áp dụng cho
 cam kết payload *hiện có*: không định dạng envelope mới, các chứng minh disclosure
 và linkage hiện có áp dụng không đổi, và chứng minh có thể được sinh ngoài băng
-cho một video đã nhúng trước đó. Tính cả cam kết, (a′) là 6 720 + 44 558 = 51 278
-B so với 49 742 B cho (b), nên hai cái trong 3 %. Lựa chọn (b) không cần mã mới
+cho một video đã nhúng trước đó. Tính cả cam kết, (a′) là 7 680 + 46 670 = 54 350
+B so với 52 814 B cho (b) trên nền v3 (v2/v1: 51 278 so với 49 742 B), nên hai
+cái trong 3 %. Lựa chọn (b) không cần mã mới
 (nó là `binary_proof.prove(BINARY_128, x, Com(encode_bits(p)), …)`) và do đó
 không được cài lại; các kích thước của nó trong benchmark JSON.
 
@@ -381,61 +428,91 @@ riêng, và `r'` không bao giờ tái dùng dưới hai khóa.
 
 ### 4. Soundness
 
-Lỗi theo vòng (như chứng minh nhị phân; `L` không đổi chúng):
+Lỗi theo vòng cho một vector thông điệp cố định `s̄` (như chứng minh nhị phân,
+`thm:bin-rbr`; `L` không đổi chúng). Như ở Phần I §4, đây là các cận khi các hàng
+được cố định trước thách thức, không phải cận đối với một prover tùy ý:
 
-| Vòng | Sự kiện xấu | Lỗi |
+| Vòng | Sự kiện xấu (đối với `s̄`) | Lỗi |
 |---|---|---|
 | lift (`γ`) | một `β̄_j` nào đó không nhị phân và mọi `⟨γ_{j,i}, β̄_j ∘ (β̄_j − J)⟩ = 0` | `q^-k = 2^-150` |
 | check (`ρ, μ, ρ^L`) | lỗi `e = (Δ, Q, m̄ − Aβ̄ − e_L) ≠ 0` cố định trước, và `ct(ḡ_t) + φ_t(e) = 0` cho mọi `t` | `q^-k' = 2^-150` |
-| combine (`α`) | `Σ α_t P̄_t = 0` với một `P̄_t ≠ 0` nào đó | `q^-N/2 = 2^-3840` |
+| combine (`α`) | `Σ α_t P̄_t = 0` với một `P̄_t ≠ 0` nào đó | `q^-N/2 = 2^-3840` (thực tế `≈ 2^-256` qua seed 256 bit) |
 | challenge (`c`) | `c` một nghiệm của một bậc-hai khác không | `2/|C| = 2^-256` |
+
+Tổng `ε_rbr ≈ 2^-149.0` (số hạng lớn nhất `2^-149.99`).
 
 `m̄ − Aβ̄ − e_L` được cố định bởi `C` và `D_0`, cả hai băm trước `ρ^L`; nếu nó
 bằng không và `β̄` nhị phân, thì `m̄ = Aβ̄ + e_L` trên số nguyên (mọi giá trị
 dưới `2^24 < q`), tức `m̄ = encode_payload(p)`.
 
 Knowledge soundness không tương tác (Định lý `thm:bin-ks`, áp dụng nguyên văn):
-một kẻ thù với `Q` truy vấn oracle làm verifier chấp nhận một statement sai thành
-công với xác suất nhiều nhất
+với một kẻ thù có `Q` truy vấn oracle (mọi `H_i`, `Expand`, `G`) được chấp nhận
+với xác suất `ε`, extractor xuất ra một relaxed opening của `C` với message
+`encode_payload(p)` cho một `p` `L`-byte với xác suất ít nhất
 
 ```text
-(Q + 1)(q^-k + q^-k' + q^-N/2 + 2/|C|) + Σ_{i=1..3} sqrt((Q + 1) α_i) + β + Q^2 2^-256
+ε − (Q + 1)(q^-k + q^-k' + q^-N/2 + 2/|C|) − Σ_{i=1..3} sqrt((Q + 1) α_i) − β − δ_coll,
+δ_coll = 13 (Q + 4)^2 2^-256
 ```
 
 trong đó `α_i, β` là các xác suất mà các thuật toán forking tường minh tìm được
-một nghiệm M-SIS của `ℓ∞ ≤ 8κB`. Phần thống kê là `(Q + 1)·2^-149.99`; các số
+một nghiệm M-SIS của `ℓ∞ ≤ 8κB`. Phần thống kê là `(Q + 1)·ε_rbr` với
+`ε_rbr ≈ 2^-149.0`; các số
 hạng M-SIS có mất mát forking căn bậc hai thường thấy (như với chứng minh
 opening, Bổ đề `lem:fork`). Các abort chỉ lặp vòng cuối; extraction fork chỉ
 oracle cuối (extractor Σ-protocol của AFK22, kỳ vọng `3 + 2Q` lượt chạy), và các
 vòng thống kê được chặn bằng một lập luận plurality đối với các message bị ràng
 buộc tính toán. Phác thảo trong `docs/paper/sections/binary_proof.tex` sau Định
-lý `thm:bin-rbr`, với các khoảng trống còn lại liệt kê ở đó.
+lý `thm:bin-rbr`, với các khoảng trống còn lại liệt kê ở đó. Khi phép rút gọn cấy
+thể hiện M-SIS, nó phải đoán khóa (nền hoặc một trong tối đa 4 khóa phụ trợ, một
+cho mỗi `ℓ`), tức thừa số tối đa 5.
+
+Như ở Phần I §4, không có khẳng định "statement sai": hầu như mọi `C` có relaxed
+opening tới mọi message. Soundness có nghĩa đi qua binding (Hệ quả
+`cor:bin-sound`): nếu `C = Com(m; r)` được sinh trung thực với
+`m ≠ encode_payload(p)` cho mọi `p` `L`-byte, xác suất chấp nhận tối đa là cận
+trên cộng `Adv^MSIS`.
+
+**Simulation-extractability (Định lý `thm:pay-se`).** Range proof được mang
+in-band (`video_proof.create_envelope` / `verify_envelope`), nên đối thủ của trò
+chơi SE thấy các range proof trung thực. `thm:pay-se` thay chúng bằng bộ mô phỏng
+(`Q_P·Adv^MLWE_aux + ε_zk`). Nếu đối thủ dùng lại điểm `H_4` đã lập trình của
+một proof trung thực, thì cùng `s3` (trừ va chạm), cùng `t_G, w, w'` và cùng `c`,
+nên `(z, z')` khác cho một nghiệm M-SIS chuẩn `≤ 2B` cho `B1` hoặc `B1'`. Ngược
+lại, áp dụng `thm:bin-ks` với `Q' = Q + 7Q_P`, đếm cả các truy vấn
+`H_1..H_3`/`Expand`/`G` của bộ mô phỏng trong lập luận plurality.
 
 ### 5. Bảo mật cụ thể của khóa phụ trợ
 
 Mô hình CRYSTALS đã ghim (`python research/bdlop_params/estimate.py --estimator
 <security-estimates> --parameter-set PAYLOAD_RANGE_128 --binary-polys ℓ`):
-với `ℓ = 1` (M-SIS `6 × 25`, 18 mẫu M-LWE) và `ℓ = 4` (`6 × 43`, 36 mẫu) các
-mức bằng của bộ nền: M-SIS β = 480 (140 / 127 bit), primal M-LWE β = 580
+với bộ sản xuất `bdlop-payload-range-128-v2` trên `bdlop-open-128-v3`, `ℓ = 1`
+(M-SIS `7 × 26`, 19 mẫu M-LWE) và `ℓ = 4` (`7 × 44`, 37 mẫu) cho các
+mức bằng của bộ nền: M-SIS β = 589 (172 / 156 bit), primal M-LWE β = 580
 (169 / 153), dual β = 578
-(`research/bdlop_params/bdlop_payload_range_128_l{1,4}.estimate.json`). Lý do là
+(`research/bdlop_params/bdlop_payload_range_128_v2_l{1,4}.estimate.json`). (Bộ
+cũ v1 trên nền v2: `6 × 25` / `6 × 43`, 18 / 36 mẫu, M-SIS β = 480, 140 / 127
+bit, `bdlop_payload_range_128_l{1,4}.estimate.json`.) Lý do là
 của chứng minh nhị phân (Phần I §7): sub-dimension M-SIS tối ưu dưới mọi độ rộng
 và các mẫu M-LWE thêm vượt tối ưu không giúp. Phần đối chiếu dual-hybrid của
 lattice-estimator (164 / 150 bit cho bộ nền) không được chạy lại cho các instance
 này.
 
-### 6. Kích thước và thời gian (sản xuất, `bdlop-payload-range-128-v1`)
+### 6. Kích thước và thời gian (sản xuất, `bdlop-payload-range-128-v2`)
 
-| `L` (byte) | ℓ | Byte proof | Chấp nhận | Lần thử kỳ vọng |
-|---|---|---|---|---|
-| 0–32 | 1 | 44 558 | 0.00996 | 100 |
-| 33–64 | 2 | 53 774 | 0.00490 | 204 |
-| 65–96 | 3 | 62 990 | 0.00241 | 415 |
-| 97–128 | 4 | 72 206 | 0.00119 | 843 |
+| `L` (byte) | ℓ | Byte proof | Chấp nhận | Lần thử kỳ vọng | Toàn-abort (`2^17` lần thử) |
+|---|---|---|---|---|---|
+| 0–32 | 1 | 46 670 | 0.00786 | 127 | `2^-1492` |
+| 33–64 | 2 | 55 886 | 0.00387 | 259 | `2^-733` |
+| 65–96 | 3 | 65 102 | 0.00190 | 525 | `2^-360` |
+| 97–128 | 4 | 74 318 | 0.00094 | 1 068 | `2^-177` |
 
-Các phần cho ℓ = 1: `D_0` 6 720, `D_1` 9 600, `h` 4 782, `t_G` 960, seed 32,
-đáp ứng (39 poly × 256 × 18 bit) 22 464. Cap lần thử `2^17`: xác suất toàn-abort
-`2^-1892` (ℓ = 1), `2^-225` (ℓ = 4).
+Các phần cho ℓ = 1: `D_0` 7 680, `D_1` 9 600, `h` 4 782, `t_G` 960, seed 32,
+đáp ứng (41 poly × 256 × 18 bit) 23 616.
+
+Bộ cũ `bdlop-payload-range-128-v1` (nền v2): 44 558 / 53 774 / 62 990 / 72 206
+byte, chấp nhận 0.00996 / 0.00490 / 0.00241 / 0.00119, toàn-abort `2^-1892`
+(ℓ = 1) đến `2^-225` (ℓ = 4). Các số đo dưới đây là của v1.
 
 Đo (`benchmark/results/q2/payload_range_proof_bench.json`, 10 lượt, payload/
 randomness/entropy mới mỗi lượt, Python 3.12 một luồng, laptop **tải nặng bởi một
@@ -464,10 +541,16 @@ sản xuất và một proof sản xuất ℓ = 2); độ phủ dòng của `pay
 2. `β` được cam kết trong `D_0` trước `γ` và các lift được thêm sau dưới cùng
    `r'`. Ta lập luận rằng binding theo relaxed opening của `t1'` cố định message
    của mỗi hàng; việc dùng tăng dần một vector randomness BDLOP này có được các
-   lập luận binding/hiding chuẩn phủ không?
+   lập luận binding/hiding chuẩn phủ không? (Đánh giá nội bộ
+   `docs/review/INTERNAL_REVIEW_SOUNDNESS.md`: có, binding mọi hàng suy ra từ
+   binding nới lỏng của `t1'`; hiding không bị ảnh hưởng.)
 3. Kiểm phác thảo knowledge-soundness (`thm:bin-ks`): lập luận plurality cho các
-   vòng thống kê, việc dùng AFK22 với một prefix chọn adaptive, và số hạng
-   seed-ordering `Q^2 2^-256`.
+   vòng thống kê, việc dùng AFK22 với một prefix chọn adaptive (bước "`s3` xác
+   định tiền tố trên mọi lần chạy" nay đã viết ra), và số hạng va chạm
+   `δ_coll = 13 (Q + 4)^2 2^-256`.
+3a. Kiểm Định lý `thm:pay-se` (simulation-extractability của range proof in-band):
+   trường hợp điểm `H_4` đã lập trình bị dùng lại (nghiệm M-SIS chuẩn `≤ 2B`), và
+   lập luận plurality khi tiền tố và các truy vấn `H_1..H_3` là của bộ mô phỏng.
 4. Một độ dài ẩn (`L` bí mật, `≤ 32ℓ`) sẽ cần một chứng minh rằng các byte sau
    `L` bằng không, ví dụ với một chỉ báo độ dài one-hot đã cam kết và một quan hệ
    bậc-hai nữa. Có cách rẻ hơn không?

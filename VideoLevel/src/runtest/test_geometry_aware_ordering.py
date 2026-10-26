@@ -47,7 +47,7 @@ from src.core.chaos import ChaosTransformer
 from src.registry.lattice_pq import LatticeSigner
 from src.lattice_zk import bdlop, codec
 from src.lattice_zk import video_pipeline as pipeline
-from src.lattice_zk.params import BDLOP_OPEN_128, TOY
+from src.lattice_zk.params import BDLOP_OPEN_128, BDLOP_OPEN_128_V2, TOY
 from src.registry.zkp_registry import SignedZkpRelationRegistry
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -72,7 +72,8 @@ ORIGINAL_PROFILE_IDS = {
     ("adaptive", "TOY", True): "3d65bfb395ed10e56614147336d318b89d23ea174ff2d7d135abc6d9e2c78f51",
     ("adaptive-texture", "BDLOP_OPEN_128", True): "482fc180c6d6829f43d30147a930a149df7c2983bb348c957c0326df3b13a7b0",
 }
-PARAMETER_SETS = {"BDLOP_OPEN_128": BDLOP_OPEN_128, "TOY": TOY}
+# The ids were recorded when the production set was bdlop-open-128-v2.
+PARAMETER_SETS = {"BDLOP_OPEN_128": BDLOP_OPEN_128_V2, "TOY": TOY}
 
 # Transport digests of the original contracts recorded with commit c027c87.
 BASELINE_PAYLOAD = (b"geometry-aware carrier order baseline payload " * 8)
@@ -264,7 +265,9 @@ def test_geometry_contracts_mirror_the_original_carrier_rules() -> None:
 @pytest.mark.parametrize("key", sorted(ORIGINAL_PROFILE_IDS))
 def test_original_profile_ids_are_unchanged(key) -> None:
     carrier, parameter_set, registered = key
-    profile = pipeline.CarrierProfile(CARRIER_CONTRACTS[carrier], registered=registered)
+    profile = pipeline.CarrierProfile(
+        CARRIER_CONTRACTS[carrier], registered=registered, codec_policy=pipeline.CODEC_POLICY_V1
+    )
     assert profile.profile_id(PARAMETER_SETS[parameter_set]).hex() == ORIGINAL_PROFILE_IDS[key]
 
 

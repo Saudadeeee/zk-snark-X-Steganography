@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thuật ngữ · ZK-Video</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Lora:ital,wght@0,500;0,600;1,500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a><button class="menu-btn" data-menu-btn aria-label="Menu">☰</button></div>
+<div class="shell">
+<aside class="sidebar">
+  <a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a>
+  <p class="tagline">Bằng chứng không tiết lộ, giấu trong video — giải thích cho mọi người</p>
+  <div class="nav-group">Bắt đầu</div>
+  <nav><a href="index.html">Tổng quan</a><a href="khai-niem.html">Khái niệm nền (từ số 0)</a></nav>
+  <div class="nav-group">Hệ thống hoạt động</div>
+  <nav><a href="kien-truc.html">Kiến trúc & luồng</a><a href="thanh-phan.html">Các thành phần</a><a href="che-do-vi-du.html">Chế độ & ví dụ thật</a></nav>
+  <div class="nav-group">Bảo mật & kết quả</div>
+  <nav><a href="bao-mat.html">An toàn & chống tấn công</a><a href="ket-qua.html">Kết quả & hạn chế</a></nav>
+  <div class="nav-group">Tra cứu</div>
+  <nav><a href="thuat-ngu.html">Thuật ngữ</a></nav>
+  <div class="tools"><button class="tbtn" data-theme-btn>☾ Tối</button></div>
+</aside>
+<main class="content"><div class="content-inner">
+
+  <p class="crumbs">Tra cứu › Thuật ngữ</p>
+  <h1>Thuật ngữ — dịch sang tiếng thường</h1>
+  <p class="lead">Gặp từ lạ ở trang nào thì tra ở đây. Sắp theo nhóm để dễ nhớ.</p>
+
+  <h2>Ý tưởng lớn</h2>
+  <dl class="gloss">
+    <dt>Steganography (giấu tin)</dt><dd>Giấu thông tin bên trong một thứ trông bình thường (ở đây là các con số của khung hình), khác với mã hoá là làm thông tin thành vô nghĩa nhìn thấy được.</dd>
+    <dt>Zero-knowledge (không tiết lộ)</dt><dd>Chứng minh “tôi biết/tôi có” mà không để người kiểm tra biết bí mật là gì.</dd>
+    <dt>Commitment (niêm phong / cam kết)</dt><dd>“Phong bì dán kín”: không ai đọc trộm được (hiding) và bạn không đổi nội dung được (binding).</dd>
+    <dt>Hậu lượng tử (post-quantum)</dt><dd>An toàn kể cả khi có máy tính lượng tử mạnh trong tương lai.</dd>
+    <dt>Kiểm tra mù (blind verification)</dt><dd>Xác minh chỉ từ file video, không cần bản gốc, không cần biết bí mật, không cần liên hệ người tạo.</dd>
+  </dl>
+
+  <h2>Phần video</h2>
+  <dl class="gloss">
+    <dt>H.264 / CAVLC / Baseline</dt><dd>Chuẩn nén video và một kiểu mã hoá hệ số (CAVLC) trong hồ sơ Baseline mà hệ này làm việc trên đó.</dd>
+    <dt>Hệ số (coefficient)</dt><dd>Các con số mà máy nén dùng để mô tả khung hình sau biến đổi + lượng tử.</dd>
+    <dt>Carrier</dt><dd>Những hệ số “an toàn” được chọn để giấu bit; đổi bit cuối của chúng gần như không ảnh hưởng hình và tính lại được từ phía kiểm tra.</dd>
+    <dt>LSB (bit cuối)</dt><dd>Chữ số nhị phân cuối cùng của một con số — đổi nó thay đổi giá trị rất ít.</dd>
+    <dt>IDR / khung P / GOP</dt><dd>IDR là khung độc lập; khung P phụ thuộc khung trước; GOP là độ dài một nhóm khung. Hệ chỉ giấu vào IDR, khoá nguyên khung P.</dd>
+    <dt>PSNR / SSIM</dt><dd>Hai thước đo “ảnh sau có giống ảnh gốc không”. PSNR cao (trên ~40 dB) và SSIM gần 1 nghĩa là gần như không khác.</dd>
+  </dl>
+
+  <h2>Phần mật mã</h2>
+  <dl class="gloss">
+    <dt>Lattice (dàn điểm)</dt><dd>Lưới điểm đều trong không gian nhiều chiều; nền của mật mã hậu lượng tử.</dd>
+    <dt>BDLOP</dt><dd>Tên sơ đồ commitment trên lattice mà hệ dùng.</dd>
+    <dt>Opening proof (chứng minh mở)</dt><dd>Bằng chứng “tôi biết cách mở niêm phong” mà không lộ bí mật.</dd>
+    <dt>Fiat–Shamir có abort</dt><dd>Cách biến đối thoại hỏi–đáp thành một bằng chứng tĩnh bằng hàm băm; “có abort” = đôi khi phải thử lại để không rò rỉ bí mật.</dd>
+    <dt>M-SIS / M-LWE</dt><dd>Hai bài toán lattice khó. M-SIS giữ “không tráo được” (binding); M-LWE giữ “không nhìn ra bí mật” (hiding).</dd>
+    <dt>Statement (đề bài)</dt><dd>Mã tóm tắt ràng buộc bằng chứng vào đúng video và đúng phiên.</dd>
+    <dt>Thử thách phiên (session challenge)</dt><dd>Một giá trị dùng-một-lần do người kiểm tra cấp, để chống phát lại.</dd>
+    <dt>Replay / Tamper</dt><dd>Phát lại một video hợp lệ cũ / sửa đổi video. Cả hai đều bị từ chối.</dd>
+    <dt>Linkage / Disclosure</dt><dd>Chứng minh hai video cùng một bí mật / tiết lộ payload cho đúng một người mà không lộ khoá.</dd>
+    <dt>Credential / Payload</dt><dd>Bí mật được cam kết: credential (chế độ registered) hoặc payload ẩn (in-band).</dd>
+  </dl>
+
+  <div class="next"><a href="ket-qua.html">← Kết quả & hạn chế</a><a href="index.html">Về Tổng quan →</a></div>
+  <p class="foot">Hết. Quay lại <a href="index.html">Tổng quan</a>, hoặc mở bản chạy thật trong <code>webdemo/</code>.</p>
+
+</div></main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

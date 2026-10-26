@@ -4,7 +4,7 @@ Mục đích: điểm vào cho người tiếp nhận dự án; liệt kê từn
 cập nhật: 2026-10-22
 
 Bộ tài liệu này viết cho người **tiếp nhận và duy trì** hệ thống giấu tin
-lattice-ZK trong video H.264 (parameter set sản xuất `bdlop-open-128-v2`,
+lattice-ZK trong video H.264 (parameter set sản xuất `bdlop-open-128-v3`,
 mã nguồn trong `src/lattice_zk/`). Nó tóm tắt và liên kết tới các tài liệu kỹ
 thuật tiếng Anh đã có (`docs/LATTICE_ZK_BDLOP_SPEC.md`, `docs/paper/`,
 `docs/review/`), **không thay thế** chúng.
@@ -47,3 +47,17 @@ thuật tiếng Anh đã có (`docs/LATTICE_ZK_BDLOP_SPEC.md`, `docs/paper/`,
 8. Hướng dẫn tái lập đầy đủ (dữ liệu Xiph, mã hóa cover, bảng kết quả): `ARTIFACT.md`.
 9. Bản đồ di dời file sau đợt dọn dẹp 10/2026: git history; phần dọn dẹp còn lại: `08_don_dep_con_lai.md`.
 10. Tài liệu mật mã chính thức: `docs/LATTICE_ZK_BDLOP_SPEC.md`; gói review ngoài: `docs/review/`.
+
+## Bổ sung 2026-10-26
+
+- `docs/LATTICE_ZK_BDLOP_SPEC.md` §2, §3.7 — bộ `bdlop-open-128-v3`, envelope
+  phiên bản 2 (đính kèm range proof), phiên offline theo epoch.
+- `docs/CABAC_SUPPORT.md` — hỗ trợ H.264 Main/High (CABAC): thiết kế, dạng
+  chuẩn tắc, carrier, digest, cách chạy, kết quả, giới hạn.
+- `docs/ROBUST_MODE.md` — chế độ bền với nén lại (semi-fragile): thiết kế,
+  tham số đã hiệu chuẩn, kết quả benchmark, giới hạn.
+- `docs/review/INTERNAL_REVIEW_SOUNDNESS.md` — review soundness đối kháng nội
+  bộ và các sửa đã áp dụng.
+- `research/bdlop_params/CROSSCHECK.md` (mục v3) — đối chiếu lattice-estimator.
+- `scripts/ops/system_e2e_v3.sh` — E2E toàn hệ dưới v3 (gồm `inband_range32`,
+  `reg_codec_v1`).

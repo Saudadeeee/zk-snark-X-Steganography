@@ -70,13 +70,13 @@ phần dư CAVLC của một luồng bit H.264 Baseline và kiểm chứng nó t
 được, không cần tệp phụ, hộp siêu dữ liệu hay quyền truy cập vào vật phủ. Chứng
 minh là một chứng minh hiểu biết (proof of knowledge) theo kiểu
 Fiat--Shamir-with-aborts về một phần mở của một cam kết BDLOP, được hiện thực
-ở mức core-SVP ước lượng 140 bit cổ điển và 127 bit lượng tử cho tính ràng buộc
+ở mức core-SVP ước lượng 172 bit cổ điển và 156 bit lượng tử cho tính ràng buộc
 (164/150 bit cho tính che giấu). Phát biểu của nó ràng buộc một digest đã chuẩn
 hóa theo vật mang của video, các vị trí vật mang do bên kiểm chứng tính lại, một
 thách thức dùng-một-lần của bên kiểm chứng và một sổ đăng ký quan hệ được bên
 phát hành ký; việc chuẩn hóa theo vật mang phá vỡ tính vòng tròn giữa một chứng
-minh và video chứa nó. Hai chế độ được hỗ trợ: một envelope 8\,165 byte chứng
-minh việc sở hữu một chứng chỉ đã đăng ký, và một envelope 14\,885 byte cam kết
+minh và video chứa nó. Hai chế độ được hỗ trợ: một envelope 8\,741 byte chứng
+minh việc sở hữu một chứng chỉ đã đăng ký, và một envelope 16\,421 byte cam kết
 với một tải trọng ẩn mà về sau có thể được tiết lộ hoặc liên kết tới một cam kết
 khác. Trên các chuỗi CIF và 4CIF chuẩn, mọi lần chạy hoàn tất đều kiểm chứng
 được chỉ từ video stego và, ở những nơi được thử nghiệm, đã từ chối các phiên bị
@@ -142,9 +142,9 @@ góp của chúng tôi là:
   không bao giờ đọc một trường nào của phát biểu từ video, điều này đem lại khả
   năng chống phát lại và neo niềm tin tại bên kiểm chứng.
 \item \textbf{Hai chế độ chứng minh và liên kết.} Một chế độ đã đăng ký chứng
-  minh việc sở hữu một chứng chỉ do bên phát hành đăng ký (envelope 8\,165
+  minh việc sở hữu một chứng chỉ do bên phát hành đăng ký (envelope 8\,741
   byte), và một chế độ in-band cam kết với một tải trọng ẩn lên tới 766 byte
-  (envelope 14\,885 byte) mà về sau có thể được tiết lộ hoặc liên kết, bằng một
+  (envelope 16\,421 byte) mà về sau có thể được tiết lộ hoặc liên kết, bằng một
   chứng minh đẳng thức, tới một video khác hoặc tới một chứng chỉ mà không bị lộ.
 \item \textbf{Một hiện thực và đánh giá cụ thể, tái lập được.} Chúng tôi đưa ra
   một bộ tham số kèm các ước lượng core-SVP và các vector câu-trả-lời-đã-biết
@@ -486,23 +486,27 @@ Bảng~\ref{tab:params} liệt kê bộ tham số sản xuất. Với việc che
 lại tính không tiết lộ tri thức mà không cần một bộ lấy mẫu Gauss; cái giá là
 chuẩn trích xuất lớn hơn, nên tính ràng buộc được ước lượng cho cận $\ell_\infty$
 $8\kappa B$ thay vì tái dùng từ~\cite{ref:bdlop}. Xác suất chấp nhận mỗi lần thử
-là $((2B+1)/2\gamma)^{kN}\approx0.191$ (kỳ vọng 5.23 lần thử; đo được 4.68 qua
-50 lần chạy với \texttt{bdlop-open-128-v1}\todo{v2 measurement}). Chi phí core-SVP được tính bằng các
+là $((2B+1)/2\gamma)^{kN}\approx0.170$ (kỳ vọng 5.9 lần thử; với bộ trước đó
+\texttt{bdlop-open-128-v2}, $k=14$: 0.191); đo được 4.36 lần thử trung bình
+qua 50 lần chạy với bộ v3 (\texttt{benchmark/results/q2/crypto\_bench\_v3.json}).
+Chi phí core-SVP được tính bằng các
 script ước lượng CRYSTALS~\cite{ref:crystalsestimates}, bỏ qua các tổn thất do
 rút gọn như với ML-DSA. Một kiểm tra chéo độc lập với
 lattice-estimator~\cite{ref:aps15,ref:latticeestimator} (commit
-\texttt{e4333d9}, cùng mô hình core-SVP) tái lập ước lượng M-SIS ($\beta=480$,
-140/127 bit) và ước lượng M-LWE nguyên thủy (primal) ($\beta=580$, 169/154 bit;
-169/153 với các script CRYSTALS). Tấn công lai đối ngẫu (dual-hybrid) của nó lên
-M-LWE rẻ hơn một chút ($\beta=564$, $2^{164.9}$ cổ điển; $\beta=567$,
-$2^{150.3}$ lượng tử), nên chúng tôi lấy 164/150 bit cho tính che giấu
-(Bảng~\ref{tab:params}). Ước lượng tính ràng buộc lượng tử, 127 bit, chỉ vừa
-dưới 128. Nới lỏng $\ell_2$ của cận ràng buộc vượt quá $q$, nên tính ràng buộc
-dựa trên ước lượng $\ell_\infty$. Dưới mô hình chi phí mặc định của bộ ước lượng,
-mọi tấn công vào một trong hai thể hiện đều tốn ít nhất $2^{170}$. Bộ trước đó
-\texttt{bdlop-open-128-v1} ($\lambda=6$, $k=13$) có cùng ước lượng ràng buộc
-nhưng chỉ 135/123 bit cho tính che giấu (lai đối ngẫu, $\beta=463$); đây là lý
-do bộ sản xuất nâng hạng M-LWE lên $\lambda=7$.
+\texttt{e4333d9}, cùng mô hình core-SVP) tái lập ước lượng M-SIS ($\beta=589$,
+172.0/156.1 bit) và ước lượng M-LWE nguyên thủy (primal) ($\beta=580$,
+169.4/153.7 bit; 169/153 với các script CRYSTALS). Tấn công lai đối ngẫu
+(dual-hybrid) của nó lên M-LWE rẻ hơn một chút ($\beta=564$, $2^{164.9}$ cổ
+điển; $\beta=567$, $2^{150.3}$ lượng tử), nên chúng tôi lấy 164/150 bit cho
+tính che giấu (Bảng~\ref{tab:params}). Nới lỏng $\ell_2$ của cận ràng buộc
+vượt quá $q$, nên tính ràng buộc dựa trên ước lượng $\ell_\infty$. Dưới mô hình
+chi phí mặc định của bộ ước lượng (MATZOV), mọi tấn công vào một trong hai thể
+hiện đều tốn ít nhất $2^{189}$. Hai bộ trước đó vẫn được định nghĩa:
+\texttt{bdlop-open-128-v2} ($n=6$, $k=14$) có tính ràng buộc 140/127 bit --
+ước lượng lượng tử chỉ vừa dưới 128, lý do bộ sản xuất nâng hạng M-SIS lên
+$n=7$ với giá là envelope lớn hơn 7\,\%; và \texttt{bdlop-open-128-v1}
+($\lambda=6$, $k=13$) chỉ có 135/123 bit cho tính che giấu (lai đối ngẫu,
+$\beta=463$), lý do nâng hạng M-LWE lên $\lambda=7$.
 
 \subsection{Envelope, sổ đăng ký và phiên}
 Envelope là
@@ -511,7 +515,7 @@ E_{\mathrm{in}}  &= \texttt{"ZKLB"}\,\|\,\texttt{0x01}\,\|\,\pid\,\|\,N_s\,\|\,t
 E_{\mathrm{reg}} &= \texttt{"ZKLR"}\,\|\,\texttt{0x01}\,\|\,\pid\,\|\,N_s\,\|\,\pi,
 \end{align*}
 cho các chế độ in-band và đã đăng ký. Trong chế độ in-band, một cam kết mới $t$
-(6\,720 byte) với tải trọng di chuyển trong video; tải trọng được mã hóa đơn
+(7\,680 byte) với tải trọng di chuyển trong video; tải trọng được mã hóa đơn
 ánh vào $N$ hệ số và dài tối đa 766 byte. Trong chế độ đã đăng ký, $t$ là cam
 kết chứng chỉ của bên nắm giữ, có các byte đi vào giá trị băm khóa-kiểm-chứng mà
 bên phát hành ký vào sổ đăng ký, nên chỉ bên nắm giữ chứng chỉ mới có thể tạo ra
@@ -533,14 +537,14 @@ thức là đã tiêu thụ nếu việc kiểm chứng thành công.
 \subsection{Liên kết và tiết lộ}
 \label{sec:linkage}
 Một bên nắm giữ hai phần mở có thể chứng minh rằng hai cam kết giấu cùng một
-tải trọng bằng chứng minh đẳng thức (16\,160 byte), được ràng buộc vào hai cam
+tải trọng bằng chứng minh đẳng thức (17\,312 byte), được ràng buộc vào hai cam
 kết và vào một ngữ cảnh chẳng hạn hai định danh phát biểu. Điều này liên kết hai
 video in-band tới một tải trọng, hoặc liên kết một video in-band tới một chứng
 chỉ đã đăng ký sau đó, mà không tiết lộ tải trọng. Một bên nắm giữ cũng có thể
 tiết lộ tải trọng cho một bên được chọn mà không tiết lộ tính ngẫu nhiên: việc
 tiết lộ là tải trọng kèm một chứng minh đẳng thức giữa cam kết đã trích xuất và
 cam kết tất định với tải trọng dưới tính ngẫu nhiên bằng không, được ràng buộc
-vào định danh phát biểu và nonce của bên nhận (16\,160 byte chứng minh). Bên
+vào định danh phát biểu và nonce của bên nhận (17\,312 byte chứng minh). Bên
 nhận biết được tải trọng nhưng không thể tái dùng cam kết trong các chứng minh
 mới.
 
@@ -644,20 +648,21 @@ biểu, việc giả mạo envelope, việc ghim và quay lui sổ đăng ký, v
 phiên, việc liên kết, CLI, và các vector câu-trả-lời-đã-biết chính xác từng
 byte cho bộ tham số.
 
-\paragraph{Kích thước} Cam kết 6\,720~B, chứng minh mở 8\,096~B (một hạt giống
+\paragraph{Kích thước} Cam kết 7\,680~B, chứng minh mở 8\,672~B (một hạt giống
 thách thức 32 byte và $kN$ đáp ứng mỗi cái 18 bit), chứng minh đẳng thức
-16\,160~B, header envelope 69~B; do đó 8\,165~B (đã đăng ký) và 14\,885~B
+17\,312~B, header envelope 69~B; do đó 8\,741~B (đã đăng ký) và 16\,421~B
 (in-band) trong video, cộng thêm 23~B đóng khung mỗi chunk.
 
-\paragraph{Thời gian} Trên máy đánh giá (một luồng, rảnh rỗi), các thời gian
-trung vị qua 50 lần chạy là 21\,ms để cam kết, 120\,ms để chứng minh (phân vị
-thứ 95 là 302\,ms) và 22\,ms để kiểm chứng một phần mở, và 0.97\,s cùng 46\,ms
-cho chứng minh đẳng thức (đo với \texttt{bdlop-open-128-v1})\todo{v2 measurement}. Do đó mật mã là
-không đáng kể xét trên toàn trình đầu-cuối: việc nhúng và kiểm chứng một clip
-mất vài phút và bị chi phối bởi việc phân tích và vá CAVLC bằng Python
-(Bảng~\ref{tab:e2e}). Một đường kiểm chứng nhanh hơn đang được phát triển;
-\todo{update verification times after the verification
-speed-up (roadmap A2)}.
+\paragraph{Thời gian} Trên máy đánh giá (một luồng; trong lúc một lần chạy
+đầu-cuối khác chiếm bốn lõi), các thời gian trung vị qua 50 lần chạy với
+\texttt{bdlop-open-128-v3} là 50\,ms để cam kết, 221\,ms để chứng minh (phân vị
+thứ 95 là 671\,ms) và 53\,ms để kiểm chứng một phần mở, và 2.8\,s cùng
+111\,ms cho chứng minh đẳng thức
+(\texttt{benchmark/results/q2/crypto\_bench\_v3.json}; với bộ v1 trên máy rảnh:
+21, 120, 22\,ms và 0.97\,s, 46\,ms). Do đó mật mã là không đáng kể xét trên
+toàn trình đầu-cuối: việc nhúng và kiểm chứng một clip mất vài phút và bị chi
+phối bởi việc phân tích và vá CAVLC bằng Python (Bảng~\ref{tab:e2e},
+Bảng~\ref{tab:system-v3}).
 
 \paragraph{Vì sao không dùng đường mã hóa gốc (native)} Việc nhúng bên trong một
 bộ mã hóa sẽ làm thay đổi các điểm ảnh tham chiếu được tái dựng, và cùng với
@@ -727,6 +732,22 @@ chunk đồng nhất; ở QP~18 nó kiểm chứng được qua bốn đoạn (4
 36.6\,dB).\todo{v2 measurement}
 
 \input{tables/paper_e2e}
+
+\paragraph{Kiểm tra toàn hệ dưới bộ tham số sản xuất}
+Bảng~\ref{tab:system-v3} báo cáo lần chạy kiểm tra toàn hệ ngày 26/10/2026 dưới
+\texttt{bdlop-open-128-v3} với chính sách codec v2 làm mặc định
+(\texttt{scripts/ops/system\_e2e\_v3.sh}): mỗi chế độ nhúng, kiểm chứng chỉ từ
+video stego, rồi bị từ chối khi phát lại phiên đã tiêu thụ và khi một bit bị
+lật. Các kiểm tra bổ sung cũng đạt: một byte không thêm vào sau bit dừng RBSP
+của một đơn vị NAL mang vật mang bị từ chối dưới chính sách v2 (và được ghi nhận
+là không bị ràng buộc dưới v1), một kế hoạch chunk thích nghi khác bị từ chối,
+việc lật một bit trong một lát P của luồng GOP~8 bị từ chối, và lần chạy in-band
+kiểm chứng thêm liên kết với một chứng chỉ cùng một lần tiết lộ. So với bộ v2,
+PSNR của các khung bị sửa đổi thấp hơn 0.4--0.8\,dB vì envelope lớn hơn 7\,\%.
+Thời gian được đo trong khi máy chạy song song các việc khác và chỉ có tính
+tham khảo.
+
+\input{tables/system_e2e_v3}
 
 \subsection{Phân tích giấu tin}
 \paragraph{Cổ điển} Các phép kiểm thử có chủ đích đối chiếu với đúng bản gốc,
@@ -948,11 +969,16 @@ trợ; các luồng có lát P mang chứng minh chỉ trong các lát IDR
 (Mục~\ref{sec:gop}), điều này chia dung lượng cho độ dài GOP. Một envelope đã
 đăng ký cần 65.3\,kbit, mà nội dung mượt và QP cao không cung cấp được trong vài
 trăm khung. Phụ lục~\ref{sec:binary-proof} đưa ra một chứng minh rằng một cam
-kết dưới cùng bộ tham số giấu một chuỗi nhị phân (43\,022 byte; 2.2\,s để chứng
-minh và 72\,ms để kiểm chứng, đo với \texttt{bdlop-binary-128-v1}\todo{v2 measurement}), được
+kết dưới cùng bộ tham số giấu một chuỗi nhị phân (45\,134 byte; trung vị 3.8\,s
+để chứng minh và 86\,ms để kiểm chứng với \texttt{bdlop-binary-128-v3},
+\texttt{benchmark/results/q2/binary\_proof\_bench\_v3.json}), được
 xây dựng từ các quan hệ hệ-số-hằng được nâng (lifted) và một bước tích kiểu
-ALS20~\cite{ref:als20,ref:lnp22} hoạt động trên vành hai-slot của chúng tôi. Nó
-chưa được gắn với mã hóa tải trọng 24 bit, vốn sẽ cần một chứng minh phân rã
+ALS20~\cite{ref:als20,ref:lnp22} hoạt động trên vành hai-slot của chúng tôi, và
+một chứng minh khoảng tải trọng gắn nó với mã hóa tải trọng 24 bit cho một độ
+dài công khai $L\le128$ byte (\texttt{bdlop-payload-range-128-v2}: 46\,670 byte
+cho $L\le32$, trung vị 6.3\,s / 100\,ms; 74\,318 byte cho $L=128$), chứng minh
+này nay có thể đính kèm vào envelope in-band (phiên bản envelope 2, được ràng
+buộc vào cùng phát biểu video). Nó vẫn lộ $L$ và cần một chứng minh phân rã
 bit, và phép hợp thành Fiat--Shamir-with-aborts nhiều vòng của nó được lập luận
 nhưng chưa được viết ra đầy đủ; các chứng minh khoảng (range proof) trên tải
 trọng vẫn còn bỏ ngỏ.

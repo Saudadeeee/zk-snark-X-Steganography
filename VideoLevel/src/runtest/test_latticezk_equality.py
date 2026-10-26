@@ -102,7 +102,7 @@ def test_production_parameters_prove_equality() -> None:
     params = BDLOP_OPEN_128
     commitments, randomness = _pair(params)
     proof = _prove(commitments, randomness, params)
-    assert len(proof) == 16_160
+    assert len(proof) == 17_312
     assert equality_proof.verify(params, STATEMENT, commitments[0], commitments[1], proof)
     assert not equality_proof.verify(params, b"other", commitments[0], commitments[1], proof)
 

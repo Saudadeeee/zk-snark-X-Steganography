@@ -1,6 +1,6 @@
 \begin{table}[t]
 \centering
-\caption{Bộ tham số \texttt{bdlop-open-128-v2} và các ước lượng core-SVP
+\caption{Bộ tham số sản xuất \texttt{bdlop-open-128-v3} và các ước lượng core-SVP
 (CRYSTALS security-estimates, commit \texttt{75c26949}; M-LWE lai đối ngẫu
 từ lattice-estimator, commit \texttt{e4333d9}).}
 \label{tab:params}
@@ -8,14 +8,15 @@ từ lattice-estimator, commit \texttt{e4333d9}).}
 \begin{tabular}{ll}
 \toprule
 $N$, $q$ & $256$, $2^{30}-35$ ($q\equiv5 \bmod 8$) \\
-$n$, $\lambda$, $k$ & $6$, $7$, $14$ \\
+$n$, $\lambda$, $k$ & $7$, $7$, $15$ \\
 $\kappa$, $\gamma$, $B$ & $60$, $2^{17}$, $2^{17}-61$ \\
 Challenge space & $2^{257}$ \\
-Commitment / opening proof & 6\,720 B / 8\,096 B \\
-Acceptance per attempt & 0.191 \\
-Equality (linkage) proof & 16\,160 B \\
+Commitment / opening proof & 7\,680 B / 8\,672 B \\
+Envelope registered / in-band & 8\,741 B / 16\,421 B \\
+Acceptance per attempt & 0.170 \\
+Equality (linkage) proof & 17\,312 B \\
 Max.\ in-band payload & 766 B \\
-M-SIS ($\ell_\infty\le8\kappa B\approx2^{25.9}$) & $\beta=480$: 140 / 127 bits \\
+M-SIS ($\ell_\infty\le8\kappa B\approx2^{25.9}$) & $\beta=589$: 172 / 156 bits \\
 M-LWE (rank $\lambda$, $n{+}1$ samples) & dual hybrid $\beta=564$ / $567$: 164 / 150 bits \\
 \quad (primal uSVP) & $\beta=580$: 169 / 153 bits \\
 \multicolumn{2}{l}{\footnotesize $\beta$: kích thước khối BKZ; core-SVP, cổ điển / lượng tử.} \\

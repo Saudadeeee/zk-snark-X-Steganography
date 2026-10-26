@@ -36,9 +36,16 @@ def linkage_statement(params: BdlopParams, context: tuple[bytes, ...]) -> bytes:
     return hashlib.sha3_256(encoded).digest()
 
 
-def envelope_commitment(params: BdlopParams, envelope: bytes) -> Commitment:
-    """Commitment carried by an in-band envelope extracted from a video."""
-    return video_proof.decode_envelope(params, envelope).commitment
+def envelope_commitment(
+    params: BdlopParams, envelope: bytes,
+    attachment: "video_proof.PayloadRangeAttachment | None" = None,
+) -> Commitment:
+    """Commitment carried by an in-band envelope extracted from a video.
+
+    ``attachment`` is the verifier-pinned payload range attachment of the
+    carrier profile, if any (envelope version 2).
+    """
+    return video_proof.decode_envelope(params, envelope, attachment).commitment
 
 
 def prove_linkage(

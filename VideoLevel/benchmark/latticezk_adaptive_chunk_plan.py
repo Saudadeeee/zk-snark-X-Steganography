@@ -32,7 +32,7 @@ from src.transport.adaptive_chunks import FRAMING_BYTES, AdaptiveChunkPlan, plan
 from src.transport.blind_payload_chunks import CHUNK_HEADER as V1_CHUNK_HEADER  # noqa: E402
 from src.transport.blind_payload_chunks import MAX_CHUNK_BYTES as V1_MAX_CHUNK_BYTES  # noqa: E402
 from src.lattice_zk import video_proof  # noqa: E402
-from src.lattice_zk.params import BDLOP_OPEN_128_V1, BDLOP_OPEN_128_V2  # noqa: E402
+from src.lattice_zk.params import BDLOP_OPEN_128_V1, BDLOP_OPEN_128_V2, BDLOP_OPEN_128_V3  # noqa: E402
 
 RESULTS = ROOT / "benchmark" / "results" / "q2"
 V1_FRAMING_BYTES = 14 + V1_CHUNK_HEADER.size  # ZKVP envelope header + ZKBC v1 header
@@ -112,7 +112,7 @@ def plan_case(name: str, scan_file: str, density: float, results: Path,
         "carrier_bits_per_segment": scan["carrier_bits_per_segment"],
         "chunk_plan": plan.descriptor(), "envelopes": {},
     }
-    for params in (BDLOP_OPEN_128_V2, BDLOP_OPEN_128_V1):
+    for params in (BDLOP_OPEN_128_V3, BDLOP_OPEN_128_V2, BDLOP_OPEN_128_V1):
         envelope = video_proof.envelope_size(params, registered=True)
         best = best_uniform_chunk(envelope, scan["carrier_bits_per_segment"], fill)
         report["envelopes"][params.name] = {
@@ -142,7 +142,7 @@ def main() -> int:
     if arguments.output is not None:
         arguments.output.write_text(text, encoding="utf-8")
     for case in reports:
-        production = case["envelopes"][BDLOP_OPEN_128_V2.name]
+        production = case["envelopes"][BDLOP_OPEN_128_V3.name]
         legacy = case["envelopes"][BDLOP_OPEN_128_V1.name]
         sys.stdout.write(
             f"{case['case']:24s} sweep-uniform={production['sweep_uniform_rule']['fits']!s:5s} "

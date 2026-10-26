@@ -14,32 +14,48 @@ import json
 import struct
 import subprocess
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
+from ..registry.zkp_registry import (
+    BDLOP_OPEN_ZKP_SUITE,
+    RelationRecord,
+    SignedZkpRelationRegistry,
+)
+from ..registry.zkp_sessions import SessionChallengeStore
+from ..transport import cabac_sync as cabac_transport
 from ..transport import gop_policy as gop_policies
 from ..transport import video_canonicalization as canonicalization
 from ..transport.adaptive_chunks import AdaptiveChunkPlan
-from ..registry.zkp_registry import BDLOP_OPEN_ZKP_SUITE, RelationRecord, SignedZkpRelationRegistry
-from ..registry.zkp_sessions import SessionChallengeStore
 from . import bdlop, video_proof
 from .params import BdlopParams
 from .video_proof import PayloadOpening, VerifierPins
 
 _DOMAIN = b"zkstego/lattice-zk/video-pipeline/v1/"
-# Codec policies name the canonical-digest scope a statement binds (D5).  The
-# v1 string and its identifier are unchanged, so existing videos, registries
-# and statements keep verifying; v2 is opt-in per carrier profile.
+# Codec policies name the canonical-digest scope a statement binds (D5).  v2
+# (full RBSP of carrier NAL units, tagged raw segments, pinned segmentation) is
+# the default for new profiles.  The v1 string and its identifier are
+# unchanged and stay selectable, so existing videos, registries and statements
+# keep verifying under the policy they were made with.
 CODEC_POLICY_V1 = "h264-baseline-cavlc/canonical-h264-carrier-normalized-sha256-v1"
 CODEC_POLICY_V2 = (
     "h264-baseline-cavlc/canonical-h264-carrier-normalized-sha256-v2"
     "/full-rbsp/tagged-raw-segments/segmentation=" + canonicalization.SEGMENTATION_RULE_V2
 )
-CODEC_POLICY = CODEC_POLICY_V1
+CODEC_POLICY = CODEC_POLICY_V2
+# Main/High profile CABAC streams (docs/CABAC_SUPPORT.md): carrier IDR slices
+# are bound as the canonical re-encoding of their carrier-normalised syntax and
+# must be canonical in the stego; ``transport.cabac_sync`` implements it.
+CODEC_POLICY_CABAC_V1 = (
+    "h264-main-high-cabac/canonical-cabac-syntax-carrier-normalized-sha256-v1"
+    "/full-nal/tagged-raw-segments/segmentation=" + canonicalization.SEGMENTATION_RULE_V2
+)
 CODEC_POLICIES = {
     CODEC_POLICY_V1: canonicalization.DIGEST_V1,
     CODEC_POLICY_V2: canonicalization.DIGEST_V2,
+    CODEC_POLICY_CABAC_V1: cabac_transport.DIGEST_CABAC_V1,
 }
 CONSTRAINT_MODULE = "bdlop-open-v1: knowledge of a relaxed opening of the in-band commitment"
 REGISTERED_CONSTRAINT_MODULE = (
@@ -87,12 +103,17 @@ class CarrierProfile:
     # Slice structure the transport accepts (``src.transport.gop_policy``). GOP > 1
     # streams need ``IDR_CARRIERS_INTER_RAW``; the default stays all-intra.
     gop_policy: str = gop_policies.ALL_INTRA
-    # Canonical-digest scope (D5); ``CODEC_POLICY_V2`` binds the full RBSP of
-    # carrier NAL units, tags raw segments and pins the segmentation rule.
-    codec_policy: str = CODEC_POLICY_V1
+    # Canonical-digest scope (D5); the default ``CODEC_POLICY_V2`` binds the
+    # full RBSP of carrier NAL units, tags raw segments and pins the
+    # segmentation rule.  ``CODEC_POLICY_V1`` keeps earlier identifiers.
+    codec_policy: str = CODEC_POLICY_V2
     # Opt-in capacity-adaptive ZKBC v2 transport (docs/CARRIERS_VA_CHUNKING.md).
     # ``None`` keeps the fixed ``chunk_bytes`` ZKBC v1 transport and its ids.
     chunk_plan: AdaptiveChunkPlan | None = None
+    # In-band only: pin a payload length and make the envelope carry a payload
+    # range proof for it (``video_proof.PayloadRangeAttachment``).  The length
+    # is public; holders pad to it (``video_proof.pad_payload``).
+    payload_range_length: int | None = None
 
     def __post_init__(self) -> None:
         gop_policies.require_policy(self.gop_policy)
@@ -102,19 +123,37 @@ class CarrierProfile:
                 raise ValueError("chunk_plan must be an AdaptiveChunkPlan")
             if self.chunk_bytes != DEFAULT_CHUNK_BYTES:
                 raise ValueError("an adaptive chunk plan replaces chunk_bytes; leave it at the default")
+        if self.payload_range_length is not None:
+            if self.registered:
+                raise ValueError("a payload range attachment applies to in-band profiles only")
+            length = self.payload_range_length
+            if not isinstance(length, int) or isinstance(length, bool) or length < 0:
+                raise ValueError("payload_range_length must be a non-negative int")
+
+    def attachment(self, params: BdlopParams) -> video_proof.PayloadRangeAttachment | None:
+        """The pinned envelope attachment for ``params``, or ``None``."""
+        if self.payload_range_length is None:
+            return None
+        return video_proof.payload_range_attachment(params, self.payload_range_length)
 
     @property
     def digest_policy(self) -> str:
         return CODEC_POLICIES[self.codec_policy]
 
     def profile_id(self, params: BdlopParams) -> bytes:
+        attachment = self.attachment(params)
         description: dict[str, Any] = {
             "contract": dataclasses.asdict(self.contract),
             "frames_per_segment": self.frames_per_segment,
             "chunk_bytes": self.chunk_bytes,
-            "envelope_bytes": video_proof.envelope_size(params, registered=self.registered),
+            "envelope_bytes": video_proof.envelope_size(
+                params, registered=self.registered, attachment=attachment
+            ),
             "registered": self.registered,
         }
+        # Only profiles that pin an attachment describe it: others keep their ids.
+        if attachment is not None:
+            description["payload_range"] = attachment.descriptor()
         # Omitted for the default so all-intra profiles keep their identifiers;
         # any other policy gives a different profile, policy hash and statement.
         if self.gop_policy != gop_policies.ALL_INTRA:
@@ -175,8 +214,8 @@ def require_codec_policy(codec_policy: str) -> str:
     return codec_policy
 
 
-def codec_policy_id(codec_policy: str = CODEC_POLICY_V1) -> bytes:
-    """Identifier of a codec policy; the default is the unchanged v1 identifier."""
+def codec_policy_id(codec_policy: str = CODEC_POLICY_V2) -> bytes:
+    """Identifier of a codec policy (default: the v2 policy new profiles use)."""
     require_codec_policy(codec_policy)
     return hashlib.sha256(_DOMAIN + b"codec-policy\0" + codec_policy.encode("ascii")).digest()
 
@@ -312,13 +351,17 @@ def public_sync_key(params: BdlopParams, profile: CarrierProfile) -> bytes:
     ).digest()
 
 
-def _default_transport() -> Transport:
+def _default_transport(profile: CarrierProfile | None = None) -> Transport:
+    if profile is not None and profile.codec_policy == CODEC_POLICY_CABAC_V1:
+        return cabac_transport  # type: ignore[return-value]
     from ..transport import blind_sync_streaming
 
     return blind_sync_streaming  # type: ignore[return-value]
 
 
-def _default_adaptive_transport() -> AdaptiveTransport:
+def _default_adaptive_transport(profile: CarrierProfile | None = None) -> AdaptiveTransport:
+    if profile is not None and profile.codec_policy == CODEC_POLICY_CABAC_V1:
+        return cabac_transport  # type: ignore[return-value]
     from ..transport import blind_sync_adaptive
 
     return blind_sync_adaptive  # type: ignore[return-value]
@@ -368,11 +411,14 @@ def embed_video_proof(
         raise ValueError("supply a payload for in-band profiles or a credential for registered ones")
     plan = profile.chunk_plan
     if plan is None:
-        channel = transport or _default_transport()
+        channel = transport or _default_transport(profile)
     else:
-        channel = transport or _default_adaptive_transport()
+        channel = transport or _default_adaptive_transport(profile)
     options = {**profile.options(), "progress_callback": progress_callback}
-    placeholder_envelope = video_proof.placeholder_envelope(params, registered=profile.registered)
+    attachment = profile.attachment(params)
+    placeholder_envelope = video_proof.placeholder_envelope(
+        params, registered=profile.registered, attachment=attachment
+    )
     if plan is None:
         placeholder = _chunks(placeholder_envelope, profile)
         context = channel.derive_chunked_video_context(
@@ -390,7 +436,9 @@ def embed_video_proof(
         canonical_video_sha256=bytes.fromhex(context.canonical_video_sha256),
     )
     if credential is None:
-        envelope, opening = video_proof.create_envelope(params, statement, payload)
+        envelope, opening = video_proof.create_envelope(
+            params, statement, payload, attachment=attachment
+        )
     else:
         opening = None
         envelope = video_proof.create_registered_envelope(
@@ -490,22 +538,25 @@ def verify_video_proof(
         allow_toy_parameters,
     )
     plan = profile.chunk_plan
+    attachment = profile.attachment(params)
     try:
         if plan is None:
-            channel = transport or _default_transport()
+            channel = transport or _default_transport(profile)
             extracted = channel.extract_chunked_video_payload(
                 video_path, sync_key, profile.contract,
                 **profile.options(), progress_callback=progress_callback,
             )
         else:
-            channel = transport or _default_adaptive_transport()
+            channel = transport or _default_adaptive_transport(profile)
             extracted = channel.extract_adaptive_video_payload(
                 video_path, sync_key, profile.contract, plan=plan,
-                payload_bytes=video_proof.envelope_size(params, registered=profile.registered),
+                payload_bytes=video_proof.envelope_size(
+                    params, registered=profile.registered, attachment=attachment
+                ),
                 **profile.options(), progress_callback=progress_callback,
             )
         in_band_session = video_proof.envelope_session(
-            params, extracted.payload, registered=profile.registered
+            params, extracted.payload, registered=profile.registered, attachment=attachment
         )
         if plan is None:
             canonical_chunks = tuple(_chunks(extracted.payload, profile))
@@ -532,7 +583,8 @@ def verify_video_proof(
         statement = statement_for(challenge)
         if credential is None:
             return video_proof.verify_envelope(
-                params, statement, extracted.payload, allow_toy_parameters=allow_toy_parameters
+                params, statement, extracted.payload, allow_toy_parameters=allow_toy_parameters,
+                attachment=attachment,
             )
         return video_proof.verify_registered_envelope(
             params, statement, credential, extracted.payload,
@@ -557,3 +609,40 @@ def verify_video_proof(
     return VerifyResult(
         True, "ok", statement.statement_id, extracted.carriers_used, extracted.payload
     )
+
+
+def verify_video_proof_offline(
+    video_path: str | Path, *, beacon: Any, issuer_public_key: bytes, ledger: Any,
+    now: int | None = None, **verify_arguments: Any,
+) -> VerifyResult:
+    """Verify under an issuer-signed epoch challenge without any interaction.
+
+    ``beacon`` is an :class:`~src.registry.epoch_challenges.EpochChallenge`
+    the holder bound the statement to; ``ledger`` is this verifier's
+    :class:`~src.registry.epoch_challenges.OfflineReplayLedger`.  The beacon
+    must verify under ``issuer_public_key`` and be current; a statement already
+    accepted under the same beacon is a replay.  ``verify_arguments`` are those
+    of :func:`verify_video_proof` except the session arguments.
+    """
+    from ..registry.epoch_challenges import EpochChallenge, OfflineReplayLedger
+
+    if not isinstance(beacon, EpochChallenge):
+        raise TypeError("beacon must be an EpochChallenge")
+    if not isinstance(ledger, OfflineReplayLedger):
+        raise TypeError("ledger must be an OfflineReplayLedger")
+    if "session_store" in verify_arguments or "expected_session" in verify_arguments:
+        raise ValueError("offline verification takes its session from the epoch challenge")
+    outcome: dict[str, VerifyResult] = {}
+
+    def check(challenge: bytes) -> bytes | None:
+        result = verify_video_proof(video_path, expected_session=challenge, **verify_arguments)
+        outcome["result"] = result
+        return result.statement_id if result.valid else None
+
+    accepted, reason = ledger.verify_and_record(beacon, issuer_public_key, verify=check, now=now)
+    result = outcome.get("result")
+    if accepted and result is not None:
+        return result
+    if result is not None and not result.valid:
+        return result
+    return VerifyResult(False, f"epoch challenge rejected: {reason}")

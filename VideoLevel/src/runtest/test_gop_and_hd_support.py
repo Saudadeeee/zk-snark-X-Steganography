@@ -185,7 +185,9 @@ def test_unknown_gop_policy_is_refused() -> None:
 @pytest.mark.parametrize("registered", [False, True])
 def test_all_intra_profile_identifiers_are_unchanged(name, registered) -> None:
     params = PARAMETER_SETS[name]
-    profile = pipeline.CarrierProfile(CONTRACT, registered=registered)
+    profile = pipeline.CarrierProfile(
+        CONTRACT, registered=registered, codec_policy=pipeline.CODEC_POLICY_V1
+    )
     assert profile.profile_id(params).hex() == BASELINE_PROFILE_IDS[(name, registered)]
     assert pipeline.policy_hash(params, profile) == BASELINE_POLICY_HASHES[(name, registered)]
     assert profile.options() == {"frames_per_segment": 100}
@@ -198,7 +200,8 @@ def test_gop_policy_gives_distinct_profile_policy_and_relation() -> None:
     assert inter.profile_id(TOY) != intra.profile_id(TOY)
     assert pipeline.policy_hash(TOY, inter) != pipeline.policy_hash(TOY, intra)
     assert pipeline.relation_id(TOY, inter, commitment) != pipeline.relation_id(TOY, intra, commitment)
-    assert inter.options() == {"frames_per_segment": 100, "gop_policy": GOP}
+    # codec policy v2 is the default, so the options also name its digest policy
+    assert inter.options() == {"frames_per_segment": 100, "gop_policy": GOP, "digest_policy": inter.digest_policy}
 
 
 # --------------------------------------------------------------------------- #

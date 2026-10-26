@@ -1,0 +1,2040 @@
+{
+  "date": "2026-10-26",
+  "transcodes": {
+    "x264_crf18": [
+      "-c:v",
+      "libx264",
+      "-crf",
+      "18"
+    ],
+    "x264_crf23": [
+      "-c:v",
+      "libx264",
+      "-crf",
+      "23"
+    ],
+    "x264_crf28": [
+      "-c:v",
+      "libx264",
+      "-crf",
+      "28"
+    ],
+    "x265_crf23": [
+      "-c:v",
+      "libx265",
+      "-crf",
+      "23",
+      "-x265-params",
+      "log-level=error"
+    ],
+    "x264_main_cabac_crf23": [
+      "-c:v",
+      "libx264",
+      "-profile:v",
+      "main",
+      "-coder",
+      "1",
+      "-bf",
+      "2",
+      "-crf",
+      "23"
+    ]
+  },
+  "tamper": {
+    "patch": {
+      "size": 48,
+      "frame": 150,
+      "at": [
+        120,
+        150
+      ],
+      "from": [
+        16,
+        16
+      ]
+    },
+    "drop_frame": 100,
+    "swap_frames": [
+      60,
+      240
+    ],
+    "downscale": "half"
+  },
+  "runs": [
+    {
+      "clip": "container_cif",
+      "mode": "registered",
+      "parameter_set": "bdlop-open-128-v3",
+      "frames": 300,
+      "resolution": "352x288",
+      "profile": {
+        "policy": "robust/decoded-yuv420p8-luma/qim-dct16-low-ac/temporal-groups/conv-k7-crc32/fingerprint-cell-mean-v1",
+        "registered": true,
+        "envelope_bytes": 8741,
+        "step": 64.0,
+        "coefficients": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            2,
+            1
+          ],
+          [
+            2,
+            2
+          ],
+          [
+            0,
+            3
+          ],
+          [
+            3,
+            0
+          ]
+        ],
+        "block": 16,
+        "group": 3,
+        "fingerprint": {
+          "block": 64,
+          "step": 4
+        },
+        "tolerance": {
+          "hard_delta": 3,
+          "drift_delta": 2,
+          "max_drift_fraction": 0.002
+        },
+        "max_frame_ber": 0.42
+      },
+      "envelope_bytes": 8741,
+      "fingerprint_bytes": 6771,
+      "message_bytes": 15529,
+      "code_rate": "1/3",
+      "coded_bits": 372714,
+      "capacity_slots": 396000,
+      "repetitions": 1.062,
+      "watermark_psnr_db": 36.88,
+      "stego_psnr_db": 36.34,
+      "stego_ssim": 0.9378,
+      "stego_bytes": 2630841,
+      "embed_seconds": 3.8,
+      "cases": {
+        "stego": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0003,
+          "max_frame_ber": 0.0028,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 13.4,
+          "file_bytes": 2630841,
+          "outcome_as_expected": true
+        },
+        "x264_crf18": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0163,
+          "max_frame_ber": 0.0437,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 27,
+          "damaged_window_frames": [
+            19,
+            23,
+            25,
+            32,
+            41,
+            57,
+            59,
+            61,
+            89,
+            114,
+            115,
+            125,
+            131,
+            135,
+            175,
+            197,
+            203,
+            211,
+            215,
+            221
+          ],
+          "verify_seconds": 8.6,
+          "file_bytes": 1166065,
+          "psnr_vs_cover_db": 35.78,
+          "outcome_as_expected": true
+        },
+        "x264_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0663,
+          "max_frame_ber": 0.1806,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 57,
+          "damaged_window_frames": [
+            6,
+            9,
+            17,
+            22,
+            26,
+            30,
+            35,
+            38,
+            39,
+            42,
+            57,
+            58,
+            62,
+            66,
+            70,
+            71,
+            74,
+            90,
+            102,
+            103
+          ],
+          "verify_seconds": 9.2,
+          "file_bytes": 580104,
+          "psnr_vs_cover_db": 35.02,
+          "outcome_as_expected": true
+        },
+        "x264_crf28": {
+          "expected": "accept",
+          "valid": false,
+          "reason": "watermark not recoverable: message CRC-32 mismatch",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 7.8,
+          "file_bytes": 262672,
+          "psnr_vs_cover_db": 33.46,
+          "outcome_as_expected": false
+        },
+        "x265_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0287,
+          "max_frame_ber": 0.0836,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 108,
+          "damaged_window_frames": [
+            5,
+            11,
+            15,
+            17,
+            21,
+            23,
+            25,
+            31,
+            35,
+            41,
+            45,
+            47,
+            51,
+            57,
+            63,
+            65,
+            69,
+            71,
+            75,
+            77
+          ],
+          "verify_seconds": 7.9,
+          "file_bytes": 596655,
+          "psnr_vs_cover_db": 35.61,
+          "outcome_as_expected": true
+        },
+        "x264_main_cabac_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0792,
+          "max_frame_ber": 0.153,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 26,
+          "damaged_window_frames": [
+            11,
+            17,
+            23,
+            29,
+            41,
+            47,
+            82,
+            89,
+            98,
+            106,
+            129,
+            131,
+            136,
+            147,
+            158,
+            167,
+            168,
+            175,
+            189,
+            209
+          ],
+          "verify_seconds": 7.7,
+          "file_bytes": 585673,
+          "psnr_vs_cover_db": 34.96,
+          "outcome_as_expected": true
+        },
+        "tamper_patch_48x48": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "content changed: a cell moved 4 steps",
+          "raw_ber": 0.0009,
+          "max_frame_ber": 0.0194,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 4,
+          "flagged_cells": [
+            [
+              150,
+              1,
+              2,
+              2
+            ],
+            [
+              150,
+              2,
+              2,
+              4
+            ]
+          ],
+          "flagged_cell_count": 2,
+          "damaged_window_count": 2,
+          "damaged_window_frames": [
+            150
+          ],
+          "verify_seconds": 8.6,
+          "file_bytes": 2511035,
+          "outcome_as_expected": true
+        },
+        "tamper_drop_frame": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "watermark not recoverable: message CRC-32 mismatch",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 8.3,
+          "file_bytes": 2458878,
+          "outcome_as_expected": true
+        },
+        "tamper_swap_frames": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "2 frame(s) do not carry their watermark (dropped, swapped or replaced)",
+          "raw_ber": 0.0042,
+          "max_frame_ber": 0.5018,
+          "bad_frames": [
+            60,
+            240
+          ],
+          "bad_frame_count": 2,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 9.0,
+          "file_bytes": 2525241,
+          "outcome_as_expected": true
+        },
+        "tamper_downscale_half": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "video rejected: ValueError: clip carries 99000 slots but the envelope needs 172876 coded bits; use a longer or larger clip",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 0.2,
+          "file_bytes": 386111,
+          "outcome_as_expected": true
+        }
+      },
+      "session_replay": {
+        "first_valid": true,
+        "replay_valid": false,
+        "replay_reason": "proof, statement binding, or session challenge rejected"
+      }
+    },
+    {
+      "clip": "container_cif",
+      "mode": "in-band",
+      "parameter_set": "bdlop-open-128-v3",
+      "frames": 300,
+      "resolution": "352x288",
+      "profile": {
+        "policy": "robust/decoded-yuv420p8-luma/qim-dct16-low-ac/temporal-groups/conv-k7-crc32/fingerprint-cell-mean-v1",
+        "registered": false,
+        "envelope_bytes": 16421,
+        "step": 80.0,
+        "coefficients": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            2,
+            1
+          ],
+          [
+            2,
+            2
+          ],
+          [
+            0,
+            3
+          ],
+          [
+            3,
+            0
+          ]
+        ],
+        "block": 16,
+        "group": 3,
+        "fingerprint": {
+          "block": 64,
+          "step": 4
+        },
+        "tolerance": {
+          "hard_delta": 3,
+          "drift_delta": 2,
+          "max_drift_fraction": 0.002
+        },
+        "max_frame_ber": 0.42
+      },
+      "envelope_bytes": 16421,
+      "fingerprint_bytes": 6771,
+      "message_bytes": 23209,
+      "code_rate": "1/2",
+      "coded_bits": 371356,
+      "capacity_slots": 396000,
+      "repetitions": 1.066,
+      "watermark_psnr_db": 34.97,
+      "stego_psnr_db": 34.6,
+      "stego_ssim": 0.9143,
+      "stego_bytes": 2625254,
+      "embed_seconds": 4.6,
+      "cases": {
+        "stego": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0001,
+          "max_frame_ber": 0.001,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 29.6,
+          "file_bytes": 2625254,
+          "outcome_as_expected": true
+        },
+        "x264_crf18": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0057,
+          "max_frame_ber": 0.021,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 11,
+          "damaged_window_frames": [
+            11,
+            35,
+            89,
+            111,
+            165,
+            189,
+            201,
+            215,
+            227,
+            239,
+            291
+          ],
+          "verify_seconds": 12.5,
+          "file_bytes": 1204408,
+          "psnr_vs_cover_db": 34.21,
+          "outcome_as_expected": true
+        },
+        "x264_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0347,
+          "max_frame_ber": 0.0902,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 44,
+          "damaged_window_frames": [
+            6,
+            25,
+            27,
+            69,
+            71,
+            74,
+            82,
+            91,
+            105,
+            107,
+            117,
+            119,
+            121,
+            129,
+            141,
+            146,
+            152,
+            155,
+            163,
+            174
+          ],
+          "verify_seconds": 11.8,
+          "file_bytes": 628995,
+          "psnr_vs_cover_db": 33.73,
+          "outcome_as_expected": true
+        },
+        "x264_crf28": {
+          "expected": "accept",
+          "valid": false,
+          "reason": "watermark not recoverable: message CRC-32 mismatch",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 10.1,
+          "file_bytes": 297383,
+          "psnr_vs_cover_db": 32.63,
+          "outcome_as_expected": false
+        },
+        "x265_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0111,
+          "max_frame_ber": 0.0341,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 48,
+          "damaged_window_frames": [
+            3,
+            5,
+            9,
+            11,
+            15,
+            23,
+            27,
+            29,
+            33,
+            35,
+            45,
+            57,
+            65,
+            71,
+            75,
+            89,
+            99,
+            101,
+            111,
+            119
+          ],
+          "verify_seconds": 11.8,
+          "file_bytes": 615896,
+          "psnr_vs_cover_db": 34.28,
+          "outcome_as_expected": true
+        },
+        "x264_main_cabac_crf23": {
+          "expected": "accept",
+          "valid": false,
+          "reason": "watermark not recoverable: message CRC-32 mismatch",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 12.0,
+          "file_bytes": 646349,
+          "psnr_vs_cover_db": 33.71,
+          "outcome_as_expected": false
+        },
+        "tamper_patch_48x48": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "content changed: a cell moved 4 steps",
+          "raw_ber": 0.0003,
+          "max_frame_ber": 0.0169,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 4,
+          "flagged_cells": [
+            [
+              150,
+              1,
+              2,
+              2
+            ],
+            [
+              150,
+              2,
+              2,
+              4
+            ]
+          ],
+          "flagged_cell_count": 2,
+          "damaged_window_count": 2,
+          "damaged_window_frames": [
+            150
+          ],
+          "verify_seconds": 13.5,
+          "file_bytes": 2515168,
+          "outcome_as_expected": true
+        },
+        "tamper_drop_frame": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "watermark not recoverable: message CRC-32 mismatch",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 11.1,
+          "file_bytes": 2458704,
+          "outcome_as_expected": true
+        },
+        "tamper_swap_frames": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "2 frame(s) do not carry their watermark (dropped, swapped or replaced)",
+          "raw_ber": 0.0035,
+          "max_frame_ber": 0.4997,
+          "bad_frames": [
+            60,
+            240
+          ],
+          "bad_frame_count": 2,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 12.0,
+          "file_bytes": 2538320,
+          "outcome_as_expected": true
+        },
+        "tamper_downscale_half": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "video rejected: ValueError: clip carries 99000 slots but the envelope needs 295756 coded bits; use a longer or larger clip",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 0.2,
+          "file_bytes": 391946,
+          "outcome_as_expected": true
+        }
+      },
+      "session_replay": {
+        "first_valid": true,
+        "replay_valid": false,
+        "replay_reason": "proof, statement binding, or session challenge rejected"
+      }
+    },
+    {
+      "clip": "foreman_cif_300f",
+      "mode": "registered",
+      "parameter_set": "bdlop-open-128-v3",
+      "frames": 300,
+      "resolution": "352x288",
+      "profile": {
+        "policy": "robust/decoded-yuv420p8-luma/qim-dct16-low-ac/temporal-groups/conv-k7-crc32/fingerprint-cell-mean-v1",
+        "registered": true,
+        "envelope_bytes": 8741,
+        "step": 64.0,
+        "coefficients": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            2,
+            1
+          ],
+          [
+            2,
+            2
+          ],
+          [
+            0,
+            3
+          ],
+          [
+            3,
+            0
+          ]
+        ],
+        "block": 16,
+        "group": 3,
+        "fingerprint": {
+          "block": 64,
+          "step": 4
+        },
+        "tolerance": {
+          "hard_delta": 3,
+          "drift_delta": 2,
+          "max_drift_fraction": 0.002
+        },
+        "max_frame_ber": 0.42
+      },
+      "envelope_bytes": 8741,
+      "fingerprint_bytes": 6771,
+      "message_bytes": 15529,
+      "code_rate": "1/3",
+      "coded_bits": 372714,
+      "capacity_slots": 396000,
+      "repetitions": 1.062,
+      "watermark_psnr_db": 36.84,
+      "stego_psnr_db": 36.82,
+      "stego_ssim": 0.9204,
+      "stego_bytes": 2885909,
+      "embed_seconds": 4.4,
+      "cases": {
+        "stego": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0,
+          "max_frame_ber": 0.0,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 9.2,
+          "file_bytes": 2885909,
+          "outcome_as_expected": true
+        },
+        "x264_crf18": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0018,
+          "max_frame_ber": 0.0058,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 8.7,
+          "file_bytes": 1910040,
+          "psnr_vs_cover_db": 36.96,
+          "outcome_as_expected": true
+        },
+        "x264_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0248,
+          "max_frame_ber": 0.0465,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 15,
+          "damaged_window_frames": [
+            22,
+            30,
+            66,
+            88,
+            112,
+            136,
+            159,
+            163,
+            183,
+            199,
+            210,
+            235,
+            255,
+            280,
+            291
+          ],
+          "verify_seconds": 8.7,
+          "file_bytes": 1313620,
+          "psnr_vs_cover_db": 37.17,
+          "outcome_as_expected": true
+        },
+        "x264_crf28": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0985,
+          "max_frame_ber": 0.1434,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 25,
+          "damaged_window_frames": [
+            3,
+            4,
+            20,
+            44,
+            58,
+            60,
+            80,
+            83,
+            98,
+            107,
+            135,
+            136,
+            158,
+            163,
+            180,
+            185,
+            191,
+            195,
+            200,
+            203
+          ],
+          "verify_seconds": 7.5,
+          "file_bytes": 835999,
+          "psnr_vs_cover_db": 36.48,
+          "outcome_as_expected": true
+        },
+        "x265_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0064,
+          "max_frame_ber": 0.0177,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 4,
+          "damaged_window_frames": [
+            44,
+            99,
+            135,
+            233
+          ],
+          "verify_seconds": 8.7,
+          "file_bytes": 1316321,
+          "psnr_vs_cover_db": 37.24,
+          "outcome_as_expected": true
+        },
+        "x264_main_cabac_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.041,
+          "max_frame_ber": 0.0763,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 24,
+          "damaged_window_frames": [
+            5,
+            10,
+            20,
+            42,
+            47,
+            63,
+            74,
+            101,
+            107,
+            108,
+            113,
+            128,
+            149,
+            152,
+            200,
+            207,
+            210,
+            226,
+            235,
+            260
+          ],
+          "verify_seconds": 8.4,
+          "file_bytes": 1349573,
+          "psnr_vs_cover_db": 37.59,
+          "outcome_as_expected": true
+        },
+        "tamper_patch_48x48": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "content changed: a cell moved 8 steps",
+          "raw_ber": 0.0001,
+          "max_frame_ber": 0.0174,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 8,
+          "flagged_cells": [
+            [
+              150,
+              1,
+              2,
+              2
+            ],
+            [
+              150,
+              2,
+              2,
+              8
+            ]
+          ],
+          "flagged_cell_count": 2,
+          "damaged_window_count": 2,
+          "damaged_window_frames": [
+            150
+          ],
+          "verify_seconds": 13.0,
+          "file_bytes": 2946483,
+          "outcome_as_expected": true
+        },
+        "tamper_drop_frame": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "watermark not recoverable: message CRC-32 mismatch",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 17.2,
+          "file_bytes": 2943676,
+          "outcome_as_expected": true
+        },
+        "tamper_swap_frames": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "2 frame(s) do not carry their watermark (dropped, swapped or replaced)",
+          "raw_ber": 0.0033,
+          "max_frame_ber": 0.4962,
+          "bad_frames": [
+            60,
+            240
+          ],
+          "bad_frame_count": 2,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 8.8,
+          "file_bytes": 2975275,
+          "outcome_as_expected": true
+        },
+        "tamper_downscale_half": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "video rejected: ValueError: clip carries 99000 slots but the envelope needs 172876 coded bits; use a longer or larger clip",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 0.3,
+          "file_bytes": 705024,
+          "outcome_as_expected": true
+        }
+      },
+      "session_replay": {
+        "first_valid": true,
+        "replay_valid": false,
+        "replay_reason": "proof, statement binding, or session challenge rejected"
+      }
+    },
+    {
+      "clip": "foreman_cif_300f",
+      "mode": "in-band",
+      "parameter_set": "bdlop-open-128-v3",
+      "frames": 300,
+      "resolution": "352x288",
+      "profile": {
+        "policy": "robust/decoded-yuv420p8-luma/qim-dct16-low-ac/temporal-groups/conv-k7-crc32/fingerprint-cell-mean-v1",
+        "registered": false,
+        "envelope_bytes": 16421,
+        "step": 80.0,
+        "coefficients": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            2,
+            1
+          ],
+          [
+            2,
+            2
+          ],
+          [
+            0,
+            3
+          ],
+          [
+            3,
+            0
+          ]
+        ],
+        "block": 16,
+        "group": 3,
+        "fingerprint": {
+          "block": 64,
+          "step": 4
+        },
+        "tolerance": {
+          "hard_delta": 3,
+          "drift_delta": 2,
+          "max_drift_fraction": 0.002
+        },
+        "max_frame_ber": 0.42
+      },
+      "envelope_bytes": 16421,
+      "fingerprint_bytes": 6771,
+      "message_bytes": 23209,
+      "code_rate": "1/2",
+      "coded_bits": 371356,
+      "capacity_slots": 396000,
+      "repetitions": 1.066,
+      "watermark_psnr_db": 34.92,
+      "stego_psnr_db": 34.9,
+      "stego_ssim": 0.8863,
+      "stego_bytes": 3058560,
+      "embed_seconds": 7.3,
+      "cases": {
+        "stego": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0,
+          "max_frame_ber": 0.0,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 10.7,
+          "file_bytes": 3058560,
+          "outcome_as_expected": true
+        },
+        "x264_crf18": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0002,
+          "max_frame_ber": 0.0015,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 18.1,
+          "file_bytes": 2043655,
+          "psnr_vs_cover_db": 35.0,
+          "outcome_as_expected": true
+        },
+        "x264_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0099,
+          "max_frame_ber": 0.0212,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 3,
+          "damaged_window_frames": [
+            86,
+            269,
+            289
+          ],
+          "verify_seconds": 24.9,
+          "file_bytes": 1406854,
+          "psnr_vs_cover_db": 35.24,
+          "outcome_as_expected": true
+        },
+        "x264_crf28": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0615,
+          "max_frame_ber": 0.1005,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 38,
+          "damaged_window_frames": [
+            7,
+            9,
+            29,
+            33,
+            37,
+            49,
+            56,
+            58,
+            63,
+            70,
+            76,
+            80,
+            100,
+            104,
+            110,
+            127,
+            139,
+            145,
+            151,
+            160
+          ],
+          "verify_seconds": 11.3,
+          "file_bytes": 899997,
+          "psnr_vs_cover_db": 34.97,
+          "outcome_as_expected": true
+        },
+        "x265_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0014,
+          "max_frame_ber": 0.0053,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 11.7,
+          "file_bytes": 1358191,
+          "psnr_vs_cover_db": 35.37,
+          "outcome_as_expected": true
+        },
+        "x264_main_cabac_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0189,
+          "max_frame_ber": 0.0407,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 4,
+          "damaged_window_frames": [
+            93,
+            165,
+            245,
+            278
+          ],
+          "verify_seconds": 11.9,
+          "file_bytes": 1453767,
+          "psnr_vs_cover_db": 35.63,
+          "outcome_as_expected": true
+        },
+        "tamper_patch_48x48": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "content changed: a cell moved 8 steps",
+          "raw_ber": 0.0,
+          "max_frame_ber": 0.0144,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 8,
+          "flagged_cells": [
+            [
+              150,
+              1,
+              2,
+              2
+            ],
+            [
+              150,
+              2,
+              2,
+              8
+            ]
+          ],
+          "flagged_cell_count": 2,
+          "damaged_window_count": 2,
+          "damaged_window_frames": [
+            150
+          ],
+          "verify_seconds": 11.2,
+          "file_bytes": 3135329,
+          "outcome_as_expected": true
+        },
+        "tamper_drop_frame": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "watermark not recoverable: message CRC-32 mismatch",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 12.9,
+          "file_bytes": 3117458,
+          "outcome_as_expected": true
+        },
+        "tamper_swap_frames": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "2 frame(s) do not carry their watermark (dropped, swapped or replaced)",
+          "raw_ber": 0.0034,
+          "max_frame_ber": 0.5114,
+          "bad_frames": [
+            60,
+            240
+          ],
+          "bad_frame_count": 2,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 11.1,
+          "file_bytes": 3143773,
+          "outcome_as_expected": true
+        },
+        "tamper_downscale_half": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "video rejected: ValueError: clip carries 99000 slots but the envelope needs 295756 coded bits; use a longer or larger clip",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 0.2,
+          "file_bytes": 747795,
+          "outcome_as_expected": true
+        }
+      },
+      "session_replay": {
+        "first_valid": true,
+        "replay_valid": false,
+        "replay_reason": "proof, statement binding, or session challenge rejected"
+      }
+    },
+    {
+      "clip": "akiyo_cif",
+      "mode": "registered",
+      "parameter_set": "bdlop-open-128-v3",
+      "frames": 300,
+      "resolution": "352x288",
+      "profile": {
+        "policy": "robust/decoded-yuv420p8-luma/qim-dct16-low-ac/temporal-groups/conv-k7-crc32/fingerprint-cell-mean-v1",
+        "registered": true,
+        "envelope_bytes": 8741,
+        "step": 64.0,
+        "coefficients": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            2,
+            1
+          ],
+          [
+            2,
+            2
+          ],
+          [
+            0,
+            3
+          ],
+          [
+            3,
+            0
+          ]
+        ],
+        "block": 16,
+        "group": 3,
+        "fingerprint": {
+          "block": 64,
+          "step": 4
+        },
+        "tolerance": {
+          "hard_delta": 3,
+          "drift_delta": 2,
+          "max_drift_fraction": 0.002
+        },
+        "max_frame_ber": 0.42
+      },
+      "envelope_bytes": 8741,
+      "fingerprint_bytes": 6771,
+      "message_bytes": 15529,
+      "code_rate": "1/3",
+      "coded_bits": 372714,
+      "capacity_slots": 396000,
+      "repetitions": 1.062,
+      "watermark_psnr_db": 36.85,
+      "stego_psnr_db": 36.52,
+      "stego_ssim": 0.9228,
+      "stego_bytes": 1478733,
+      "embed_seconds": 3.7,
+      "cases": {
+        "stego": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0,
+          "max_frame_ber": 0.001,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 7.6,
+          "file_bytes": 1478733,
+          "outcome_as_expected": true
+        },
+        "x264_crf18": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0048,
+          "max_frame_ber": 0.0197,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 5,
+          "damaged_window_frames": [
+            23,
+            65,
+            131,
+            255,
+            279
+          ],
+          "verify_seconds": 7.6,
+          "file_bytes": 766221,
+          "psnr_vs_cover_db": 36.36,
+          "outcome_as_expected": true
+        },
+        "x264_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0392,
+          "max_frame_ber": 0.1048,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 37,
+          "damaged_window_frames": [
+            4,
+            9,
+            11,
+            27,
+            29,
+            31,
+            35,
+            45,
+            81,
+            83,
+            87,
+            91,
+            95,
+            104,
+            113,
+            115,
+            117,
+            120,
+            121,
+            133
+          ],
+          "verify_seconds": 7.9,
+          "file_bytes": 414682,
+          "psnr_vs_cover_db": 36.43,
+          "outcome_as_expected": true
+        },
+        "x264_crf28": {
+          "expected": "accept",
+          "valid": false,
+          "reason": "watermark not recoverable: message CRC-32 mismatch",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 7.2,
+          "file_bytes": 205664,
+          "psnr_vs_cover_db": 35.94,
+          "outcome_as_expected": false
+        },
+        "x265_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0184,
+          "max_frame_ber": 0.0568,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 35,
+          "damaged_window_frames": [
+            3,
+            15,
+            17,
+            29,
+            41,
+            45,
+            47,
+            56,
+            62,
+            66,
+            67,
+            77,
+            90,
+            92,
+            109,
+            135,
+            150,
+            162,
+            167,
+            183
+          ],
+          "verify_seconds": 8.3,
+          "file_bytes": 334139,
+          "psnr_vs_cover_db": 36.79,
+          "outcome_as_expected": true
+        },
+        "x264_main_cabac_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0872,
+          "max_frame_ber": 0.1803,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 4,
+          "damaged_window_frames": [
+            69,
+            153,
+            171,
+            291
+          ],
+          "verify_seconds": 7.8,
+          "file_bytes": 368014,
+          "psnr_vs_cover_db": 36.96,
+          "outcome_as_expected": true
+        },
+        "tamper_patch_48x48": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "content changed: a cell moved 4 steps",
+          "raw_ber": 0.0002,
+          "max_frame_ber": 0.0215,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 4,
+          "flagged_cells": [
+            [
+              150,
+              2,
+              2,
+              4
+            ]
+          ],
+          "flagged_cell_count": 1,
+          "damaged_window_count": 3,
+          "damaged_window_frames": [
+            150,
+            245
+          ],
+          "verify_seconds": 7.4,
+          "file_bytes": 1517759,
+          "outcome_as_expected": true
+        },
+        "tamper_drop_frame": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "watermark not recoverable: message CRC-32 mismatch",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 7.1,
+          "file_bytes": 1512871,
+          "outcome_as_expected": true
+        },
+        "tamper_swap_frames": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "2 frame(s) do not carry their watermark (dropped, swapped or replaced)",
+          "raw_ber": 0.0034,
+          "max_frame_ber": 0.4919,
+          "bad_frames": [
+            60,
+            240
+          ],
+          "bad_frame_count": 2,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 7.0,
+          "file_bytes": 1530899,
+          "outcome_as_expected": true
+        },
+        "tamper_downscale_half": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "video rejected: ValueError: clip carries 99000 slots but the envelope needs 172876 coded bits; use a longer or larger clip",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 0.2,
+          "file_bytes": 268309,
+          "outcome_as_expected": true
+        }
+      },
+      "session_replay": {
+        "first_valid": true,
+        "replay_valid": false,
+        "replay_reason": "proof, statement binding, or session challenge rejected"
+      }
+    },
+    {
+      "clip": "akiyo_cif",
+      "mode": "in-band",
+      "parameter_set": "bdlop-open-128-v3",
+      "frames": 300,
+      "resolution": "352x288",
+      "profile": {
+        "policy": "robust/decoded-yuv420p8-luma/qim-dct16-low-ac/temporal-groups/conv-k7-crc32/fingerprint-cell-mean-v1",
+        "registered": false,
+        "envelope_bytes": 16421,
+        "step": 80.0,
+        "coefficients": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            0,
+            2
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            1,
+            2
+          ],
+          [
+            2,
+            1
+          ],
+          [
+            2,
+            2
+          ],
+          [
+            0,
+            3
+          ],
+          [
+            3,
+            0
+          ]
+        ],
+        "block": 16,
+        "group": 3,
+        "fingerprint": {
+          "block": 64,
+          "step": 4
+        },
+        "tolerance": {
+          "hard_delta": 3,
+          "drift_delta": 2,
+          "max_drift_fraction": 0.002
+        },
+        "max_frame_ber": 0.42
+      },
+      "envelope_bytes": 16421,
+      "fingerprint_bytes": 6771,
+      "message_bytes": 23209,
+      "code_rate": "1/2",
+      "coded_bits": 371356,
+      "capacity_slots": 396000,
+      "repetitions": 1.066,
+      "watermark_psnr_db": 34.94,
+      "stego_psnr_db": 34.72,
+      "stego_ssim": 0.8926,
+      "stego_bytes": 1563013,
+      "embed_seconds": 3.5,
+      "cases": {
+        "stego": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0,
+          "max_frame_ber": 0.0003,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 10.9,
+          "file_bytes": 1563013,
+          "outcome_as_expected": true
+        },
+        "x264_crf18": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0014,
+          "max_frame_ber": 0.0073,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 1,
+          "damaged_window_frames": [
+            93
+          ],
+          "verify_seconds": 11.1,
+          "file_bytes": 823034,
+          "psnr_vs_cover_db": 34.62,
+          "outcome_as_expected": true
+        },
+        "x264_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0169,
+          "max_frame_ber": 0.0558,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 32,
+          "damaged_window_frames": [
+            21,
+            30,
+            33,
+            39,
+            45,
+            63,
+            69,
+            75,
+            77,
+            81,
+            95,
+            105,
+            111,
+            125,
+            133,
+            145,
+            159,
+            167,
+            176,
+            189
+          ],
+          "verify_seconds": 10.3,
+          "file_bytes": 470644,
+          "psnr_vs_cover_db": 34.77,
+          "outcome_as_expected": true
+        },
+        "x264_crf28": {
+          "expected": "accept",
+          "valid": false,
+          "reason": "watermark not recoverable: message CRC-32 mismatch",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 9.7,
+          "file_bytes": 244263,
+          "psnr_vs_cover_db": 34.65,
+          "outcome_as_expected": false
+        },
+        "x265_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.0047,
+          "max_frame_ber": 0.0182,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 11.1,
+          "file_bytes": 348736,
+          "psnr_vs_cover_db": 35.11,
+          "outcome_as_expected": true
+        },
+        "x264_main_cabac_crf23": {
+          "expected": "accept",
+          "valid": true,
+          "reason": "ok",
+          "raw_ber": 0.044,
+          "max_frame_ber": 0.1164,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 1,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 4,
+          "damaged_window_frames": [
+            18,
+            75,
+            180,
+            299
+          ],
+          "verify_seconds": 10.3,
+          "file_bytes": 428559,
+          "psnr_vs_cover_db": 35.34,
+          "outcome_as_expected": true
+        },
+        "tamper_patch_48x48": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "content changed: a cell moved 4 steps",
+          "raw_ber": 0.0001,
+          "max_frame_ber": 0.0197,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": 4,
+          "flagged_cells": [
+            [
+              150,
+              2,
+              2,
+              4
+            ]
+          ],
+          "flagged_cell_count": 1,
+          "damaged_window_count": 3,
+          "damaged_window_frames": [
+            150
+          ],
+          "verify_seconds": 10.4,
+          "file_bytes": 1549041,
+          "outcome_as_expected": true
+        },
+        "tamper_drop_frame": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "watermark not recoverable: message CRC-32 mismatch",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 10.5,
+          "file_bytes": 1580468,
+          "outcome_as_expected": true
+        },
+        "tamper_swap_frames": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "2 frame(s) do not carry their watermark (dropped, swapped or replaced)",
+          "raw_ber": 0.0032,
+          "max_frame_ber": 0.4843,
+          "bad_frames": [
+            60,
+            240
+          ],
+          "bad_frame_count": 2,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 10.5,
+          "file_bytes": 1569016,
+          "outcome_as_expected": true
+        },
+        "tamper_downscale_half": {
+          "expected": "reject",
+          "valid": false,
+          "reason": "video rejected: ValueError: clip carries 99000 slots but the envelope needs 295756 coded bits; use a longer or larger clip",
+          "raw_ber": null,
+          "max_frame_ber": null,
+          "bad_frames": [],
+          "bad_frame_count": 0,
+          "max_cell_delta": null,
+          "flagged_cells": [],
+          "flagged_cell_count": 0,
+          "damaged_window_count": 0,
+          "damaged_window_frames": [],
+          "verify_seconds": 0.2,
+          "file_bytes": 290921,
+          "outcome_as_expected": true
+        }
+      },
+      "session_replay": {
+        "first_valid": true,
+        "replay_valid": false,
+        "replay_reason": "proof, statement binding, or session challenge rejected"
+      }
+    }
+  ]
+}

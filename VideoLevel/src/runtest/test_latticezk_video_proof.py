@@ -142,7 +142,7 @@ def test_production_envelope_has_the_registered_wire_size() -> None:
         positions_hash=b"H" * 32, canonical_video_sha256=b"V" * 32,
     )
     data, opening = video_proof.create_envelope(BDLOP_OPEN_128, statement, b"p" * 100)
-    assert len(data) == 14_885
+    assert len(data) == 16_421
     assert video_proof.verify_envelope(BDLOP_OPEN_128, statement, data)
     assert video_proof.self_check_opening(BDLOP_OPEN_128, data, opening)
     disclosure = video_proof.create_disclosure(

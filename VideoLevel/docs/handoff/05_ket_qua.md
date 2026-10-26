@@ -3,8 +3,36 @@
 Mục đích: tổng hợp kết quả đã đo, phân biệt rõ số của v2, số v1-era, và phần còn hoãn.
 cập nhật: 2026-10-22
 
-> Quy ước phiên bản: envelope **8165 B (registered) / 14885 B (in-band)** là
-> `bdlop-open-128-v2`; envelope **7589 B / 14309 B** là `bdlop-open-128-v1`.
+## 0. Kiểm tra toàn hệ dưới v3 (2026-10-26)
+
+`scripts/ops/system_e2e_v3.sh` (codec policy v2 mặc định, `bdlop-open-128-v3`,
+`ZKSTEGO_ANALYSIS_WORKERS=2–4`, máy đang tải song song nên thời gian chỉ tham
+khảo). Tổng hợp: `benchmark/results/q2/system_e2e_check_20261026.json`
+(`scripts/ops/system_e2e_summary.py`). **Mọi kịch bản verify từ video, từ chối
+replay và sửa 1 bit.**
+
+| Kịch bản | Chế độ | Codec | Envelope | Đoạn | PSNR sửa (dB) | Tệ nhất | SSIM | Nhúng (s) | Verify (s) | Kiểm tra thêm |
+|---|---|---|---|---|---|---|---|---|---|---|
+| reg_magnitude | registered | v2 | 8741 | 2 | 40.96 | 32.06 | 0.99957 | 393 | 161 | thêm byte sau stop-bit: từ chối |
+| inband_magnitude | in-band | v2 | 16421 | 3 | 39.39 | 31.68 | 0.99940 | 355 | 149 | linkage + disclosure đạt |
+| reg_t1 | registered | v2 | 8741 | 1 | 42.08 | 38.85 | 0.99508 | 163 | 138 | — |
+| reg_stc | registered | v2 | 8741 | 2 | 42.57 | 31.24 | 0.99970 | 304 | 149 | — |
+| reg_adaptive_chunk | registered (ZKBC v2) | v2 | 8741 | 2 | 39.55 | 32.35 | 0.99953 | 376 | 148 | plan khác: từ chối |
+| reg_codec_v1 | registered | v1 | 8741 | 2 | 40.87 | 31.51 | 0.99956 | 411 | 175 | tương thích ngược |
+| reg_gop8 | registered, GOP 8, 3000 khung | v2 | 8741 | 7 | 39.80 | 33.12 | 0.99971 | 198 | 85 | lật bit lát P: từ chối |
+| inband_range32 | in-band + range proof L=32 (coastguard 3000 khung, ZKBC v2) | v2 | 63094 | 15 | 39.56 | 30.39 | 0.99967 | 1873 | 698 | linkage + disclosure đạt; plan khác: từ chối |
+
+So với v2 (bảng mục 1): PSNR khung sửa thấp hơn 0.4–0.8 dB do envelope lớn hơn
+7 %. Mật mã v3 (`crypto_bench_v3.json`, `binary_proof_bench_v3.json`,
+`payload_range_proof_bench_v3.json`; một luồng, trong lúc một E2E chiếm 4 lõi):
+commit 50 ms, prove median 221 ms (p95 671), verify 53 ms; equality prove 2.8 s /
+verify 111 ms; binary proof 3.8 s / 86 ms (45 134 B); range proof L=32 6.3 s /
+100 ms (46 670 B), L=64 3.9 s / 161 ms (55 886 B). Số đo lúc máy tải nặng hơn
+giữ ở `*_v3_loaded.json`.
+
+> Quy ước phiên bản: envelope **8741 B (registered) / 16421 B (in-band)** là
+> `bdlop-open-128-v3` (sản xuất từ 2026-10-26); **8165 B / 14885 B** là
+> `bdlop-open-128-v2`; **7589 B / 14309 B** là `bdlop-open-128-v1`.
 > Mọi bảng lấy từ `benchmark/results/q2/SUMMARY.md` là **v1-era** trừ khi nói
 > khác; kiểm tra chức năng dưới đây là v2.
 
@@ -35,10 +63,13 @@ true`; reg_codec_v2 có `trailing_rbsp_zero_rejected = true`; reg_gop8 có
 Nguồn: `src/lattice_zk/params.py`, `docs/LATTICE_ZK_BDLOP_SPEC.md` §2,
 `research/bdlop_params/`.
 
-- Commitment **6 720 B**, opening proof **8 096 B**, equality proof **16 160 B**;
-  envelope registered **8 165 B**, in-band **14 885 B**.
-- Core-SVP (classical/quantum): M-SIS binding **140 / 127**; M-LWE hiding
-  **164 / 150** (dual hybrid; primal 169 / 153).
+- v3: commitment **7 680 B**, opening proof **8 672 B**, equality proof
+  **17 312 B**; envelope registered **8 741 B**, in-band **16 421 B**; payload
+  range proof đính kèm **46 670 B** (L ≤ 32) … **74 318 B** (L = 128).
+  (v2: 6 720 / 8 096 / 16 160; 8 165 / 14 885.)
+- Core-SVP v3 (classical/quantum): M-SIS binding **172 / 156**; M-LWE hiding
+  **164 / 150** (dual hybrid; primal 169 / 153). lattice-estimator khớp
+  (172,0 / 156,1; 164,9 / 150,3). v2: binding 140 / 127.
 - Timing proof-only (micro-benchmark, **v1-era**): prove ~187 ms, verify
   ~41.9 ms (`SUMMARY.md` Baselines). **Số v2 cho prove/verify: cần đo lại.**
 
@@ -125,7 +156,8 @@ lượng tử và cần trusted setup; BDLOP minh bạch và hậu lượng tử
 ## 8. Tóm tắt trạng thái
 
 - Chức năng v2: **đạt** (7 chế độ verify từ video, chống phát lại + sửa 1 bit).
-- Kích thước/bảo mật v2: đã chốt (M-SIS 140/127, M-LWE 164/150).
+- Kích thước/bảo mật v3: đã chốt (M-SIS 172/156, M-LWE 164/150); v2 giữ để
+  tham chiếu (140/127).
 - Số v1-era cần cập nhật sang v2: steganalysis học máy/CNN, timing prove/verify
   đầy đủ, bảng E2E/capacity/baselines trong `SUMMARY.md` → **cần đo lại** khi
   chạy lại đánh giá v2 có bật ML.

@@ -23,8 +23,11 @@ registered, commitment là một credential được pin bởi một registry k�
 ML-DSA-65, và video chỉ mang proof. Một equality proof giữa hai commitment
 được dùng cho linkage và disclosure.
 
-Bộ tham số `bdlop-open-128-v2`: N = 256, q = 2^30 − 35 (q ≡ 5 mod 8),
-n = 6, λ = 7, k = 14, κ = 60, γ = 2^17, B = γ − κ − 1. Các mask phân bố đều
+Bộ tham số sản xuất `bdlop-open-128-v3` (2026-10-26): N = 256,
+q = 2^30 − 35 (q ≡ 5 mod 8), n = 7, λ = 7, k = 15, κ = 60, γ = 2^17,
+B = γ − κ − 1; binding 172 / 156, hiding 164 / 150 bit (core-SVP, khớp
+lattice-estimator). Bộ trước `bdlop-open-128-v2` (n = 6, k = 14; binding
+140 / 127) vẫn được định nghĩa. Các mask phân bố đều
 trên [−γ+1, γ]. Đây là uniform masking kiểu ML-DSA, không phải Gaussian
 masking của BDLOP. Tại commit `18c5123`, bộ production là `bdlop-open-128-v1`
 (λ = 6, k = 13); nó đã được thay thế vì tấn công dual-hybrid của

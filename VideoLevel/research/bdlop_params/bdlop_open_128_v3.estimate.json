@@ -1,0 +1,25 @@
+{
+  "parameter_set": "bdlop-open-128-v3",
+  "parameter_id": "5544ab987c622c71fa3bad19e19b33fe1a68edd199cbecab1bbb3becbd47c593",
+  "estimator": "pq-crystals/security-estimates@75c26949a902ca297b181375bfb7cfaf22cce784",
+  "sizes_bytes": {
+    "commitment": 7680,
+    "proof": 8672
+  },
+  "challenge_space_bits": 257.0,
+  "acceptance_probability": 0.17,
+  "msis_binding": {
+    "norm": "linf",
+    "bound_log2": 25.91,
+    "block_size": 589,
+    "classical_bits": 172,
+    "quantum_bits": 156
+  },
+  "mlwe_hiding": {
+    "primal_block_size": 580,
+    "primal_classical_bits": 169,
+    "primal_quantum_bits": 153,
+    "dual_block_size": 578,
+    "dual_classical_bits": 169
+  }
+}

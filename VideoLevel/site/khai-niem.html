@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Khái niệm nền · ZK-Video</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Lora:ital,wght@0,500;0,600;1,500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a><button class="menu-btn" data-menu-btn aria-label="Menu">☰</button></div>
+<div class="shell">
+<aside class="sidebar">
+  <a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a>
+  <p class="tagline">Bằng chứng không tiết lộ, giấu trong video — giải thích cho mọi người</p>
+  <div class="nav-group">Bắt đầu</div>
+  <nav><a href="index.html">Tổng quan</a><a href="khai-niem.html">Khái niệm nền (từ số 0)</a></nav>
+  <div class="nav-group">Hệ thống hoạt động</div>
+  <nav><a href="kien-truc.html">Kiến trúc & luồng</a><a href="thanh-phan.html">Các thành phần</a><a href="che-do-vi-du.html">Chế độ & ví dụ thật</a></nav>
+  <div class="nav-group">Bảo mật & kết quả</div>
+  <nav><a href="bao-mat.html">An toàn & chống tấn công</a><a href="ket-qua.html">Kết quả & hạn chế</a></nav>
+  <div class="nav-group">Tra cứu</div>
+  <nav><a href="thuat-ngu.html">Thuật ngữ</a></nav>
+  <div class="tools"><button class="tbtn" data-theme-btn>☾ Tối</button></div>
+</aside>
+<main class="content"><div class="content-inner">
+
+  <p class="crumbs">Tổng quan › Khái niệm nền</p>
+  <h1>Bốn viên gạch, giải thích từ số 0</h1>
+  <p class="lead">Ghép bốn ý tưởng này lại là ra cả hệ thống. Mỗi viên có một ví von đời thường, một ví dụ cụ thể, và (nếu bạn muốn) một khối chi tiết kỹ thuật. Có hai chỗ bấm thử.</p>
+
+  <!-- 1. Steganography -->
+  <h2><span class="tag">Viên gạch 1</span> &nbsp;Giấu tin (Steganography)</h2>
+  <p>Mật mã thông thường <i>khoá</i> thông tin lại (nhìn vào thấy một mớ ký tự vô nghĩa). Giấu tin thì khác: nó <b>giấu</b> thông tin vào bên trong một thứ trông hoàn toàn bình thường — ở đây là các con số tạo nên khung hình video.</p>
+  <p>Một khung hình được máy nén lưu bằng hàng nghìn <b>hệ số</b> (coefficient) — các con số mô tả độ sáng/chi tiết. Đổi <b>chữ số cuối cùng</b> của một vài hệ số làm hình gần như không đổi với mắt người, nhưng mỗi lần đổi là ta “ghi” được một <b>bit</b> (0 hoặc 1).</p>
+  <div class="analogy"><div class="h">Ví von</div><p style="margin:0">Giống đổi giá niêm yết từ 10.00<b>2</b>đ thành 10.00<b>3</b>đ: gần như không ai để ý, nhưng chữ số cuối vừa mang một mẩu tin.</p></div>
+
+  <div class="card" id="lsbDemo">
+    <h3 style="margin-top:0">Bấm thử: giấu 4 bit vào 4 con số</h3>
+    <div data-out></div>
+    <p style="margin:.6em 0 0"><button class="tbtn" data-run style="border-color:var(--accent);color:var(--accent-ink)">▶ Giấu bí mật</button></p>
+  </div>
+
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">H.264 / CAVLC / carrier</span></summary>
+    <div>
+      <p>Hệ thật làm việc trên video <b>H.264 Baseline</b> mã hoá bằng <b>CAVLC</b>. Mỗi khung nội (intra) chia thành khối 4×4; sau biến đổi + lượng tử ta có các hệ số nguyên. “Chỗ an toàn” để giấu là các hệ số AC có độ lớn phù hợp (carrier “magnitude”): đổi bit cuối của <code>|hệ số|</code> giữ nguyên độ dài mã CAVLC và bên trích tính lại được y hệt vị trí. Một biến thể khác lật dấu của “trailing ones” (carrier T1).</p>
+      <p>Điểm mấu chốt: tập carrier phải <b>suy ra lại được</b> từ chính video stego (không cần bản gốc) — nhờ vậy việc kiểm tra là “mù”. Xem thêm <a href="thanh-phan.html">Các thành phần</a>.</p>
+    </div>
+  </details>
+
+  <!-- 2. Commitment -->
+  <h2><span class="tag">Viên gạch 2</span> &nbsp;Niêm phong (Commitment)</h2>
+  <p>Một <b>commitment</b> giống việc bỏ bí mật vào phong bì dán kín rồi đưa người khác giữ. Hai tính chất:</p>
+  <ul>
+    <li><b>Không mở trộm được</b> (hiding): người giữ phong bì không đoán ra bên trong.</li>
+    <li><b>Không tráo được</b> (binding): bạn không thể đổi nội dung sau khi đã niêm phong.</li>
+  </ul>
+  <div class="analogy"><div class="h">Ví von</div><p style="margin:0">Niêm phong lời tiên đoán kết quả trận đấu vào phong bì nộp cho trọng tài: không ai đọc trước được, và bạn không thể đổi lời sau khi trận đấu kết thúc.</p></div>
+  <p>Trong hệ thống, “bí mật” là một <b>credential</b> (chế độ registered) hoặc một <b>payload</b> ẩn (chế độ in-band). Niêm phong của nó chính là thứ mà bằng chứng sẽ chứng minh “tôi biết cách mở”.</p>
+
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">BDLOP commitment</span></summary>
+    <div>
+      <p>Commitment dùng sơ đồ <b>BDLOP</b> trên vành đa thức <code>R_q = Z_q[X]/(X^N+1)</code>. Randomness <code>r</code> là các đa thức “ngắn” (hệ số nhỏ). Công khai: ma trận <code>B₁</code> và vector <code>b₂</code>. Niêm phong:
+      <code>t₁ = B₁·r</code> (ràng buộc <code>r</code>) và <code>t₂ = ⟨b₂,r⟩ + enc(payload)</code>.
+      Nhìn <code>t₁,t₂</code> không suy ra <code>r</code> hay payload (dựa vào độ khó <b>M-LWE</b>); và không thể tìm <code>r</code> ngắn khác cho cùng <code>t₁</code> (dựa vào <b>M-SIS</b>).</p>
+    </div>
+  </details>
+
+  <!-- 3. Zero-knowledge -->
+  <h2><span class="tag">Viên gạch 3</span> &nbsp;Chứng minh không tiết lộ (Zero-knowledge)</h2>
+  <p>Đây là ý tưởng “ảo diệu” nhất: chứng minh <b>“tôi biết bí mật”</b> mà người kiểm tra <b>không học được</b> bí mật.</p>
+  <div class="analogy"><div class="h">Ví von — hang động Ali Baba</div><p style="margin:0">Một hang hình chữ O, đáy có cánh cửa khoá bằng mật khẩu. Người chứng minh (P) nói “tôi biết mật khẩu”. Người kiểm tra (V) đứng ngoài, mỗi vòng hô “ra lối trái” hoặc “phải”. Nếu P thật sự biết mật khẩu, P luôn mở cửa và ra đúng lối. Làm nhiều vòng, khả năng ăn may của kẻ không biết giảm về gần 0 — <b>nhưng V không bao giờ biết mật khẩu</b>.</p></div>
+
+  <div class="card" id="zkDemo">
+    <h3 style="margin-top:0">Bấm thử: chạy từng vòng thử thách</h3>
+    <p style="margin:.2em 0"><button class="tbtn" data-toggle style="border-color:var(--accent);color:var(--accent-ink)">Người chứng minh: BIẾT mật khẩu</button> &nbsp; <span class="muted">(bấm để đổi thành kẻ giả mạo)</span></p>
+    <p style="margin:.2em 0"><button class="tbtn" data-step>▶ Chạy 1 vòng</button> <button class="tbtn" data-reset>Làm lại</button></p>
+    <div data-out style="margin:10px 0"></div>
+    <div class="callout" data-verdict>Chưa có vòng nào.</div>
+  </div>
+
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">Fiat–Shamir có abort</span></summary>
+    <div>
+      <p>Hệ dùng chứng minh mở kiểu <b>Lyubashevsky/BDLOP</b>, biến tương tác thành phi tương tác bằng <b>Fiat–Shamir</b>: thử thách <code>c</code> được sinh bằng cách <i>băm</i> (commit <code>t₁</code>, giá trị mask <code>w</code>, và digest video <code>D</code>). Phản hồi <code>z = y + c·r</code>. Vì <code>z</code> có thể “rò rỉ” <code>r</code> nếu quá lớn, có bước <b>rejection sampling</b> (“with aborts”): chỉ nhận khi <code>‖z‖</code> đủ nhỏ, nếu không thì thử lại với mask mới. Trung bình vài lần thử. Kiểm tra: dựng lại <code>w' = B₁·z − c·t₁</code>, băm lại ra <code>c'</code>, nhận nếu <code>c'=c</code> và <code>z</code> nhỏ.</p>
+    </div>
+  </details>
+
+  <!-- 4. Lattice -->
+  <h2><span class="tag">Viên gạch 4</span> &nbsp;Lattice — bài toán khó cả lượng tử cũng chịu</h2>
+  <p>Một <b>lattice</b> là một lưới điểm đều đặn. Có một bài toán rất khó: <b>cho một điểm bất kỳ, tìm điểm lưới gần nhất</b>. Ở 2 chiều thì nhìn phát ra ngay; nhưng ở <b>hàng trăm chiều</b>, kể cả máy tính lượng tử cũng chưa có cách giải nhanh. Mật mã lattice xây độ an toàn trên đúng sự khó đó.</p>
+  <figure>
+    <svg width="420" height="200" viewBox="0 0 420 200" role="img" aria-label="Lưới điểm lattice 2 chiều với một điểm truy vấn và điểm lưới gần nhất" style="max-width:100%;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)">
+      <g fill="var(--faint)">
+        <!-- dots grid -->
+        <!-- generated rows -->
+        <g id="dots"></g>
+      </g>
+      <circle cx="187" cy="92" r="4" fill="var(--amber)"/>
+      <circle cx="180" cy="80" r="6" fill="var(--accent)"/>
+      <circle cx="180" cy="80" r="11" fill="none" stroke="var(--accent)" stroke-width="2"/>
+      <line x1="187" y1="92" x2="180" y2="80" stroke="var(--amber)" stroke-width="2"/>
+    </svg>
+    <figcaption>Điểm cam = vị trí truy vấn; điểm xanh = điểm lưới gần nhất. Dễ ở 2 chiều — bất khả thi ở N=256 chiều.</figcaption>
+  </figure>
+  <script>
+    (function(){var g=document.getElementById("dots");if(!g)return;var s="";for(var x=20;x<420;x+=40)for(var y=20;y<200;y+=40)s+='<circle cx="'+x+'" cy="'+y+'" r="2.5"/>';g.innerHTML=s;})();
+  </script>
+  <div class="analogy"><div class="h">Ví von</div><p style="margin:0"><b>Dễ kiểm — khó tìm.</b> Kiểm tra “điểm này có nằm trên lưới không” thì tức thì. Nhưng <i>đi tìm</i> điểm lưới gần một vị trí cho trước, trong không gian cực nhiều chiều, thì cực lâu. Đó là nền của mọi khoá/chữ ký “hậu lượng tử”.</p></div>
+
+  <details class="tech"><summary>Chi tiết kỹ thuật <span class="t">M-SIS / M-LWE, tham số v2</span></summary>
+    <div>
+      <p>Hệ dùng vành <code>N=256</code>, <code>q=2³⁰−35</code>. Độ an toàn dựa trên hai bài toán lattice: <b>M-SIS</b> (bảo đảm không tráo được <code>r</code> — tính binding) và <b>M-LWE</b> (bảo đảm không nhìn ra bí mật — tính hiding). Ước lượng core-SVP (cổ điển/lượng tử): binding <b>172/156</b> bit, hiding <b>164/150</b> bit. Chi tiết ở <a href="bao-mat.html">An toàn & chống tấn công</a>.</p>
+    </div>
+  </details>
+
+  <div class="callout good"><div class="h">Ghép lại</div><p style="margin:0">Niêm phong bí mật (gạch 2) → chứng minh “tôi biết cách mở” mà không lộ (gạch 3), dựng trên lattice để an toàn lâu dài (gạch 4) → rồi giấu cả bằng chứng đó vào video bằng steganography (gạch 1). Trang tiếp theo cho thấy đường đi đầy đủ.</p></div>
+
+  <div class="next"><a href="index.html">← Tổng quan</a><a href="kien-truc.html">Tiếp: Kiến trúc & luồng →</a></div>
+  <p class="foot">Các demo trên chỉ minh hoạ ý tưởng. Bản chạy thật (toán lattice thật) nằm ở thư mục <code>webdemo/</code>.</p>
+
+</div></main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

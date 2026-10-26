@@ -185,7 +185,7 @@ def test_cost_model_prefers_large_levels_in_textured_macroblocks():
 
 def test_direct_contract_serialisation_and_profile_ids_are_unchanged():
     from src.lattice_zk import video_pipeline as pipeline
-    from src.lattice_zk.params import BDLOP_OPEN_128, BDLOP_OPEN_128_V1
+    from src.lattice_zk.params import BDLOP_OPEN_128, BDLOP_OPEN_128_V1, BDLOP_OPEN_128_V2
 
     assert [field.name for field in dataclasses.fields(BlindOperatingContract)] == [
         "version", "signbit_only", "bottom_rows", "dedup_per_block", "max_bits_per_idr",
@@ -199,15 +199,25 @@ def test_direct_contract_serialisation_and_profile_ids_are_unchanged():
         MAGNITUDE.version: "ff66b446eef5d8c5c9aa1312395dee5dd94487e5e902f573b89a025e574664b7",
         T1_SIGN.version: "f97e7878b023901a9c4d0a250d6da745d0b1ca8119a75e90334b279f5e6fac28",
     }
-    # Current production set bdlop-open-128-v2 (8 165-byte registered envelope).
+    # bdlop-open-128-v2 (8 165-byte registered envelope).
     frozen_v2 = {
         MAGNITUDE.version: "ad6321a5a63740c676152fa26e983fee18ad71a1115c60e3c425c5e6470c8341",
         T1_SIGN.version: "ab7dfadcfa22673d9f48bcf385f9f5a7e15bc2b4d09ff06fd9e8f9803d3d6dd7",
     }
-    for params, expected in ((BDLOP_OPEN_128_V1, frozen_v1), (BDLOP_OPEN_128, frozen_v2)):
+    # Current production set bdlop-open-128-v3 (8 741-byte registered envelope).
+    frozen_v3 = {
+        MAGNITUDE.version: "bac11a730af6bf5fe09d13c67ad72110fd3ab0dae2a57f46a85dc09c77b9e4e3",
+        T1_SIGN.version: "09df3d2092122ce18acff4248ff938de01a68c31c94b090723eac2db7a0eaba8",
+    }
+    assert BDLOP_OPEN_128.name == "bdlop-open-128-v3"
+    for params, expected in (
+        (BDLOP_OPEN_128_V1, frozen_v1), (BDLOP_OPEN_128_V2, frozen_v2), (BDLOP_OPEN_128, frozen_v3),
+    ):
         profiles = {}
         for contract in (MAGNITUDE, T1_SIGN, AdaptiveOperatingContract()):
-            profile = pipeline.CarrierProfile(contract, chunk_bytes=3800, registered=True)
+            profile = pipeline.CarrierProfile(
+                contract, chunk_bytes=3800, registered=True, codec_policy=pipeline.CODEC_POLICY_V1
+            )
             profiles[contract.version] = profile.profile_id(params).hex()
         for version, digest in expected.items():
             assert profiles[version] == digest

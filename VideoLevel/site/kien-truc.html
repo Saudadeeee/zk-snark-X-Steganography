@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiến trúc & luồng · ZK-Video</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Lora:ital,wght@0,500;0,600;1,500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="topbar"><a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a><button class="menu-btn" data-menu-btn aria-label="Menu">☰</button></div>
+<div class="shell">
+<aside class="sidebar">
+  <a class="brand" href="index.html"><span class="dot">Z</span>ZK-Video</a>
+  <p class="tagline">Bằng chứng không tiết lộ, giấu trong video — giải thích cho mọi người</p>
+  <div class="nav-group">Bắt đầu</div>
+  <nav><a href="index.html">Tổng quan</a><a href="khai-niem.html">Khái niệm nền (từ số 0)</a></nav>
+  <div class="nav-group">Hệ thống hoạt động</div>
+  <nav><a href="kien-truc.html">Kiến trúc & luồng</a><a href="thanh-phan.html">Các thành phần</a><a href="che-do-vi-du.html">Chế độ & ví dụ thật</a></nav>
+  <div class="nav-group">Bảo mật & kết quả</div>
+  <nav><a href="bao-mat.html">An toàn & chống tấn công</a><a href="ket-qua.html">Kết quả & hạn chế</a></nav>
+  <div class="nav-group">Tra cứu</div>
+  <nav><a href="thuat-ngu.html">Thuật ngữ</a></nav>
+  <div class="tools"><button class="tbtn" data-theme-btn>☾ Tối</button></div>
+</aside>
+<main class="content"><div class="content-inner">
+
+  <p class="crumbs">Hệ thống hoạt động › Kiến trúc & luồng</p>
+  <h1>Đường đi: từ video gốc đến con dấu, và ngược lại</h1>
+  <p class="lead">Có hai hành trình. <b>Nhúng</b> (bên tạo): biến video gốc thành video có bằng chứng. <b>Kiểm tra</b> (bất kỳ ai): chỉ cầm video stego mà xác nhận được. Mỗi bước dưới đây ghi rõ <b>đầu vào</b>, <b>đầu ra</b> và tên module mã nguồn.</p>
+
+  <h2>Bức tranh lớn</h2>
+  <div class="card">
+    <div class="flowline">
+      <span class="pill"><b>Video gốc</b> + bí mật (credential hoặc payload)</span>
+      <span class="arrow">↓ &nbsp; bên tạo: NHÚNG</span>
+      <span class="pill"><b>Video stego</b> (trông y hệt, có con dấu bên trong)</span>
+      <span class="arrow">↓ &nbsp; bất kỳ ai: KIỂM TRA (chỉ cần video)</span>
+      <span class="pill" style="border-color:var(--good);color:var(--good)"><b>HỢP LỆ</b></span> &nbsp;hoặc&nbsp; <span class="pill" style="border-color:var(--bad);color:var(--bad)"><b>TỪ CHỐI</b></span>
+    </div>
+  </div>
+  <div class="callout info"><div class="h">Ý quan trọng nhất: “kiểm tra mù”</div><p style="margin:0">Người kiểm tra <b>không cần</b> video gốc, <b>không cần</b> biết bí mật, <b>không cần</b> liên hệ bên tạo. Họ tự tính lại mọi thứ từ chính file video. Sửa một chút trong vùng được bảo vệ → phép tính ra khác → con dấu không khớp → từ chối.</p></div>
+
+  <h2>Hành trình 1 — NHÚNG (embed)</h2>
+  <div class="steps">
+    <div class="step"><span class="n"></span><div>
+      <h4>Phân tích carrier</h4>
+      <p style="margin:0">Đọc video, biến đổi khung + lượng tử, tìm các hệ số “an toàn” có thể giấu bit mà không phá cú pháp và tính lại được từ phía kiểm tra.</p>
+      <div class="io"><div class="io-box"><div class="h">Vào</div>Video H.264 gốc (vd. container_cif)</div><div class="io-box out"><div class="h">Ra</div>Danh sách vị trí carrier — vài nghìn/khung</div></div>
+      <p class="mono" style="font-size:.78rem;color:var(--muted);margin:.6em 0 0">module: src/core · src/transport/blind_sync</p>
+    </div></div>
+
+    <div class="step"><span class="n"></span><div>
+      <h4>Dựng “đề bài” (statement)</h4>
+      <p style="margin:0">Tính một mã tóm tắt (digest) của video đã chuẩn hoá, kèm vị trí carrier + một thử thách phiên dùng-một-lần + chính sách codec. Đây là thứ khoá bằng chứng vào đúng video & đúng phiên.</p>
+      <div class="io"><div class="io-box"><div class="h">Vào</div>digest(video) + vị trí + thử thách phiên</div><div class="io-box out"><div class="h">Ra</div>Một statement cố định</div></div>
+      <p class="mono" style="font-size:.78rem;color:var(--muted);margin:.6em 0 0">module: src/lattice_zk/video_proof</p>
+    </div></div>
+
+    <div class="step"><span class="n"></span><div>
+      <h4>Tạo bằng chứng (con dấu)</h4>
+      <p style="margin:0">Niêm phong bí mật thành commitment, rồi chạy chứng minh zero-knowledge (Fiat–Shamir có abort) rằng “tôi biết cách mở” — không lộ bí mật.</p>
+      <div class="io"><div class="io-box"><div class="h">Vào</div>Bí mật + statement</div><div class="io-box out"><div class="h">Ra</div>Phong bì ZK: commitment + proof</div></div>
+      <p class="mono" style="font-size:.78rem;color:var(--muted);margin:.6em 0 0">module: src/lattice_zk/bdlop · opening_proof</p>
+    </div></div>
+
+    <div class="step"><span class="n"></span><div>
+      <h4>Cắt thành chunk</h4>
+      <p style="margin:0">Phong bì (vài KB) được cắt thành các mẩu “ZKBC” có header + mã kiểm (CRC), rải vào các đoạn 100 khung hình.</p>
+      <div class="io"><div class="io-box"><div class="h">Vào</div>Phong bì (chuỗi byte)</div><div class="io-box out"><div class="h">Ra</div>Các chunk rải theo đoạn</div></div>
+      <p class="mono" style="font-size:.78rem;color:var(--muted);margin:.6em 0 0">module: src/transport/blind_payload_chunks · adaptive_chunks</p>
+    </div></div>
+
+    <div class="step"><span class="n"></span><div>
+      <h4>Vá vào bitstream → video stego</h4>
+      <p style="margin:0">Ghi từng bit chunk vào bit cuối của hệ số carrier, giữ nguyên độ dài bitstream, rồi xuất file video.</p>
+      <div class="io"><div class="io-box"><div class="h">Vào</div>Video gốc + chunk + vị trí</div><div class="io-box out"><div class="h">Ra</div>Video stego (PSNR ~40–43 dB, nhìn y hệt)</div></div>
+      <p class="mono" style="font-size:.78rem;color:var(--muted);margin:.6em 0 0">module: src/bitstream · reconstruct_video</p>
+    </div></div>
+  </div>
+
+  <h2>Hành trình 2 — KIỂM TRA (verify)</h2>
+  <p>Người kiểm tra chỉ có video stego. Họ đi gần như ngược lại, và ở mỗi bước đều <b>tự tính lại</b> rồi <b>so khớp</b>.</p>
+  <div class="steps">
+    <div class="step"><span class="n"></span><div><h4>Nhận video stego</h4><p style="margin:0">Chỉ cần đúng file này — không cần gì khác.</p></div></div>
+    <div class="step"><span class="n"></span><div><h4>Tự tính lại vị trí carrier</h4><p style="margin:0">Từ chính video; vì carrier “bất biến” nên ra đúng tập mà bên tạo đã dùng.</p></div></div>
+    <div class="step"><span class="n"></span><div><h4>Rút các chunk & ráp lại phong bì</h4><p style="margin:0">Đọc bit cuối các carrier; đòi cách cắt chunk phải khớp chuẩn (chống giả mạo khung).</p></div></div>
+    <div class="step"><span class="n"></span><div><h4>Dựng lại statement</h4><p style="margin:0">Tính lại digest video + vị trí + thử thách phiên — phải khớp cái bên tạo đã dùng.</p></div></div>
+    <div class="step"><span class="n"></span><div><h4>Kiểm tra bằng chứng</h4><p style="margin:0">Chạy phép verify của chứng minh zero-knowledge so với statement.</p></div></div>
+    <div class="step"><span class="n"></span><div><h4>Tiêu thụ thử thách phiên</h4><p style="margin:0">Đánh dấu phiên đã dùng → không thể phát lại (replay).</p></div></div>
+    <div class="step"><span class="n"></span><div><h4>Kết luận</h4><p style="margin:0"><b style="color:var(--good)">HỢP LỆ</b> nếu mọi thứ khớp; ngược lại <b style="color:var(--bad)">TỪ CHỐI</b>.</p></div></div>
+  </div>
+
+  <h2>Vì sao sửa hay phát lại đều trượt</h2>
+  <div class="grid g3">
+    <div class="callout bad" style="margin:0"><div class="h">Sửa khung hình</div><p style="margin:0">digest video đổi → statement đổi → bằng chứng không khớp → từ chối.</p></div>
+    <div class="callout bad" style="margin:0"><div class="h">Lật bit con dấu</div><p style="margin:0">byte phong bì hỏng → phép verify thất bại.</p></div>
+    <div class="callout bad" style="margin:0"><div class="h">Phát lại phiên</div><p style="margin:0">thử thách phiên đã tiêu thụ → bị chặn trước cả khi xét toán.</p></div>
+  </div>
+  <p class="muted">Giải thích sâu các cơ chế này ở trang <a href="bao-mat.html">An toàn & chống tấn công</a>.</p>
+
+  <div class="next"><a href="khai-niem.html">← Khái niệm nền</a><a href="thanh-phan.html">Tiếp: Các thành phần →</a></div>
+
+</div></main>
+</div>
+<script src="assets/site.js"></script>
+</body>
+</html>

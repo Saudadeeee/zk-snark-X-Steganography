@@ -54,13 +54,13 @@ claim↔code↔test, câu hỏi mở cho reviewer). Phần dưới chỉ tóm t�
 
 - **Equality proof** (`equality_proof.py`): chứng minh hai cam kết `t_a, t_b`
   giấu **cùng** message (dùng chung `f`). Cap 4096 lần (fix D4) → fail
-  `≈ 2^{-220}`. Kích thước equality proof (v2): **16 160 byte**.
+  `≈ 2^{-220}`. Kích thước equality proof: **17 312 byte** (v3; v2: 16 160).
 - **Linkage** (`linkage.py`): liên kết hai cam kết video, hoặc một cam kết video
   với một credential, cùng giấu một payload.
 - **Disclosure** (SPEC §3.7): tiết lộ payload `p` của cam kết `t` cho một người
   nhận, bằng equality proof giữa `t` và `Com(encode(p); 0) = (0, encode(p))`,
   ràng buộc vào `statement_id` + `nonce` người nhận chọn — **không lộ
-  randomness `r`**. Kích thước: `39 + |p| + 16 160` byte. Disclosure có thể
+  randomness `r`**. Kích thước: `39 + |p| + 17 312` byte (v3). Disclosure có thể
   chuyển nhượng cho bên thứ ba tin nonce tươi.
 
 ## 6. Binary proof và payload range proof (tùy chọn, ngoài băng)
@@ -116,22 +116,24 @@ hiện gửi **ngoài băng (out-of-band)**:
   (registered); linkage. Toàn bộ đối chiếu claim↔code↔test trong
   `docs/review/CLAIMS.md`.
 
-## 10. Chọn tham số (v1 vs v2, vì sao λ=7)
+## 10. Chọn tham số (v1 → v2 → v3)
 
-Parameter set sản xuất `bdlop-open-128-v2` (`src/lattice_zk/params.py`):
+Parameter set sản xuất `bdlop-open-128-v3` (`src/lattice_zk/params.py`,
+2026-10-26):
 
-| | giá trị |
-|---|---|
-| `N`, `q` | 256, `2^30 − 35` |
-| `n` (M-SIS), `λ` (M-LWE), `k` | 6, 7, 14 |
-| `κ`, `γ`, `B` | 60, `2^17`, `2^17 − 61` |
-| `|C|` | ≈ `2^257` |
-| Commitment / opening proof / equality proof | 6 720 / 8 096 / 16 160 byte |
+| | v3 (sản xuất) | v2 (cũ) |
+|---|---|---|
+| `N`, `q` | 256, `2^30 − 35` | như v3 |
+| `n` (M-SIS), `λ` (M-LWE), `k` | 7, 7, 15 | 6, 7, 14 |
+| `κ`, `γ`, `B` | 60, `2^17`, `2^17 − 61` | như v3 |
+| `|C|` | ≈ `2^257` | ≈ `2^257` |
+| Commitment / opening proof / equality proof | 7 680 / 8 672 / 17 312 byte | 6 720 / 8 096 / 16 160 |
+| Envelope registered / in-band | 8 741 / 16 421 byte | 8 165 / 14 885 |
 
 Mức core-SVP (classical / quantum), từ `research/bdlop_params/estimate.py` +
-đối chiếu lattice-estimator (`CROSSCHECK.md`):
+đối chiếu lattice-estimator (`CROSSCHECK.md`, v3 khớp 172,0 / 156,1):
 
-- **M-SIS (binding)**: 140 / 127 bit.
+- **M-SIS (binding)**: 172 / 156 bit (v2: 140 / 127 — 127 là lý do ra đời v3).
 - **M-LWE (hiding)**: 164 / 150 bit (dual hybrid; primal 169 / 153).
 
 **Vì sao λ=7**: set cũ `bdlop-open-128-v1` (λ=6, k=13) có cùng M-SIS nhưng M-LWE
